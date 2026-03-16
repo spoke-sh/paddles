@@ -1,0 +1,21 @@
+[package]
+name = "paddles"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "paddles"
+path = "src/main.rs"
+
+[dependencies]
+wonopcode = { git = "https://github.com/wonop-io/wonopcode" }
+sift = { git = "https://github.com/rupurt/sift" }
+candle-core = "0.8.2"
+candle-transformers = "0.8.2"
+tokio = { version = "1.43", features = ["full"] }
+anyhow = "1.0.95"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+clap = { version = "4.5.28", features = ["derive"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
