@@ -20,9 +20,9 @@ mission: VE47usFrC
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 2/3 stories done
+**Progress:** 2/2 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Chord Wiring](voyages/VE47zV8lt/) | done | 2/2 |
-| [Real Chord Integration](voyages/VE4Gv6Gv3/) | in-progress | 0/1 |
+| [Real Chord Integration](voyages/VE4Gv6Gv3/) | done | 1/1 |
 <!-- END GENERATED -->

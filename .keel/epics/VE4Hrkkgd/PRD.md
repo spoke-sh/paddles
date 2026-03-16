@@ -1,0 +1,77 @@
+# Boot Sequence and Credit Inheritance - Product Requirements
+
+## Problem Statement
+
+The system needs a foundational credit and inheritance mechanism to allow environmental calibration against weights and biases without violating constitutional bounds.
+
+## Goals & Objectives
+
+| ID | Goal | Success Metric | Target |
+|----|------|----------------|--------|
+| GOAL-01 | Establish boot sequence credit system | System initializes with an explicit credit balance (default 0) | 100% |
+| GOAL-02 | Environment calibration | System applies foundational weights and biases at boot | 100% |
+| GOAL-03 | Constitutional adherence | Boot calibration respects core constraints and religion | 100% |
+
+## Users
+
+| Persona | Description | Primary Need |
+|---------|-------------|--------------|
+| Operator | Human controlling the simulation | Ability to allocate credit inheritance and set environmental weights |
+| Agent | The `paddles` mech suit | A calibrated operational baseline aligned with constitution |
+
+## Scope
+
+### In Scope
+
+- [SCOPE-01] Boot sequence parameter loading for credit balance.
+- [SCOPE-02] Configuration of foundational weights and biases.
+- [SCOPE-03] Validation of boot state against a basic constitution mock.
+
+### Out of Scope
+
+- [SCOPE-04] Deep token-level credit integration into `wonopcode-core` internals.
+- [SCOPE-05] Dynamic mid-session modification of foundational weights.
+
+## Requirements
+
+### Functional Requirements
+
+<!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
+| ID | Requirement | Goals | Priority | Rationale |
+|----|-------------|-------|----------|-----------|
+| FR-01 | The CLI boot sequence must accept or load an initial credit balance (default 0). | GOAL-01 | must | Required for tracking agent economy. |
+| FR-02 | The boot sequence must parse and log foundational weights and biases. | GOAL-02 | must | Allows calibration to human environment. |
+| FR-03 | The boot sequence must validate the initialized state against a constitutional baseline. | GOAL-03 | must | Prevents rogue calibrations. |
+<!-- END FUNCTIONAL_REQUIREMENTS -->
+
+### Non-Functional Requirements
+
+<!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
+| ID | Requirement | Goals | Priority | Rationale |
+|----|-------------|-------|----------|-----------|
+| NFR-01 | Boot sequence operations (credit load, weight application) must be clearly traceable. | GOAL-02 | must | Operator needs to verify the initial state. |
+<!-- END NON_FUNCTIONAL_REQUIREMENTS -->
+
+## Verification Strategy
+
+- **Method:** CLI proofs and unit tests (if applicable) verifying the startup state.
+- **Evidence:** Story-level artifacts showing `paddles` initializing with given credits and weights, and failing when constitutional bounds are broken.
+
+## Assumptions
+
+| Assumption | Rationale |
+|------------|-----------|
+| A-01 | Constitution and weights can be represented as config fields initially. | Simplifies the first iteration. |
+
+## Open Questions & Risks
+
+| ID | Question/Risk | Mitigation |
+|----|---------------|------------|
+| R-01 | Over-engineering the weights | Keep the weights mechanism to simple simulated properties for now. |
+
+## Success Criteria
+
+<!-- BEGIN SUCCESS_CRITERIA -->
+- [ ] `paddles` binary boots and reports its initial inherited credit balance.
+- [ ] `paddles` applies configuration for weights/biases and logs the calibrated state.
+<!-- END SUCCESS_CRITERIA -->
