@@ -30,34 +30,8 @@
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
 
-        # The 'rev' here should match the 'ref' in the input url.
-        keelSource = pkgs.fetchFromGitHub {
-          owner = "spoke-sh";
-          repo = "keel";
-          rev = "0e078226c7bf61de9c1c6c6261697bc332411cf2";
-          # This sha256 needs to be updated to match the fetched source.
-          # The error message indicated a mismatch for txtplot, not keelSource itself yet.
-          # For now, I will keep the existing sha256 for keelSource, but note it may need updating.
-          sha256 = "sha256-NckgHUHQDRA+zJTuZf6nc6Dbma6GjVaox81Q4+ledG0="; # Placeholder, may need update
-        };
-
-        keelPkg = pkgs.rustPlatform.buildRustPackage {
-          pname = "keel";
-          version = "0.1.0";
-          src = keelSource;
-
-          cargoLock = {
-            lockFile = "${keelSource}/Cargo.lock";
-            # This outputHash for txtplot needs to be updated based on the error message.
-            outputHashes = {
-              "txtplot-0.1.0" = "sha256-PXj4ntPJ1UXda++7gcE+yk2cCLy/CFBMBGxgfBGSH5c="; # Updated based on Nix error
-            };
-          };
-
-          doCheck = false;
-        };
-
         siftPkg = sift.packages.${system}.sift;
+        keelPkg = keel.packages.${system}.keel;
       in {
         packages = {
           keel = keelPkg;
@@ -94,9 +68,9 @@
             # Prefer the real host CUDA driver at runtime without relying on
             # LD_LIBRARY_PATH, while still using the toolkit stubs for linking.
             cuda_driver_rpath=""
-            for candidate in 
-              /run/opengl-driver/lib 
-              /usr/lib/x86_64-linux-gnu 
+            for candidate in \
+              /run/opengl-driver/lib \
+              /usr/lib/x86_64-linux-gnu \
               /usr/lib/wsl/lib
             do
               if [ -f "$candidate/libcuda.so.1" ]; then

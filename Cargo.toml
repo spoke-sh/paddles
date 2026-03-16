@@ -8,7 +8,7 @@ name = "paddles"
 path = "src/main.rs"
 
 [dependencies]
-wonopcode = { git = "https://github.com/wonop-io/wonopcode" }
+wonopcode = { git = "https://github.com/wonop-io/wonopcode", branch = "main" }
 sift = { git = "https://github.com/rupurt/sift" }
 candle-core = "0.8.2"
 candle-transformers = "0.8.2"

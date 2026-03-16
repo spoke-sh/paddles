@@ -17,6 +17,10 @@ async fn main() -> Result<()> {
 
     if let Some(prompt) = cli.prompt {
         println!("Received prompt: {}", prompt);
+        println!("Chord integration is currently being wired up...");
+        // Placeholder for Chord engine execution
+        // let engine = wonopcode::Engine::new();
+        // engine.run(prompt).await?;
     } else {
         println!("No prompt provided. Starting interactive mode (not implemented).");
     }
