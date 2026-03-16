@@ -24,11 +24,15 @@ The paddles assistant lacks its primary 'chord' capabilities for agentic coding 
 - [SCOPE-01] Wiring `wonopcode` into `src/main.rs`.
 - [SCOPE-02] Basic prompt handling via chord.
 - [SCOPE-03] Verification test for a simple chord-driven file modification.
+- [SCOPE-06] Integration of `wonopcode-core` `Instance` and `PromptLoop`.
+- [SCOPE-07] Successful compilation with real dependencies.
+- [SCOPE-08] Execution of a real agentic prompt via the CLI.
 
 ### Out of Scope
 
 - [SCOPE-04] Advanced multi-step reasoning or complex tool use.
 - [SCOPE-05] Integration with `sift` for advanced retrieval (future epic).
+- [SCOPE-09] Advanced TUI features from `wonopcode`.
 
 ## Requirements
 
@@ -51,24 +55,25 @@ The paddles assistant lacks its primary 'chord' capabilities for agentic coding 
 
 ## Verification Strategy
 
-| Area | Method | Evidence |
-|------|--------|----------|
-| Problem outcome | Tests, CLI proofs, or manual review chosen during planning | Story-level verification artifacts linked during execution |
+- Automated build verification via `cargo build`.
+- Manual verification of prompt execution using the `paddles` binary.
+- Tracing logs review for agentic step verification.
 
 ## Assumptions
 
-| Assumption | Impact if Wrong | Validation |
-|------------|-----------------|------------|
-| The problem statement reflects a real user or operator need. | The epic may optimize the wrong outcome. | Revisit with planners during decomposition. |
+| Assumption | Rationale |
+|------------|-----------|
+| A-01 | The `wonopcode-core` API is stable enough for initial wiring. | Necessary for building against the crate. |
 
 ## Open Questions & Risks
 
-| Question/Risk | Owner | Status |
-|---------------|-------|--------|
-| Which metric best proves the problem above is resolved? | Epic owner | Open |
+| ID | Question/Risk | Mitigation |
+|----|---------------|------------|
+| R-01 | OpenSSL dependency issues in Nix environment. | Updated `flake.nix` to include `openssl` and `pkg-config`. |
 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] The team can state a measurable user outcome that resolves the problem above.
+- [ ] `paddles --prompt "test"` initiates a `wonopcode` session.
+- [ ] The system compiles and runs without mock simulations.
 <!-- END SUCCESS_CRITERIA -->

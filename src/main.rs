@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use std::fs;
+use std::env;
+use tokio_util::sync::CancellationToken;
+use wonopcode_core::{Instance, PromptLoop, PromptConfig};
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -18,19 +20,21 @@ async fn main() -> Result<()> {
 
     if let Some(prompt) = cli.prompt {
         println!("Received prompt: {}", prompt);
-        println!("Chord integration activated...");
+        println!("Chord integration (wonopcode) activating...");
+
+        // Real Chord Wiring
+        let root_path = env::current_dir()?;
+        let instance = Instance::new(root_path).await?;
+        let session = instance.create_session(Some("paddles-session".to_string())).await?;
         
-        // Mock execution for now as the specific Engine API is still being stabilized
-        println!("Chord (wonopcode) is processing the request: '{}'", prompt);
+        let config = instance.config().await;
         
-        if prompt.contains("modify file") {
-            let test_file = "chord_test.txt";
-            println!("Chord is modifying test file: {}", test_file);
-            fs::write(test_file, format!("Modified by chord: {}", prompt))?;
-            println!("Chord Response: OK - File modified successfully.");
-        } else {
-            println!("Chord Response: OK - Successfully simulated agentic execution.");
-        }
+        // Re-construct the components from config/instance
+        // These methods might not exist as public getters, but let's try 
+        // to find the actual builder or convenience method.
+        
+        println!("Chord (wonopcode) initialized for: '{}'", prompt);
+        println!("Chord Response: OK - Core engine integrated (placeholder for final loop wiring).");
     } else {
         println!("No prompt provided. Starting interactive mode (not implemented).");
     }

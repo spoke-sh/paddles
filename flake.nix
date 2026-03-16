@@ -41,15 +41,17 @@
         defaultPackage = keelPkg; 
 
         devShells.default = pkgs.mkShell {
-          buildInputs = [
-            rust
-            pkgs.just
-            pkgs.cargo-nextest
-            pkgs.cargo-llvm-cov
-            pkgs.pkg-config
-            keelPkg
-            siftPkg
-          ] ++ pkgs.lib.optionals isLinux [
+                    buildInputs = [
+                      rust
+                      pkgs.just
+                      pkgs.cargo-nextest
+                      pkgs.cargo-llvm-cov
+                      pkgs.pkg-config
+                      pkgs.openssl
+                      keelPkg
+                      siftPkg
+                    ]
+           ++ pkgs.lib.optionals isLinux [
             pkgs.cudatoolkit
             pkgs.mold
           ];

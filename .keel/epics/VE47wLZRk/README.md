@@ -3,6 +3,7 @@ id: VE47wLZRk
 title: Foundational Chord Integration
 created_at: 2026-03-16T13:49:20
 index: 1
+mission: VE47usFrC
 ---
 
 # Foundational Chord Integration
@@ -19,8 +20,9 @@ index: 1
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/2 stories done
+**Progress:** 1/2 voyages complete, 2/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Chord Wiring](voyages/VE47zV8lt/) | in-progress | 1/2 |
+| [Chord Wiring](voyages/VE47zV8lt/) | done | 2/2 |
+| [Real Chord Integration](voyages/VE4Gv6Gv3/) | in-progress | 0/1 |
 <!-- END GENERATED -->

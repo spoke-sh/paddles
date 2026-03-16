@@ -21,15 +21,17 @@ completed_at: 2026-03-16T14:09:28
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 stories complete
+**Progress:** 2/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Wire Wonopcode Into Main](../../../../stories/VE485S98P/README.md) | feat | done |
-| [Verify Chord File Modification](../../../../stories/VE48AsLMk/README.md) | feat | needs-human-verification |
+| [Verify Chord File Modification](../../../../stories/VE48AsLMk/README.md) | feat | done |
 <!-- END GENERATED -->

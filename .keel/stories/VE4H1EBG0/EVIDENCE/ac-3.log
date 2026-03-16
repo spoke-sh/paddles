@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T14:27:15.105407632-07:00
+mode: manual
+---
+CLI logic includes core engine initialization (PromptLoop wiring in progress).
