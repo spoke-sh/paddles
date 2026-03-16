@@ -9,7 +9,7 @@
     sift.url = "github:rupurt/sift?ref=main";
 
     keel = {
-      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=0e078226c7bf61de9c1c6c6261697bc332411cf2";
+      url = "git+ssh://git@github.com/spoke-sh/keel.git?rev=0e078226c7bf61de9c1c6c6261697bc332411cf2";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -37,8 +37,8 @@
           rev = "0e078226c7bf61de9c1c6c6261697bc332411cf2";
           # This sha256 needs to be updated to match the fetched source.
           # The error message indicated a mismatch for txtplot, not keelSource itself yet.
-          # For now, I will keep the existing sha256 for keelSource, but note it might need updating.
-          sha256 = "sha256-NckgHUHQDRA+zJTuZf6nc6Dbma6GjVaox81Q4+ledG0="; 
+          # For now, I will keep the existing sha256 for keelSource, but note it may need updating.
+          sha256 = "sha256-NckgHUHQDRA+zJTuZf6nc6Dbma6GjVaox81Q4+ledG0="; # Placeholder, may need update
         };
 
         keelPkg = pkgs.rustPlatform.buildRustPackage {
@@ -63,6 +63,8 @@
           keel = keelPkg;
           sift = siftPkg;
         };
+        # Expose keelPkg as the default package for the system
+        defaultPackage = keelPkg; 
 
         devShells.default = pkgs.mkShell {
           buildInputs = [

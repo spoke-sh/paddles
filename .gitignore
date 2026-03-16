@@ -6,3 +6,4 @@
 /target
 .direnv
 .envrc
+result/
