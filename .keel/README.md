@@ -9,5 +9,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Chord Wiring](epics/VE47wLZRk/voyages/VE47zV8lt/) | planned |
+| [Chord Wiring](epics/VE47wLZRk/voyages/VE47zV8lt/) | in-progress |
 

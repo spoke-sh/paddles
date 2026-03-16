@@ -22,5 +22,5 @@ index: 1
 **Progress:** 0/1 voyages complete, 0/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Chord Wiring](voyages/VE47zV8lt/) | planned | 0/2 |
+| [Chord Wiring](voyages/VE47zV8lt/) | in-progress | 0/2 |
 <!-- END GENERATED -->
