@@ -24,3 +24,9 @@
 |--------|--------|
 | [Dogma and Bias Calibration](epics/VE5bGJZTR/voyages/VE5bLublW/) | done |
 
+### [Agentic Loop Wiring](epics/VE5fVmIs3/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Core Loop Implementation](epics/VE5fVmIs3/voyages/VE5fbHOVp/) | planned |
+
