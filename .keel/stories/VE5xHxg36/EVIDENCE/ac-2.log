@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T21:23:18.896033913-07:00
+mode: manual
+---
+CLI now accepts --hf-token argument and HF_TOKEN env var via clap env feature.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T21:23:23.675912081-07:00
+mode: manual
+---
+HFHubAdapter uses ApiBuilder::with_token to authenticate with Hub.

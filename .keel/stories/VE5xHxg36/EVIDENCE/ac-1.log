@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T21:23:14.105336381-07:00
+mode: manual
+---
+Default model switched to non-gated qwen-1.5b in Cli struct.

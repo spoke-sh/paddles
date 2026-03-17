@@ -35,8 +35,12 @@ struct Cli {
     reality_mode: bool,
 
     /// Model ID to use from the registry (e.g. gemma-2b, qwen-1.5b).
-    #[arg(short, long, default_value = "gemma-2b")]
+    #[arg(short, long, default_value = "qwen-1.5b")]
     model: String,
+
+    /// Hugging Face API token for gated models.
+    #[arg(long, env = "HF_TOKEN")]
+    hf_token: Option<String>,
 }
 
 #[tokio::main]
@@ -46,16 +50,21 @@ async fn main() -> Result<()> {
 
     let root_path = env::current_dir()?;
     let instance = Instance::new(root_path).await?;
+    
+    // Registry requires the token from the boot context
+    let registry = Arc::new(HFHubAdapter::new(cli.hf_token.clone())?);
     let engine = Arc::new(CandleAdapter::new());
-    let registry = Arc::new(HFHubAdapter::new()?);
     let service = MechSuitService::new(instance, engine, registry);
 
     // Boot sequence
     println!("[BOOT] Initializing system...");
-    let _boot_ctx = service.boot(cli.credits, cli.weights, cli.biases, cli.reality_mode)?;
+    let _boot_ctx = service.boot(cli.credits, cli.weights, cli.biases, cli.hf_token, cli.reality_mode)?;
     println!("[BOOT] Inherited Credits: {}", _boot_ctx.credits);
     println!("[BOOT] Applying Foundational Weights: {}", _boot_ctx.weight);
     println!("[BOOT] Applying Foundational Biases: {}", _boot_ctx.bias);
+    if _boot_ctx.hf_token.is_some() {
+        println!("[BOOT] Hugging Face Token: [MASKED]");
+    }
     println!("[BOOT] Calibration Successful.");
 
     // Registry Synchronization

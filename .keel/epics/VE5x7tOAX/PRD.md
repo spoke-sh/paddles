@@ -56,11 +56,15 @@ The current default model (Gemma-2B) is gated on Hugging Face, requiring users t
 
 ## Assumptions
 
-- Qwen-1.5B remains non-gated on the Hugging Face Hub.
+| Assumption | Rationale |
+|------------|-----------|
+| A-01 | Qwen-1.5B remains non-gated on the Hugging Face Hub. | Essential for 0-config boot. |
 
 ## Open Questions & Risks
 
-- Risk: Rate limiting on HF Hub without a token even for public models.
+| ID | Question/Risk | Mitigation |
+|----|---------------|------------|
+| R-01 | Rate limiting on public models | Token support allows users to bypass limits with their own identity. |
 
 ## Success Criteria
 

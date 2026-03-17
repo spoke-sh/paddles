@@ -43,15 +43,16 @@ pub struct BootContext {
     pub credits: u64,
     pub weight: f64,
     pub bias: f64,
+    pub hf_token: Option<String>,
 }
 
 impl BootContext {
     /// Initialize and validate the boot context.
-    pub fn new(credits: u64, weight: f64, bias: f64, reality_mode: bool) -> Result<Self> {
+    pub fn new(credits: u64, weight: f64, bias: f64, hf_token: Option<String>, reality_mode: bool) -> Result<Self> {
         let constitution = Constitution::default();
         constitution.validate(weight)?;
         Dogma::validate(reality_mode)?;
         
-        Ok(Self { credits, weight, bias })
+        Ok(Self { credits, weight, bias, hf_token })
     }
 }

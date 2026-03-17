@@ -18,8 +18,8 @@ impl MechSuitService {
     }
 
     /// Execute the boot sequence.
-    pub fn boot(&self, credits: u64, weight: f64, bias: f64, reality_mode: bool) -> Result<BootContext> {
-        BootContext::new(credits, weight, bias, reality_mode)
+    pub fn boot(&self, credits: u64, weight: f64, bias: f64, hf_token: Option<String>, reality_mode: bool) -> Result<BootContext> {
+        BootContext::new(credits, weight, bias, hf_token, reality_mode)
     }
 
     /// Prepare the model for inference.
@@ -31,8 +31,6 @@ impl MechSuitService {
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
         let session = self.instance.create_session(Some("paddles-session".to_string())).await?;
         
-        // In a real implementation, we would use the paths from prepare_model
-        // to initialize the engine. For now, we still use the CandleAdapter.
         let provider = Arc::new(crate::infrastructure::adapters::candle::CandleAdapter::new());
         let tools = Arc::new(wonopcode_tools::ToolRegistry::default());
         let session_repo = Arc::new(self.instance.session_repo());

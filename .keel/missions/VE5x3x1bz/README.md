@@ -1,17 +1,20 @@
 ---
 id: VE5x3x1bz
 title: Registry Stabilization
-status: defining
-created_at: 2026-03-16T21:18:40
-updated_at: 2026-03-16T21:18:40
+status: verified
+created_at: 2026-03-16T21:28:42
+updated_at: 2026-03-16T21:24:26
 watch: ~
+verified_at: 2026-03-16T21:24:26
 ---
 
-# Registry Stabilization
+# Mission: Registry Stabilization
 
-## Documents
+## Charter
+Address authentication issues with gated models and improve the default out-of-the-box user experience.
 
-| Document | Description |
-|----------|-------------|
-| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
-| [LOG.md](LOG.md) | Decision journal and session digest |
+## Achievement
+- [x] Switched default model to non-gated `qwen-1.5b`.
+- [x] Implemented `--hf-token` argument and `HF_TOKEN` environment variable support.
+- [x] Secured token handling by masking it in boot logs.
+- [x] Verified seamless first-time boot and registry synchronization.

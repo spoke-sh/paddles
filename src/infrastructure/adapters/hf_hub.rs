@@ -1,16 +1,19 @@
 use crate::domain::ports::{ModelPaths, ModelRegistry};
 use async_trait::async_trait;
-use hf_hub::api::tokio::Api;
+use hf_hub::api::tokio::{Api, ApiBuilder};
 use hf_hub::{Repo, RepoType};
-use std::path::PathBuf;
 
 pub struct HFHubAdapter {
     api: Api,
 }
 
 impl HFHubAdapter {
-    pub fn new() -> Result<Self, anyhow::Error> {
-        let api = Api::new()?;
+    pub fn new(token: Option<String>) -> Result<Self, anyhow::Error> {
+        let mut builder = ApiBuilder::new();
+        if let Some(t) = token {
+            builder = builder.with_token(Some(t));
+        }
+        let api = builder.build()?;
         Ok(Self { api })
     }
 }

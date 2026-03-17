@@ -1,8 +1,9 @@
 ---
 id: VE5x7tOAX
 title: Registry Auth and Defaults
-created_at: 2026-03-16T21:18:56
+created_at: 2026-03-16T21:29:05
 index: 8
+mission: VE5x3x1bz
 ---
 
 # Registry Auth and Defaults
@@ -19,8 +20,8 @@ index: 8
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Auth and Default Stabilization](voyages/VE5xDYVO9/) | planned | 0/1 |
+| [Auth and Default Stabilization](voyages/VE5xDYVO9/) | done | 1/1 |
 <!-- END GENERATED -->

@@ -54,9 +54,9 @@
 |--------|--------|
 | [Registry Implementation](epics/VE5ttmBfz/voyages/VE5tzQyo5/) | done |
 
-### [Registry Auth and Defaults](epics/VE5x7tOAX/) (active)
+### [Registry Auth and Defaults](epics/VE5x7tOAX/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Auth and Default Stabilization](epics/VE5x7tOAX/voyages/VE5xDYVO9/) | planned |
+| [Auth and Default Stabilization](epics/VE5x7tOAX/voyages/VE5xDYVO9/) | done |
 
