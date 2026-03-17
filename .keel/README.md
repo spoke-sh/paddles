@@ -24,9 +24,15 @@
 |--------|--------|
 | [Dogma and Bias Calibration](epics/VE5bGJZTR/voyages/VE5bLublW/) | done |
 
-### [Agentic Loop Wiring](epics/VE5fVmIs3/) (active)
+### [Agentic Loop Wiring](epics/VE5fVmIs3/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Core Loop Implementation](epics/VE5fVmIs3/voyages/VE5fbHOVp/) | in-progress |
+| [Core Loop Implementation](epics/VE5fVmIs3/voyages/VE5fbHOVp/) | done |
+
+### [Local Inference Integration](epics/VE5jWMShq/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Candle Logic Implementation](epics/VE5jWMShq/voyages/VE5jbmios/) | planned |
 
