@@ -17,3 +17,11 @@
 - **Verification**: Verified system correctly applies valid weights and rejects those outside constitutional bounds.
 - **Stabilization**: Updated `flake.nix` with required runtime libraries (`zlib`, `zstd`) and `LD_LIBRARY_PATH` to ensure binary stability.
 - **Finalization**: Completed stories `VE4IFY2ng` and `VE4IMv0dQ`, auto-completing voyage `VE4I8ZqA5` and epic `VE4Hrkkgd`.
+
+### Sealing move: Complete Dogma and Bias Calibration
+
+- **Environmental Biases**: Extended CLI with `--biases` to allow offset calibration during boot.
+- **Religious Dogma**: Implemented `Dogma` validation for immutable invariants, specifically "Simulation over Reality".
+- **Unclean Boot**: Implemented failure mode for dogma violations, reporting "Unclean Boot" status.
+- **Verification**: Verified system correctly applies biases and fails boot if reality mode is enabled.
+- **Finalization**: Completed story `VE5bQB2UO`, auto-completing voyage `VE5bLublW` and epic `VE5bGJZTR`.

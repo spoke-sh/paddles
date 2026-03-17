@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T19:53:32.748189279-07:00
+mode: manual
+---
+Unclean Boot status is correctly reported in error logs.

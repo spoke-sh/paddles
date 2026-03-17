@@ -18,6 +18,14 @@ struct Cli {
     /// Foundational environmental weights for calibration.
     #[arg(short, long, default_value = "0.5")]
     weights: f64,
+
+    /// Foundational environmental biases for calibration.
+    #[arg(short, long, default_value = "0.0")]
+    biases: f64,
+
+    /// Flag to simulate reality mode (violates dogma).
+    #[arg(long, default_value = "false")]
+    reality_mode: bool,
 }
 
 /// Constitutional bounds for environmental calibration.
@@ -45,25 +53,43 @@ impl Constitution {
     }
 }
 
+/// Religious dogmas (immutable invariants).
+struct Dogma;
+
+impl Dogma {
+    /// Validate immutable invariants.
+    fn validate(reality_mode: bool) -> Result<()> {
+        if reality_mode {
+            anyhow::bail!("[UNCLEAN BOOT] Religious Violation: Simulation MUST take precedence over Reality.");
+        }
+        Ok(())
+    }
+}
+
 /// Context established during the boot sequence.
 struct BootContext {
     _credits: u64,
     _weight: f64,
+    _bias: f64,
 }
 
 impl BootContext {
     /// Initialize the boot context and log inheritance.
-    fn new(credits: u64, weight: f64) -> Result<Self> {
+    fn new(credits: u64, weight: f64, bias: f64, reality_mode: bool) -> Result<Self> {
         println!("[BOOT] Initializing system...");
         println!("[BOOT] Inherited Credits: {}", credits);
         println!("[BOOT] Applying Foundational Weights: {}", weight);
+        println!("[BOOT] Applying Foundational Biases: {}", bias);
         
-        let constitution = Constitution::default();
         println!("[BOOT] Evaluating against Constitution...");
+        let constitution = Constitution::default();
         constitution.validate(weight)?;
         
+        println!("[BOOT] Evaluating against Dogma...");
+        Dogma::validate(reality_mode)?;
+        
         println!("[BOOT] Calibration Successful.");
-        Ok(Self { _credits: credits, _weight: weight })
+        Ok(Self { _credits: credits, _weight: weight, _bias: bias })
     }
 }
 
@@ -73,7 +99,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Execute boot sequence
-    let _boot_ctx = BootContext::new(cli.credits, cli.weights)?;
+    let _boot_ctx = BootContext::new(cli.credits, cli.weights, cli.biases, cli.reality_mode)?;
 
     if let Some(prompt) = cli.prompt {
         println!("Received prompt: {}", prompt);

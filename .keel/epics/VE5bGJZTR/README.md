@@ -1,13 +1,14 @@
 ---
-id: VE4Hrkkgd
-title: Boot Sequence and Credit Inheritance
-created_at: 2026-03-16T14:28:46
+id: VE5bGJZTR
+title: Dogma and Bias Calibration
+created_at: 2026-03-16T19:52:05
 index: 2
+mission: VE4HiyEM7
 ---
 
-# Boot Sequence and Credit Inheritance
+# Dogma and Bias Calibration
 
-> The system needs a foundational credit and inheritance mechanism to allow environmental calibration against weights and biases without violating constitutional bounds.
+> The system is missing environmental biases and religious dogma validation in its boot sequence.
 
 ## Documents
 
@@ -19,8 +20,8 @@ index: 2
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/1 voyages complete, 2/2 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Boot Sequence Mechanics](voyages/VE4I8ZqA5/) | done | 2/2 |
+| [Dogma and Bias Calibration](voyages/VE5bLublW/) | done | 1/1 |
 <!-- END GENERATED -->

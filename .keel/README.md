@@ -12,9 +12,15 @@
 | [Chord Wiring](epics/VE47wLZRk/voyages/VE47zV8lt/) | done |
 | [Real Chord Integration](epics/VE47wLZRk/voyages/VE4Gv6Gv3/) | done |
 
-### [Boot Sequence and Credit Inheritance](epics/VE4Hrkkgd/) (active)
+### [Boot Sequence and Credit Inheritance](epics/VE4Hrkkgd/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Boot Sequence Mechanics](epics/VE4Hrkkgd/voyages/VE4I8ZqA5/) | in-progress |
+| [Boot Sequence Mechanics](epics/VE4Hrkkgd/voyages/VE4I8ZqA5/) | done |
+
+### [Dogma and Bias Calibration](epics/VE5bGJZTR/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Dogma and Bias Calibration](epics/VE5bGJZTR/voyages/VE5bLublW/) | in-progress |
 
