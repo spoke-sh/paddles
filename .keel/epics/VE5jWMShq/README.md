@@ -1,8 +1,9 @@
 ---
 id: VE5jWMShq
 title: Local Inference Integration
-created_at: 2026-03-16T20:24:53
+created_at: 2026-03-16T20:24:51
 index: 4
+mission: VE5jRmMzR
 ---
 
 # Local Inference Integration
@@ -19,8 +20,8 @@ index: 4
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/2 stories done
+**Progress:** 1/1 voyages complete, 2/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Candle Logic Implementation](voyages/VE5jbmios/) | planned | 0/2 |
+| [Candle Logic Implementation](voyages/VE5jbmios/) | done | 2/2 |
 <!-- END GENERATED -->

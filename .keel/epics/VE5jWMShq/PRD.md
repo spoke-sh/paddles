@@ -55,11 +55,15 @@ The `CandleProvider` currently uses a hardcoded mock response. To build actual c
 
 ## Assumptions
 
-- We have access to a small compatible model (e.g. Llama-3-8B-Instruct-GGUF).
+| Assumption | Rationale |
+|------------|-----------|
+| A-01 | Small GGUF models are compatible with current candle-transformers versions. | Necessary for CPU-bound inference. |
 
 ## Open Questions & Risks
 
-- Risk: Hardware compatibility (CPU vs GPU) in the Nix environment.
+| ID | Question/Risk | Mitigation |
+|----|---------------|------------|
+| R-01 | Memory constraints on large models | Target < 8B parameter models for initial capacity. |
 
 ## Success Criteria
 

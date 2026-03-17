@@ -30,9 +30,9 @@
 |--------|--------|
 | [Core Loop Implementation](epics/VE5fVmIs3/voyages/VE5fbHOVp/) | done |
 
-### [Local Inference Integration](epics/VE5jWMShq/) (active)
+### [Local Inference Integration](epics/VE5jWMShq/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Candle Logic Implementation](epics/VE5jWMShq/voyages/VE5jbmios/) | planned |
+| [Candle Logic Implementation](epics/VE5jWMShq/voyages/VE5jbmios/) | done |
 

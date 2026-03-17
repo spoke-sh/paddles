@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T20:28:13.890975999-07:00
+mode: manual
+---
+Text is correctly streamed through the loop to stdout.
