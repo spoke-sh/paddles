@@ -36,3 +36,9 @@
 |--------|--------|
 | [Candle Logic Implementation](epics/VE5jWMShq/voyages/VE5jbmios/) | done |
 
+### [Interactive Prompt TUI](epics/VE5oA4s7x/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Interactive Loop Integration](epics/VE5oA4s7x/voyages/VE5oG5fQe/) | in-progress |
+

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T20:44:58.623735120-07:00
+mode: manual
+---
+just paddles command added to justfile and launches interactive loop in main.rs.

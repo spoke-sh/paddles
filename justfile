@@ -21,9 +21,9 @@ quality:
 keel *args:
   keel {{args}}
 
-# Initialize development shell.
-shell:
-  nix develop
+# Run the paddles CLI.
+paddles *args:
+  cargo run -- {{args}}
 
 # Standard mission path for verification.
 mission: build quality test

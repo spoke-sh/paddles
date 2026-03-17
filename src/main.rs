@@ -1,11 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use candle_core::Device;
-use candle_transformers::models::quantized_llama::ModelWeights;
 use clap::Parser;
 use futures::stream::{self, BoxStream};
 use std::env;
 use std::sync::Arc;
+use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio_util::sync::CancellationToken;
 use wonopcode_core::{Instance, PromptLoop, PromptConfig};
 use wonopcode_provider::{
@@ -104,7 +104,7 @@ pub struct CandleProvider {
 
 impl CandleProvider {
     pub fn new() -> Self {
-        let device = Device::Cpu; // Default to CPU for maximum compatibility
+        let device = Device::Cpu; 
         Self {
             info: ModelInfo {
                 id: "local-candle-llama".to_string(),
@@ -132,27 +132,9 @@ impl LanguageModel for CandleProvider {
             }
         }
         
-        let model_path = "model.gguf";
-        if !std::path::Path::new(model_path).exists() {
-            let chunks = vec![
-                Ok(StreamChunk::TextStart),
-                Ok(StreamChunk::TextDelta(format!("Error: Local model file '{}' not found. Please provide a GGUF model to build capacity.", model_path))),
-                Ok(StreamChunk::TextEnd),
-                Ok(StreamChunk::FinishStep {
-                    usage: wonopcode_provider::stream::Usage::new(0, 0),
-                    finish_reason: wonopcode_provider::stream::FinishReason::EndTurn,
-                }),
-            ];
-            return Ok(Box::pin(stream::iter(chunks)));
-        }
-
-        // Simulating the logic with real types to prove build capacity
-        // let mut file = std::fs::File::open(model_path)?;
-        // let _model = ModelWeights::from_gguf(&mut file, &self.device)?;
-
         let chunks = vec![
             Ok(StreamChunk::TextStart),
-            Ok(StreamChunk::TextDelta(format!("Real inference loop active. Processing prompt: '{}' using local Candle device: {:?}", prompt_text, self.device))),
+            Ok(StreamChunk::TextDelta(format!("(Local Candle) I heard: '{}'", prompt_text))),
             Ok(StreamChunk::TextEnd),
             Ok(StreamChunk::FinishStep {
                 usage: wonopcode_provider::stream::Usage::new(0, 0),
@@ -178,33 +160,50 @@ async fn main() -> Result<()> {
 
     let _boot_ctx = BootContext::new(cli.credits, cli.weights, cli.biases, cli.reality_mode)?;
 
-    if let Some(prompt) = cli.prompt {
-        println!("Received prompt: {}", prompt);
-        println!("Chord integration (wonopcode) activating with local Candle provider...");
+    let root_path = env::current_dir()?;
+    let instance = Instance::new(root_path).await?;
+    let session = instance.create_session(Some("paddles-session".to_string())).await?;
+    
+    let provider: Arc<dyn LanguageModel> = Arc::new(CandleProvider::new());
+    let tools = Arc::new(ToolRegistry::default());
+    let session_repo = Arc::new(instance.session_repo());
+    let bus = instance.bus().clone();
+    let cancel = CancellationToken::new();
+    
+    let loop_engine = PromptLoop::new(
+        provider,
+        tools,
+        session_repo,
+        bus,
+        cancel,
+    );
 
-        let root_path = env::current_dir()?;
-        let instance = Instance::new(root_path).await?;
-        let session = instance.create_session(Some("paddles-session".to_string())).await?;
-        
-        let provider: Arc<dyn LanguageModel> = Arc::new(CandleProvider::new());
-        let tools = Arc::new(ToolRegistry::default());
-        let session_repo = Arc::new(instance.session_repo());
-        let bus = instance.bus().clone();
-        let cancel = CancellationToken::new();
-        
-        let loop_engine = PromptLoop::new(
-            provider,
-            tools,
-            session_repo,
-            bus,
-            cancel,
-        );
-        
+    if let Some(prompt) = cli.prompt {
         let result = loop_engine.run(&session, &prompt, PromptConfig::default()).await?;
-        
         println!("Chord Response: {}", result.text);
     } else {
-        println!("No prompt provided. Starting interactive mode (not implemented).");
+        println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
+        let mut stdin_reader = BufReader::new(io::stdin()).lines();
+        loop {
+            print!(">> ");
+            use std::io::Write;
+            std::io::stdout().flush()?;
+
+            if let Some(line) = stdin_reader.next_line().await? {
+                let input = line.trim();
+                if input == "exit" || input == "quit" {
+                    break;
+                }
+                if input.is_empty() {
+                    continue;
+                }
+
+                let result = loop_engine.run(&session, input, PromptConfig::default()).await?;
+                println!("Chord Response: {}", result.text);
+            } else {
+                break;
+            }
+        }
     }
 
     Ok(())
