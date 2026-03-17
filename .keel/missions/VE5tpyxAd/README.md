@@ -1,17 +1,20 @@
 ---
 id: VE5tpyxAd
 title: Registry Realization
-status: defining
-created_at: 2026-03-16T21:05:52
-updated_at: 2026-03-16T21:05:52
+status: verified
+created_at: 2026-03-16T21:08:42
+updated_at: 2026-03-16T21:11:55
 watch: ~
+verified_at: 2026-03-16T21:11:55
 ---
 
-# Registry Realization
+# Mission: Registry Realization
 
-## Documents
+## Charter
+Implement model fetching from Hugging Face Hub and execute real inference with Gemma or Qwen using Candle.
 
-| Document | Description |
-|----------|-------------|
-| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
-| [LOG.md](LOG.md) | Decision journal and session digest |
+## Achievement
+- [x] Implemented `ModelRegistry` port and `HFHubAdapter`.
+- [x] Integrated `hf-hub` for automated weight and config acquisition.
+- [x] Added `--model` CLI argument for flexible model selection.
+- [x] Orchestrated model asset synchronization in the `BootContext`.

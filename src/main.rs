@@ -8,6 +8,7 @@ use wonopcode_core::Instance;
 // External Crate Modules
 use paddles::application::MechSuitService;
 use paddles::infrastructure::adapters::candle::CandleAdapter;
+use paddles::infrastructure::adapters::hf_hub::HFHubAdapter;
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -32,6 +33,10 @@ struct Cli {
     /// Flag to simulate reality mode (violates dogma).
     #[arg(long, default_value = "false")]
     reality_mode: bool,
+
+    /// Model ID to use from the registry (e.g. gemma-2b, qwen-1.5b).
+    #[arg(short, long, default_value = "gemma-2b")]
+    model: String,
 }
 
 #[tokio::main]
@@ -42,7 +47,8 @@ async fn main() -> Result<()> {
     let root_path = env::current_dir()?;
     let instance = Instance::new(root_path).await?;
     let engine = Arc::new(CandleAdapter::new());
-    let service = MechSuitService::new(instance, engine);
+    let registry = Arc::new(HFHubAdapter::new()?);
+    let service = MechSuitService::new(instance, engine, registry);
 
     // Boot sequence
     println!("[BOOT] Initializing system...");
@@ -51,6 +57,11 @@ async fn main() -> Result<()> {
     println!("[BOOT] Applying Foundational Weights: {}", _boot_ctx.weight);
     println!("[BOOT] Applying Foundational Biases: {}", _boot_ctx.bias);
     println!("[BOOT] Calibration Successful.");
+
+    // Registry Synchronization
+    println!("[BOOT] Syncing model assets for: {}...", cli.model);
+    let _paths = service.prepare_model(&cli.model).await?;
+    println!("[BOOT] Registry Sync Complete.");
 
     if let Some(prompt) = cli.prompt {
         let response = service.process_prompt(&prompt).await?;

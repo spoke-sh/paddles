@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T21:11:00.263915787-07:00
+mode: manual
+---
+Application layer orchestrates model asset acquisition via ModelRegistry.

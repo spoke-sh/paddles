@@ -11,6 +11,7 @@ path = "src/main.rs"
 wonopcode-core = { git = "https://github.com/wonop-io/wonopcode", branch = "main" }
 wonopcode-provider = { git = "https://github.com/wonop-io/wonopcode", branch = "main" }
 wonopcode-tools = { git = "https://github.com/wonop-io/wonopcode", branch = "main" }
+hf-hub = "0.4.1"
 sift = { git = "https://github.com/rupurt/sift" }
 candle-core = "0.8.2"
 candle-transformers = "0.8.2"

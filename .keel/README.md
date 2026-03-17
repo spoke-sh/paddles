@@ -48,9 +48,9 @@
 |--------|--------|
 | [Lattice Structure Transition](epics/VE5qX07aD/voyages/VE5qdK37s/) | done |
 
-### [Hugging Face Model Integration](epics/VE5ttmBfz/) (active)
+### [Hugging Face Model Integration](epics/VE5ttmBfz/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Registry Implementation](epics/VE5ttmBfz/voyages/VE5tzQyo5/) | planned |
+| [Registry Implementation](epics/VE5ttmBfz/voyages/VE5tzQyo5/) | done |
 
