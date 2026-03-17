@@ -2,7 +2,7 @@
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Nix Build](https://img.shields.io/badge/Nix-Build-informational)](https://nixos.org/guides/how-nix-works)
-[![Agentic SDLC](https://img.shields.io/badge/Agentic-SDLC-purple)](PHILOSOPHY.md)
+[![Agentic SDLC](https://img.shields.io/badge/Agentic-SDLC-purple)](CONSTITUTION.md)
 [![Keel Board](https://img.shields.io/badge/Keel-Board-blue)](.keel/README.md)
 
 > Paddles is your specialized agentic harness, designed to operate within the high-fidelity simulation environment provided by the Keel Engine. It's the mech suit for your AI assistant, enabling turn-based coding tasks with unparalleled precision and verifiable outcomes.
@@ -19,11 +19,12 @@ The core philosophy is **Human-Authoring Physics, Agent-Simulation Execution, an
 
 The project operates under a strict set of guiding principles captured in the following documents:
 
-*   **[PHILOSOPHY.md](PHILOSOPHY.md):** Core principles of the Agentic SDLC Simulator, emphasizing human judgment at strategic levels and agent execution for tactical tasks.
 *   **[CONSTITUTION.md](CONSTITUTION.md):** Defines the collaboration model (2-queue pull system), decision hierarchy (ADRs → Epics → Voyages → Stories → Verification → Acceptance), and the goal of minimizing "drift" for high-fidelity simulation.
+*   **[POLICY.md](POLICY.md):** Captures the operational invariants and engine constraints that govern the simulator.
 *   **[ARCHITECTURE.md](ARCHITECTURE.md):** Details the layered source layout, component responsibilities, entity state machines, and the Verified Spec Driven Development (VSDD) methodology.
 *   **[AGENTS.md](AGENTS.md):** Provides operational guidance for AI agents, emphasizing autonomous gardening, pacemaker stability, and strict adherence to procedural loops.
-*   **[FORMAL_RULES.md](FORMAL_RULES.md):** Captures the executable engine invariants and operational constraints that agents must follow.
+*   **[PROTOCOL.md](PROTOCOL.md):** Defines the communication protocol and data contracts between agents and the engine.
+*   **[STAGE.md](STAGE.md):** Outlines the visual philosophy and scene rendering metaphors.
 *   **[LICENSE](LICENSE):** The project is licensed under the permissive MIT License.
 
 ## ⚙️ Development Environment & Setup

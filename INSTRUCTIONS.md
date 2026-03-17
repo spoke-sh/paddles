@@ -16,6 +16,7 @@ Every session follows this deterministic cycle:
     - Record your move in the mission `LOG.md`.
     - **Pace-setting**: Execute `just keel poke "Sealing move: <summary>"` to synchronize the pacemaker with the board state. This is MANDATORY for all commits, including work performed without a story (e.g., gardening, bug fixes, or engine improvements).
     - Create a single atomic [Conventional Commit](https://www.conventionalcommits.org/) including the heartbeat.
+6.  **Re-orient**: After the commit lands, run `just keel doctor --status` and `just keel flow` to see what the board needs next. This is the "plug the chord back in" moment — you reconnect to the board's current state. If the delivery lane has ready work, start the next loop immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification).
 
 ## Primary Workflows
 
@@ -72,7 +73,7 @@ Apply these checks to **every change** before finalizing work:
    - **CIRCULATORY**: Workflow (Graph integrity, topology)
    - **PACEMAKER**: Heartbeat (System energization and commit stability)
    - **KINETIC**: Delivery (Backlog liquidity, execution capacity)
-3. **Pacemaker Protocol**: The system's heartbeat (.keel/heartbeat) is its pacemaker. You MUST ensure the pacemaker is stable (committed) before concluding any unit of work. Every commit MUST be preceded by a `just keel poke "Sealing move: <summary>"` to refresh the system's pulse and reflect the latest change, especially when working without a story. Uncommitted energy is a signal of an open tactical loop and will trigger a CRITICAL status in the Med-Bay bio-scan.
+3. **Pacemaker Protocol**: The system's heartbeat (.keel/heartbeat) is its pacemaker. You MUST ensure the pacemaker is stable (committed) before concluding any unit of work. Every commit MUST be preceded by a `just keel poke "Sealing move: <summary>"` to refresh the system's pulse and reflect the latest change, especially when working without a story. Uncommitted energy is a signal of an open tactical loop and will trigger a CRITICAL status in the Med-Bay bio-scan. Any commit that includes `.keel/heartbeat` MUST append the output of `just keel doctor --status` to the commit message body so reviewers can see the board's importance snapshot at the time of the commit.
 4. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
 5. **Notification Threshold**: Only request human intervention when you reach a "Manual Lane" that requires design direction or a decision on application behavior (e.g., assessing a Bearing, planning a Voyage, or human verification of a complex Story).
 6. **Quality Check**: `just quality` must be clean (formatting and linting).
