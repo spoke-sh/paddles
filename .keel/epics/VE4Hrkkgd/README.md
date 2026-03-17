@@ -3,6 +3,7 @@ id: VE4Hrkkgd
 title: Boot Sequence and Credit Inheritance
 created_at: 2026-03-16T14:28:46
 index: 2
+mission: VE4HiyEM7
 ---
 
 # Boot Sequence and Credit Inheritance
