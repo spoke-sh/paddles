@@ -36,9 +36,15 @@
 |--------|--------|
 | [Candle Logic Implementation](epics/VE5jWMShq/voyages/VE5jbmios/) | done |
 
-### [Interactive Prompt TUI](epics/VE5oA4s7x/) (active)
+### [Interactive Prompt TUI](epics/VE5oA4s7x/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Interactive Loop Integration](epics/VE5oA4s7x/voyages/VE5oG5fQe/) | in-progress |
+| [Interactive Loop Integration](epics/VE5oA4s7x/voyages/VE5oG5fQe/) | done |
+
+### [Lattice Refactor](epics/VE5qX07aD/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Lattice Structure Transition](epics/VE5qX07aD/voyages/VE5qdK37s/) | planned |
 
