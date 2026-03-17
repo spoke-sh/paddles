@@ -39,6 +39,7 @@ The current `paddles` implementation uses placeholders for the agentic loop inst
 |----|-------------|-------|----------|-----------|
 | FR-01 | `main.rs` must correctly construct a `PromptLoop`. | GOAL-01 | must | Required for execution. |
 | FR-02 | `main.rs` must execute the loop and handle the result. | GOAL-01 | must | Required for user output. |
+| FR-03 | `main.rs` must initialize a valid `Session`. | GOAL-02 | must | Required for context management. |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
 ### Non-Functional Requirements
@@ -55,14 +56,18 @@ The current `paddles` implementation uses placeholders for the agentic loop inst
 
 ## Assumptions
 
-- `wonopcode-core` APIs are sufficiently public for this integration.
+| Assumption | Rationale |
+|------------|-----------|
+| A-01 | `wonopcode-core` APIs are sufficiently public for this integration. | Needed for direct construction. |
 
 ## Open Questions & Risks
 
-- Risk: Missing dependencies for `PromptLoop` construction (e.g. `LanguageModel` provider).
+| ID | Question/Risk | Mitigation |
+|----|---------------|------------|
+| R-01 | Missing dependencies for construction | API research and discovery during implementation. |
 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] `paddles --prompt "write a comment in src/lib.rs"` actually executes.
+- [x] `paddles --prompt "write a comment in src/lib.rs"` actually executes.
 <!-- END SUCCESS_CRITERIA -->

@@ -2823,9 +2823,11 @@ name = "paddles"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "candle-core 0.8.4",
  "candle-transformers 0.8.4",
  "clap",
+ "futures",
  "serde",
  "serde_json",
  "sift",
@@ -2834,6 +2836,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wonopcode-core",
+ "wonopcode-provider",
+ "wonopcode-tools",
 ]
 
 [[package]]

@@ -28,5 +28,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Core Loop Implementation](epics/VE5fVmIs3/voyages/VE5fbHOVp/) | planned |
+| [Core Loop Implementation](epics/VE5fVmIs3/voyages/VE5fbHOVp/) | in-progress |
 

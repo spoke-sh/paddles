@@ -1,11 +1,13 @@
 ---
 id: VE5fbHOVp
 title: Core Loop Implementation
-status: planned
+status: done
 epic: VE5fVmIs3
 created_at: 2026-03-16T20:09:19
 index: 1
 updated_at: 2026-03-16T20:09:50
+started_at: 2026-03-16T20:10:24
+completed_at: 2026-03-16T20:21:27
 ---
 
 # Core Loop Implementation
@@ -24,10 +26,10 @@ updated_at: 2026-03-16T20:09:50
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Build PromptLoop](../../../../stories/VE5ffV9DE/README.md) | feat | backlog |
-| [Execute Agentic Loop](../../../../stories/VE5fgj0gJ/README.md) | feat | backlog |
+| [Build PromptLoop](../../../../stories/VE5ffV9DE/README.md) | feat | done |
+| [Execute Agentic Loop](../../../../stories/VE5fgj0gJ/README.md) | feat | needs-human-verification |
 <!-- END GENERATED -->

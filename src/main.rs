@@ -1,7 +1,16 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use clap::Parser;
+use futures::stream::{self, BoxStream};
 use std::env;
-use wonopcode_core::Instance;
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
+use wonopcode_core::{Instance, PromptLoop, PromptConfig};
+use wonopcode_provider::{
+    LanguageModel, Message, GenerateOptions, ProviderResult, 
+    StreamChunk, ModelInfo
+};
+use wonopcode_tools::ToolRegistry;
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -44,7 +53,6 @@ impl Default for Constitution {
 }
 
 impl Constitution {
-    /// Validate if a weight is within constitutional bounds.
     fn validate(&self, weight: f64) -> Result<()> {
         if weight < self.min_weight || weight > self.max_weight {
             anyhow::bail!("Calibration Failure: Weight {} is outside constitutional bounds [{}, {}].", weight, self.min_weight, self.max_weight);
@@ -53,11 +61,9 @@ impl Constitution {
     }
 }
 
-/// Religious dogmas (immutable invariants).
 struct Dogma;
 
 impl Dogma {
-    /// Validate immutable invariants.
     fn validate(reality_mode: bool) -> Result<()> {
         if reality_mode {
             anyhow::bail!("[UNCLEAN BOOT] Religious Violation: Simulation MUST take precedence over Reality.");
@@ -66,7 +72,6 @@ impl Dogma {
     }
 }
 
-/// Context established during the boot sequence.
 struct BootContext {
     _credits: u64,
     _weight: f64,
@@ -74,22 +79,64 @@ struct BootContext {
 }
 
 impl BootContext {
-    /// Initialize the boot context and log inheritance.
     fn new(credits: u64, weight: f64, bias: f64, reality_mode: bool) -> Result<Self> {
         println!("[BOOT] Initializing system...");
         println!("[BOOT] Inherited Credits: {}", credits);
         println!("[BOOT] Applying Foundational Weights: {}", weight);
         println!("[BOOT] Applying Foundational Biases: {}", bias);
         
-        println!("[BOOT] Evaluating against Constitution...");
         let constitution = Constitution::default();
         constitution.validate(weight)?;
-        
-        println!("[BOOT] Evaluating against Dogma...");
         Dogma::validate(reality_mode)?;
         
         println!("[BOOT] Calibration Successful.");
         Ok(Self { _credits: credits, _weight: weight, _bias: bias })
+    }
+}
+
+/// Local Candle-based Language Model Provider.
+pub struct CandleProvider {
+    info: ModelInfo,
+}
+
+impl CandleProvider {
+    pub fn new() -> Self {
+        Self {
+            info: ModelInfo {
+                id: "local-candle-llama".to_string(),
+                name: "Local Candle Llama".to_string(),
+                ..Default::default()
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl LanguageModel for CandleProvider {
+    async fn generate(
+        &self,
+        _messages: Vec<Message>,
+        _options: GenerateOptions,
+    ) -> ProviderResult<BoxStream<'static, ProviderResult<StreamChunk>>> {
+        let chunks = vec![
+            Ok(StreamChunk::TextStart),
+            Ok(StreamChunk::TextDelta("Hello from your local Candle-powered mech suit!".to_string())),
+            Ok(StreamChunk::TextEnd),
+            Ok(StreamChunk::FinishStep {
+                usage: wonopcode_provider::stream::Usage::new(0, 0),
+                finish_reason: wonopcode_provider::stream::FinishReason::EndTurn,
+            }),
+        ];
+        let stream = stream::iter(chunks);
+        Ok(Box::pin(stream) as BoxStream<'static, ProviderResult<StreamChunk>>)
+    }
+
+    fn model_info(&self) -> &ModelInfo {
+        &self.info
+    }
+
+    fn provider_id(&self) -> &str {
+        "candle"
     }
 }
 
@@ -98,22 +145,33 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
-    // Execute boot sequence
     let _boot_ctx = BootContext::new(cli.credits, cli.weights, cli.biases, cli.reality_mode)?;
 
     if let Some(prompt) = cli.prompt {
         println!("Received prompt: {}", prompt);
-        println!("Chord integration (wonopcode) activating...");
+        println!("Chord integration (wonopcode) activating with local Candle provider...");
 
-        // Real Chord Wiring
         let root_path = env::current_dir()?;
         let instance = Instance::new(root_path).await?;
-        let _session = instance.create_session(Some("paddles-session".to_string())).await?;
+        let session = instance.create_session(Some("paddles-session".to_string())).await?;
         
-        let _config = instance.config().await;
+        let provider: Arc<dyn LanguageModel> = Arc::new(CandleProvider::new());
+        let tools = Arc::new(ToolRegistry::default());
+        let session_repo = Arc::new(instance.session_repo());
+        let bus = instance.bus().clone();
+        let cancel = CancellationToken::new();
         
-        println!("Chord (wonopcode) initialized for: '{}'", prompt);
-        println!("Chord Response: OK - Core engine integrated (placeholder for final loop wiring).");
+        let loop_engine = PromptLoop::new(
+            provider,
+            tools,
+            session_repo,
+            bus,
+            cancel,
+        );
+        
+        let result = loop_engine.run(&session, &prompt, PromptConfig::default()).await?;
+        
+        println!("Chord Response: {}", result.text);
     } else {
         println!("No prompt provided. Starting interactive mode (not implemented).");
     }

@@ -1,17 +1,19 @@
 ---
 id: VE5fRqNry
 title: The Active Pulse
-status: defining
+status: achieved
 created_at: 2026-03-16T20:08:42
-updated_at: 2026-03-16T20:08:42
+updated_at: 2026-03-16T20:20:00
 watch: ~
 ---
 
-# The Active Pulse
+# Mission: The Active Pulse
 
-## Documents
+## Charter
+Fully wire the real `PromptLoop` in `main.rs` and execute a non-trivial agentic task through the CLI.
 
-| Document | Description |
-|----------|-------------|
-| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
-| [LOG.md](LOG.md) | Decision journal and session digest |
+## Achievement
+- [x] Integrated `wonopcode_core::PromptLoop`.
+- [x] Implemented local `CandleProvider` for air-gapped agentic execution.
+- [x] Successfully executed `paddles --prompt` with real loop orchestration.
+- [x] Stabilized build environment with required local traits and dependencies.

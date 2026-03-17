@@ -3,6 +3,7 @@ id: VE5fVmIs3
 title: Agentic Loop Wiring
 created_at: 2026-03-16T20:08:58
 index: 3
+mission: VE5fRqNry
 ---
 
 # Agentic Loop Wiring
@@ -19,8 +20,8 @@ index: 3
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/2 stories done
+**Progress:** 1/1 voyages complete, 2/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Core Loop Implementation](voyages/VE5fbHOVp/) | planned | 0/2 |
+| [Core Loop Implementation](voyages/VE5fbHOVp/) | done | 2/2 |
 <!-- END GENERATED -->

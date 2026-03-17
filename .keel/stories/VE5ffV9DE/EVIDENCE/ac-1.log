@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T20:20:39.056006846-07:00
+mode: manual
+---
+PromptLoop correctly constructed using local CandleProvider and Instance dependencies.
