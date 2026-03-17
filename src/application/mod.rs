@@ -8,13 +8,12 @@ use tokio_util::sync::CancellationToken;
 /// Application service for managing the mech suit lifecycle.
 pub struct MechSuitService {
     instance: Instance,
-    _engine: Arc<dyn InferenceEngine>,
     registry: Arc<dyn ModelRegistry>,
 }
 
 impl MechSuitService {
-    pub fn new(instance: Instance, engine: Arc<dyn InferenceEngine>, registry: Arc<dyn ModelRegistry>) -> Self {
-        Self { instance, _engine: engine, registry }
+    pub fn new(instance: Instance, registry: Arc<dyn ModelRegistry>) -> Self {
+        Self { instance, registry }
     }
 
     /// Execute the boot sequence.
@@ -27,11 +26,12 @@ impl MechSuitService {
         self.registry.get_model_paths(model_id).await
     }
 
-    /// Process a single prompt.
-    pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
+    /// Process a single prompt using a specific model.
+    pub async fn process_prompt(&self, prompt: &str, paths: ModelPaths) -> Result<String> {
         let session = self.instance.create_session(Some("paddles-session".to_string())).await?;
         
-        let provider = Arc::new(crate::infrastructure::adapters::candle::CandleAdapter::new());
+        // Use the Sift-backed inference adapter
+        let provider = Arc::new(crate::infrastructure::adapters::candle::SiftInferenceAdapter::new(paths.weights)?);
         let tools = Arc::new(wonopcode_tools::ToolRegistry::default());
         let session_repo = Arc::new(self.instance.session_repo());
         let bus = self.instance.bus().clone();

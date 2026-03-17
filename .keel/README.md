@@ -60,9 +60,9 @@
 |--------|--------|
 | [Auth and Default Stabilization](epics/VE5x7tOAX/voyages/VE5xDYVO9/) | done |
 
-### [Sift Docking Integration](epics/VE5zxrA1w/) (active)
+### [Sift Docking Integration](epics/VE5zxrA1w/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Sift Implementation Transition](epics/VE5zxrA1w/voyages/VE604BPRi/) | planned |
+| [Sift Implementation Transition](epics/VE5zxrA1w/voyages/VE604BPRi/) | done |
 

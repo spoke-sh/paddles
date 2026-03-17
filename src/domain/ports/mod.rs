@@ -23,6 +23,7 @@ pub trait ModelRegistry: Send + Sync {
 }
 
 /// Paths to local model assets.
+#[derive(Clone)]
 pub struct ModelPaths {
     pub weights: PathBuf,
     pub tokenizer: PathBuf,

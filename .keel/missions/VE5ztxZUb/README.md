@@ -1,17 +1,20 @@
 ---
 id: VE5ztxZUb
 title: Docking with Sift
-status: defining
-created_at: 2026-03-16T21:29:57
-updated_at: 2026-03-16T21:29:57
+status: verified
+created_at: 2026-03-16T21:44:32
+updated_at: 2026-03-16T21:42:24
 watch: ~
+verified_at: 2026-03-16T21:42:24
 ---
 
-# Docking with Sift
+# Mission: Docking with Sift
 
-## Documents
+## Charter
+Replace manual HF/Candle logic with `sift` adapters and execute multi-turn prompts using `sift` backed models.
 
-| Document | Description |
-|----------|-------------|
-| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
-| [LOG.md](LOG.md) | Decision journal and session digest |
+## Achievement
+- [x] Integrated `sift::internal` for model acquisition.
+- [x] Implemented `SiftRegistryAdapter` and `SiftInferenceAdapter`.
+- [x] Removed direct `hf-hub` dependencies from the application layer.
+- [x] Verified successful model synchronization and initialization via `sift`.

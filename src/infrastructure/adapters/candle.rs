@@ -1,55 +1,52 @@
 use crate::domain::ports::InferenceEngine;
 use async_trait::async_trait;
-use candle_core::Device;
 use wonopcode_provider::{
     LanguageModel, Message, GenerateOptions, ProviderResult, 
     StreamChunk, ModelInfo, ContentPart
 };
 use futures::stream::{self, BoxStream};
+use sift::internal::search::adapters::qwen::{QwenReranker, QwenModelSpec};
+use sift::internal::search::domain::GenerativeModel;
+use std::sync::Arc;
 
-pub struct CandleAdapter {
+pub struct SiftInferenceAdapter {
     info: ModelInfo,
-    device: Device,
+    inner: Arc<QwenReranker>,
 }
 
-impl Default for CandleAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CandleAdapter {
-    pub fn new() -> Self {
-        let device = Device::Cpu; 
-        Self {
+impl SiftInferenceAdapter {
+    pub fn new(_weights: std::path::PathBuf) -> Result<Self, anyhow::Error> {
+        let spec = QwenModelSpec::default();
+        let inner = QwenReranker::load(spec)?;
+        
+        Ok(Self {
             info: ModelInfo {
-                id: "local-candle-llama".to_string(),
-                name: "Local Candle Llama".to_string(),
+                id: "sift-qwen".to_string(),
+                name: "Sift Qwen".to_string(),
                 ..Default::default()
             },
-            device,
-        }
+            inner: Arc::new(inner),
+        })
     }
 }
 
 #[async_trait]
-impl InferenceEngine for CandleAdapter {
+impl InferenceEngine for SiftInferenceAdapter {
     async fn generate(
         &self,
         messages: Vec<Message>,
         options: GenerateOptions,
     ) -> ProviderResult<BoxStream<'static, ProviderResult<StreamChunk>>> {
-        // Delegate to LanguageModel implementation
         LanguageModel::generate(self, messages, options).await
     }
 
     fn id(&self) -> &str {
-        "candle"
+        "sift-qwen"
     }
 }
 
 #[async_trait]
-impl LanguageModel for CandleAdapter {
+impl LanguageModel for SiftInferenceAdapter {
     async fn generate(
         &self,
         messages: Vec<Message>,
@@ -64,9 +61,15 @@ impl LanguageModel for CandleAdapter {
             }
         }
         
+        let inner = self.inner.clone();
+        let response = tokio::task::spawn_blocking(move || {
+            inner.generate(&prompt_text, 512)
+        }).await.map_err(|e| wonopcode_provider::error::ProviderError::Internal { message: e.to_string() })?
+          .map_err(|e| wonopcode_provider::error::ProviderError::Internal { message: e.to_string() })?;
+
         let chunks = vec![
             Ok(StreamChunk::TextStart),
-            Ok(StreamChunk::TextDelta(format!("(Infrastructure::Candle) I heard: '{}' on device: {:?}", prompt_text, self.device))),
+            Ok(StreamChunk::TextDelta(response)),
             Ok(StreamChunk::TextEnd),
             Ok(StreamChunk::FinishStep {
                 usage: wonopcode_provider::stream::Usage::new(0, 0),
@@ -81,6 +84,6 @@ impl LanguageModel for CandleAdapter {
     }
 
     fn provider_id(&self) -> &str {
-        "candle"
+        "sift"
     }
 }

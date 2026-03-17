@@ -1,8 +1,9 @@
 ---
 id: VE5zxrA1w
 title: Sift Docking Integration
-created_at: 2026-03-16T21:30:12
+created_at: 2026-03-16T21:44:46
 index: 9
+mission: VE5ztxZUb
 ---
 
 # Sift Docking Integration
@@ -19,8 +20,8 @@ index: 9
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/2 stories done
+**Progress:** 1/1 voyages complete, 2/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Sift Implementation Transition](voyages/VE604BPRi/) | planned | 0/2 |
+| [Sift Implementation Transition](voyages/VE604BPRi/) | done | 2/2 |
 <!-- END GENERATED -->

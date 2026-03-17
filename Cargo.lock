@@ -2889,6 +2889,7 @@ dependencies = [
  "candle-core 0.8.4",
  "candle-transformers 0.8.4",
  "clap",
+ "directories",
  "futures",
  "hf-hub",
  "serde",

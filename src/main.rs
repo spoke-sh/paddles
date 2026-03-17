@@ -7,8 +7,7 @@ use wonopcode_core::Instance;
 
 // External Crate Modules
 use paddles::application::MechSuitService;
-use paddles::infrastructure::adapters::candle::CandleAdapter;
-use paddles::infrastructure::adapters::hf_hub::HFHubAdapter;
+use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -51,10 +50,8 @@ async fn main() -> Result<()> {
     let root_path = env::current_dir()?;
     let instance = Instance::new(root_path).await?;
     
-    // Registry requires the token from the boot context
-    let registry = Arc::new(HFHubAdapter::new(cli.hf_token.clone())?);
-    let engine = Arc::new(CandleAdapter::new());
-    let service = MechSuitService::new(instance, engine, registry);
+    let registry = Arc::new(SiftRegistryAdapter::new());
+    let service = MechSuitService::new(instance, registry);
 
     // Boot sequence
     println!("[BOOT] Initializing system...");
@@ -67,13 +64,13 @@ async fn main() -> Result<()> {
     }
     println!("[BOOT] Calibration Successful.");
 
-    // Registry Synchronization
-    println!("[BOOT] Syncing model assets for: {}...", cli.model);
-    let _paths = service.prepare_model(&cli.model).await?;
+    // Registry Synchronization via Sift
+    println!("[BOOT] Syncing model assets via SIFT for: {}...", cli.model);
+    let paths = service.prepare_model(&cli.model).await?;
     println!("[BOOT] Registry Sync Complete.");
 
     if let Some(prompt) = cli.prompt {
-        let response = service.process_prompt(&prompt).await?;
+        let response = service.process_prompt(&prompt, paths).await?;
         println!("Chord Response: {}", response);
     } else {
         println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
@@ -92,7 +89,7 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                let response = service.process_prompt(input).await?;
+                let response = service.process_prompt(input, paths.clone()).await?;
                 println!("Chord Response: {}", response);
             } else {
                 break;

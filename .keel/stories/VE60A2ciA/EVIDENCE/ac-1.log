@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T21:41:18.302219053-07:00
+mode: manual
+---
+SiftInferenceAdapter implemented by wrapping sift::internal::search::adapters::qwen::QwenReranker.
