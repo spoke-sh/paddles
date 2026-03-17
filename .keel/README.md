@@ -16,5 +16,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Boot Sequence Mechanics](epics/VE4Hrkkgd/voyages/VE4I8ZqA5/) | planned |
+| [Boot Sequence Mechanics](epics/VE4Hrkkgd/voyages/VE4I8ZqA5/) | in-progress |
 

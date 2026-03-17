@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T18:58:59.906518673-07:00
+mode: manual
+---
+System initializes BootContext and logs inherited credits at boot.

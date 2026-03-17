@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T19:00:00.851382703-07:00
+mode: manual
+---
+System parses and loads --weights during boot sequence.

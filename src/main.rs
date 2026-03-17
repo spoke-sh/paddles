@@ -1,8 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::env;
-use tokio_util::sync::CancellationToken;
-use wonopcode_core::{Instance, PromptLoop, PromptConfig};
+use wonopcode_core::Instance;
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -11,12 +10,70 @@ struct Cli {
     /// The prompt to send to the assistant.
     #[arg(short, long)]
     prompt: Option<String>,
+
+    /// Initial credit inheritance balance.
+    #[arg(short, long, default_value = "0")]
+    credits: u64,
+
+    /// Foundational environmental weights for calibration.
+    #[arg(short, long, default_value = "0.5")]
+    weights: f64,
+}
+
+/// Constitutional bounds for environmental calibration.
+struct Constitution {
+    min_weight: f64,
+    max_weight: f64,
+}
+
+impl Default for Constitution {
+    fn default() -> Self {
+        Self {
+            min_weight: 0.0,
+            max_weight: 1.0,
+        }
+    }
+}
+
+impl Constitution {
+    /// Validate if a weight is within constitutional bounds.
+    fn validate(&self, weight: f64) -> Result<()> {
+        if weight < self.min_weight || weight > self.max_weight {
+            anyhow::bail!("Calibration Failure: Weight {} is outside constitutional bounds [{}, {}].", weight, self.min_weight, self.max_weight);
+        }
+        Ok(())
+    }
+}
+
+/// Context established during the boot sequence.
+struct BootContext {
+    _credits: u64,
+    _weight: f64,
+}
+
+impl BootContext {
+    /// Initialize the boot context and log inheritance.
+    fn new(credits: u64, weight: f64) -> Result<Self> {
+        println!("[BOOT] Initializing system...");
+        println!("[BOOT] Inherited Credits: {}", credits);
+        println!("[BOOT] Applying Foundational Weights: {}", weight);
+        
+        let constitution = Constitution::default();
+        println!("[BOOT] Evaluating against Constitution...");
+        constitution.validate(weight)?;
+        
+        println!("[BOOT] Calibration Successful.");
+        Ok(Self { _credits: credits, _weight: weight })
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+
+    // Execute boot sequence
+    let _boot_ctx = BootContext::new(cli.credits, cli.weights)?;
 
     if let Some(prompt) = cli.prompt {
         println!("Received prompt: {}", prompt);
@@ -25,13 +82,9 @@ async fn main() -> Result<()> {
         // Real Chord Wiring
         let root_path = env::current_dir()?;
         let instance = Instance::new(root_path).await?;
-        let session = instance.create_session(Some("paddles-session".to_string())).await?;
+        let _session = instance.create_session(Some("paddles-session".to_string())).await?;
         
-        let config = instance.config().await;
-        
-        // Re-construct the components from config/instance
-        // These methods might not exist as public getters, but let's try 
-        // to find the actual builder or convenience method.
+        let _config = instance.config().await;
         
         println!("Chord (wonopcode) initialized for: '{}'", prompt);
         println!("Chord Response: OK - Core engine integrated (placeholder for final loop wiring).");

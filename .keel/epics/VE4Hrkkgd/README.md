@@ -20,8 +20,8 @@ mission: VE4HiyEM7
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/2 stories done
+**Progress:** 0/1 voyages complete, 1/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Boot Sequence Mechanics](voyages/VE4I8ZqA5/) | planned | 0/2 |
+| [Boot Sequence Mechanics](voyages/VE4I8ZqA5/) | in-progress | 1/2 |
 <!-- END GENERATED -->

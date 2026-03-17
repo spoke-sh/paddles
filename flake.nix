@@ -46,20 +46,25 @@
                       pkgs.just
                       pkgs.cargo-nextest
                       pkgs.cargo-llvm-cov
-                      pkgs.pkg-config
-                      pkgs.openssl
-                      keelPkg
-                      siftPkg
+                                  pkgs.pkg-config
+                                              pkgs.openssl
+                                              pkgs.zlib
+                                              pkgs.zstd
+                                              keelPkg
+                                                        siftPkg
                     ]
            ++ pkgs.lib.optionals isLinux [
             pkgs.cudatoolkit
             pkgs.mold
           ];
 
-          shellHook = ''
-            # Shared target directory across shell sessions for faster rebuilds.
-            export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
-          '' + pkgs.lib.optionalString isDarwin ''
+                              shellHook = ''
+                                # Shared target directory across shell sessions for faster rebuilds.
+                                export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
+                                export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.zlib pkgs.zstd pkgs.openssl ]}:$LD_LIBRARY_PATH"
+                              ''
+                    
+           + pkgs.lib.optionalString isDarwin ''
             # Nix can set TMPDIR to a shell-specific path on macOS; use a stable path.
             export TMPDIR=/var/tmp
           '' + pkgs.lib.optionalString isLinux ''

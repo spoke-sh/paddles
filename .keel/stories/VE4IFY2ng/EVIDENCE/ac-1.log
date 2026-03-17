@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T18:58:54.889410537-07:00
+mode: manual
+---
+CLI now accepts --credits argument.
