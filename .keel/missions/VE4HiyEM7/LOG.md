@@ -25,3 +25,8 @@
 - **Unclean Boot**: Implemented failure mode for dogma violations, reporting "Unclean Boot" status.
 - **Verification**: Verified system correctly applies biases and fails boot if reality mode is enabled.
 - **Finalization**: Completed story `VE5bQB2UO`, auto-completing voyage `VE5bLublW` and epic `VE5bGJZTR`.
+
+### Sealing move: Sync Goal Verification
+
+- **Charter Correction**: Updated `CHARTER.md` with correct `board: <ID>` syntax for goal verification.
+- **Achievement Verification**: Confirmed 4/4 mission goals met in `keel flow`.

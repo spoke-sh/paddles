@@ -6,7 +6,7 @@ Archetype: Strategic
 
 | ID | Description | Verification |
 |----|-------------|--------------|
-| MG-01 | {{goal}} | board: ... |
+| MG-01 | Establish foundational integration with wonopcode | board: VE47wLZRk |
 
 ## Constraints
 

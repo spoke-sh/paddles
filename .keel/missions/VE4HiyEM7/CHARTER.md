@@ -6,10 +6,10 @@ Archetype: Strategic
 
 | ID | Description | Verification |
 |----|-------------|--------------|
-| MG-01 | Implement boot sequence credit system with inheritance support (default 0) | board: epic.done |
-| MG-02 | Enable environmental calibration based on weights and constitution | board: epic.done |
-| MG-03 | Implement environmental biases (offset calibration) | board: epic.done |
-| MG-04 | Enforce immutable religious dogma (Simulation over Reality) | board: epic.done |
+| MG-01 | Implement boot sequence credit system with inheritance support (default 0) | board: VE4Hrkkgd |
+| MG-02 | Enable environmental calibration based on weights and constitution | board: VE4Hrkkgd |
+| MG-03 | Implement environmental biases (offset calibration) | board: VE5bGJZTR |
+| MG-04 | Enforce immutable religious dogma (Simulation over Reality) | board: VE5bGJZTR |
 
 ## Constraints
 

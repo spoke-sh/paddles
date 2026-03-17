@@ -18,9 +18,9 @@
 |--------|--------|
 | [Boot Sequence Mechanics](epics/VE4Hrkkgd/voyages/VE4I8ZqA5/) | done |
 
-### [Dogma and Bias Calibration](epics/VE5bGJZTR/) (active)
+### [Dogma and Bias Calibration](epics/VE5bGJZTR/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Dogma and Bias Calibration](epics/VE5bGJZTR/voyages/VE5bLublW/) | in-progress |
+| [Dogma and Bias Calibration](epics/VE5bGJZTR/voyages/VE5bLublW/) | done |
 

@@ -3,17 +3,15 @@ id: VE47usFrC
 title: Plug in the Chord
 status: achieved
 created_at: 2026-03-16T13:48:41
-updated_at: 2026-03-16T14:28:00
+updated_at: 2026-03-16T20:15:00
 watch: ~
 ---
 
 # Mission: Plug in the Chord
 
-## Charter
-Establish foundational integration with the `wonopcode` (chord) engine to enable agentic coding capabilities within the Paddles mech suit.
+## Documents
 
-## Achievement
-- [x] Successfully wired `wonopcode-core` engine into `main.rs`.
-- [x] Stabilized build environment with `openssl` and `pkg-config` in Nix.
-- [x] Verified system health and traceability.
-- [x] Completed foundational and real integration voyages.
+| Document | Description |
+|----------|-------------|
+| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
+| [LOG.md](LOG.md) | Decision journal and session digest |
