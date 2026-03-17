@@ -1,17 +1,21 @@
 ---
 id: VE5qT3n0e
 title: The Architectural Lattice
-status: defining
-created_at: 2026-03-16T20:52:29
-updated_at: 2026-03-16T20:52:29
+status: verified
+created_at: 2026-03-16T20:44:32
+updated_at: 2026-03-16T21:00:36
 watch: ~
+verified_at: 2026-03-16T21:00:36
 ---
 
-# The Architectural Lattice
+# Mission: The Architectural Lattice
 
-## Documents
+## Charter
+Refactor the `paddles` codebase into a Domain-Driven Design and Hexagonal Architecture to support modularity and long-term expansion.
 
-| Document | Description |
-|----------|-------------|
-| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
-| [LOG.md](LOG.md) | Decision journal and session digest |
+## Achievement
+- [x] Established `domain`, `application`, and `infrastructure` module hierarchy.
+- [x] Migrated boot calibration and validation logic to the `Domain` layer.
+- [x] Extracted `InferenceEngine` port and implemented `CandleAdapter` in `Infrastructure`.
+- [x] Refactored CLI entry point to delegate to the `Application` layer.
+- [x] Maintained 100% functional parity with previous implementation.

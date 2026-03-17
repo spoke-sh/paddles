@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T20:59:44.288866539-07:00
+mode: manual
+---
+Main.rs refactored to use application layer services.

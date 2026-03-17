@@ -1,8 +1,9 @@
 ---
 id: VE5qX07aD
 title: Lattice Refactor
-created_at: 2026-03-16T20:52:44
+created_at: 2026-03-16T20:44:46
 index: 6
+mission: VE5qT3n0e
 ---
 
 # Lattice Refactor
@@ -19,8 +20,8 @@ index: 6
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Lattice Structure Transition](voyages/VE5qdK37s/) | planned | 0/4 |
+| [Lattice Structure Transition](voyages/VE5qdK37s/) | done | 4/4 |
 <!-- END GENERATED -->

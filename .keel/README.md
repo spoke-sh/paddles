@@ -42,9 +42,9 @@
 |--------|--------|
 | [Interactive Loop Integration](epics/VE5oA4s7x/voyages/VE5oG5fQe/) | done |
 
-### [Lattice Refactor](epics/VE5qX07aD/) (active)
+### [Lattice Refactor](epics/VE5qX07aD/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Lattice Structure Transition](epics/VE5qX07aD/voyages/VE5qdK37s/) | planned |
+| [Lattice Structure Transition](epics/VE5qX07aD/voyages/VE5qdK37s/) | done |
 

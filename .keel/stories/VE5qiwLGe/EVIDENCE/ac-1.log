@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-16T20:55:13.457846630-07:00
+mode: manual
+---
+Directory structure created and src/lib.rs updated with domain, application, and infrastructure modules.
