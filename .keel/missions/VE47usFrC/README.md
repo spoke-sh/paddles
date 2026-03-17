@@ -1,10 +1,11 @@
 ---
 id: VE47usFrC
 title: Plug in the Chord
-status: achieved
+status: verified
 created_at: 2026-03-16T13:48:41
-updated_at: 2026-03-16T20:15:00
+updated_at: 2026-03-16T20:03:49
 watch: ~
+verified_at: 2026-03-16T20:03:49
 ---
 
 # Mission: Plug in the Chord
