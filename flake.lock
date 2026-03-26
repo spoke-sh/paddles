@@ -49,16 +49,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1773682529,
-        "narHash": "sha256-ECBG83qLydY+gnObaluHPSRI1+at22UsxnEvTx8fr0w=",
-        "ref": "refs/heads/main",
-        "rev": "0e078226c7bf61de9c1c6c6261697bc332411cf2",
-        "revCount": 497,
+        "lastModified": 1774485330,
+        "narHash": "sha256-ByjCYnwt9bC/zswDmFNF1tl2Wc9UUZ340GFCO9vchTs=",
+        "ref": "main",
+        "rev": "c052b9b75221469eaef6ce6c0fcbcdf47f0d4d7d",
+        "revCount": 533,
         "type": "git",
         "url": "ssh://git@github.com/spoke-sh/keel.git"
       },
       "original": {
-        "rev": "0e078226c7bf61de9c1c6c6261697bc332411cf2",
+        "ref": "main",
         "type": "git",
         "url": "ssh://git@github.com/spoke-sh/keel.git"
       }

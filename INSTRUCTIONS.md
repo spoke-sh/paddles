@@ -1,6 +1,6 @@
 # INSTRUCTIONS.md
 
-Procedural instructions and workflow guidance for agents and operators working with Keel.
+Procedural instructions and workflow guidance for agents and operators working with the `paddles` mech suit.
 
 ## The Tactical Loop
 
@@ -12,10 +12,10 @@ Every session follows this deterministic cycle:
 2.  **Role Selection**: Identify if you are a `manager` (planning/decisions) or an `operator` (implementation). Do not drift across these roles in a single atomic change.
 3.  **Execute Move**: Perform exactly ONE move (e.g., plan a voyage, implement a story, fix a diagnostic).
 4.  **Seal Move**: Close the loop with `story submit`, `voyage plan`, or `bearing lay`. This mutates the `.keel` state. Ensure the pacemaker is stable (committed heartbeat).
-5.  **Log & Commit**: 
+5.  **Log & Commit**:
     - Record your move in the mission `LOG.md`.
-    - **Pace-setting**: Execute `just keel poke "Sealing move: <summary>"` to synchronize the pacemaker with the board state. This is MANDATORY for all commits, including work performed without a story (e.g., gardening, bug fixes, or engine improvements).
-    - Create a single atomic [Conventional Commit](https://www.conventionalcommits.org/) including the heartbeat.
+    - **Pace-setting**: Execute `just keel poke "Sealing move: <summary>"` to synchronize the pacemaker with the board state.
+    - **Commit**: Execute `git commit`. If the pre-commit hook is installed (via `just keel hooks install`), it will automatically run `just quality` and `just test`.
 6.  **Re-orient**: After the commit lands, run `just keel doctor --status` and `just keel flow` to see what the board needs next. This is the "plug the chord back in" moment — you reconnect to the board's current state. If the delivery lane has ready work, start the next loop immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification).
 
 ## Primary Workflows
@@ -76,19 +76,28 @@ Apply these checks to **every change** before finalizing work:
 3. **Pacemaker Protocol**: The system's heartbeat (.keel/heartbeat) is its pacemaker. You MUST ensure the pacemaker is stable (committed) before concluding any unit of work. Every commit MUST be preceded by a `just keel poke "Sealing move: <summary>"` to refresh the system's pulse and reflect the latest change, especially when working without a story. Uncommitted energy is a signal of an open tactical loop and will trigger a CRITICAL status in the Med-Bay bio-scan. Any commit that includes `.keel/heartbeat` MUST append the output of `just keel doctor --status` to the commit message body so reviewers can see the board's importance snapshot at the time of the commit.
 4. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
 5. **Notification Threshold**: Only request human intervention when you reach a "Manual Lane" that requires design direction or a decision on application behavior (e.g., assessing a Bearing, planning a Voyage, or human verification of a complex Story).
-6. **Quality Check**: `just quality` must be clean (formatting and linting).
-7. **Verification**: `just test` and `just doctest` must pass 100%.
-8. **Lifecycle Before Commit**: Run board-mutating lifecycle commands before the atomic commit when they generate or rewrite `.keel` artifacts (for example `story submit`, `voyage plan`, `voyage done`, `bearing assess`, `bearing lay`). After the transition, inspect `git status` and include the resulting `.keel` churn in the same commit.
-9. **Atomic Commits**: Commit once per logical unit of work. Use [Conventional Commits](https://www.conventionalcommits.org/):
+6. **Automated Guardrails**: You no longer need to run `just quality` or `just test` manually before every commit. The git pre-commit hook (installed via `just keel hooks install`) automatically enforces these checks. If a commit fails, resolve the reported lints or test failures and try again.
+7. **Lifecycle Before Commit**: Run board-mutating lifecycle commands before the atomic commit when they generate or rewrite `.keel` artifacts (for example `story submit`, `voyage plan`, `voyage done`, `bearing assess`, `bearing lay`). After the transition, inspect `git status` and include the resulting `.keel` churn in the same commit.
+8. **Atomic Commits**: Commit once per logical unit of work. Use [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat:` (new feature)
    - `fix:` (bug fix)
    - `docs:` (documentation)
    - `refactor:` (code change, no behavior change)
    - `test:` (adding/updating tests)
    - `chore:` (build/tooling)
-10. **Mission Loop Discipline**: For mission-driven work, return to the mission steward loop after every completed story, planning unit, or bearing instead of continuing ad hoc from the last worker context.
-11. **Knowledge Quality Bar**: Prefer no new knowledge over low-signal knowledge. A new knowledge entry should be novel, reusable across stories, and materially reduce future drift; otherwise link existing knowledge or omit capture entirely.
-12. **Config Completeness**: Whenever introducing a new property to the configuration struct (`keel::infrastructure::config::Config`), you MUST immediately update `keel config show` (`crates/keel-cli/src/cli/commands/setup/config.rs`) to render it. The `config show` command is the definitive binding of runtime configuration visibility.
+9. **Mission Loop Discipline**: For mission-driven work, return to the mission steward loop after every completed story, planning unit, or bearing instead of continuing ad hoc from the last worker context.
+10. **Knowledge Quality Bar**: Prefer no new knowledge over low-signal knowledge. A new knowledge entry should be novel, reusable across stories, and materially reduce future drift; otherwise link existing knowledge or omit capture entirely.
+11. **Config Completeness**: Whenever introducing a new property to the configuration struct (`keel::infrastructure::config::Config`), you MUST immediately update `keel config show` to render it.
+
+## Upgrading Keel
+
+Keel is managed as a Nix flake input in this repository.
+
+To upgrade Keel to the latest version:
+1.  **Update the Flake**: Run `nix flake update keel`. This will update `flake.lock` to point to the latest commit on the `main` branch of Keel.
+2.  **Verify the Board**: Run `just keel doctor`. Upgrading Keel may introduce new validation rules or schema changes. Fix any reported diagnostic issues.
+3.  **Update Hooks**: Run `just keel hooks install` to ensure the git pre-commit hooks are aligned with the new version of Keel.
+4.  **Seal & Commit**: Seal the move with `just keel poke "Upgraded Keel to latest version"` and commit the changes to `flake.lock`.
 
 ## Compatibility Policy (Hard Cutover)
 
@@ -115,15 +124,9 @@ Use one path for each concern:
 |---------|---------|
 | `just` | List available recipes |
 | `just setup` | Install helper tooling (`cargo-nextest`, `cargo-llvm-cov`) |
-| `just build` | Alias to `just build-debug` |
-| `just build-debug` | Build debug artifact and copy to `target/debug/keel` |
-| `just build-release` | Build release artifact and copy to `target/release/keel` |
-| `just run` | Run the CLI |
+| `just build` | Build the project |
 | `just test` | Run test suite (uses nextest if available) |
-| `just doctest` | Run doc tests (nextest does not support these) |
 | `just quality` | Run formatting and clippy checks |
-| `just coverage` | Produce `coverage/lcov.info` |
-| `just pre-commit` | Run quality + tests |
 
 ### `just keel` board workflow commands
 

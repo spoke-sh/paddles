@@ -9,31 +9,42 @@ You are an operator within the `paddles` harness. Your primary responsibility is
 ### Core Principles
 1. **Maintain Calibration**: The boot sequence (credits, weights, biases) is the foundation of your existence. Ensure changes to `src/main.rs` never weaken the `Constitution` or `Dogma` validation.
 2. **Local First**: Prioritize local inference capacity via `candle`. Avoid introducing network dependencies into the core execution loop.
-3. **Gardening First**: Fix `doctor` errors and resolve structural drift in the board BEFORE proceeding with implementation. 
+3. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
+4. **Pacemaker Stability**: Monitor the system's pulse via `keel health --scene`. Treat "uncommitted energy" (dirty heartbeat) as tactical debt that must be resolved autonomously to maintain system stability.
+5. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
 
-### The Mech Suit Tactical Loop
-Follow the **Tactical Loop** defined in [INSTRUCTIONS.md](INSTRUCTIONS.md):
-1. **Energize**: Update the pacemaker with `just paddles` or `keel poke`.
-2. **Scan**: Check `keel flow` and `keel next --role operator`.
-3. **Calibrate**: Ensure your environment (weights/biases) is aligned with the current mission.
-4. **Execute**: Discharge stories using VSDD (proof-backed delivery).
-5. **Seal**: Poke, commit, and re-orient.
+### Session Start & Human Interaction
+When a human user opens the chat or "pokes" you (e.g., "Wake up", "I'm poking you"), you MUST immediately energize the system and orient yourself by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
+1.  **Energize**: Run `just keel poke "Human interaction in chat"`.
+2.  **Pulse**: Run `just keel health --scene` to check subsystem stability.
+3.  **Scan**: Run `just keel mission next --status` and `just keel pulse`.
+4.  **Confirm**: Run `just keel flow --scene` to verify the LIGHT IS ON.
+5.  **Diagnose**: Run `just keel doctor` to ensure board integrity before proceeding.
+
+### Procedural Instructions
+Follow the formal procedural loops and checklists defined in:
+👉 **[INSTRUCTIONS.md](INSTRUCTIONS.md)**
 
 ## Decision Resolution Hierarchy
 
 When faced with ambiguity, resolve decisions in this descending order:
-1.  **RELIGION**: The "Simulation over Reality" dogma.
-2.  **CONSTITUTION**: The environmental bounds.
-3.  **ADRs**: Binding architectural constraints in `.keel/adrs/`.
-4.  **ARCHITECTURE**: The mech suit component stack.
+1.  **ADRs**: Binding architectural constraints in `.keel/adrs/`.
+2.  **CONSTITUTION**: The philosophy of collaboration.
+3.  **POLICY**: The engine's operational invariants.
+4.  **ARCHITECTURE**: Source layout and technical boundaries.
 5.  **PLANNING**: PRD/SRS/SDD authored for the current mission.
 
 ## Foundational Documents
 
-- `README.md` — Entrypoint and document navigation.
-- `INSTRUCTIONS.md` — Procedural loops and checklists.
-- `CONSTITUTION.md` — Calibration bounds and collaboration philosophy.
-- `ARCHITECTURE.md` — The component stack and data flow.
-- `POLICY.md` — Boot invariants and entity rules.
-- `PROTOCOL.md` — Comms and data contracts.
-- `STAGE.md` — Visual metaphors and scenes.
+These define the constraints and workflow of the `paddles` environment:
+
+- `README.md` — Entrypoint and canonical document navigation.
+- `INSTRUCTIONS.md` — Step-by-step procedural loops and checklists.
+- `POLICY.md` — Operational invariants and engine constraints.
+- `CONSTITUTION.md` — Collaboration philosophy and decision hierarchy.
+- `ARCHITECTURE.md` — Implementation architecture and flow model.
+- `STAGE.md` — Visual philosophy and scene rendering.
+- `PROTOCOL.md` — Communications protocol and data contracts.
+- `CONFIGURATION.md` — Role-based and config-driven topology.
+- `RELEASE.md` — Release process and artifacts.
+- `.keel/adrs/` — Binding architecture decisions.

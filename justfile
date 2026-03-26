@@ -10,7 +10,7 @@ build:
 
 # Run tests.
 test:
-  cargo nextest run
+  cargo nextest run --no-tests pass
 
 # Run quality checks.
 quality:

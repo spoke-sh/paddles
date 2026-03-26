@@ -9,7 +9,7 @@
     sift.url = "github:rupurt/sift?ref=main";
 
     keel = {
-      url = "git+ssh://git@github.com/spoke-sh/keel.git?rev=0e078226c7bf61de9c1c6c6261697bc332411cf2";
+      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
