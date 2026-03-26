@@ -49,13 +49,19 @@ async fn main() -> Result<()> {
 
     let root_path = env::current_dir()?;
     let instance = Instance::new(root_path).await?;
-    
+
     let registry = Arc::new(SiftRegistryAdapter::new());
     let service = MechSuitService::new(instance, registry);
 
     // Boot sequence
     println!("[BOOT] Initializing system...");
-    let _boot_ctx = service.boot(cli.credits, cli.weights, cli.biases, cli.hf_token, cli.reality_mode)?;
+    let _boot_ctx = service.boot(
+        cli.credits,
+        cli.weights,
+        cli.biases,
+        cli.hf_token,
+        cli.reality_mode,
+    )?;
     println!("[BOOT] Inherited Credits: {}", _boot_ctx.credits);
     println!("[BOOT] Applying Foundational Weights: {}", _boot_ctx.weight);
     println!("[BOOT] Applying Foundational Biases: {}", _boot_ctx.bias);

@@ -1,13 +1,12 @@
 use crate::domain::ports::InferenceEngine;
 use async_trait::async_trait;
-use wonopcode_provider::{
-    LanguageModel, Message, GenerateOptions, ProviderResult, 
-    StreamChunk, ModelInfo, ContentPart
-};
 use futures::stream::{self, BoxStream};
-use sift::internal::search::adapters::qwen::{QwenReranker, QwenModelSpec};
+use sift::internal::search::adapters::qwen::{QwenModelSpec, QwenReranker};
 use sift::internal::search::domain::GenerativeModel;
 use std::sync::Arc;
+use wonopcode_provider::{
+    ContentPart, GenerateOptions, LanguageModel, Message, ModelInfo, ProviderResult, StreamChunk,
+};
 
 pub struct SiftInferenceAdapter {
     info: ModelInfo,
@@ -18,7 +17,7 @@ impl SiftInferenceAdapter {
     pub fn new(_weights: std::path::PathBuf) -> Result<Self, anyhow::Error> {
         let spec = QwenModelSpec::default();
         let inner = QwenReranker::load(spec)?;
-        
+
         Ok(Self {
             info: ModelInfo {
                 id: "sift-qwen".to_string(),
@@ -60,12 +59,16 @@ impl LanguageModel for SiftInferenceAdapter {
                 }
             }
         }
-        
+
         let inner = self.inner.clone();
-        let response = tokio::task::spawn_blocking(move || {
-            inner.generate(&prompt_text, 512)
-        }).await.map_err(|e| wonopcode_provider::error::ProviderError::Internal { message: e.to_string() })?
-          .map_err(|e| wonopcode_provider::error::ProviderError::Internal { message: e.to_string() })?;
+        let response = tokio::task::spawn_blocking(move || inner.generate(&prompt_text, 512))
+            .await
+            .map_err(|e| wonopcode_provider::error::ProviderError::Internal {
+                message: e.to_string(),
+            })?
+            .map_err(|e| wonopcode_provider::error::ProviderError::Internal {
+                message: e.to_string(),
+            })?;
 
         let chunks = vec![
             Ok(StreamChunk::TextStart),

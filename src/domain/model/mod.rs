@@ -19,7 +19,12 @@ impl Constitution {
     /// Validate if a weight is within constitutional bounds.
     pub fn validate(&self, weight: f64) -> Result<()> {
         if weight < self.min_weight || weight > self.max_weight {
-            anyhow::bail!("Calibration Failure: Weight {} is outside constitutional bounds [{}, {}].", weight, self.min_weight, self.max_weight);
+            anyhow::bail!(
+                "Calibration Failure: Weight {} is outside constitutional bounds [{}, {}].",
+                weight,
+                self.min_weight,
+                self.max_weight
+            );
         }
         Ok(())
     }
@@ -32,7 +37,9 @@ impl Dogma {
     /// Validate immutable invariants.
     pub fn validate(reality_mode: bool) -> Result<()> {
         if reality_mode {
-            anyhow::bail!("[UNCLEAN BOOT] Religious Violation: Simulation MUST take precedence over Reality.");
+            anyhow::bail!(
+                "[UNCLEAN BOOT] Religious Violation: Simulation MUST take precedence over Reality."
+            );
         }
         Ok(())
     }
@@ -48,11 +55,22 @@ pub struct BootContext {
 
 impl BootContext {
     /// Initialize and validate the boot context.
-    pub fn new(credits: u64, weight: f64, bias: f64, hf_token: Option<String>, reality_mode: bool) -> Result<Self> {
+    pub fn new(
+        credits: u64,
+        weight: f64,
+        bias: f64,
+        hf_token: Option<String>,
+        reality_mode: bool,
+    ) -> Result<Self> {
         let constitution = Constitution::default();
         constitution.validate(weight)?;
         Dogma::validate(reality_mode)?;
-        
-        Ok(Self { credits, weight, bias, hf_token })
+
+        Ok(Self {
+            credits,
+            weight,
+            bias,
+            hf_token,
+        })
     }
 }
