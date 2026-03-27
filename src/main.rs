@@ -37,6 +37,10 @@ struct Cli {
     #[arg(short, long, default_value = "qwen-1.5b")]
     model: String,
 
+    /// Verbosity level (-v, -vv, -vvv)
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
+
     /// Hugging Face API token for gated models.
     #[arg(long, env = "HF_TOKEN")]
     hf_token: Option<String>,
@@ -44,36 +48,55 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+
+    // Initialize tracing based on verbosity
+    let log_level = match cli.verbose {
+        0 => tracing::Level::ERROR,
+        1 => tracing::Level::INFO,
+        2 => tracing::Level::DEBUG,
+        _ => tracing::Level::TRACE,
+    };
+
+    tracing_subscriber::fmt().with_max_level(log_level).init();
 
     let root_path = env::current_dir()?;
     let instance = Instance::new(root_path).await?;
 
     let registry = Arc::new(SiftRegistryAdapter::new());
     let service = MechSuitService::new(instance, registry);
+    service.set_verbose(cli.verbose);
 
     // Boot sequence
-    println!("[BOOT] Initializing system...");
+    if cli.verbose >= 1 {
+        println!("[BOOT] Initializing system...");
+    }
     let _boot_ctx = service.boot(
         cli.credits,
         cli.weights,
         cli.biases,
-        cli.hf_token,
+        cli.hf_token.clone(),
         cli.reality_mode,
     )?;
-    println!("[BOOT] Inherited Credits: {}", _boot_ctx.credits);
-    println!("[BOOT] Applying Foundational Weights: {}", _boot_ctx.weight);
-    println!("[BOOT] Applying Foundational Biases: {}", _boot_ctx.bias);
-    if _boot_ctx.hf_token.is_some() {
-        println!("[BOOT] Hugging Face Token: [MASKED]");
+
+    if cli.verbose >= 1 {
+        println!("[BOOT] Inherited Credits: {}", _boot_ctx.credits);
+        println!("[BOOT] Applying Foundational Weights: {}", _boot_ctx.weight);
+        println!("[BOOT] Applying Foundational Biases: {}", _boot_ctx.bias);
+        if _boot_ctx.hf_token.is_some() {
+            println!("[BOOT] Hugging Face Token: [MASKED]");
+        }
+        println!("[BOOT] Calibration Successful.");
     }
-    println!("[BOOT] Calibration Successful.");
 
     // Registry Synchronization via Sift
-    println!("[BOOT] Syncing model assets via SIFT for: {}...", cli.model);
+    if cli.verbose >= 1 {
+        println!("[BOOT] Syncing model assets via SIFT for: {}...", cli.model);
+    }
     let paths = service.prepare_model(&cli.model).await?;
-    println!("[BOOT] Registry Sync Complete.");
+    if cli.verbose >= 1 {
+        println!("[BOOT] Registry Sync Complete.");
+    }
 
     if let Some(prompt) = cli.prompt {
         let response = service.process_prompt(&prompt, paths).await?;

@@ -1,11 +1,22 @@
 use crate::domain::ports::{ModelPaths, ModelRegistry};
-use anyhow::anyhow;
 use async_trait::async_trait;
+use sift::internal::cache::cache_dir;
 use sift::internal::search::adapters::llm_utils::ensure_hf_asset;
 use sift::internal::search::adapters::qwen::QwenModelSpec;
 use std::path::Path;
 
 pub struct SiftRegistryAdapter;
+
+pub fn qwen_spec_for(model_id: &str) -> QwenModelSpec {
+    match model_id {
+        "qwen-1.5b" => QwenModelSpec {
+            model_id: "Qwen/Qwen2.5-1.5B-Instruct".to_string(),
+            revision: "main".to_string(),
+            max_length: 512,
+        },
+        _ => QwenModelSpec::default(),
+    }
+}
 
 impl SiftRegistryAdapter {
     pub fn new() -> Self {
@@ -24,25 +35,9 @@ impl ModelRegistry for SiftRegistryAdapter {
     async fn get_model_paths(&self, model_id: &str) -> Result<ModelPaths, anyhow::Error> {
         println!("[SIFT] Resolving model: {}", model_id);
 
-        // We'll use sift's internal directory helpers or define our own if needed.
-        // For this refactor, we'll map to what QwenModelSpec expects.
-        let spec = match model_id {
-            "qwen-1.5b" => QwenModelSpec {
-                model_id: "Qwen/Qwen2.5-1.5B-Instruct".to_string(),
-                revision: "main".to_string(),
-                max_length: 512,
-            },
-            _ => QwenModelSpec::default(),
-        };
+        let spec = qwen_spec_for(model_id);
 
-        // Sift's ensure_hf_asset is synchronous and uses ureq.
-        // We'll call it in spawn_blocking if needed, but since we are in a boot sequence
-        // and it's IO bound, it's acceptable for now.
-
-        let cache_root = directories::ProjectDirs::from("io", "wonop", "paddles")
-            .ok_or_else(|| anyhow!("could not determine cache directory"))?
-            .cache_dir()
-            .join("models");
+        let cache_root = cache_dir("models")?;
 
         let root = cache_root
             .join(Path::new(&spec.model_id))

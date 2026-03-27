@@ -1,8 +1,9 @@
 use crate::domain::ports::InferenceEngine;
+use crate::infrastructure::adapters::sift_registry::qwen_spec_for;
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
-use sift::internal::search::adapters::qwen::{QwenModelSpec, QwenReranker};
-use sift::internal::search::domain::GenerativeModel;
+use sift::internal::search::adapters::qwen::QwenReranker;
+use sift::internal::search::domain::{Conversation, GenerativeModel};
 use std::sync::Arc;
 use wonopcode_provider::{
     ContentPart, GenerateOptions, LanguageModel, Message, ModelInfo, ProviderResult, StreamChunk,
@@ -10,13 +11,15 @@ use wonopcode_provider::{
 
 pub struct SiftInferenceAdapter {
     info: ModelInfo,
-    inner: Arc<QwenReranker>,
+    conversation: Arc<std::sync::Mutex<Box<dyn Conversation>>>,
+    verbose: std::sync::atomic::AtomicU8,
 }
 
 impl SiftInferenceAdapter {
-    pub fn new(_weights: std::path::PathBuf) -> Result<Self, anyhow::Error> {
-        let spec = QwenModelSpec::default();
+    pub fn new(model_id: &str) -> Result<Self, anyhow::Error> {
+        let spec = qwen_spec_for(model_id);
         let inner = QwenReranker::load(spec)?;
+        let conversation = inner.start_conversation()?;
 
         Ok(Self {
             info: ModelInfo {
@@ -24,8 +27,14 @@ impl SiftInferenceAdapter {
                 name: "Sift Qwen".to_string(),
                 ..Default::default()
             },
-            inner: Arc::new(inner),
+            conversation: Arc::new(std::sync::Mutex::new(conversation)),
+            verbose: std::sync::atomic::AtomicU8::new(0),
         })
+    }
+
+    pub fn set_verbose(&mut self, level: u8) {
+        self.verbose
+            .store(level, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -60,15 +69,53 @@ impl LanguageModel for SiftInferenceAdapter {
             }
         }
 
-        let inner = self.inner.clone();
-        let response = tokio::task::spawn_blocking(move || inner.generate(&prompt_text, 512))
-            .await
-            .map_err(|e| wonopcode_provider::error::ProviderError::Internal {
-                message: e.to_string(),
-            })?
-            .map_err(|e| wonopcode_provider::error::ProviderError::Internal {
-                message: e.to_string(),
-            })?;
+        let conv = self.conversation.clone();
+        let prompt_clone = prompt_text.clone();
+        let verbose = self.verbose.load(std::sync::atomic::Ordering::Relaxed);
+
+        if verbose >= 1 {
+            println!("[INFO] SiftInferenceAdapter starting generation...");
+        }
+
+        let response = tokio::task::spawn_blocking(move || {
+            let mut conv = conv.lock().unwrap();
+
+            if verbose >= 3 {
+                println!("[TRACE] Current Conversation History:");
+                for (i, turn) in conv.history().iter().enumerate() {
+                    println!("[TRACE]   Turn {}: {}", i, turn);
+                }
+            }
+
+            if verbose >= 2 {
+                println!("[DEBUG] Sending prompt to Sift model: '{}'", prompt_clone);
+            }
+
+            let result = conv.send(&prompt_clone, 512);
+
+            #[allow(clippy::collapsible_if)]
+            if verbose >= 2 {
+                if let Ok(ref res) = result {
+                    println!("[DEBUG] Sift model responded with: '{}'", res);
+                }
+            }
+
+            result
+        })
+        .await
+        .map_err(|e| wonopcode_provider::error::ProviderError::Internal {
+            message: e.to_string(),
+        })?
+        .map_err(|e| wonopcode_provider::error::ProviderError::Internal {
+            message: e.to_string(),
+        })?;
+
+        if verbose >= 1 {
+            println!(
+                "[INFO] SiftInferenceAdapter generation complete. Response length: {}",
+                response.len()
+            );
+        }
 
         let chunks = vec![
             Ok(StreamChunk::TextStart),

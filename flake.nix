@@ -32,13 +32,49 @@
 
         siftPkg = sift.packages.${system}.sift;
         keelPkg = keel.packages.${system}.keel;
+
+        cargoToml = (builtins.fromTOML (builtins.readFile ./Cargo.toml));
+        version = cargoToml.package.version;
+
+        paddlesPkg = pkgs.rustPlatform.buildRustPackage {
+          pname = "paddles";
+          inherit version;
+          src = ./.;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            outputHashes = {
+              "candle-core-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
+              "candle-nn-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
+              "candle-transformers-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
+              "candle-kernels-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
+              "candle-ug-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
+              "wonopcode-core-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-provider-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-tools-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-storage-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-util-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-snapshot-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-lsp-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-mcp-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+              "wonopcode-sandbox-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
+            };
+          };
+          nativeBuildInputs = [ pkgs.pkg-config ] ++ pkgs.lib.optionals isLinux [ pkgs.cudatoolkit ];
+          buildInputs = [ pkgs.openssl pkgs.zlib pkgs.zstd ] ++ pkgs.lib.optionals isLinux [ pkgs.cudatoolkit ];
+          doCheck = false;
+
+          CUDA_PATH = pkgs.lib.optionalString isLinux "${pkgs.cudatoolkit}";
+          CUDA_COMPUTE_CAP = "80";
+          NVCC_PREPEND_FLAGS = pkgs.lib.optionalString isLinux "-I${pkgs.cudatoolkit}/include";
+        };
+
       in {
         packages = {
+          paddles = paddlesPkg;
           keel = keelPkg;
           sift = siftPkg;
+          default = paddlesPkg;
         };
-        # Expose keelPkg as the default package for the system
-        defaultPackage = keelPkg; 
 
         devShells.default = pkgs.mkShell {
                     buildInputs = [
