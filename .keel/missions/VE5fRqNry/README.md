@@ -1,10 +1,11 @@
 ---
 id: VE5fRqNry
 title: The Active Pulse
-status: achieved
+status: verified
 created_at: 2026-03-16T20:08:42
-updated_at: 2026-03-16T20:20:00
+updated_at: 2026-03-27T07:40:40
 watch: ~
+verified_at: 2026-03-27T07:40:40
 ---
 
 # Mission: The Active Pulse
