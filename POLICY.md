@@ -17,17 +17,25 @@ Progress is blocked if structural or requirement drift is detected:
 ## 3. Local Capacity Invariant
 Features should be implemented using local inference (`candle`) or local-first tools whenever possible. New network dependencies must be justified via an ADR.
 
-## 4. Entity State Machine
+## 4. Specialized Model Routing
+Model selection is an architectural decision, not an incidental prompt tweak.
+- **Smallest Capable Model**: Route each request to the smallest model that can satisfy the user's intent within the active runtime constraints.
+- **Intent Before Size**: Choose models based on workload shape first: direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
+- **Separate Search From Answering**: Retrieval-heavy or multi-hop tasks may use a dedicated context-gathering model, but answer generation should remain a distinct step.
+- **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.
+- **No Silent Remote Regression**: The default `paddles` path remains local-first. Remote or heavyweight specialized models must be explicit, observable, and degradable to a local fallback.
+
+## 5. Entity State Machine
 Follow strict transition gates for all `.keel/` entities:
 - **Planned**: Requires SRS/SDD authored content.
 - **Started**: Requires an active parent Voyage.
 - **Submitted**: Requires recorded proof for every Acceptance Criterion.
 - **Verified**: Requires human sign-off of the submitted evidence.
 
-## 5. Pacemaker Synchronization
+## 6. Pacemaker Synchronization
 Every commit that modifies the board MUST be pace-set by `keel poke` and include the `keel doctor --status` Importance Snapshot in the commit message.
 
-## 6. Mission Achievement
+## 7. Mission Achievement
 A mission is **Achieved** only when:
 - **Goals Met**: All `board:` goals are satisfied by terminal child entities.
 - **Work Closed**: No open implementation work remains in the mission's scope.
