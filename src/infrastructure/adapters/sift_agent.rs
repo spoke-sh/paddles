@@ -5,9 +5,9 @@ use crate::infrastructure::adapters::sift_registry::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{Linear, VarBuilder};
+use candle_nn::VarBuilder;
 use candle_transformers::models::{
-    qwen2::{Config as Qwen2Config, Model as Qwen2Model},
+    qwen2::{Config as Qwen2Config, ModelForCausalLM as Qwen2Model},
     qwen3::{Config as Qwen3Config, ModelForCausalLM as Qwen3Model},
     qwen3_5::{Config as Qwen3_5Config, ModelForCausalLM as Qwen3_5Model},
 };
@@ -256,7 +256,7 @@ impl PaddlesQwenRuntime {
 }
 
 enum QwenModelRunner {
-    Qwen2 { model: Qwen2Model, lm_head: Linear },
+    Qwen2 { model: Qwen2Model },
     Qwen3 { model: Qwen3Model },
     Qwen3_5 { model: Qwen3_5Model },
 }
@@ -275,19 +275,10 @@ impl PaddlesQwenSession {
         device: &Device,
         max_length: usize,
     ) -> Result<Self> {
-        let model = Qwen2Model::new(config, vb.clone())?;
-        let lm_head = if config.tie_word_embeddings {
-            Linear::new(
-                vb.pp("model.embed_tokens")
-                    .get((config.vocab_size, config.hidden_size), "weight")?,
-                None,
-            )
-        } else {
-            candle_nn::linear_no_bias(config.hidden_size, config.vocab_size, vb.pp("lm_head"))?
-        };
-
         Ok(Self {
-            runner: QwenModelRunner::Qwen2 { model, lm_head },
+            runner: QwenModelRunner::Qwen2 {
+                model: Qwen2Model::new(config, vb.clone())?,
+            },
             tokens: Vec::new(),
             device: device.clone(),
             max_length,
@@ -428,10 +419,8 @@ impl PaddlesQwenSession {
     fn next_token_logits(&mut self, tokens: &[u32], offset: usize) -> Result<Tensor> {
         let tokens_tensor = Tensor::new(tokens, &self.device)?.unsqueeze(0)?;
         match &mut self.runner {
-            QwenModelRunner::Qwen2 { model, lm_head } => {
-                let hidden_states = model.forward(&tokens_tensor, offset, None)?;
-                let last_hidden = hidden_states.narrow(1, tokens.len() - 1, 1)?;
-                let logits = last_hidden.apply(lm_head)?;
+            QwenModelRunner::Qwen2 { model } => {
+                let logits = model.forward(&tokens_tensor, offset)?;
                 logits.get(0)?.get(0).map_err(Into::into)
             }
             QwenModelRunner::Qwen3 { model } => {
@@ -679,21 +668,30 @@ impl SiftAgentAdapter {
         };
 
         if casual_turn {
-            if parse_tool_call(&reply)?.is_some() {
+            if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
                 reply = self.send_to_model(
                     conversation.as_mut(),
                     &build_direct_retry_prompt(prompt, &memory_prompt),
                 )?;
             }
-            if parse_tool_call(&reply)?.is_some() {
+            if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
                 reply = fallback_casual_reply(prompt);
             }
         } else {
-            if prefer_tools && pending_tool_call.is_none() && parse_tool_call(&reply)?.is_none() {
-                reply = self.send_to_model(
-                    conversation.as_mut(),
-                    &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
-                )?;
+            if pending_tool_call.is_none() {
+                if prefer_tools
+                    && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
+                {
+                    reply = self.send_to_model(
+                        conversation.as_mut(),
+                        &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
+                    )?;
+                } else if is_blank_model_reply(&reply) {
+                    reply = self.send_to_model(
+                        conversation.as_mut(),
+                        &build_direct_retry_prompt(prompt, &memory_prompt),
+                    )?;
+                }
             }
 
             for _ in 0..MAX_TOOL_STEPS {
@@ -756,6 +754,11 @@ impl SiftAgentAdapter {
 
             if parse_tool_call(&reply)?.is_some() {
                 bail!("tool step limit exceeded after {MAX_TOOL_STEPS} tool call(s)");
+            }
+
+            if is_blank_model_reply(&reply) {
+                reply =
+                    "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
             }
         }
 
@@ -1397,6 +1400,10 @@ fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
         return Ok(None);
     };
     Ok(serde_json::from_str(json).ok())
+}
+
+fn is_blank_model_reply(response: &str) -> bool {
+    response.trim().is_empty()
 }
 
 fn extract_json_payload(response: &str) -> Option<&str> {
@@ -2109,6 +2116,41 @@ mod tests {
     }
 
     #[test]
+    fn casual_prompts_retry_after_empty_response() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                String::new(),
+                "Hello.".to_string(),
+            ])),
+        );
+
+        let reply = adapter.respond("Hello").expect("response");
+        assert_eq!(reply, "Hello.");
+
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 0);
+    }
+
+    #[test]
+    fn casual_prompts_fall_back_after_repeated_empty_responses() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![String::new(), String::new()])),
+        );
+
+        let reply = adapter.respond("What's up?").expect("response");
+        assert_eq!(reply, "Not much. What do you want to work on?");
+
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 0);
+    }
+
+    #[test]
     fn casual_prompts_fall_back_to_plain_text_after_repeated_tool_calls() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test(
@@ -2193,6 +2235,35 @@ mod tests {
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
                 "You can run `git status` to inspect the working tree.".to_string(),
+                r#"{"tool":"shell","command":"git status"}"#.to_string(),
+                "Working tree is clean.".to_string(),
+            ])),
+        );
+
+        let reply = adapter
+            .respond("Inspect the repository status")
+            .expect("response");
+
+        assert_eq!(reply, "Working tree is clean.");
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 1);
+    }
+
+    #[test]
+    fn action_prompts_retry_for_tool_calls_after_empty_response() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(workspace.path())
+            .status()
+            .expect("git init");
+
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                String::new(),
                 r#"{"tool":"shell","command":"git status"}"#.to_string(),
                 "Working tree is clean.".to_string(),
             ])),
