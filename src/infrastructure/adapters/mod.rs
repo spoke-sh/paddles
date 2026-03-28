@@ -1,3 +1,5 @@
+mod agent_memory;
+
 pub mod context1_gatherer;
 pub mod hf_hub;
 pub mod sift_agent;

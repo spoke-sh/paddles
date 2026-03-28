@@ -86,6 +86,16 @@ Every session follows a deterministic cycle:
     just quality  # Formatting and linting
     ```
 
+### 4. REPL Memory Files
+
+The `paddles` REPL reloads `AGENTS.md` memory on every prompt. It searches in this order:
+
+*   `/etc/paddles/AGENTS.md`
+*   `~/.config/paddles/AGENTS.md`
+*   Every `AGENTS.md` from the filesystem root down to the current working directory
+
+Later files are treated as more specific and override earlier guidance. That means edits to a local project `AGENTS.md` take effect on the next turn without restarting the REPL.
+
 ## 🛠️ Key Tools & Components
 
 Paddles integrates these core components within the Keel Engine:

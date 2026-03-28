@@ -1,3 +1,4 @@
+use super::agent_memory::AgentMemory;
 use crate::domain::ports::EvidenceBundle;
 use crate::infrastructure::adapters::sift_registry::qwen_spec_for;
 use anyhow::{Context, Result, anyhow, bail};
@@ -95,6 +96,17 @@ struct ToolResult {
     name: &'static str,
     summary: String,
     retained_artifacts: Option<Vec<RetainedArtifact>>,
+}
+
+struct TurnPrompt<'a> {
+    workspace_root: &'a Path,
+    user_prompt: &'a str,
+    recent_turns: &'a str,
+    memory_prompt: &'a str,
+    context: &'a ContextAssemblyResponse,
+    gathered_evidence: Option<&'a EvidenceBundle>,
+    prefer_tools: bool,
+    follow_up_execution: bool,
 }
 
 trait ConversationFactory: Send + Sync {
@@ -438,6 +450,14 @@ impl SiftAgentAdapter {
         prompt: &str,
         gathered_evidence: Option<&EvidenceBundle>,
     ) -> Result<String> {
+        let memory = AgentMemory::load(&self.workspace_root);
+        if self.verbose.load(Ordering::Relaxed) >= 1 {
+            for warning in memory.warnings() {
+                println!("[WARN] {warning}");
+            }
+        }
+        let memory_prompt = memory.render_for_prompt();
+
         let mut state = self
             .state
             .lock()
@@ -466,7 +486,10 @@ impl SiftAgentAdapter {
         };
         let mut conversation = self.conversation_factory.start_conversation()?;
         let mut reply = if casual_turn {
-            self.send_to_model(conversation.as_mut(), &build_direct_turn_prompt(prompt))?
+            self.send_to_model(
+                conversation.as_mut(),
+                &build_direct_turn_prompt(prompt, &memory_prompt),
+            )?
         } else if pending_tool_call.is_some() {
             String::new()
         } else {
@@ -478,22 +501,25 @@ impl SiftAgentAdapter {
 
             self.send_to_model(
                 conversation.as_mut(),
-                &build_turn_prompt(
-                    &self.workspace_root,
-                    prompt,
-                    &recent_turns,
-                    &initial_context,
+                &build_turn_prompt(&TurnPrompt {
+                    workspace_root: &self.workspace_root,
+                    user_prompt: prompt,
+                    recent_turns: &recent_turns,
+                    memory_prompt: &memory_prompt,
+                    context: &initial_context,
                     gathered_evidence,
                     prefer_tools,
                     follow_up_execution,
-                ),
+                }),
             )?
         };
 
         if casual_turn {
             if parse_tool_call(&reply)?.is_some() {
-                reply =
-                    self.send_to_model(conversation.as_mut(), &build_direct_retry_prompt(prompt))?;
+                reply = self.send_to_model(
+                    conversation.as_mut(),
+                    &build_direct_retry_prompt(prompt, &memory_prompt),
+                )?;
             }
             if parse_tool_call(&reply)?.is_some() {
                 reply = fallback_casual_reply(prompt);
@@ -502,7 +528,7 @@ impl SiftAgentAdapter {
             if prefer_tools && pending_tool_call.is_none() && parse_tool_call(&reply)?.is_none() {
                 reply = self.send_to_model(
                     conversation.as_mut(),
-                    &build_tool_retry_prompt(prompt, &recent_turns),
+                    &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
                 )?;
             }
 
@@ -554,7 +580,13 @@ impl SiftAgentAdapter {
 
                 reply = self.send_to_model(
                     conversation.as_mut(),
-                    &build_tool_follow_up_prompt(prompt, &call_id, result.name, &result.summary),
+                    &build_tool_follow_up_prompt(
+                        prompt,
+                        &call_id,
+                        result.name,
+                        &result.summary,
+                        &memory_prompt,
+                    ),
                 )?;
             }
 
@@ -827,18 +859,10 @@ impl SiftAgentAdapter {
     }
 }
 
-fn build_turn_prompt(
-    workspace_root: &Path,
-    user_prompt: &str,
-    recent_turns: &str,
-    context: &ContextAssemblyResponse,
-    gathered_evidence: Option<&EvidenceBundle>,
-    prefer_tools: bool,
-    follow_up_execution: bool,
-) -> String {
-    let routing_guidance = if follow_up_execution {
+fn build_turn_prompt(turn: &TurnPrompt<'_>) -> String {
+    let routing_guidance = if turn.follow_up_execution {
         "This request refers to a previous turn. Resolve words like `it` or `that` using the recent conversation, then perform the implied action with a tool when possible."
-    } else if prefer_tools {
+    } else if turn.prefer_tools {
         "This request is action-oriented. If a workspace tool can answer it, call the tool instead of explaining a command the user could run."
     } else {
         "Use tools when they materially improve accuracy; otherwise answer directly."
@@ -849,6 +873,9 @@ fn build_turn_prompt(
 Use the provided workspace evidence first. If you have enough information, answer directly.\n\
 Final answers should stay concise and focus on the requested result.\n\
 Routing guidance: {}\n\
+Persistent operator memory:\n\
+{}\n\
+\n\
 If you need a tool, respond with ONLY a single JSON object and no markdown or prose.\n\
 \n\
 When the user asks you to inspect repository state, run a command, read a file, search the workspace, or apply a change, prefer a tool call over describing how they could do it themselves.\n\
@@ -878,16 +905,17 @@ Current workspace evidence:\n\
 \n\
 Current user request:\n\
 {}\n",
-        workspace_root.display(),
+        turn.workspace_root.display(),
         routing_guidance,
-        recent_turns,
-        format_gathered_evidence_digest(gathered_evidence),
-        format_context_digest(context),
-        user_prompt
+        turn.memory_prompt,
+        turn.recent_turns,
+        format_gathered_evidence_digest(turn.gathered_evidence),
+        format_context_digest(turn.context),
+        turn.user_prompt
     )
 }
 
-fn build_direct_turn_prompt(user_prompt: &str) -> String {
+fn build_direct_turn_prompt(user_prompt: &str, memory_prompt: &str) -> String {
     format!(
         "You are Paddles, a local-first coding assistant.\n\
 The user is making a conversational request that does not require workspace tools.\n\
@@ -895,27 +923,36 @@ Answer directly in plain text.\n\
 Do not emit JSON, code fences, or tool calls.\n\
 Do not modify files or suggest workspace actions unless the user explicitly asks for them.\n\
 \n\
-Current user request:\n\
-{user_prompt}\n"
-    )
-}
-
-fn build_direct_retry_prompt(user_prompt: &str) -> String {
-    format!(
-        "Your last reply tried to call a workspace tool for a conversational message.\n\
-Answer the user directly in plain text.\n\
-Do not emit JSON, code fences, or tool calls.\n\
+Persistent operator memory:\n\
+{memory_prompt}\n\
 \n\
 Current user request:\n\
 {user_prompt}\n"
     )
 }
 
-fn build_tool_retry_prompt(user_prompt: &str, recent_turns: &str) -> String {
+fn build_direct_retry_prompt(user_prompt: &str, memory_prompt: &str) -> String {
+    format!(
+        "Your last reply tried to call a workspace tool for a conversational message.\n\
+Answer the user directly in plain text.\n\
+Do not emit JSON, code fences, or tool calls.\n\
+\n\
+Persistent operator memory:\n\
+{memory_prompt}\n\
+\n\
+Current user request:\n\
+{user_prompt}\n"
+    )
+}
+
+fn build_tool_retry_prompt(user_prompt: &str, recent_turns: &str, memory_prompt: &str) -> String {
     format!(
         "The user asked for a workspace action and your last reply used prose instead of a tool.\n\
 Reply with ONLY one JSON tool call and no prose.\n\
 If the request refers to `it` or `that`, resolve it from the recent conversation first.\n\
+\n\
+Persistent operator memory:\n\
+{memory_prompt}\n\
 \n\
 Available tools:\n\
 - {{\"tool\":\"search\",\"query\":\"...\",\"intent\":\"optional\"}}\n\
@@ -940,9 +977,13 @@ fn build_tool_follow_up_prompt(
     call_id: &str,
     tool_name: &str,
     summary: &str,
+    memory_prompt: &str,
 ) -> String {
     format!(
-        "Tool call {call_id} ({tool_name}) completed.\n\
+        "Persistent operator memory:\n\
+{memory_prompt}\n\
+\n\
+Tool call {call_id} ({tool_name}) completed.\n\
 Tool result:\n\
 {summary}\n\
 \n\
@@ -1629,6 +1670,72 @@ mod tests {
             .expect("recorded prompt");
         assert!(prompt.contains("Gathered repository evidence for runtime lanes."));
         assert!(prompt.contains("src/application/mod.rs"));
+    }
+
+    #[test]
+    fn direct_prompts_include_loaded_agents_memory() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "Reply tersely.\nMention the active workspace when relevant.\n",
+        )
+        .expect("write AGENTS");
+        let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "Hello.",
+                Arc::clone(&recorded_messages),
+            )),
+        );
+
+        let reply = adapter.respond("Hello").expect("response");
+        assert_eq!(reply, "Hello.");
+
+        let prompt = recorded_messages
+            .lock()
+            .expect("history lock")
+            .first()
+            .cloned()
+            .expect("recorded prompt");
+        assert!(prompt.contains("Persistent operator memory"));
+        assert!(prompt.contains("Reply tersely."));
+        assert!(prompt.contains("AGENTS.md"));
+    }
+
+    #[test]
+    fn tool_prompts_include_loaded_agents_memory() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "Prefer concrete repository answers over generic advice.\n",
+        )
+        .expect("write AGENTS");
+        let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "The repository layout is straightforward.",
+                Arc::clone(&recorded_messages),
+            )),
+        );
+
+        let reply = adapter
+            .respond("Summarize the repository layout")
+            .expect("response");
+        assert_eq!(reply, "The repository layout is straightforward.");
+
+        let prompt = recorded_messages
+            .lock()
+            .expect("history lock")
+            .first()
+            .cloned()
+            .expect("recorded prompt");
+        assert!(prompt.contains("Persistent operator memory"));
+        assert!(prompt.contains("Prefer concrete repository answers over generic advice."));
+        assert!(prompt.contains("Current workspace evidence"));
     }
 
     #[test]
