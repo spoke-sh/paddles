@@ -66,3 +66,9 @@
 |--------|--------|
 | [Sift Implementation Transition](epics/VE5zxrA1w/voyages/VE604BPRi/) | done |
 
+### [Sift Controller Migration](epics/VF7t633ux/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Sift-Native Runtime Cutover](epics/VF7t633ux/voyages/VF7tAvs7B/) | planned |
+

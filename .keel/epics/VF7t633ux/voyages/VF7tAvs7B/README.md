@@ -1,0 +1,36 @@
+---
+# system-managed
+id: VF7tAvs7B
+status: planned
+epic: VF7t633ux
+created_at: 2026-03-27T19:44:40
+# authored
+title: Sift-Native Runtime Cutover
+index: 1
+updated_at: 2026-03-27T19:48:12
+---
+
+# Sift-Native Runtime Cutover
+
+> Replace wonopcode-owned core orchestration with a Sift-backed controller that supports retained context and immediate local tool execution.
+
+## Documents
+
+<!-- BEGIN DOCUMENTS -->
+| Document | Description |
+|----------|-------------|
+| [SRS.md](SRS.md) | Requirements and verification criteria |
+| [SDD.md](SDD.md) | Architecture and implementation details |
+<!-- END DOCUMENTS -->
+
+## Stories
+
+<!-- BEGIN GENERATED -->
+**Progress:** 0/3 stories complete
+
+| Title | Type | Status |
+|-------|------|--------|
+| [Build Sift Session Controller](../../../../stories/VF7tCKEgw/README.md) | feat | backlog |
+| [Add Local Tool Surface](../../../../stories/VF7tCKUgx/README.md) | feat | backlog |
+| [Cut Over Runtime And Docs](../../../../stories/VF7tCKsgv/README.md) | feat | backlog |
+<!-- END GENERATED -->
