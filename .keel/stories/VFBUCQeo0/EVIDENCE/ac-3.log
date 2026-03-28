@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:15:44.280051917-07:00
+mode: manual
+---
+When no gatherer lane is configured, RuntimeLaneConfig defaults to the synthesizer response lane and MechSuitService::process_prompt() executes through that prepared synthesizer lane. Covered by the new application tests and the CLI help proof for the optional --gatherer-model flag.

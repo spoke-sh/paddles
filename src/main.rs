@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 
 // External Crate Modules
-use paddles::application::MechSuitService;
+use paddles::application::{MechSuitService, RuntimeLaneConfig};
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 
 /// The mech suit for the famous assistant, Paddles mate!
@@ -36,12 +36,16 @@ struct Cli {
     #[arg(short, long, default_value = "qwen-1.5b")]
     model: String,
 
+    /// Optional model ID for a dedicated context-gathering lane.
+    #[arg(long)]
+    gatherer_model: Option<String>,
+
     /// Verbosity level (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
 
     /// Hugging Face API token for gated models.
-    #[arg(long, env = "HF_TOKEN")]
+    #[arg(long, env = "HF_TOKEN", hide_env_values = true)]
     hf_token: Option<String>,
 }
 
@@ -88,15 +92,25 @@ async fn main() -> Result<()> {
 
     // Registry Synchronization via Sift
     if cli.verbose >= 1 {
-        println!("[BOOT] Syncing model assets via SIFT for: {}...", cli.model);
+        println!(
+            "[BOOT] Syncing synthesizer lane via SIFT for: {}...",
+            cli.model
+        );
+        if let Some(gatherer_model) = &cli.gatherer_model {
+            println!(
+                "[BOOT] Syncing gatherer lane via SIFT for: {}...",
+                gatherer_model
+            );
+        }
     }
-    let paths = service.prepare_model(&cli.model).await?;
+    let runtime_lanes = RuntimeLaneConfig::new(cli.model.clone(), cli.gatherer_model.clone());
+    let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
     if cli.verbose >= 1 {
-        println!("[BOOT] Registry Sync Complete.");
+        println!("[BOOT] Runtime lanes ready.");
     }
 
     if let Some(prompt) = cli.prompt {
-        let response = service.process_prompt(&prompt, paths).await?;
+        let response = service.process_prompt(&prompt).await?;
         println!("Chord Response: {}", response);
     } else {
         println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
@@ -115,7 +129,7 @@ async fn main() -> Result<()> {
                     continue;
                 }
 
-                let response = service.process_prompt(input, paths.clone()).await?;
+                let response = service.process_prompt(input).await?;
                 println!("Chord Response: {}", response);
             } else {
                 break;

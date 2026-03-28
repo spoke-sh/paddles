@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:15:44.258542613-07:00
+mode: manual
+---
+The default prompt path remains local-first: only the synthesizer lane is instantiated for prompt execution, the gatherer lane is optional, and no new mandatory remote dependency was introduced. Verified by cargo test and just quality after the lane refactor.

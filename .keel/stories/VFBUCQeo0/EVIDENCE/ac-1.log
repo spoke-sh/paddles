@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:15:44.226860512-07:00
+mode: manual
+---
+Added RuntimeLaneConfig, RuntimeLaneRole, PreparedModelLane, and PreparedRuntimeLanes in src/application/mod.rs, plus the optional --gatherer-model CLI flag in src/main.rs and runtime-lane documentation in CONFIGURATION.md. MechSuitService now prepares separate synthesizer and optional gatherer lanes via prepare_runtime_lanes().

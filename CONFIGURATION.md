@@ -121,6 +121,28 @@ weight = 1.0
 weight = 1.5
 ```
 
+## Runtime Lane Selection
+
+`paddles` now treats runtime configuration as lane-based rather than
+single-model-only:
+
+- The **synthesizer lane** is the default response path and must always be
+  configured.
+- The **gatherer lane** is optional and exists to support retrieval-heavy
+  requests with a dedicated context-gathering model.
+- If no gatherer lane is configured, `paddles` stays on the local synthesizer
+  path for normal prompt handling.
+
+Today the lane wiring is exposed through CLI/runtime configuration:
+
+```bash
+paddles --model qwen-1.5b --gatherer-model qwen-1.5b
+```
+
+This does not make the gatherer lane mandatory. It simply prepares a distinct
+lane so routing can opt into it later without changing the default response
+model.
+
 ## Subsystem Health (The Med-Bay)
 
 The `keel health` command provides a high-level triage of the system's core subsystems. Use `--scene` for a visual bio-scan.

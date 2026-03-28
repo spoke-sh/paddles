@@ -16,7 +16,7 @@ pub trait ModelRegistry: Send + Sync {
 }
 
 /// Paths to local model assets.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelPaths {
     pub weights: PathBuf,
     pub tokenizer: PathBuf,
