@@ -1,5 +1,12 @@
+mod context_gathering;
+
 use async_trait::async_trait;
 use std::path::PathBuf;
+
+pub use context_gathering::{
+    ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBudget, EvidenceBundle,
+    EvidenceItem, GathererCapability,
+};
 
 /// Port for model discovery and acquisition.
 #[async_trait]

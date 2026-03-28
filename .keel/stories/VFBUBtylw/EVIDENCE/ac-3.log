@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:12:04.184413927-07:00
+mode: manual
+---
+The contract is synthesis-oriented: ContextGatherResult carries capability state plus an optional EvidenceBundle, and there is no final-answer field. Unsupported and harness-required states return no evidence and are covered by unit tests in src/domain/ports/context_gathering.rs.

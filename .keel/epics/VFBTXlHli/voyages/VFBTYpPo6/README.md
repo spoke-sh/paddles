@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFBTYpPo6
-status: planned
+status: in-progress
 epic: VFBTXlHli
 created_at: 2026-03-28T10:28:00
 # authored
 title: Subagent Interface and Routing Foundations
 index: 1
 updated_at: 2026-03-28T10:33:21
+started_at: 2026-03-28T13:07:30
 ---
 
 # Subagent Interface and Routing Foundations
@@ -26,11 +27,11 @@ updated_at: 2026-03-28T10:33:21
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Context-Gathering Subagent Contract](../../../../stories/VFBUBtylw/README.md) | feat | backlog |
+| [Define Context-Gathering Subagent Contract](../../../../stories/VFBUBtylw/README.md) | feat | done |
 | [Refactor Runtime For Gatherer And Synthesizer Lanes](../../../../stories/VFBUCQeo0/README.md) | feat | backlog |
 | [Route Retrieval-Heavy Turns Through Context Gathering](../../../../stories/VFBUCxNpH/README.md) | feat | backlog |
 | [Add Context-1 Adapter Boundary And Harness Gate](../../../../stories/VFBUDSjqS/README.md) | feat | backlog |

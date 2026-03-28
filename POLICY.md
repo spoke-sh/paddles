@@ -22,6 +22,7 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Smallest Capable Model**: Route each request to the smallest model that can satisfy the user's intent within the active runtime constraints.
 - **Intent Before Size**: Choose models based on workload shape first: direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
 - **Separate Search From Answering**: Retrieval-heavy or multi-hop tasks may use a dedicated context-gathering model, but answer generation should remain a distinct step.
+- **Evidence-First Gatherers**: Context-gathering adapters must return typed evidence bundles and capability state for a downstream synthesizer, not prose pretending to be the final answer.
 - **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.
 - **No Silent Remote Regression**: The default `paddles` path remains local-first. Remote or heavyweight specialized models must be explicit, observable, and degradable to a local fallback.
 

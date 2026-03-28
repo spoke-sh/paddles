@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:12:04.133415145-07:00
+mode: manual
+---
+Added src/domain/ports/context_gathering.rs with ContextGatherRequest, ContextGatherResult, EvidenceBundle, EvidenceItem, EvidenceBudget, GathererCapability, and the ContextGatherer trait. Verified by cargo test, cargo nextest run, and just quality.

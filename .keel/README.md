@@ -76,5 +76,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Subagent Interface and Routing Foundations](epics/VFBTXlHli/voyages/VFBTYpPo6/) | planned |
+| [Subagent Interface and Routing Foundations](epics/VFBTXlHli/voyages/VFBTYpPo6/) | in-progress |
 

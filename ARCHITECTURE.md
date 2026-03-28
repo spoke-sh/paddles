@@ -122,6 +122,25 @@ If adopted, a context-gathering model should sit behind an explicit controller b
 
 This separation keeps search quality, search cost, and answer quality independently tunable.
 
+### Typed Gatherer Contract
+
+The gatherer boundary should be explicit in code, not implied by prompt text.
+The current contract lives in `src/domain/ports/context_gathering.rs` and is
+intended to preserve these semantics:
+
+- `ContextGatherRequest`
+  Carries the user query, workspace root, routing rationale, evidence budget,
+  and prior context references.
+- `ContextGatherResult`
+  Returns explicit capability state plus an optional evidence bundle.
+- `GathererCapability`
+  Must distinguish `available`, `unsupported`, and `harness-required`.
+- `EvidenceBundle`
+  Carries a synthesis-ready summary, ranked evidence items, and warnings.
+
+The important behavioral rule is simple: a gatherer returns evidence for a
+downstream synthesizer. It does not return the final user-facing answer.
+
 ### Non-Goals
 
 Context-gathering models should not become:

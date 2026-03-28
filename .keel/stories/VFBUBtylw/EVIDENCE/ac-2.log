@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:12:04.157988200-07:00
+mode: manual
+---
+Updated ARCHITECTURE.md and POLICY.md to document the gatherer-vs-synthesizer split, the typed gatherer contract in src/domain/ports/context_gathering.rs, and the evidence-first boundary future adapters must implement.
