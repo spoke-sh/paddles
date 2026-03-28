@@ -66,7 +66,7 @@ Key architectural rules reflected in that flow:
 *   The REPL reloads hierarchical `AGENTS.md` memory on every turn, so operator guidance can change without restarting the process.
 *   The local Qwen runtime stays loaded, while turn-local prompt state is rebuilt per send.
 
-Current local model defaults are tuned for this repository's constraints rather than model hype. The synthesizer lane now defaults to `qwen3.5-2b` as the stronger generalist local path on an 8 GB CUDA card, while `qwen-coder-3b` remains available as an opt-in coding-tuned alternative when you want that bias explicitly.
+Current local model defaults are tuned for this repository's constraints rather than model hype. The synthesizer lane now defaults to `qwen3.5-2b` as the stronger generalist local path when enough CUDA memory is actually free, while `qwen-coder-3b` remains available as an opt-in coding-tuned alternative when you want that bias explicitly. If the Qwen3.5 CUDA load or first generation step hits an out-of-memory or reduced-precision runtime failure, `paddles` now logs a warning and retries that lane on CPU instead of crashing the REPL.
 
 ## 📜 Foundational Principles & Philosophy
 

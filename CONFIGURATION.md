@@ -145,9 +145,10 @@ model.
 
 Current local model guidance on an 8 GB CUDA card:
 
-- `qwen3.5-2b` is the default stronger generalist local path.
+- `qwen3.5-2b` is the default stronger generalist local path when the GPU has enough free VRAM.
 - `qwen-coder-3b` is the opt-in coding-tuned lane when you want a stronger coding bias.
 - `qwen-1.5b` remains available as a smaller fallback.
+- If `qwen3.5-2b` cannot complete its CUDA load or first generation step because of GPU OOM or a reduced-precision runtime mismatch, the runtime warns and retries on CPU instead of aborting the REPL.
 
 ### Experimental Context-1 Boundary
 

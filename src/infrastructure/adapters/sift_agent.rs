@@ -164,6 +164,7 @@ impl Conversation for ReusableQwenConversation {
 }
 
 struct PaddlesQwenRuntime {
+    spec: QwenModelSpec,
     session: PaddlesQwenSession,
     tokenizer: Tokenizer,
     family: QwenModelFamily,
@@ -171,33 +172,25 @@ struct PaddlesQwenRuntime {
 
 impl PaddlesQwenRuntime {
     fn load(spec: QwenModelSpec) -> Result<Self> {
-        let config_path = spec.config_path()?;
         let tokenizer_path = spec.tokenizer_path()?;
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|err| anyhow!("failed to load tokenizer: {err}"))?;
         let device = get_device_for("QWEN")?;
-        let dtype = preferred_qwen_weight_dtype(&device);
-        let vb = load_qwen_var_builder(spec, dtype, &device)?;
-
-        let session = match spec.family {
-            QwenModelFamily::Qwen2 => {
-                let config_partial: QwenConfigPartial =
-                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                let config = config_partial.into_config()?;
-                PaddlesQwenSession::new_qwen2(&config, &vb, &device, spec.max_length)?
+        let session = match Self::load_session(spec, &device) {
+            Ok(session) => session,
+            Err(err) if should_retry_qwen_on_cpu(&device, &err) => {
+                tracing::warn!(
+                    "CUDA runtime for {} failed during load ({}); retrying on CPU",
+                    spec.model_id,
+                    err
+                );
+                Self::load_session(spec, &Device::Cpu)?
             }
-            QwenModelFamily::Qwen3 => {
-                let config: Qwen3Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                PaddlesQwenSession::new_qwen3(&config, &vb, &device, spec.max_length)?
-            }
-            QwenModelFamily::Qwen3_5 => {
-                let config: Qwen3_5Config =
-                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                PaddlesQwenSession::new_qwen3_5(&config, &vb, &device, spec.max_length)?
-            }
+            Err(err) => return Err(err),
         };
 
         Ok(Self {
+            spec,
             session,
             tokenizer,
             family: spec.family,
@@ -212,8 +205,53 @@ impl PaddlesQwenRuntime {
     fn send(&mut self, message: &str, max_tokens: usize) -> Result<String> {
         self.reset()?;
         let prompted = format_qwen_prompt(self.family, message);
-        self.session
+        match self
+            .session
             .generate(&prompted, max_tokens, &self.tokenizer)
+        {
+            Ok(response) => Ok(response),
+            Err(err) if should_retry_qwen_on_cpu(&self.session.device, &err) => {
+                tracing::warn!(
+                    "CUDA runtime for {} failed during generation ({}); retrying on CPU",
+                    self.spec.model_id,
+                    err
+                );
+                self.reload_on_cpu()?;
+                self.reset()?;
+                self.session
+                    .generate(&prompted, max_tokens, &self.tokenizer)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn reload_on_cpu(&mut self) -> Result<()> {
+        self.session = Self::load_session(self.spec, &Device::Cpu)?;
+        Ok(())
+    }
+
+    fn load_session(spec: QwenModelSpec, device: &Device) -> Result<PaddlesQwenSession> {
+        let config_path = spec.config_path()?;
+        let dtype = preferred_qwen_weight_dtype(spec.family, device);
+        let vb = load_qwen_var_builder(spec, dtype, device)?;
+
+        match spec.family {
+            QwenModelFamily::Qwen2 => {
+                let config_partial: QwenConfigPartial =
+                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                let config = config_partial.into_config()?;
+                PaddlesQwenSession::new_qwen2(&config, &vb, device, spec.max_length)
+            }
+            QwenModelFamily::Qwen3 => {
+                let config: Qwen3Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                PaddlesQwenSession::new_qwen3(&config, &vb, device, spec.max_length)
+            }
+            QwenModelFamily::Qwen3_5 => {
+                let config: Qwen3_5Config =
+                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                PaddlesQwenSession::new_qwen3_5(&config, &vb, device, spec.max_length)
+            }
+        }
     }
 }
 
@@ -298,6 +336,7 @@ impl PaddlesQwenSession {
     }
 
     fn select_next_token(logits: &Tensor) -> Result<u32> {
+        let logits = logits.to_dtype(DType::F32)?;
         Ok(logits
             .to_vec1::<f32>()?
             .iter()
@@ -407,12 +446,28 @@ impl PaddlesQwenSession {
     }
 }
 
-fn preferred_qwen_weight_dtype(device: &Device) -> DType {
-    if device.is_cuda() {
-        DType::F16
-    } else {
-        DType::F32
+fn preferred_qwen_weight_dtype(family: QwenModelFamily, device: &Device) -> DType {
+    if !device.is_cuda() {
+        return DType::F32;
     }
+
+    match family {
+        QwenModelFamily::Qwen2 => DType::F16,
+        QwenModelFamily::Qwen3 | QwenModelFamily::Qwen3_5 => DType::BF16,
+    }
+}
+
+fn should_retry_qwen_on_cpu(device: &Device, err: &anyhow::Error) -> bool {
+    should_retry_qwen_on_cpu_message(device.is_cuda(), &err.to_string())
+}
+
+fn should_retry_qwen_on_cpu_message(device_is_cuda: bool, error_message: &str) -> bool {
+    if !device_is_cuda {
+        return false;
+    }
+
+    let error_message = error_message.to_ascii_lowercase();
+    error_message.contains("out of memory") || error_message.contains("unexpected dtype")
 }
 
 fn format_qwen_prompt(family: QwenModelFamily, message: &str) -> String {
@@ -1576,15 +1631,15 @@ impl ConversationFactory for StaticConversationFactory {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, SiftAgentAdapter, ToolCall,
-        extract_json_payload, format_qwen_prompt, infer_tool_call, is_follow_up_execution_request,
-        normalize_relative_path, preferred_qwen_weight_dtype, should_prefer_tools,
-        trim_for_context,
+        AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, PaddlesQwenSession, SiftAgentAdapter,
+        ToolCall, extract_json_payload, format_qwen_prompt, infer_tool_call,
+        is_follow_up_execution_request, normalize_relative_path, preferred_qwen_weight_dtype,
+        should_prefer_tools, should_retry_qwen_on_cpu_message, trim_for_context,
     };
     use crate::domain::ports::{EvidenceBundle, EvidenceItem};
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
-    use candle_core::{DType, Device};
+    use candle_core::{DType, Device, Tensor};
     use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
@@ -1712,7 +1767,58 @@ mod tests {
 
     #[test]
     fn cpu_runtime_keeps_qwen_weights_in_f32() {
-        assert_eq!(preferred_qwen_weight_dtype(&Device::Cpu), DType::F32);
+        assert_eq!(
+            preferred_qwen_weight_dtype(QwenModelFamily::Qwen2, &Device::Cpu),
+            DType::F32
+        );
+        assert_eq!(
+            preferred_qwen_weight_dtype(QwenModelFamily::Qwen3_5, &Device::Cpu),
+            DType::F32
+        );
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_runtime_uses_family_specific_weight_dtypes() {
+        let device = Device::new_cuda(0).expect("cuda device");
+        assert_eq!(
+            preferred_qwen_weight_dtype(QwenModelFamily::Qwen2, &device),
+            DType::F16
+        );
+        assert_eq!(
+            preferred_qwen_weight_dtype(QwenModelFamily::Qwen3_5, &device),
+            DType::BF16
+        );
+    }
+
+    #[test]
+    fn select_next_token_accepts_reduced_precision_logits() {
+        let logits = Tensor::from_vec(vec![0.1_f32, 0.9, 0.4], 3, &Device::Cpu)
+            .expect("cpu tensor")
+            .to_dtype(DType::BF16)
+            .expect("bf16 logits");
+
+        assert_eq!(PaddlesQwenSession::select_next_token(&logits).unwrap(), 1);
+    }
+
+    #[test]
+    fn retries_qwen_cuda_runtime_on_oom_or_dtype_errors() {
+        assert!(should_retry_qwen_on_cpu_message(
+            true,
+            "DriverError(CUDA_ERROR_OUT_OF_MEMORY, \"out of memory\")"
+        ));
+        assert!(should_retry_qwen_on_cpu_message(
+            true,
+            "unexpected dtype, expected: F32, got: BF16"
+        ));
+        assert!(!should_retry_qwen_on_cpu_message(
+            false,
+            "DriverError(CUDA_ERROR_OUT_OF_MEMORY, \"out of memory\")"
+        ));
+        assert!(!should_retry_qwen_on_cpu_message(
+            true,
+            "failed to load tokenizer: broken tokenizer"
+        ));
     }
 
     #[test]

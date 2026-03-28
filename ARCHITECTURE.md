@@ -111,7 +111,7 @@ Model routing should be driven by two inputs:
 ### Routing Principles
 
 - Use the smallest capable local model for direct chat and straightforward tool orchestration.
-- Prefer `qwen3.5-2b` as the local default on constrained 8 GB CUDA systems, and expose `qwen-coder-3b` as an opt-in coding-tuned lane when the operator wants that tradeoff explicitly.
+- Prefer `qwen3.5-2b` as the local default on constrained 8 GB CUDA systems when enough VRAM is free, expose `qwen-coder-3b` as an opt-in coding-tuned lane when the operator wants that tradeoff explicitly, and fail over to CPU when the Qwen3.5 CUDA runtime cannot load or generate safely.
 - Prefer deterministic controller routing over asking a weak model to infer obvious shell or file actions.
 - Keep retrieval and answer generation separate when the task is genuinely retrieval-heavy.
 - Introduce a larger or specialized model only when the user's request actually needs it.
