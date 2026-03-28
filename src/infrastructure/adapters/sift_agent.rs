@@ -669,12 +669,22 @@ impl SiftAgentAdapter {
 
         if casual_turn {
             if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
+                self.log_retry_reason(
+                    "casual-direct-retry",
+                    &reply,
+                    "empty or tool-like casual response",
+                );
                 reply = self.send_to_model(
                     conversation.as_mut(),
                     &build_direct_retry_prompt(prompt, &memory_prompt),
                 )?;
             }
             if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
+                self.log_retry_reason(
+                    "casual-fallback",
+                    &reply,
+                    "repeated empty or tool-like casual response",
+                );
                 reply = fallback_casual_reply(prompt);
             }
         } else {
@@ -682,11 +692,17 @@ impl SiftAgentAdapter {
                 if prefer_tools
                     && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
                 {
+                    self.log_retry_reason(
+                        "tool-retry",
+                        &reply,
+                        "missing or empty tool call response",
+                    );
                     reply = self.send_to_model(
                         conversation.as_mut(),
                         &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
                     )?;
                 } else if is_blank_model_reply(&reply) {
+                    self.log_retry_reason("direct-retry", &reply, "empty direct response");
                     reply = self.send_to_model(
                         conversation.as_mut(),
                         &build_direct_retry_prompt(prompt, &memory_prompt),
@@ -757,6 +773,11 @@ impl SiftAgentAdapter {
             }
 
             if is_blank_model_reply(&reply) {
+                self.log_retry_reason(
+                    "blank-fallback",
+                    &reply,
+                    "repeated empty response after retries",
+                );
                 reply =
                     "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
             }
@@ -798,10 +819,25 @@ impl SiftAgentAdapter {
         let response = conversation.send(prompt, MAX_MODEL_TOKENS)?;
 
         if verbose >= 2 {
-            println!("[DEBUG] Model response: {}", response);
+            if is_blank_model_reply(&response) {
+                println!("[DEBUG] Model response: <empty>");
+            } else {
+                println!("[DEBUG] Model response: {}", response);
+            }
         }
 
         Ok(response)
+    }
+
+    fn log_retry_reason(&self, stage: &str, response: &str, reason: &str) {
+        if self.verbose.load(Ordering::Relaxed) >= 1 {
+            let observed = if is_blank_model_reply(response) {
+                "<empty>"
+            } else {
+                "non-empty"
+            };
+            println!("[INFO] Response recovery ({stage}): {reason} (observed={observed}).");
+        }
     }
 
     fn log_context_assembly(&self, label: &str, response: &ContextAssemblyResponse) {
