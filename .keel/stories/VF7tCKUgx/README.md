@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VF7tCKUgx
-status: needs-human-verification
+status: done
 created_at: 2026-03-27T19:44:45
-updated_at: 2026-03-27T23:12:05
+updated_at: 2026-03-27T23:12:36
 # authored
 title: Add Local Tool Surface
 type: feat
@@ -12,6 +12,7 @@ scope: VF7t633ux/VF7tAvs7B
 index: 2
 started_at: 2026-03-27T23:11:27
 submitted_at: 2026-03-27T23:12:05
+completed_at: 2026-03-27T23:12:36
 ---
 
 # Add Local Tool Surface

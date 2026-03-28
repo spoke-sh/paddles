@@ -27,11 +27,11 @@ started_at: 2026-03-27T19:51:31
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Build Sift Session Controller](../../../../stories/VF7tCKEgw/README.md) | feat | done |
-| [Add Local Tool Surface](../../../../stories/VF7tCKUgx/README.md) | feat | needs-human-verification |
+| [Add Local Tool Surface](../../../../stories/VF7tCKUgx/README.md) | feat | done |
 | [Cut Over Runtime And Docs](../../../../stories/VF7tCKsgv/README.md) | feat | backlog |
 <!-- END GENERATED -->
