@@ -97,19 +97,27 @@
                               shellHook = ''
                                 # Shared target directory across shell sessions for faster rebuilds.
                                 export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
-                                export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.zlib pkgs.zstd pkgs.openssl ]}:$LD_LIBRARY_PATH"
+                                runtime_ld_library_path="${pkgs.lib.makeLibraryPath [ pkgs.zlib pkgs.zstd pkgs.openssl ]}"
                               ''
                     
            + pkgs.lib.optionalString isDarwin ''
             # Nix can set TMPDIR to a shell-specific path on macOS; use a stable path.
             export TMPDIR=/var/tmp
           '' + pkgs.lib.optionalString isLinux ''
-            # Expose the CUDA toolkit for Candle CUDA builds.
+            # Expose the CUDA toolkit for Candle CUDA builds and runtime loading.
             export CUDA_PATH="${pkgs.cudatoolkit}"
             export CUDA_ROOT="${pkgs.cudatoolkit}"
             export CUDA_TOOLKIT_ROOT_DIR="${pkgs.cudatoolkit}"
-            # Prefer the real host CUDA driver at runtime without relying on
-            # LD_LIBRARY_PATH, while still using the toolkit stubs for linking.
+            for candidate in \
+              "${pkgs.cudatoolkit}/lib" \
+              "${pkgs.cudatoolkit}/lib64" \
+              "${pkgs.cudatoolkit}/targets/x86_64-linux/lib"
+            do
+              if [ -d "$candidate" ]; then
+                runtime_ld_library_path="$candidate:$runtime_ld_library_path"
+              fi
+            done
+
             cuda_driver_rpath=""
             for candidate in \
               /run/opengl-driver/lib \
@@ -117,10 +125,13 @@
               /usr/lib/wsl/lib
             do
               if [ -f "$candidate/libcuda.so.1" ]; then
+                runtime_ld_library_path="$candidate:$runtime_ld_library_path"
                 cuda_driver_rpath="$candidate"
                 break
               fi
             done
+
+            export LD_LIBRARY_PATH="$runtime_ld_library_path''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
             linux_link_args="-C link-arg=-fuse-ld=mold"
             if [ -n "$cuda_driver_rpath" ]; then
