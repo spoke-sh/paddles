@@ -32,8 +32,8 @@ struct Cli {
     #[arg(long, default_value = "false")]
     reality_mode: bool,
 
-    /// Model ID to use from the registry (e.g. gemma-2b, qwen-1.5b).
-    #[arg(short, long, default_value = "qwen-1.5b")]
+    /// Model ID to use from the registry (e.g. qwen3.5-2b, qwen-coder-3b).
+    #[arg(short, long, default_value = "qwen3.5-2b")]
     model: String,
 
     /// Optional model ID for a dedicated context-gathering lane.

@@ -26,9 +26,28 @@ That routing principle is foundational. `paddles` should not assume one model is
 - Owns the active engine instance used for prompt execution.
 
 ### 3. Model Registry (`src/infrastructure/adapters/sift_registry.rs`)
-- Resolves logical model IDs such as `qwen-1.5b` into concrete asset locations.
+- Resolves logical model IDs such as `qwen-coder-3b` and `qwen3.5-2b` into concrete asset locations.
 - Ensures local model artifacts are present before inference begins.
-- Acts as the boundary between `paddles` model names and backing runtimes.
+- Acts as the catalog boundary between `paddles` model names and backing runtimes.
+
+### 3a. Model Integration Layers
+
+Model-family complexity is intentionally split into three local layers so adding
+support for a new family does not turn the registry into a god object:
+
+1. **Catalog / Registry**
+   Maps logical IDs to a typed model spec: backing repo, revision, family,
+   weight layout, and local asset paths.
+2. **Backend Runtime**
+   Owns family-specific config parsing, `candle` model construction, weight
+   dtype policy, cache reset, and token generation.
+3. **Prompt / Protocol**
+   Owns the prompt wrapper and response protocol that `paddles` expects for a
+   family. This is controlled by `paddles`, not delegated blindly to an
+   upstream chat template.
+
+That split is what makes `Qwen3.5` support additive to existing `Qwen2`
+support instead of a cross-cutting rewrite.
 
 ### 4. Session Controller (`src/infrastructure/adapters/sift_agent.rs`)
 - Interprets user intent for each turn.
@@ -92,6 +111,7 @@ Model routing should be driven by two inputs:
 ### Routing Principles
 
 - Use the smallest capable local model for direct chat and straightforward tool orchestration.
+- Prefer `qwen3.5-2b` as the local default on constrained 8 GB CUDA systems, and expose `qwen-coder-3b` as an opt-in coding-tuned lane when the operator wants that tradeoff explicitly.
 - Prefer deterministic controller routing over asking a weak model to infer obvious shell or file actions.
 - Keep retrieval and answer generation separate when the task is genuinely retrieval-heavy.
 - Introduce a larger or specialized model only when the user's request actually needs it.

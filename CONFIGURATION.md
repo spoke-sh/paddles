@@ -136,12 +136,18 @@ single-model-only:
 Today the lane wiring is exposed through CLI/runtime configuration:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-model qwen-1.5b
+paddles --model qwen3.5-2b --gatherer-model qwen-coder-3b
 ```
 
 This does not make the gatherer lane mandatory. It simply prepares a distinct
 lane so routing can opt into it later without changing the default response
 model.
+
+Current local model guidance on an 8 GB CUDA card:
+
+- `qwen3.5-2b` is the default stronger generalist local path.
+- `qwen-coder-3b` is the opt-in coding-tuned lane when you want a stronger coding bias.
+- `qwen-1.5b` remains available as a smaller fallback.
 
 ### Experimental Context-1 Boundary
 
@@ -149,7 +155,7 @@ model.
 drop-in answer model:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-provider context1
+paddles --model qwen3.5-2b --gatherer-provider context1
 ```
 
 That provider fails closed by design.

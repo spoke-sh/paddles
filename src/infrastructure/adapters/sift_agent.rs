@@ -1,16 +1,18 @@
 use super::agent_memory::AgentMemory;
 use crate::domain::ports::EvidenceBundle;
-use crate::infrastructure::adapters::sift_registry::qwen_spec_for;
+use crate::infrastructure::adapters::sift_registry::{
+    QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Linear, VarBuilder};
-use candle_transformers::models::qwen2::{Config as QwenConfig, Model as QwenModel};
-use serde::Deserialize;
-use sift::internal::cache::cache_dir;
-use sift::internal::search::adapters::llm_utils::{
-    QwenConfigPartial, get_device_for, load_mmaped_safetensors_with_repair,
+use candle_transformers::models::{
+    qwen2::{Config as Qwen2Config, Model as Qwen2Model},
+    qwen3::{Config as Qwen3Config, ModelForCausalLM as Qwen3Model},
+    qwen3_5::{Config as Qwen3_5Config, ModelForCausalLM as Qwen3_5Model},
 };
-use sift::internal::search::adapters::qwen::QwenModelSpec;
+use serde::Deserialize;
+use sift::internal::search::adapters::llm_utils::{QwenConfigPartial, get_device_for};
 use sift::{
     AgentTurnInput, ContextAssemblyBudget, ContextAssemblyRequest, ContextAssemblyResponse,
     Conversation, EnvironmentFactInput, LocalContextSource, RetainedArtifact, SearchPlan, Sift,
@@ -164,35 +166,41 @@ impl Conversation for ReusableQwenConversation {
 struct PaddlesQwenRuntime {
     session: PaddlesQwenSession,
     tokenizer: Tokenizer,
+    family: QwenModelFamily,
 }
 
 impl PaddlesQwenRuntime {
     fn load(spec: QwenModelSpec) -> Result<Self> {
-        let root = cache_dir("models")?
-            .join(Path::new(&spec.model_id))
-            .join(Path::new(&spec.revision));
-
-        let config_path = root.join("config.json");
-        let tokenizer_path = root.join("tokenizer.json");
-        let weights_path = root.join("model.safetensors");
-
-        let config_partial: QwenConfigPartial =
-            serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-        let config = config_partial.into_config()?;
+        let config_path = spec.config_path()?;
+        let tokenizer_path = spec.tokenizer_path()?;
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|err| anyhow!("failed to load tokenizer: {err}"))?;
         let device = get_device_for("QWEN")?;
-        let vb = load_mmaped_safetensors_with_repair(
-            &spec.model_id,
-            &spec.revision,
-            &weights_path,
-            DType::F32,
-            &device,
-        )?;
+        let dtype = preferred_qwen_weight_dtype(&device);
+        let vb = load_qwen_var_builder(spec, dtype, &device)?;
+
+        let session = match spec.family {
+            QwenModelFamily::Qwen2 => {
+                let config_partial: QwenConfigPartial =
+                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                let config = config_partial.into_config()?;
+                PaddlesQwenSession::new_qwen2(&config, &vb, &device, spec.max_length)?
+            }
+            QwenModelFamily::Qwen3 => {
+                let config: Qwen3Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                PaddlesQwenSession::new_qwen3(&config, &vb, &device, spec.max_length)?
+            }
+            QwenModelFamily::Qwen3_5 => {
+                let config: Qwen3_5Config =
+                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                PaddlesQwenSession::new_qwen3_5(&config, &vb, &device, spec.max_length)?
+            }
+        };
 
         Ok(Self {
-            session: PaddlesQwenSession::new(&config, &vb, &device, spec.max_length)?,
+            session,
             tokenizer,
+            family: spec.family,
         })
     }
 
@@ -203,30 +211,33 @@ impl PaddlesQwenRuntime {
 
     fn send(&mut self, message: &str, max_tokens: usize) -> Result<String> {
         self.reset()?;
-        let prompted = format!(
-            "{QWEN_SYSTEM_PROMPT}<|im_start|>user\n{message}<|im_end|>\n<|im_start|>assistant\n"
-        );
+        let prompted = format_qwen_prompt(self.family, message);
         self.session
             .generate(&prompted, max_tokens, &self.tokenizer)
     }
 }
 
+enum QwenModelRunner {
+    Qwen2 { model: Qwen2Model, lm_head: Linear },
+    Qwen3 { model: Qwen3Model },
+    Qwen3_5 { model: Qwen3_5Model },
+}
+
 struct PaddlesQwenSession {
-    model: QwenModel,
-    lm_head: Linear,
+    runner: QwenModelRunner,
     tokens: Vec<u32>,
     device: Device,
     max_length: usize,
 }
 
 impl PaddlesQwenSession {
-    fn new(
-        config: &QwenConfig,
+    fn new_qwen2(
+        config: &Qwen2Config,
         vb: &VarBuilder<'static>,
         device: &Device,
         max_length: usize,
     ) -> Result<Self> {
-        let model = QwenModel::new(config, vb.clone())?;
+        let model = Qwen2Model::new(config, vb.clone())?;
         let lm_head = if config.tie_word_embeddings {
             Linear::new(
                 vb.pp("model.embed_tokens")
@@ -238,8 +249,39 @@ impl PaddlesQwenSession {
         };
 
         Ok(Self {
-            model,
-            lm_head,
+            runner: QwenModelRunner::Qwen2 { model, lm_head },
+            tokens: Vec::new(),
+            device: device.clone(),
+            max_length,
+        })
+    }
+
+    fn new_qwen3(
+        config: &Qwen3Config,
+        vb: &VarBuilder<'static>,
+        device: &Device,
+        max_length: usize,
+    ) -> Result<Self> {
+        Ok(Self {
+            runner: QwenModelRunner::Qwen3 {
+                model: Qwen3Model::new(config, vb.clone())?,
+            },
+            tokens: Vec::new(),
+            device: device.clone(),
+            max_length,
+        })
+    }
+
+    fn new_qwen3_5(
+        config: &Qwen3_5Config,
+        vb: &VarBuilder<'static>,
+        device: &Device,
+        max_length: usize,
+    ) -> Result<Self> {
+        Ok(Self {
+            runner: QwenModelRunner::Qwen3_5 {
+                model: Qwen3_5Model::new(config, vb.clone())?,
+            },
             tokens: Vec::new(),
             device: device.clone(),
             max_length,
@@ -248,7 +290,11 @@ impl PaddlesQwenSession {
 
     fn reset(&mut self) {
         self.tokens.clear();
-        self.model.clear_kv_cache();
+        match &mut self.runner {
+            QwenModelRunner::Qwen2 { model, .. } => model.clear_kv_cache(),
+            QwenModelRunner::Qwen3 { model } => model.clear_kv_cache(),
+            QwenModelRunner::Qwen3_5 { model } => model.clear_kv_cache(),
+        }
     }
 
     fn select_next_token(logits: &Tensor) -> Result<u32> {
@@ -288,16 +334,12 @@ impl PaddlesQwenSession {
         let mut pending_next_token = None;
 
         if !new_tokens.is_empty() {
-            let tokens_tensor = Tensor::new(new_tokens, &self.device)?.unsqueeze(0)?;
             let pos = self.tokens.len();
-            let hidden_states = self.model.forward(&tokens_tensor, pos, None)?;
+            let logits = self.next_token_logits(new_tokens, pos)?;
             self.tokens.extend_from_slice(new_tokens);
 
             if max_tokens > 0 {
-                let last_hidden = hidden_states.narrow(1, new_tokens.len() - 1, 1)?;
-                let logits = last_hidden.apply(&self.lm_head)?;
-                let last_logit = logits.get(0)?.get(0)?;
-                pending_next_token = Some(Self::select_next_token(&last_logit)?);
+                pending_next_token = Some(Self::select_next_token(&logits)?);
             }
         } else if max_tokens > 0 && self.tokens.is_empty() {
             return Ok(String::new());
@@ -308,14 +350,8 @@ impl PaddlesQwenSession {
                 Some(token) => token,
                 None => {
                     let last_token = *self.tokens.last().unwrap();
-                    let tokens_tensor = Tensor::new(&[last_token], &self.device)?.unsqueeze(0)?;
-                    let hidden_states =
-                        self.model
-                            .forward(&tokens_tensor, self.tokens.len() - 1, None)?;
-                    let last_hidden = hidden_states.narrow(1, 0, 1)?;
-                    let logits = last_hidden.apply(&self.lm_head)?;
-                    let last_logit = logits.get(0)?.get(0)?;
-                    Self::select_next_token(&last_logit)?
+                    let logits = self.next_token_logits(&[last_token], self.tokens.len() - 1)?;
+                    Self::select_next_token(&logits)?
                 }
             };
 
@@ -349,6 +385,79 @@ impl PaddlesQwenSession {
 
         Ok(decoded.trim().to_string())
     }
+
+    fn next_token_logits(&mut self, tokens: &[u32], offset: usize) -> Result<Tensor> {
+        let tokens_tensor = Tensor::new(tokens, &self.device)?.unsqueeze(0)?;
+        match &mut self.runner {
+            QwenModelRunner::Qwen2 { model, lm_head } => {
+                let hidden_states = model.forward(&tokens_tensor, offset, None)?;
+                let last_hidden = hidden_states.narrow(1, tokens.len() - 1, 1)?;
+                let logits = last_hidden.apply(lm_head)?;
+                logits.get(0)?.get(0).map_err(Into::into)
+            }
+            QwenModelRunner::Qwen3 { model } => {
+                let logits = model.forward(&tokens_tensor, offset)?;
+                logits.get(0)?.get(0).map_err(Into::into)
+            }
+            QwenModelRunner::Qwen3_5 { model } => {
+                let logits = model.forward(&tokens_tensor, offset)?;
+                logits.get(0)?.get(0).map_err(Into::into)
+            }
+        }
+    }
+}
+
+fn preferred_qwen_weight_dtype(device: &Device) -> DType {
+    if device.is_cuda() {
+        DType::F16
+    } else {
+        DType::F32
+    }
+}
+
+fn format_qwen_prompt(family: QwenModelFamily, message: &str) -> String {
+    let assistant_prefix = match family {
+        QwenModelFamily::Qwen2 => "<|im_start|>assistant\n",
+        QwenModelFamily::Qwen3 | QwenModelFamily::Qwen3_5 => {
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        }
+    };
+
+    format!("{QWEN_SYSTEM_PROMPT}<|im_start|>user\n{message}<|im_end|>\n{assistant_prefix}")
+}
+
+fn load_qwen_var_builder(
+    spec: QwenModelSpec,
+    dtype: DType,
+    device: &Device,
+) -> Result<VarBuilder<'static>> {
+    let weights = qwen_weight_paths(spec)?;
+    match unsafe { VarBuilder::from_mmaped_safetensors(&weights, dtype, device) } {
+        Ok(vb) => Ok(vb),
+        Err(err) => {
+            tracing::warn!(
+                "failed to load {}, refreshing cached model weights: {:?}",
+                spec.model_id,
+                err
+            );
+            remove_cached_qwen_weights(spec)?;
+            ensure_qwen_assets(spec)?;
+            let refreshed_weights = qwen_weight_paths(spec)?;
+            unsafe { VarBuilder::from_mmaped_safetensors(&refreshed_weights, dtype, device) }
+                .map_err(Into::into)
+        }
+    }
+}
+
+fn remove_cached_qwen_weights(spec: QwenModelSpec) -> Result<()> {
+    let mut paths = qwen_weight_paths(spec)?;
+    paths.push(spec.primary_weights_path()?);
+    for path in paths {
+        if path.exists() {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
 }
 
 impl ToolCall {
@@ -369,7 +478,7 @@ impl ToolCall {
 impl SiftAgentAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>, model_id: &str) -> Result<Self> {
         let workspace_root = workspace_root.into();
-        let model = ReusableQwenConversationFactory::load(qwen_spec_for(model_id))?;
+        let model = ReusableQwenConversationFactory::load(qwen_spec_for(model_id)?)?;
         Ok(Self::from_factory(
             workspace_root,
             model_id,
@@ -1468,11 +1577,14 @@ impl ConversationFactory for StaticConversationFactory {
 mod tests {
     use super::{
         AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, SiftAgentAdapter, ToolCall,
-        extract_json_payload, infer_tool_call, is_follow_up_execution_request,
-        normalize_relative_path, should_prefer_tools, trim_for_context,
+        extract_json_payload, format_qwen_prompt, infer_tool_call, is_follow_up_execution_request,
+        normalize_relative_path, preferred_qwen_weight_dtype, should_prefer_tools,
+        trim_for_context,
     };
     use crate::domain::ports::{EvidenceBundle, EvidenceItem};
+    use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
+    use candle_core::{DType, Device};
     use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
@@ -1590,6 +1702,17 @@ mod tests {
         let trimmed = trim_for_context(&input, 10);
         assert!(trimmed.starts_with("aaaaaaaaaa"));
         assert!(trimmed.contains("[truncated]"));
+    }
+
+    #[test]
+    fn qwen3_family_prompts_disable_thinking_explicitly() {
+        let prompt = format_qwen_prompt(QwenModelFamily::Qwen3_5, "Hello");
+        assert!(prompt.contains("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+    }
+
+    #[test]
+    fn cpu_runtime_keeps_qwen_weights_in_f32() {
+        assert_eq!(preferred_qwen_weight_dtype(&Device::Cpu), DType::F32);
     }
 
     #[test]

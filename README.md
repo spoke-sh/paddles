@@ -66,6 +66,8 @@ Key architectural rules reflected in that flow:
 *   The REPL reloads hierarchical `AGENTS.md` memory on every turn, so operator guidance can change without restarting the process.
 *   The local Qwen runtime stays loaded, while turn-local prompt state is rebuilt per send.
 
+Current local model defaults are tuned for this repository's constraints rather than model hype. The synthesizer lane now defaults to `qwen3.5-2b` as the stronger generalist local path on an 8 GB CUDA card, while `qwen-coder-3b` remains available as an opt-in coding-tuned alternative when you want that bias explicitly.
+
 ## 📜 Foundational Principles & Philosophy
 
 The project operates under a strict set of guiding principles captured in the following documents:
