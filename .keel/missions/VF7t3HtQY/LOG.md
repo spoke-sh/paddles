@@ -25,3 +25,7 @@
 ## 2026-03-28T06:12:40Z
 
 - Accepted story `VF7tCKUgx` as manager after review of the attached proof logs, unblocking the final runtime/docs cutover slice.
+
+## 2026-03-28T06:14:04Z
+
+- Started story `VF7tCKsgv`, attached proof for CLI continuity, runtime-boundary cleanup, and verbose debugging output, and submitted it for manual verification.
