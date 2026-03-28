@@ -1,19 +1,27 @@
 use crate::infrastructure::adapters::sift_registry::qwen_spec_for;
 use anyhow::{Context, Result, anyhow, bail};
+use candle_core::{DType, Device, Tensor};
+use candle_nn::{Linear, VarBuilder};
+use candle_transformers::models::qwen2::{Config as QwenConfig, Model as QwenModel};
 use serde::Deserialize;
-use sift::internal::search::adapters::qwen::QwenReranker;
+use sift::internal::cache::cache_dir;
+use sift::internal::search::adapters::llm_utils::{
+    QwenConfigPartial, get_device_for, load_mmaped_safetensors_with_repair,
+};
+use sift::internal::search::adapters::qwen::QwenModelSpec;
 use sift::{
     AgentTurnInput, ContextAssemblyBudget, ContextAssemblyRequest, ContextAssemblyResponse,
-    Conversation, EnvironmentFactInput, GenerativeModel, LocalContextSource, RetainedArtifact,
-    SearchPlan, Sift, ToolOutputInput,
+    Conversation, EnvironmentFactInput, LocalContextSource, RetainedArtifact, SearchPlan, Sift,
+    ToolOutputInput,
 };
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokenizers::Tokenizer;
 
 const MAX_MODEL_TOKENS: usize = 256;
 const MAX_TOOL_STEPS: usize = 4;
@@ -23,6 +31,7 @@ const MAX_FILE_CHARS: usize = 16_000;
 const MAX_LISTED_FILES: usize = 200;
 const MAX_CONTEXT_HITS: usize = 5;
 const RETAINED_ARTIFACT_LIMIT: usize = 5;
+const QWEN_SYSTEM_PROMPT: &str = "<|im_start|>system\nYou are Paddles, a helpful AI assistant and mech suit operator. You provide concise and accurate technical advice.<|im_end|>\n";
 
 pub struct SiftAgentAdapter {
     workspace_root: PathBuf,
@@ -91,9 +100,241 @@ trait ConversationFactory: Send + Sync {
     fn start_conversation(&self) -> Result<Box<dyn Conversation>>;
 }
 
-impl ConversationFactory for QwenReranker {
+struct ReusableQwenConversationFactory {
+    runtime: Arc<Mutex<PaddlesQwenRuntime>>,
+}
+
+impl ReusableQwenConversationFactory {
+    fn load(spec: QwenModelSpec) -> Result<Self> {
+        Ok(Self {
+            runtime: Arc::new(Mutex::new(PaddlesQwenRuntime::load(spec)?)),
+        })
+    }
+}
+
+impl ConversationFactory for ReusableQwenConversationFactory {
     fn start_conversation(&self) -> Result<Box<dyn Conversation>> {
-        <Self as GenerativeModel>::start_conversation(self)
+        self.runtime
+            .lock()
+            .map_err(|_| anyhow!("Qwen runtime lock poisoned"))?
+            .reset()?;
+
+        Ok(Box::new(ReusableQwenConversation {
+            runtime: Arc::clone(&self.runtime),
+            history: Vec::new(),
+        }))
+    }
+}
+
+struct ReusableQwenConversation {
+    runtime: Arc<Mutex<PaddlesQwenRuntime>>,
+    history: Vec<String>,
+}
+
+impl Conversation for ReusableQwenConversation {
+    fn send(&mut self, message: &str, max_tokens: usize) -> Result<String> {
+        self.history.push(message.to_string());
+        let response = self
+            .runtime
+            .lock()
+            .map_err(|_| anyhow!("Qwen runtime lock poisoned"))?
+            .send(message, max_tokens)?;
+        self.history.push(response.clone());
+        Ok(response)
+    }
+
+    fn history(&self) -> &[String] {
+        &self.history
+    }
+}
+
+struct PaddlesQwenRuntime {
+    session: PaddlesQwenSession,
+    tokenizer: Tokenizer,
+}
+
+impl PaddlesQwenRuntime {
+    fn load(spec: QwenModelSpec) -> Result<Self> {
+        let root = cache_dir("models")?
+            .join(Path::new(&spec.model_id))
+            .join(Path::new(&spec.revision));
+
+        let config_path = root.join("config.json");
+        let tokenizer_path = root.join("tokenizer.json");
+        let weights_path = root.join("model.safetensors");
+
+        let config_partial: QwenConfigPartial =
+            serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+        let config = config_partial.into_config()?;
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|err| anyhow!("failed to load tokenizer: {err}"))?;
+        let device = get_device_for("QWEN")?;
+        let vb = load_mmaped_safetensors_with_repair(
+            &spec.model_id,
+            &spec.revision,
+            &weights_path,
+            DType::F32,
+            &device,
+        )?;
+
+        Ok(Self {
+            session: PaddlesQwenSession::new(&config, &vb, &device, spec.max_length)?,
+            tokenizer,
+        })
+    }
+
+    fn reset(&mut self) -> Result<()> {
+        self.session.reset();
+        Ok(())
+    }
+
+    fn send(&mut self, message: &str, max_tokens: usize) -> Result<String> {
+        self.reset()?;
+        let prompted = format!(
+            "{QWEN_SYSTEM_PROMPT}<|im_start|>user\n{message}<|im_end|>\n<|im_start|>assistant\n"
+        );
+        self.session
+            .generate(&prompted, max_tokens, &self.tokenizer)
+    }
+}
+
+struct PaddlesQwenSession {
+    model: QwenModel,
+    lm_head: Linear,
+    tokens: Vec<u32>,
+    device: Device,
+    max_length: usize,
+}
+
+impl PaddlesQwenSession {
+    fn new(
+        config: &QwenConfig,
+        vb: &VarBuilder<'static>,
+        device: &Device,
+        max_length: usize,
+    ) -> Result<Self> {
+        let model = QwenModel::new(config, vb.clone())?;
+        let lm_head = if config.tie_word_embeddings {
+            Linear::new(
+                vb.pp("model.embed_tokens")
+                    .get((config.vocab_size, config.hidden_size), "weight")?,
+                None,
+            )
+        } else {
+            candle_nn::linear_no_bias(config.hidden_size, config.vocab_size, vb.pp("lm_head"))?
+        };
+
+        Ok(Self {
+            model,
+            lm_head,
+            tokens: Vec::new(),
+            device: device.clone(),
+            max_length,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.tokens.clear();
+        self.model.clear_kv_cache();
+    }
+
+    fn select_next_token(logits: &Tensor) -> Result<u32> {
+        Ok(logits
+            .to_vec1::<f32>()?
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(index, _)| index as u32)
+            .unwrap_or_default())
+    }
+
+    fn generate(
+        &mut self,
+        prompt: &str,
+        max_tokens: usize,
+        tokenizer: &Tokenizer,
+    ) -> Result<String> {
+        let encoding = tokenizer
+            .encode(prompt, self.tokens.is_empty())
+            .map_err(|err| anyhow!("encoding failed: {err}"))?;
+
+        let all_new_tokens = encoding.get_ids();
+        let available_input_tokens = self
+            .max_length
+            .saturating_sub(self.tokens.len().saturating_add(max_tokens));
+        let new_tokens = if available_input_tokens == 0 {
+            &[][..]
+        } else if all_new_tokens.len() > available_input_tokens {
+            &all_new_tokens[all_new_tokens.len() - available_input_tokens..]
+        } else {
+            all_new_tokens
+        };
+
+        let mut generated_tokens = Vec::new();
+        let eos_token_id = tokenizer.token_to_id("<|im_end|>").unwrap_or(151645);
+        let mut pending_next_token = None;
+
+        if !new_tokens.is_empty() {
+            let tokens_tensor = Tensor::new(new_tokens, &self.device)?.unsqueeze(0)?;
+            let pos = self.tokens.len();
+            let hidden_states = self.model.forward(&tokens_tensor, pos, None)?;
+            self.tokens.extend_from_slice(new_tokens);
+
+            if max_tokens > 0 {
+                let last_hidden = hidden_states.narrow(1, new_tokens.len() - 1, 1)?;
+                let logits = last_hidden.apply(&self.lm_head)?;
+                let last_logit = logits.get(0)?.get(0)?;
+                pending_next_token = Some(Self::select_next_token(&last_logit)?);
+            }
+        } else if max_tokens > 0 && self.tokens.is_empty() {
+            return Ok(String::new());
+        }
+
+        for _ in 0..max_tokens {
+            let next_token = match pending_next_token.take() {
+                Some(token) => token,
+                None => {
+                    let last_token = *self.tokens.last().unwrap();
+                    let tokens_tensor = Tensor::new(&[last_token], &self.device)?.unsqueeze(0)?;
+                    let hidden_states =
+                        self.model
+                            .forward(&tokens_tensor, self.tokens.len() - 1, None)?;
+                    let last_hidden = hidden_states.narrow(1, 0, 1)?;
+                    let logits = last_hidden.apply(&self.lm_head)?;
+                    let last_logit = logits.get(0)?.get(0)?;
+                    Self::select_next_token(&last_logit)?
+                }
+            };
+
+            if next_token == eos_token_id || self.tokens.len() >= self.max_length {
+                break;
+            }
+
+            self.tokens.push(next_token);
+            generated_tokens.push(next_token);
+
+            let current_text = tokenizer
+                .decode(&generated_tokens, true)
+                .map_err(|err| anyhow!("decoding failed: {err}"))?;
+            if current_text.contains("<|im_end|>")
+                || current_text.contains("Human:")
+                || current_text.contains("User:")
+                || current_text.contains("<|im_start|>")
+            {
+                break;
+            }
+        }
+
+        let mut decoded = tokenizer
+            .decode(&generated_tokens, true)
+            .map_err(|err| anyhow!("decoding failed: {err}"))?;
+        for stop_seq in ["<|im_end|>", "Human:", "User:", "<|im_start|>"] {
+            if let Some(index) = decoded.find(stop_seq) {
+                decoded.truncate(index);
+            }
+        }
+
+        Ok(decoded.trim().to_string())
     }
 }
 
@@ -115,7 +356,7 @@ impl ToolCall {
 impl SiftAgentAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>, model_id: &str) -> Result<Self> {
         let workspace_root = workspace_root.into();
-        let model = QwenReranker::load(qwen_spec_for(model_id))?;
+        let model = ReusableQwenConversationFactory::load(qwen_spec_for(model_id))?;
         Ok(Self::from_factory(
             workspace_root,
             model_id,
@@ -209,9 +450,16 @@ impl SiftAgentAdapter {
         let casual_turn = is_casual_prompt(prompt);
         let prefer_tools = should_prefer_tools(prompt);
         let follow_up_execution = is_follow_up_execution_request(prompt);
+        let mut pending_tool_call = if casual_turn {
+            None
+        } else {
+            infer_tool_call(prompt, &state.local_context)
+        };
         let mut conversation = self.conversation_factory.start_conversation()?;
         let mut reply = if casual_turn {
             self.send_to_model(conversation.as_mut(), &build_direct_turn_prompt(prompt))?
+        } else if pending_tool_call.is_some() {
+            String::new()
         } else {
             let initial_local_context = self.combined_local_context(&working_local_context);
             let initial_context =
@@ -241,10 +489,23 @@ impl SiftAgentAdapter {
                 reply = fallback_casual_reply(prompt);
             }
         } else {
+            if prefer_tools && pending_tool_call.is_none() && parse_tool_call(&reply)?.is_none() {
+                reply = self.send_to_model(
+                    conversation.as_mut(),
+                    &build_tool_retry_prompt(prompt, &recent_turns),
+                )?;
+            }
+
             for _ in 0..MAX_TOOL_STEPS {
-                let Some(tool_call) = parse_tool_call(&reply)? else {
-                    break;
-                };
+                let (tool_call, controller_inferred) =
+                    if let Some(tool_call) = pending_tool_call.take() {
+                        (tool_call, true)
+                    } else {
+                        let Some(tool_call) = parse_tool_call(&reply)? else {
+                            break;
+                        };
+                        (tool_call, false)
+                    };
 
                 state.tool_counter += 1;
                 let call_id = format!("tool-{}", state.tool_counter);
@@ -275,6 +536,11 @@ impl SiftAgentAdapter {
                         result.summary.clone(),
                     )),
                 );
+
+                if controller_inferred {
+                    reply = result.summary.clone();
+                    break;
+                }
 
                 reply = self.send_to_model(
                     conversation.as_mut(),
@@ -630,6 +896,30 @@ Current user request:\n\
     )
 }
 
+fn build_tool_retry_prompt(user_prompt: &str, recent_turns: &str) -> String {
+    format!(
+        "The user asked for a workspace action and your last reply used prose instead of a tool.\n\
+Reply with ONLY one JSON tool call and no prose.\n\
+If the request refers to `it` or `that`, resolve it from the recent conversation first.\n\
+\n\
+Available tools:\n\
+- {{\"tool\":\"search\",\"query\":\"...\",\"intent\":\"optional\"}}\n\
+- {{\"tool\":\"list_files\",\"pattern\":\"optional substring\"}}\n\
+- {{\"tool\":\"read_file\",\"path\":\"relative/path\"}}\n\
+- {{\"tool\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\"}}\n\
+- {{\"tool\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false}}\n\
+- {{\"tool\":\"shell\",\"command\":\"local shell command\"}}\n\
+- {{\"tool\":\"diff\",\"path\":\"optional relative/path\"}}\n\
+- {{\"tool\":\"apply_patch\",\"patch\":\"unified diff text\"}}\n\
+\n\
+Recent conversation:\n\
+{recent_turns}\n\
+\n\
+Current user request:\n\
+{user_prompt}\n"
+    )
+}
+
 fn build_tool_follow_up_prompt(
     user_prompt: &str,
     call_id: &str,
@@ -806,6 +1096,40 @@ fn should_prefer_tools(prompt: &str) -> bool {
         })
 }
 
+fn infer_tool_call(prompt: &str, local_context: &[LocalContextSource]) -> Option<ToolCall> {
+    infer_shell_command(prompt)
+        .map(|command| ToolCall::Shell {
+            command: command.to_string(),
+        })
+        .or_else(|| {
+            if is_follow_up_execution_request(prompt) {
+                infer_recent_shell_command(local_context).map(|command| ToolCall::Shell {
+                    command: command.to_string(),
+                })
+            } else {
+                None
+            }
+        })
+}
+
+fn infer_shell_command(prompt: &str) -> Option<&'static str> {
+    let normalized = normalize_prompt(prompt);
+    if normalized.contains("git status") {
+        return Some("git status");
+    }
+    if normalized.contains("git diff") {
+        return Some("git diff --stat");
+    }
+    None
+}
+
+fn infer_recent_shell_command(local_context: &[LocalContextSource]) -> Option<&'static str> {
+    local_context.iter().rev().find_map(|item| match item {
+        LocalContextSource::AgentTurn(turn) => infer_shell_command(&turn.content),
+        _ => None,
+    })
+}
+
 fn is_follow_up_execution_request(prompt: &str) -> bool {
     matches!(
         normalize_prompt(prompt).as_str(),
@@ -834,17 +1158,22 @@ fn extract_json_payload(response: &str) -> Option<&str> {
         return Some(response);
     }
 
-    if !response.starts_with("```") || !response.ends_with("```") {
-        return None;
+    if response.starts_with("```") && response.ends_with("```") {
+        let inner = response
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+        if inner.starts_with('{') && inner.ends_with('}') {
+            return Some(inner);
+        }
     }
 
-    let inner = response
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    if inner.starts_with('{') && inner.ends_with('}') {
-        Some(inner)
+    let start = response.find('{')?;
+    let end = response.rfind('}')?;
+    let candidate = response.get(start..=end)?.trim();
+    if candidate.starts_with('{') && candidate.ends_with('}') {
+        Some(candidate)
     } else {
         None
     }
@@ -1056,9 +1385,9 @@ impl ConversationFactory for StaticConversationFactory {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalContextSource, MAX_TOOL_STEPS, SiftAgentAdapter, ToolCall, extract_json_payload,
-        is_follow_up_execution_request, normalize_relative_path, should_prefer_tools,
-        trim_for_context,
+        AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, SiftAgentAdapter, ToolCall,
+        extract_json_payload, infer_tool_call, is_follow_up_execution_request,
+        normalize_relative_path, should_prefer_tools, trim_for_context,
     };
     use anyhow::{Result, anyhow};
     use sift::Conversation;
@@ -1113,6 +1442,20 @@ mod tests {
         let payload =
             extract_json_payload("```json\n{\"tool\":\"shell\",\"command\":\"pwd\"}\n```")
                 .expect("fenced json payload");
+        let parsed: ToolCall = serde_json::from_str(payload).expect("tool call");
+        assert_eq!(
+            parsed,
+            ToolCall::Shell {
+                command: "pwd".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn extracts_tool_call_from_embedded_json() {
+        let payload =
+            extract_json_payload("Sure, running it now.\n{\"tool\":\"shell\",\"command\":\"pwd\"}")
+                .expect("embedded json payload");
         let parsed: ToolCall = serde_json::from_str(payload).expect("tool call");
         assert_eq!(
             parsed,
@@ -1347,6 +1690,23 @@ mod tests {
     }
 
     #[test]
+    fn follow_up_execution_infers_recent_shell_command() {
+        let local_context = vec![LocalContextSource::AgentTurn(AgentTurnInput::new(
+            "turn-1",
+            "assistant",
+            "Run `git status` to inspect the repo.",
+        ))];
+
+        let inferred = infer_tool_call("I mean run it", &local_context).expect("tool call");
+        assert_eq!(
+            inferred,
+            ToolCall::Shell {
+                command: "git status".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn respond_starts_a_fresh_conversation_each_turn() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test_with_conversations(
@@ -1363,11 +1723,66 @@ mod tests {
 
         let first = adapter.respond("Hello").expect("first response");
         let second = adapter
-            .respond("Show me the git status")
+            .respond("Inspect the repository status")
             .expect("second response");
 
         assert_eq!(first, "Hello.");
         assert_eq!(second, "Working tree is clean.");
+    }
+
+    #[test]
+    fn action_prompts_retry_for_tool_calls_after_prose() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(workspace.path())
+            .status()
+            .expect("git init");
+
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                "You can run `git status` to inspect the working tree.".to_string(),
+                r#"{"tool":"shell","command":"git status"}"#.to_string(),
+                "Working tree is clean.".to_string(),
+            ])),
+        );
+
+        let reply = adapter
+            .respond("Inspect the repository status")
+            .expect("response");
+
+        assert_eq!(reply, "Working tree is clean.");
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 1);
+    }
+
+    #[test]
+    fn action_prompts_can_use_controller_inferred_tool_calls() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(workspace.path())
+            .status()
+            .expect("git init");
+
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                "Working tree is clean.".to_string(),
+            ])),
+        );
+
+        let reply = adapter.respond("Show me the git status").expect("response");
+
+        assert!(reply.contains("git status"));
+        assert!(reply.contains("Exit status"));
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 1);
     }
 
     #[test]

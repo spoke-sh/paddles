@@ -11,6 +11,7 @@ path = "src/main.rs"
 hf-hub = "0.4.1"
 sift = { git = "https://github.com/rupurt/sift", branch = "main" }
 candle-core = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
+candle-nn = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-transformers = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 tokio = { version = "1.43", features = ["full"] }
 async-trait = "0.1.86"
@@ -18,12 +19,13 @@ anyhow = "1.0.95"
 directories = "6.0.0"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
 clap = { version = "4.5.28", features = ["derive", "env"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 
 [features]
-cuda = ["sift/cuda", "candle-core/cuda", "candle-transformers/cuda"]
+cuda = ["sift/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 
 [dev-dependencies]
 tempfile = "3.17.1"
