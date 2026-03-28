@@ -47,6 +47,10 @@ impl QwenModelSpec {
         Ok(self.root()?.join("tokenizer.json"))
     }
 
+    pub fn generation_config_path(self) -> Result<PathBuf> {
+        Ok(self.root()?.join("generation_config.json"))
+    }
+
     pub fn primary_weights_path(self) -> Result<PathBuf> {
         let root = self.root()?;
         Ok(match self.weights {
@@ -129,6 +133,7 @@ pub fn qwen_weight_paths(spec: QwenModelSpec) -> Result<Vec<PathBuf>> {
 pub fn ensure_qwen_assets(spec: QwenModelSpec) -> Result<ModelPaths> {
     let root = spec.root()?;
     let config_path = root.join("config.json");
+    let generation_config_path = root.join("generation_config.json");
     let tokenizer_path = root.join("tokenizer.json");
     let weights_path = spec.primary_weights_path()?;
 
@@ -140,6 +145,12 @@ pub fn ensure_qwen_assets(spec: QwenModelSpec) -> Result<ModelPaths> {
         spec.revision,
         &tokenizer_path,
         "tokenizer.json",
+    )?;
+    ensure_hf_asset(
+        spec.model_id,
+        spec.revision,
+        &generation_config_path,
+        "generation_config.json",
     )?;
 
     match spec.weights {

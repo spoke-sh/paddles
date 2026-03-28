@@ -6,6 +6,7 @@ use crate::infrastructure::adapters::sift_registry::{
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
+use candle_transformers::generation::{LogitsProcessor, Sampling};
 use candle_transformers::models::{
     qwen2::{Config as Qwen2Config, ModelForCausalLM as Qwen2Model},
     qwen3::{Config as Qwen3Config, ModelForCausalLM as Qwen3Model},
@@ -232,6 +233,7 @@ impl PaddlesQwenRuntime {
 
     fn load_session(spec: QwenModelSpec, device: &Device) -> Result<PaddlesQwenSession> {
         let config_path = spec.config_path()?;
+        let generation = load_generation_settings(spec)?;
         let dtype = preferred_qwen_weight_dtype(spec.family, device);
         let vb = load_qwen_var_builder(spec, dtype, device)?;
 
@@ -240,16 +242,16 @@ impl PaddlesQwenRuntime {
                 let config_partial: QwenConfigPartial =
                     serde_json::from_str(&fs::read_to_string(&config_path)?)?;
                 let config = config_partial.into_config()?;
-                PaddlesQwenSession::new_qwen2(&config, &vb, device, spec.max_length)
+                PaddlesQwenSession::new_qwen2(&config, &vb, device, spec.max_length, generation)
             }
             QwenModelFamily::Qwen3 => {
                 let config: Qwen3Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                PaddlesQwenSession::new_qwen3(&config, &vb, device, spec.max_length)
+                PaddlesQwenSession::new_qwen3(&config, &vb, device, spec.max_length, generation)
             }
             QwenModelFamily::Qwen3_5 => {
                 let config: Qwen3_5Config =
                     serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                PaddlesQwenSession::new_qwen3_5(&config, &vb, device, spec.max_length)
+                PaddlesQwenSession::new_qwen3_5(&config, &vb, device, spec.max_length, generation)
             }
         }
     }
@@ -266,6 +268,31 @@ struct PaddlesQwenSession {
     tokens: Vec<u32>,
     device: Device,
     max_length: usize,
+    generation: QwenGenerationSettings,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct QwenGenerationSettings {
+    eos_token_ids: Vec<u32>,
+    repetition_penalty: f32,
+    repeat_last_n: usize,
+    sampling: Sampling,
+    seed: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct QwenGenerationConfig {
+    #[serde(default)]
+    do_sample: bool,
+    eos_token_id: serde_json::Value,
+    #[serde(default)]
+    repetition_penalty: Option<f32>,
+    #[serde(default)]
+    temperature: Option<f64>,
+    #[serde(default)]
+    top_p: Option<f64>,
+    #[serde(default)]
+    top_k: Option<usize>,
 }
 
 impl PaddlesQwenSession {
@@ -274,6 +301,7 @@ impl PaddlesQwenSession {
         vb: &VarBuilder<'static>,
         device: &Device,
         max_length: usize,
+        generation: QwenGenerationSettings,
     ) -> Result<Self> {
         Ok(Self {
             runner: QwenModelRunner::Qwen2 {
@@ -282,6 +310,7 @@ impl PaddlesQwenSession {
             tokens: Vec::new(),
             device: device.clone(),
             max_length,
+            generation,
         })
     }
 
@@ -290,6 +319,7 @@ impl PaddlesQwenSession {
         vb: &VarBuilder<'static>,
         device: &Device,
         max_length: usize,
+        generation: QwenGenerationSettings,
     ) -> Result<Self> {
         Ok(Self {
             runner: QwenModelRunner::Qwen3 {
@@ -298,6 +328,7 @@ impl PaddlesQwenSession {
             tokens: Vec::new(),
             device: device.clone(),
             max_length,
+            generation,
         })
     }
 
@@ -306,6 +337,7 @@ impl PaddlesQwenSession {
         vb: &VarBuilder<'static>,
         device: &Device,
         max_length: usize,
+        generation: QwenGenerationSettings,
     ) -> Result<Self> {
         Ok(Self {
             runner: QwenModelRunner::Qwen3_5 {
@@ -314,6 +346,7 @@ impl PaddlesQwenSession {
             tokens: Vec::new(),
             device: device.clone(),
             max_length,
+            generation,
         })
     }
 
@@ -324,17 +357,6 @@ impl PaddlesQwenSession {
             QwenModelRunner::Qwen3 { model } => model.clear_kv_cache(),
             QwenModelRunner::Qwen3_5 { model } => model.clear_kv_cache(),
         }
-    }
-
-    fn select_next_token(logits: &Tensor) -> Result<u32> {
-        let logits = logits.to_dtype(DType::F32)?;
-        Ok(logits
-            .to_vec1::<f32>()?
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(index, _)| index as u32)
-            .unwrap_or_default())
     }
 
     fn generate(
@@ -360,7 +382,8 @@ impl PaddlesQwenSession {
         };
 
         let mut generated_tokens = Vec::new();
-        let eos_token_id = tokenizer.token_to_id("<|im_end|>").unwrap_or(151645);
+        let mut logits_processor = self.generation.logits_processor();
+        let first_token_ban_ids = self.first_token_ban_ids(tokenizer);
         let mut pending_next_token = None;
 
         if !new_tokens.is_empty() {
@@ -369,7 +392,11 @@ impl PaddlesQwenSession {
             self.tokens.extend_from_slice(new_tokens);
 
             if max_tokens > 0 {
-                pending_next_token = Some(Self::select_next_token(&logits)?);
+                pending_next_token = Some(self.select_next_token(
+                    &logits,
+                    &mut logits_processor,
+                    &first_token_ban_ids,
+                )?);
             }
         } else if max_tokens > 0 && self.tokens.is_empty() {
             return Ok(String::new());
@@ -381,11 +408,16 @@ impl PaddlesQwenSession {
                 None => {
                     let last_token = *self.tokens.last().unwrap();
                     let logits = self.next_token_logits(&[last_token], self.tokens.len() - 1)?;
-                    Self::select_next_token(&logits)?
+                    let banned_ids = if generated_tokens.is_empty() {
+                        first_token_ban_ids.as_slice()
+                    } else {
+                        &[][..]
+                    };
+                    self.select_next_token(&logits, &mut logits_processor, banned_ids)?
                 }
             };
 
-            if next_token == eos_token_id || self.tokens.len() >= self.max_length {
+            if self.generation.is_eos_token(next_token) || self.tokens.len() >= self.max_length {
                 break;
             }
 
@@ -416,6 +448,63 @@ impl PaddlesQwenSession {
         Ok(decoded.trim().to_string())
     }
 
+    fn select_next_token(
+        &self,
+        logits: &Tensor,
+        logits_processor: &mut LogitsProcessor,
+        banned_ids: &[u32],
+    ) -> Result<u32> {
+        let logits = if self.generation.repetition_penalty <= 1.0 {
+            logits.to_dtype(DType::F32)?
+        } else {
+            let start_at = self
+                .tokens
+                .len()
+                .saturating_sub(self.generation.repeat_last_n);
+            candle_transformers::utils::apply_repeat_penalty(
+                logits,
+                self.generation.repetition_penalty,
+                &self.tokens[start_at..],
+            )?
+        };
+
+        let sampled = logits_processor.sample(&logits);
+        let sampled = match sampled {
+            Ok(token_id) if !banned_ids.contains(&token_id) => return Ok(token_id),
+            Ok(_) | Err(_) => self.select_argmax_token(&logits, banned_ids)?,
+        };
+
+        Ok(sampled)
+    }
+
+    fn select_argmax_token(&self, logits: &Tensor, banned_ids: &[u32]) -> Result<u32> {
+        let mut logits = logits.to_dtype(DType::F32)?.to_vec1::<f32>()?;
+
+        for token_id in banned_ids {
+            if let Some(logit) = logits.get_mut(*token_id as usize) {
+                *logit = f32::NEG_INFINITY;
+            }
+        }
+
+        logits
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| value.is_finite())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(index, _)| index as u32)
+            .ok_or_else(|| anyhow!("no valid token remained after filtering logits"))
+    }
+
+    fn first_token_ban_ids(&self, tokenizer: &Tokenizer) -> Vec<u32> {
+        let mut banned_ids = self.generation.eos_token_ids.clone();
+        if let Some(token_id) = tokenizer.token_to_id("<|im_start|>") {
+            banned_ids.push(token_id);
+        }
+        banned_ids.sort_unstable();
+        banned_ids.dedup();
+        banned_ids
+    }
+
     fn next_token_logits(&mut self, tokens: &[u32], offset: usize) -> Result<Tensor> {
         let tokens_tensor = Tensor::new(tokens, &self.device)?.unsqueeze(0)?;
         match &mut self.runner {
@@ -441,8 +530,79 @@ fn preferred_qwen_weight_dtype(family: QwenModelFamily, device: &Device) -> DTyp
     }
 
     match family {
-        QwenModelFamily::Qwen2 => DType::F16,
-        QwenModelFamily::Qwen3 | QwenModelFamily::Qwen3_5 => DType::BF16,
+        QwenModelFamily::Qwen2 | QwenModelFamily::Qwen3 | QwenModelFamily::Qwen3_5 => DType::BF16,
+    }
+}
+
+impl QwenGenerationSettings {
+    fn logits_processor(&self) -> LogitsProcessor {
+        LogitsProcessor::from_sampling(self.seed, self.sampling.clone())
+    }
+
+    fn is_eos_token(&self, token_id: u32) -> bool {
+        self.eos_token_ids.contains(&token_id)
+    }
+}
+
+fn load_generation_settings(spec: QwenModelSpec) -> Result<QwenGenerationSettings> {
+    let path = spec.generation_config_path()?;
+    let generation_config =
+        serde_json::from_str::<QwenGenerationConfig>(&fs::read_to_string(&path)?)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+
+    Ok(QwenGenerationSettings {
+        eos_token_ids: parse_eos_token_ids(&generation_config.eos_token_id)?,
+        repetition_penalty: generation_config.repetition_penalty.unwrap_or(1.0),
+        repeat_last_n: 64,
+        sampling: generation_sampling(&generation_config),
+        seed: 299_792_458,
+    })
+}
+
+fn parse_eos_token_ids(value: &serde_json::Value) -> Result<Vec<u32>> {
+    let eos_ids = match value {
+        serde_json::Value::Number(number) => vec![
+            number
+                .as_u64()
+                .ok_or_else(|| anyhow!("invalid eos_token_id: {number}"))? as u32,
+        ],
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_u64()
+                    .map(|value| value as u32)
+                    .ok_or_else(|| anyhow!("invalid eos_token_id entry: {value}"))
+            })
+            .collect::<Result<Vec<_>>>()?,
+        other => bail!("unsupported eos_token_id format: {other}"),
+    };
+
+    if eos_ids.is_empty() {
+        bail!("generation config does not define any eos token ids");
+    }
+
+    Ok(eos_ids)
+}
+
+fn generation_sampling(config: &QwenGenerationConfig) -> Sampling {
+    if !config.do_sample {
+        return Sampling::ArgMax;
+    }
+
+    let temperature = config.temperature.unwrap_or(0.7);
+    let top_p = config.top_p.unwrap_or(0.8);
+
+    match config.top_k {
+        Some(top_k) if top_k > 0 => Sampling::TopKThenTopP {
+            k: top_k,
+            p: top_p,
+            temperature,
+        },
+        _ => Sampling::TopP {
+            p: top_p,
+            temperature,
+        },
     }
 }
 
@@ -1674,15 +1834,17 @@ impl ConversationFactory for StaticConversationFactory {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, PaddlesQwenSession, SiftAgentAdapter,
-        ToolCall, extract_json_payload, format_qwen_prompt, infer_tool_call,
+        AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, QwenGenerationConfig, SiftAgentAdapter,
+        ToolCall, extract_json_payload, format_qwen_prompt, generation_sampling, infer_tool_call,
         is_follow_up_execution_request, normalize_relative_path, preferred_qwen_weight_dtype,
         should_prefer_tools, should_retry_qwen_on_cpu_message, trim_for_context,
     };
     use crate::domain::ports::{EvidenceBundle, EvidenceItem};
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
-    use candle_core::{DType, Device, Tensor};
+    use candle_core::{DType, Device};
+    use candle_transformers::generation::Sampling;
+    use serde_json::json;
     use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
@@ -1826,7 +1988,7 @@ mod tests {
         let device = Device::new_cuda(0).expect("cuda device");
         assert_eq!(
             preferred_qwen_weight_dtype(QwenModelFamily::Qwen2, &device),
-            DType::F16
+            DType::BF16
         );
         assert_eq!(
             preferred_qwen_weight_dtype(QwenModelFamily::Qwen3_5, &device),
@@ -1835,13 +1997,24 @@ mod tests {
     }
 
     #[test]
-    fn select_next_token_accepts_reduced_precision_logits() {
-        let logits = Tensor::from_vec(vec![0.1_f32, 0.9, 0.4], 3, &Device::Cpu)
-            .expect("cpu tensor")
-            .to_dtype(DType::BF16)
-            .expect("bf16 logits");
+    fn qwen_generation_sampling_uses_model_defaults() {
+        let config = QwenGenerationConfig {
+            do_sample: true,
+            eos_token_id: json!([151645, 151643]),
+            repetition_penalty: Some(1.1),
+            temperature: Some(0.7),
+            top_p: Some(0.8),
+            top_k: Some(20),
+        };
 
-        assert_eq!(PaddlesQwenSession::select_next_token(&logits).unwrap(), 1);
+        assert_eq!(
+            generation_sampling(&config),
+            Sampling::TopKThenTopP {
+                k: 20,
+                p: 0.8,
+                temperature: 0.7
+            }
+        );
     }
 
     #[test]
