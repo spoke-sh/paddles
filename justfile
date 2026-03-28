@@ -36,10 +36,6 @@ quality:
   cargo fmt --all --check
   cargo clippy --all-targets --all-features -- -D warnings
 
-# Run the keel CLI with arguments.
-keel *args:
-  keel {{args}}
-
 # Run the paddles CLI. Use --cuda to enable GPU support.
 paddles *args:
   #!/usr/bin/env bash

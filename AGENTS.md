@@ -9,26 +9,36 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Core Principles
 1. **Maintain Calibration**: The boot sequence (credits, weights, biases) is foundational. Ensure changes to `src/main.rs` never weaken Constitution or Dogma validation.
 2. **Local First**: Prioritize local inference capacity via `candle`. Avoid introducing network dependencies into the core execution loop.
-3. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
-4. **Heartbeat Hygiene**: Monitor the system's pulse via `just keel heartbeat` and `just keel health --scene`. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
-5. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
+3. **Intent Before Size**: Treat runtime selection as controller-owned routing. Default to the smallest capable local path, keep direct answer/tool turns on the synthesizer lane, and use a gatherer lane only when the request is retrieval-heavy or multi-hop.
+4. **Evidence Before Prose**: Gatherers return evidence bundles and capability state for a downstream synthesizer. They do not pretend to be the final answer model.
+5. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
+6. **Pacemaker Hygiene**: Monitor system stability with `keel health --scene`, `keel flow --scene`, `keel doctor`, and dirty-worktree state. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
+7. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
+
+### Runtime Routing Contract
+
+- Model/tool choice is a controller decision, not something delegated blindly to prompt text.
+- The **synthesizer lane** is the default path for casual chat, direct answers, and deterministic workspace/tool turns.
+- The **gatherer lane** is optional and exists for retrieval-heavy or multi-hop context acquisition. It must return typed evidence for synthesis.
+- Chroma `context-1` is an experimental **gatherer provider only**. It is never the default answer runtime and must fail closed when its harness/runtime is unavailable.
+- When runtime routing behavior changes, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same slice.
 
 ### Canonical Turn Loop
-Keel's operator rhythm is the `Orient -> Inspect -> Pull -> Ship -> Close` loop surfaced by `just keel turn`.
+Keel's operator rhythm is the `Orient -> Inspect -> Pull -> Ship -> Close` loop surfaced by the `keel` CLI.
 
-- **Orient**: Inspect charge and board stability with `just keel heartbeat`, `just keel health --scene`, `just keel flow --scene`, and `just keel doctor`.
-- **Inspect**: Read current demand with `just keel mission next --status`, `just keel pulse`, `just keel roles`, and `just keel next --role <role> --explain` when routing is unclear.
-- **Pull**: Select one role-scoped slice with `just keel next --role <role>`.
+- **Orient**: Inspect board stability with `keel health --scene`, `keel flow --scene`, and `keel doctor`.
+- **Inspect**: Read current demand with `keel mission next --status`, `keel pulse`, and `keel workshop`. Use `keel screen --static` or `keel topology --static` when board geometry or queue state is unclear.
+- **Pull**: Select one role-scoped slice with `keel next --role <role>` or operate on the explicit mission/story the human just requested.
 - **Ship**: Execute the slice, record proof, and advance lifecycle state.
 - **Close**: Land the relevant transition and the sealing commit that clears open-loop energy.
 
 ### Session Start & Human Interaction
 When a human user opens the chat or "pokes" you (for example, "Wake up" or "I'm poking you"), you MUST immediately perform the `Orient` and `Inspect` halves of the turn loop by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
-1. **Heartbeat**: Run `just keel heartbeat` to inspect current charge and whether the worktree is carrying uncommitted energy.
-2. **Pulse**: Run `just keel health --scene` to check subsystem stability.
-3. **Scan**: Run `just keel mission next --status` and `just keel pulse`.
-4. **Confirm**: Run `just keel flow --scene` to verify whether the LIGHT IS ON or the board is idle waiting for fresh repository activity.
-5. **Diagnose**: Run `just keel doctor` to ensure board integrity before proceeding.
+1. **Energize**: Run `keel poke "Human interaction in chat"` to spark or re-evaluate the system.
+2. **Pulse**: Run `keel health --scene` to check subsystem stability.
+3. **Scan**: Run `keel mission next --status`, `keel pulse`, and `keel workshop`.
+4. **Confirm**: Run `keel flow --scene` to verify whether the board is actively lit or simply idle.
+5. **Diagnose**: Run `keel doctor --status` to ensure board integrity before proceeding.
 
 ### Procedural Instructions
 Follow the formal procedural loops and checklists defined in:

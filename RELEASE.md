@@ -10,7 +10,7 @@
 
 Before performing a release, the following invariants must be satisfied:
 
-1.  **Zero Drift:** `just keel doctor` must report 100% board integrity.
+1.  **Zero Drift:** `keel doctor` must report 100% board integrity.
 2.  **Verified State:** All mission goals for the release must be in the `Verified` state.
 3.  **Quality Gate:** `just quality` (formatting and linting) must pass 100%.
 4.  **Verification Gate:** `just test` must pass 100% in the current environment.
@@ -21,7 +21,7 @@ Before performing a release, the following invariants must be satisfied:
 ### 1. Stabilization
 Ensure the pacemaker is stable and all recent moves are committed.
 ```bash
-just keel poke "Stabilizing for release vX.Y.Z"
+keel poke "Stabilizing for release vX.Y.Z"
 git add .
 git commit -m "chore(release): prepare for vX.Y.Z"
 ```

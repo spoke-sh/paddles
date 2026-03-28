@@ -45,7 +45,7 @@ Paddles leverages **Nix** for a reproducible and isolated development environmen
 3.  **Initial Board Health Check:**
     Before starting any development work, it's crucial to ensure the Keel board is healthy. Run the doctor command to diagnose and fix any inconsistencies:
     ```bash
-    just keel doctor
+    keel doctor
     ```
     This step is vital for maintaining the integrity of the simulation.
 
@@ -56,20 +56,20 @@ Paddles operates using a structured, agentic workflow managed by the Keel Engine
 ### 1. The Tactical Loop
 
 Every session follows a deterministic cycle:
-    *   **Mission Orientation:** Run `keel mission next --status` to identify high-signal moves. Check `just keel flow --scene` for workflow visualization.
+    *   **Mission Orientation:** Run `keel mission next --status` to identify high-signal moves. Check `keel flow --scene` for workflow visualization.
     *   **Role Selection:** Operate as either a `manager` (planning/decisions) or an `operator` (implementation). Do not switch roles within a single atomic change.
     *   **Execute Move:** Perform exactly ONE move (e.g., plan a voyage, implement a story, fix a diagnostic).
-    *   **Seal Move:** Close the loop by submitting work (`story submit`, `voyage plan`, `bearing lay`). Ensure the pacemaker is stable via `just keel poke "Sealing move: <summary>"`.
+    *   **Seal Move:** Close the loop by submitting work (`story submit`, `voyage plan`, `bearing assess`) and landing a single sealing commit.
     *   **Log & Commit:**
         *   Record your move in the mission `LOG.md`.
-        *   **Pace-setting**: Execute `just keel poke "Sealing move: <summary>"` to synchronize the pacemaker with the board state. This is MANDATORY for all commits, including work performed without a story (e.g., gardening, bug fixes, or engine improvements).
-        *   Create a single atomic [Conventional Commit](https://www.conventionalcommits.org/) including the heartbeat.
+        *   **Pace-setting**: Use `keel poke "Sealing move: <summary>"` when you need to respond to a human/system nudge or explicitly re-energize an idle board before the next scan.
+        *   Create a single atomic [Conventional Commit](https://www.conventionalcommits.org/) capturing the resulting board and code state.
 
 ### 2. Primary Workflows
 
-*   **Operator (Implementation):** Focus on evidence-backed delivery. Use `keel story show <id>` and `keel voyage show <id>` for context. Implement requirements, record proofs with `keel story record`, and `submit`. Every acceptance criterion must have a proof.
-*   **Manager (Planning):** Focus on strategic alignment and unblocking. Use `keel epic show <id>` and `keel flow` for context. Author PRDs, SRSs, SDDs, and decompose voyages into stories. Move voyages from `draft` to `planned` only when requirements are coherent.
-*   **Explorer (Research):** Focus on technical discovery and fog reduction. Use `keel bearing list` for context. Fill `BRIEF.md`, collect `EVIDENCE.md`, and `assess`. Graduate to epics only when research is conclusive.
+*   **Operator (Implementation):** Focus on evidence-backed delivery. Use `keel story show <id>` and `keel voyage show <id>` for context. Implement requirements, record proofs with `keel story record`, and transition with `keel story submit`. Every acceptance criterion must have a proof.
+*   **Manager (Planning):** Focus on strategic alignment and unblocking. Use `keel epic show <id>` and `keel flow` for context. Author PRDs, SRSs, SDDs, decompose voyages into stories, and promote voyages with `keel voyage plan` only when requirements are coherent.
+*   **Explorer (Research):** Focus on technical discovery and fog reduction. Use `keel bearing list` for context. Fill `BRIEF.md`, collect `EVIDENCE.md`, and conclude with `keel bearing assess`. Graduate to epics only when research is conclusive.
 
 ### 3. Building & Testing
 
@@ -99,9 +99,9 @@ Paddles integrates these core components within the Keel Engine:
 
 Keel provides tools to diagnose and maintain the system's health:
 
-*   **`just keel doctor`:** Validates board integrity and fixes inconsistencies. **Must be run at the start of every session.**
-*   **`just keel health --scene`:** Provides a high-level visual scan of subsystem health (NEURAL, MOTOR, STRATEGIC, etc.).
-*   **`just keel flow --scene`:** Visualizes the workflow lanes and identifies blockages or available work.
+*   **`keel doctor`:** Validates board integrity and fixes inconsistencies. **Must be run at the start of every session.**
+*   **`keel health --scene`:** Provides a high-level visual scan of subsystem health (NEURAL, MOTOR, STRATEGIC, etc.).
+*   **`keel flow --scene`:** Visualizes the workflow lanes and identifies blockages or available work.
 
 ## 🚀 Release Process
 

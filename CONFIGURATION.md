@@ -180,7 +180,7 @@ The `keel health` command provides a high-level triage of the system's core subs
 | **PACEMAKER** | Heartbeat | System energization and commit stability |
 
 ```bash
-just keel health --scene
+keel health --scene
 ```
 
 ## Full Example
