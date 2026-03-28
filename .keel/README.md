@@ -70,5 +70,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Sift-Native Runtime Cutover](epics/VF7t633ux/voyages/VF7tAvs7B/) | planned |
+| [Sift-Native Runtime Cutover](epics/VF7t633ux/voyages/VF7tAvs7B/) | in-progress |
 

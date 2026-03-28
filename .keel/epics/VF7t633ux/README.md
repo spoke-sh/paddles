@@ -25,5 +25,5 @@ mission: VF7t3HtQY
 **Progress:** 0/1 voyages complete, 0/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Sift-Native Runtime Cutover](voyages/VF7tAvs7B/) | planned | 0/3 |
+| [Sift-Native Runtime Cutover](voyages/VF7tAvs7B/) | in-progress | 0/3 |
 <!-- END GENERATED -->

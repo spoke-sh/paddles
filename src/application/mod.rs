@@ -1,25 +1,24 @@
 use crate::domain::model::BootContext;
-use crate::domain::ports::{InferenceEngine, ModelPaths, ModelRegistry};
-use crate::infrastructure::adapters::candle::SiftInferenceAdapter;
+use crate::domain::ports::{ModelPaths, ModelRegistry};
+use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use anyhow::Result;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tokio::sync::RwLock;
-use tokio_util::sync::CancellationToken;
-use wonopcode_core::{Instance, PromptConfig, PromptLoop};
 
 /// Application service for managing the mech suit lifecycle.
 pub struct MechSuitService {
-    instance: Instance,
+    workspace_root: PathBuf,
     registry: Arc<dyn ModelRegistry>,
-    engine: RwLock<Option<Arc<SiftInferenceAdapter>>>,
+    engine: RwLock<Option<Arc<SiftAgentAdapter>>>,
     verbose: AtomicU8,
 }
 
 impl MechSuitService {
-    pub fn new(instance: Instance, registry: Arc<dyn ModelRegistry>) -> Self {
+    pub fn new(workspace_root: impl Into<PathBuf>, registry: Arc<dyn ModelRegistry>) -> Self {
         Self {
-            instance,
+            workspace_root: workspace_root.into(),
             registry,
             engine: RwLock::new(None),
             verbose: AtomicU8::new(0),
@@ -46,59 +45,27 @@ impl MechSuitService {
     pub async fn prepare_model(&self, model_id: &str) -> Result<ModelPaths> {
         let paths = self.registry.get_model_paths(model_id).await?;
 
-        // Initialize the engine once
-        let mut provider =
-            crate::infrastructure::adapters::candle::SiftInferenceAdapter::new(model_id)?;
-        provider.set_verbose(self.verbose.load(Ordering::Relaxed));
-
-        let provider_arc = Arc::new(provider);
-        *self.engine.write().await = Some(provider_arc);
+        let engine = Arc::new(SiftAgentAdapter::new(
+            self.workspace_root.clone(),
+            model_id,
+        )?);
+        engine.set_verbose(self.verbose.load(Ordering::Relaxed));
+        *self.engine.write().await = Some(engine);
 
         Ok(paths)
     }
 
     /// Process a single prompt using a specific model.
     pub async fn process_prompt(&self, prompt: &str, _paths: ModelPaths) -> Result<String> {
-        let verbose = self.verbose.load(Ordering::Relaxed);
-
-        let session = self
-            .instance
-            .create_session(Some("paddles-session".to_string()))
-            .await?;
-
-        if verbose >= 2 {
-            println!("[TRACE] Session created: {}", session.id);
-        }
-
         let engine_guard = self.engine.read().await;
-        let provider = engine_guard
+        let engine = engine_guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Engine not initialized"))?
             .clone();
 
-        if verbose >= 2 {
-            println!("[TRACE] Provider resolved: {}", provider.id());
-        }
-
-        let tools = Arc::new(wonopcode_tools::ToolRegistry::default());
-        let session_repo = Arc::new(self.instance.session_repo());
-        let bus = self.instance.bus().clone();
-        let cancel = CancellationToken::new();
-
-        let loop_engine = PromptLoop::new(provider, tools, session_repo, bus, cancel);
-
-        if verbose >= 1 {
-            println!("[INFO] Running prompt loop for: '{}'", prompt);
-        }
-
-        let result = loop_engine
-            .run(&session, prompt, PromptConfig::default())
-            .await?;
-
-        if verbose >= 1 {
-            println!("[INFO] Prompt loop complete. Output received.");
-        }
-
-        Ok(result.text)
+        let prompt = prompt.to_string();
+        tokio::task::spawn_blocking(move || engine.respond(&prompt))
+            .await
+            .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
     }
 }

@@ -3,7 +3,6 @@ use clap::Parser;
 use std::env;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
-use wonopcode_core::Instance;
 
 // External Crate Modules
 use paddles::application::MechSuitService;
@@ -61,10 +60,8 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
     let root_path = env::current_dir()?;
-    let instance = Instance::new(root_path).await?;
-
     let registry = Arc::new(SiftRegistryAdapter::new());
-    let service = MechSuitService::new(instance, registry);
+    let service = MechSuitService::new(root_path, registry);
     service.set_verbose(cli.verbose);
 
     // Boot sequence

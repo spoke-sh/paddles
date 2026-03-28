@@ -1,19 +1,5 @@
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use std::path::PathBuf;
-use wonopcode_provider::{GenerateOptions, Message, ProviderResult, StreamChunk};
-
-/// Port for the agentic inference engine.
-#[async_trait]
-pub trait InferenceEngine: Send + Sync {
-    async fn generate(
-        &self,
-        messages: Vec<Message>,
-        options: GenerateOptions,
-    ) -> ProviderResult<BoxStream<'static, ProviderResult<StreamChunk>>>;
-
-    fn id(&self) -> &str;
-}
 
 /// Port for model discovery and acquisition.
 #[async_trait]
