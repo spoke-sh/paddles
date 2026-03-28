@@ -1,14 +1,15 @@
 ---
 # system-managed
 id: VF7t3HtQY
-status: achieved
+status: verified
 created_at: 2026-03-27T19:44:10
-updated_at: 2026-03-27T23:14:41
+updated_at: 2026-03-28T14:14:58
 # authored
 title: Sift-Native Tool Runtime
 watch: ~
 activated_at: 2026-03-27T19:48:16
 achieved_at: 2026-03-27T23:14:41
+verified_at: 2026-03-28T14:14:58
 ---
 
 # Sift-Native Tool Runtime
