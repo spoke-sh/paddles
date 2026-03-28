@@ -32,6 +32,6 @@ started_at: 2026-03-27T19:51:31
 | Title | Type | Status |
 |-------|------|--------|
 | [Build Sift Session Controller](../../../../stories/VF7tCKEgw/README.md) | feat | done |
-| [Add Local Tool Surface](../../../../stories/VF7tCKUgx/README.md) | feat | backlog |
+| [Add Local Tool Surface](../../../../stories/VF7tCKUgx/README.md) | feat | needs-human-verification |
 | [Cut Over Runtime And Docs](../../../../stories/VF7tCKsgv/README.md) | feat | backlog |
 <!-- END GENERATED -->

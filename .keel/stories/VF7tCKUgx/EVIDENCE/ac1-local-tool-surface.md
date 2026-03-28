@@ -1,0 +1,19 @@
+# AC1 Proof: Local Tool Surface
+
+- `src/infrastructure/adapters/sift_agent.rs` defines the controller tool contract in `ToolCall`.
+- The runtime exposes immediate local tools for:
+  - search
+  - file listing
+  - file reads
+  - file writes
+  - in-file replacement edits
+  - shell commands
+  - git diff
+  - patch application
+- These tools are executed directly in `SiftAgentAdapter::execute_tool` without wonopcode tool plumbing.
+- `cargo test` covers representative tool behavior, including:
+  - `search_tool_uses_sift_context_assembly`
+  - `shell_tool_returns_error_on_non_zero_exit`
+  - `apply_patch_returns_error_on_failure`
+  - `read_file_rejects_symlink_escape`
+  - `list_files_skips_symlinked_directories`
