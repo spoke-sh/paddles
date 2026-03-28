@@ -27,7 +27,7 @@ const RETAINED_ARTIFACT_LIMIT: usize = 5;
 pub struct SiftAgentAdapter {
     workspace_root: PathBuf,
     sift: Sift,
-    conversation: Mutex<Box<dyn Conversation>>,
+    conversation_factory: Box<dyn ConversationFactory>,
     base_context: Vec<LocalContextSource>,
     state: Mutex<SessionState>,
     verbose: AtomicU8,
@@ -87,6 +87,16 @@ struct ToolResult {
     retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
+trait ConversationFactory: Send + Sync {
+    fn start_conversation(&self) -> Result<Box<dyn Conversation>>;
+}
+
+impl ConversationFactory for QwenReranker {
+    fn start_conversation(&self) -> Result<Box<dyn Conversation>> {
+        <Self as GenerativeModel>::start_conversation(self)
+    }
+}
+
 impl ToolCall {
     fn name(&self) -> &'static str {
         match self {
@@ -106,18 +116,17 @@ impl SiftAgentAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>, model_id: &str) -> Result<Self> {
         let workspace_root = workspace_root.into();
         let model = QwenReranker::load(qwen_spec_for(model_id))?;
-        let conversation = model.start_conversation()?;
-        Ok(Self::from_conversation(
+        Ok(Self::from_factory(
             workspace_root,
             model_id,
-            conversation,
+            Box::new(model),
         ))
     }
 
-    fn from_conversation(
+    fn from_factory(
         workspace_root: PathBuf,
         model_id: &str,
-        conversation: Box<dyn Conversation>,
+        conversation_factory: Box<dyn ConversationFactory>,
     ) -> Self {
         let session_id = format!("paddles-{}", unix_timestamp());
         let base_context = vec![
@@ -135,7 +144,7 @@ impl SiftAgentAdapter {
         Self {
             workspace_root: workspace_root.clone(),
             sift: Sift::builder().build(),
-            conversation: Mutex::new(conversation),
+            conversation_factory,
             base_context,
             state: Mutex::new(SessionState {
                 session_id,
@@ -154,7 +163,24 @@ impl SiftAgentAdapter {
         model_id: &str,
         conversation: Box<dyn Conversation>,
     ) -> Self {
-        Self::from_conversation(workspace_root.into(), model_id, conversation)
+        Self::from_factory(
+            workspace_root.into(),
+            model_id,
+            Box::new(StaticConversationFactory::new(vec![conversation])),
+        )
+    }
+
+    #[cfg(test)]
+    fn new_for_test_with_conversations(
+        workspace_root: impl Into<PathBuf>,
+        model_id: &str,
+        conversations: Vec<Box<dyn Conversation>>,
+    ) -> Self {
+        Self::from_factory(
+            workspace_root.into(),
+            model_id,
+            Box::new(StaticConversationFactory::new(conversations)),
+        )
     }
 
     pub fn set_verbose(&self, level: u8) {
@@ -170,6 +196,7 @@ impl SiftAgentAdapter {
         state.turn_counter += 1;
         let turn_id = format!("turn-{}", state.turn_counter);
         let assistant_turn_id = format!("{turn_id}-assistant");
+        let recent_turns = format_recent_turns(&state.local_context);
 
         let mut working_retained = state.retained_artifacts.clone();
         let mut working_local_context = state.local_context.clone();
@@ -180,8 +207,11 @@ impl SiftAgentAdapter {
             ),
         );
         let casual_turn = is_casual_prompt(prompt);
+        let prefer_tools = should_prefer_tools(prompt);
+        let follow_up_execution = is_follow_up_execution_request(prompt);
+        let mut conversation = self.conversation_factory.start_conversation()?;
         let mut reply = if casual_turn {
-            self.send_to_model(&build_direct_turn_prompt(prompt))?
+            self.send_to_model(conversation.as_mut(), &build_direct_turn_prompt(prompt))?
         } else {
             let initial_local_context = self.combined_local_context(&working_local_context);
             let initial_context =
@@ -189,16 +219,23 @@ impl SiftAgentAdapter {
             working_retained = initial_context.retained_artifacts.clone();
             self.log_context_assembly("initial", &initial_context);
 
-            self.send_to_model(&build_turn_prompt(
-                &self.workspace_root,
-                prompt,
-                &initial_context,
-            ))?
+            self.send_to_model(
+                conversation.as_mut(),
+                &build_turn_prompt(
+                    &self.workspace_root,
+                    prompt,
+                    &recent_turns,
+                    &initial_context,
+                    prefer_tools,
+                    follow_up_execution,
+                ),
+            )?
         };
 
         if casual_turn {
             if parse_tool_call(&reply)?.is_some() {
-                reply = self.send_to_model(&build_direct_retry_prompt(prompt))?;
+                reply =
+                    self.send_to_model(conversation.as_mut(), &build_direct_retry_prompt(prompt))?;
             }
             if parse_tool_call(&reply)?.is_some() {
                 reply = fallback_casual_reply(prompt);
@@ -239,12 +276,10 @@ impl SiftAgentAdapter {
                     )),
                 );
 
-                reply = self.send_to_model(&build_tool_follow_up_prompt(
-                    prompt,
-                    &call_id,
-                    result.name,
-                    &result.summary,
-                ))?;
+                reply = self.send_to_model(
+                    conversation.as_mut(),
+                    &build_tool_follow_up_prompt(prompt, &call_id, result.name, &result.summary),
+                )?;
             }
 
             if parse_tool_call(&reply)?.is_some() {
@@ -275,7 +310,7 @@ impl SiftAgentAdapter {
         combined
     }
 
-    fn send_to_model(&self, prompt: &str) -> Result<String> {
+    fn send_to_model(&self, conversation: &mut dyn Conversation, prompt: &str) -> Result<String> {
         let verbose = self.verbose.load(Ordering::Relaxed);
 
         if verbose >= 1 {
@@ -284,11 +319,6 @@ impl SiftAgentAdapter {
         if verbose >= 3 {
             println!("[TRACE] Prompt payload:\n{prompt}");
         }
-
-        let mut conversation = self
-            .conversation
-            .lock()
-            .map_err(|_| anyhow!("Sift conversation lock poisoned"))?;
 
         let response = conversation.send(prompt, MAX_MODEL_TOKENS)?;
 
@@ -524,13 +554,31 @@ impl SiftAgentAdapter {
 fn build_turn_prompt(
     workspace_root: &Path,
     user_prompt: &str,
+    recent_turns: &str,
     context: &ContextAssemblyResponse,
+    prefer_tools: bool,
+    follow_up_execution: bool,
 ) -> String {
+    let routing_guidance = if follow_up_execution {
+        "This request refers to a previous turn. Resolve words like `it` or `that` using the recent conversation, then perform the implied action with a tool when possible."
+    } else if prefer_tools {
+        "This request is action-oriented. If a workspace tool can answer it, call the tool instead of explaining a command the user could run."
+    } else {
+        "Use tools when they materially improve accuracy; otherwise answer directly."
+    };
+
     format!(
         "You are Paddles, a local-first coding assistant operating inside the workspace `{}`.\n\
 Use the provided workspace evidence first. If you have enough information, answer directly.\n\
 Final answers should stay concise and focus on the requested result.\n\
+Routing guidance: {}\n\
 If you need a tool, respond with ONLY a single JSON object and no markdown or prose.\n\
+\n\
+When the user asks you to inspect repository state, run a command, read a file, search the workspace, or apply a change, prefer a tool call over describing how they could do it themselves.\n\
+Examples:\n\
+- `show me the git status` -> {{\"tool\":\"shell\",\"command\":\"git status --short\"}}\n\
+- `open src/main.rs` -> {{\"tool\":\"read_file\",\"path\":\"src/main.rs\"}}\n\
+- `find heartbeat references` -> {{\"tool\":\"search\",\"query\":\"heartbeat references\"}}\n\
 \n\
 Available tools:\n\
 - {{\"tool\":\"search\",\"query\":\"...\",\"intent\":\"optional\"}}\n\
@@ -542,12 +590,17 @@ Available tools:\n\
 - {{\"tool\":\"diff\",\"path\":\"optional relative/path\"}}\n\
 - {{\"tool\":\"apply_patch\",\"patch\":\"unified diff text\"}}\n\
 \n\
+Recent conversation:\n\
+{}\n\
+\n\
 Current workspace evidence:\n\
 {}\n\
 \n\
 Current user request:\n\
 {}\n",
         workspace_root.display(),
+        routing_guidance,
+        recent_turns,
         format_context_digest(context),
         user_prompt
     )
@@ -653,6 +706,28 @@ fn format_search_summary(query: &str, assembly: &ContextAssemblyResponse) -> Str
     lines.join("\n")
 }
 
+fn format_recent_turns(local_context: &[LocalContextSource]) -> String {
+    let turns = local_context
+        .iter()
+        .rev()
+        .filter_map(|item| match item {
+            LocalContextSource::AgentTurn(turn) => Some(format!(
+                "- {}: {}",
+                turn.role,
+                trim_for_context(&turn.content, 240)
+            )),
+            _ => None,
+        })
+        .take(4)
+        .collect::<Vec<_>>();
+
+    if turns.is_empty() {
+        return "No prior conversation in this session.".to_string();
+    }
+
+    turns.into_iter().rev().collect::<Vec<_>>().join("\n")
+}
+
 fn is_casual_prompt(prompt: &str) -> bool {
     let normalized = normalize_prompt(prompt);
 
@@ -697,6 +772,53 @@ fn fallback_casual_reply(prompt: &str) -> String {
     }
 
     "I am here. What do you want to work on?".to_string()
+}
+
+fn should_prefer_tools(prompt: &str) -> bool {
+    let normalized = normalize_prompt(prompt);
+    if is_casual_prompt(prompt) || is_follow_up_execution_request(prompt) {
+        return !is_casual_prompt(prompt);
+    }
+
+    normalized.contains("git status")
+        || normalized.contains("git diff")
+        || normalized.split_whitespace().any(|word| {
+            matches!(
+                word,
+                "run"
+                    | "show"
+                    | "check"
+                    | "inspect"
+                    | "list"
+                    | "find"
+                    | "search"
+                    | "open"
+                    | "read"
+                    | "edit"
+                    | "write"
+                    | "replace"
+                    | "diff"
+                    | "patch"
+                    | "apply"
+                    | "create"
+                    | "delete"
+            )
+        })
+}
+
+fn is_follow_up_execution_request(prompt: &str) -> bool {
+    matches!(
+        normalize_prompt(prompt).as_str(),
+        "run it"
+            | "i mean run it"
+            | "do it"
+            | "i mean do it"
+            | "execute it"
+            | "i mean execute it"
+            | "run that"
+            | "execute that"
+            | "do that"
+    )
 }
 
 fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
@@ -907,10 +1029,36 @@ fn unix_timestamp() -> u64 {
 }
 
 #[cfg(test)]
+struct StaticConversationFactory {
+    conversations: Mutex<std::collections::VecDeque<Box<dyn Conversation>>>,
+}
+
+#[cfg(test)]
+impl StaticConversationFactory {
+    fn new(conversations: Vec<Box<dyn Conversation>>) -> Self {
+        Self {
+            conversations: Mutex::new(conversations.into()),
+        }
+    }
+}
+
+#[cfg(test)]
+impl ConversationFactory for StaticConversationFactory {
+    fn start_conversation(&self) -> Result<Box<dyn Conversation>> {
+        self.conversations
+            .lock()
+            .map_err(|_| anyhow!("Static conversation factory lock poisoned"))?
+            .pop_front()
+            .ok_or_else(|| anyhow!("no test conversation available"))
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{
         LocalContextSource, MAX_TOOL_STEPS, SiftAgentAdapter, ToolCall, extract_json_payload,
-        normalize_relative_path, trim_for_context,
+        is_follow_up_execution_request, normalize_relative_path, should_prefer_tools,
+        trim_for_context,
     };
     use anyhow::{Result, anyhow};
     use sift::Conversation;
@@ -1188,6 +1336,38 @@ mod tests {
 
         let state = adapter.state.lock().expect("state");
         assert_eq!(state.tool_counter, 0);
+    }
+
+    #[test]
+    fn action_requests_prefer_tools() {
+        assert!(should_prefer_tools("Can you show me the git status?"));
+        assert!(should_prefer_tools("Open src/main.rs"));
+        assert!(is_follow_up_execution_request("I mean run it"));
+        assert!(!should_prefer_tools("Do you know how to use tools?"));
+    }
+
+    #[test]
+    fn respond_starts_a_fresh_conversation_each_turn() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test_with_conversations(
+            workspace.path(),
+            "qwen-1.5b",
+            vec![
+                Box::new(MockConversation::new(vec!["Hello.".to_string()])),
+                Box::new(MockConversation::new(vec![
+                    r#"{"tool":"shell","command":"git status --short"}"#.to_string(),
+                    "Working tree is clean.".to_string(),
+                ])),
+            ],
+        );
+
+        let first = adapter.respond("Hello").expect("first response");
+        let second = adapter
+            .respond("Show me the git status")
+            .expect("second response");
+
+        assert_eq!(first, "Hello.");
+        assert_eq!(second, "Working tree is clean.");
     }
 
     #[test]
