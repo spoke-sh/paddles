@@ -58,9 +58,13 @@ impl QwenModelSpec {
 
 const SUPPORTED_QWEN_MODELS: &[&str] = &[
     "qwen-1.5b",
+    "qwen-coder-0.5b",
+    "qwen-coder-1.5b",
     "qwen-coder-3b",
     "qwen3.5-2b",
     "Qwen/Qwen2.5-1.5B-Instruct",
+    "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+    "Qwen/Qwen2.5-Coder-1.5B-Instruct",
     "Qwen/Qwen2.5-Coder-3B-Instruct",
     "Qwen/Qwen3.5-2B",
 ];
@@ -69,6 +73,20 @@ pub fn qwen_spec_for(model_id: &str) -> Result<QwenModelSpec> {
     let spec = match model_id {
         "qwen-1.5b" | "Qwen/Qwen2.5-1.5B-Instruct" => QwenModelSpec {
             model_id: "Qwen/Qwen2.5-1.5B-Instruct",
+            revision: "main",
+            max_length: 512,
+            family: QwenModelFamily::Qwen2,
+            weights: QwenWeightLayout::Single("model.safetensors"),
+        },
+        "qwen-coder-0.5b" | "Qwen/Qwen2.5-Coder-0.5B-Instruct" => QwenModelSpec {
+            model_id: "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+            revision: "main",
+            max_length: 512,
+            family: QwenModelFamily::Qwen2,
+            weights: QwenWeightLayout::Single("model.safetensors"),
+        },
+        "qwen-coder-1.5b" | "Qwen/Qwen2.5-Coder-1.5B-Instruct" => QwenModelSpec {
+            model_id: "Qwen/Qwen2.5-Coder-1.5B-Instruct",
             revision: "main",
             max_length: 512,
             family: QwenModelFamily::Qwen2,
@@ -215,6 +233,16 @@ mod tests {
 
     #[test]
     fn supports_new_runtime_aliases() {
+        let spec = qwen_spec_for("qwen-coder-0.5b").expect("0.5b coder spec");
+        assert_eq!(spec.model_id, "Qwen/Qwen2.5-Coder-0.5B-Instruct");
+        assert_eq!(spec.family, QwenModelFamily::Qwen2);
+        assert_eq!(spec.weights, QwenWeightLayout::Single("model.safetensors"));
+
+        let spec = qwen_spec_for("qwen-coder-1.5b").expect("1.5b coder spec");
+        assert_eq!(spec.model_id, "Qwen/Qwen2.5-Coder-1.5B-Instruct");
+        assert_eq!(spec.family, QwenModelFamily::Qwen2);
+        assert_eq!(spec.weights, QwenWeightLayout::Single("model.safetensors"));
+
         let spec = qwen_spec_for("qwen-coder-3b").expect("coder spec");
         assert_eq!(spec.model_id, "Qwen/Qwen2.5-Coder-3B-Instruct");
         assert_eq!(spec.family, QwenModelFamily::Qwen2);

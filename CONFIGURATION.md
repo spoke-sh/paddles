@@ -136,7 +136,7 @@ single-model-only:
 Today the lane wiring is exposed through CLI/runtime configuration:
 
 ```bash
-paddles --model qwen3.5-2b --gatherer-model qwen-coder-3b
+paddles --model qwen-coder-1.5b --gatherer-model qwen-coder-3b
 ```
 
 This does not make the gatherer lane mandatory. It simply prepares a distinct
@@ -145,9 +145,11 @@ model.
 
 Current local model guidance on an 8 GB CUDA card:
 
-- `qwen3.5-2b` is the default stronger generalist local path when the GPU has enough free VRAM.
-- `qwen-coder-3b` is the opt-in coding-tuned lane when you want a stronger coding bias.
-- `qwen-1.5b` remains available as a smaller fallback.
+- `qwen-coder-1.5b` is the default Qwen2 coding-tuned local path.
+- `qwen-coder-0.5b` is the smaller fast fallback when latency matters more than capability.
+- `qwen-1.5b` remains available as the general-purpose Qwen2 fallback.
+- `qwen-coder-3b` remains available as the larger Qwen2 coding lane when you want more coding headroom.
+- `qwen3.5-2b` remains available as an opt-in heavier lane, not the default.
 - If `qwen3.5-2b` cannot complete its CUDA load or first generation step because of GPU OOM or a reduced-precision runtime mismatch, the runtime warns and retries on CPU instead of aborting the REPL.
 
 ### Experimental Context-1 Boundary
@@ -156,7 +158,7 @@ Current local model guidance on an 8 GB CUDA card:
 drop-in answer model:
 
 ```bash
-paddles --model qwen3.5-2b --gatherer-provider context1
+paddles --model qwen-coder-1.5b --gatherer-provider context1
 ```
 
 That provider fails closed by design.
