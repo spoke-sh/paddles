@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 
 // External Crate Modules
-use paddles::application::{MechSuitService, RuntimeLaneConfig};
+use paddles::application::{GathererProvider, MechSuitService, RuntimeLaneConfig};
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 
 /// The mech suit for the famous assistant, Paddles mate!
@@ -39,6 +39,14 @@ struct Cli {
     /// Optional model ID for a dedicated context-gathering lane.
     #[arg(long)]
     gatherer_model: Option<String>,
+
+    /// Provider to use for the optional gatherer lane.
+    #[arg(long, value_enum, default_value = "local")]
+    gatherer_provider: GathererProvider,
+
+    /// Acknowledge that the external Context-1 harness is actually available.
+    #[arg(long, default_value_t = false)]
+    context1_harness_ready: bool,
 
     /// Verbosity level (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
@@ -102,8 +110,16 @@ async fn main() -> Result<()> {
                 gatherer_model
             );
         }
+        if matches!(cli.gatherer_provider, GathererProvider::Context1) {
+            println!(
+                "[BOOT] Context-1 gatherer provider selected (harness ready: {}).",
+                cli.context1_harness_ready
+            );
+        }
     }
-    let runtime_lanes = RuntimeLaneConfig::new(cli.model.clone(), cli.gatherer_model.clone());
+    let runtime_lanes = RuntimeLaneConfig::new(cli.model.clone(), cli.gatherer_model.clone())
+        .with_gatherer_provider(cli.gatherer_provider)
+        .with_context1_harness_ready(cli.context1_harness_ready);
     let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
     if cli.verbose >= 1 {
         println!("[BOOT] Runtime lanes ready.");

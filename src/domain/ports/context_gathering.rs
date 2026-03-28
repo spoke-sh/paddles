@@ -4,6 +4,9 @@ use std::path::PathBuf;
 /// Port for specialized context-gathering subagents.
 #[async_trait]
 pub trait ContextGatherer: Send + Sync {
+    /// Report whether this gatherer is actually usable in the current runtime.
+    fn capability(&self) -> GathererCapability;
+
     /// Gather ranked evidence for a retrieval-heavy request.
     async fn gather_context(
         &self,

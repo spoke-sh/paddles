@@ -141,6 +141,18 @@ intended to preserve these semantics:
 The important behavioral rule is simple: a gatherer returns evidence for a
 downstream synthesizer. It does not return the final user-facing answer.
 
+### Experimental Context-1 Boundary
+
+The current `context-1` integration is intentionally only a provider boundary.
+
+- The controller can select `context-1` as a gatherer provider explicitly.
+- The adapter reports `harness-required` until the external search harness is
+  acknowledged as present.
+- Even with that acknowledgement, the adapter reports `unsupported` until
+  Paddles ships a real harness-backed provider implementation.
+- In all non-available states, the controller falls back to the synthesizer
+  lane instead of pretending the provider ran.
+
 ### Non-Goals
 
 Context-gathering models should not become:

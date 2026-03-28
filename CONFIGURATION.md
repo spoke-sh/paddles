@@ -143,6 +143,26 @@ This does not make the gatherer lane mandatory. It simply prepares a distinct
 lane so routing can opt into it later without changing the default response
 model.
 
+### Experimental Context-1 Boundary
+
+`context-1` is exposed as an explicit experimental gatherer provider, not as a
+drop-in answer model:
+
+```bash
+paddles --model qwen-1.5b --gatherer-provider context1
+```
+
+That provider fails closed by design.
+
+- Without `--context1-harness-ready`, the adapter reports
+  `harness-required` and Paddles falls back to the synthesizer lane.
+- With `--context1-harness-ready`, the adapter boundary is still honest about
+  the current state and reports `unsupported` until a real harness-backed
+  implementation exists.
+- Verbose mode surfaces the selected gatherer provider, capability state, and
+  evidence summary so missing-context and misrouting cases can be diagnosed from
+  terminal output.
+
 ## Subsystem Health (The Med-Bay)
 
 The `keel health` command provides a high-level triage of the system's core subsystems. Use `--scene` for a visual bio-scan.

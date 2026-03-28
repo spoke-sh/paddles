@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:24:29.987319726-07:00
+mode: manual
+---
+Updated CONFIGURATION.md and ARCHITECTURE.md to document --gatherer-provider context1, the --context1-harness-ready acknowledgement gate, the current fail-closed behavior, and how verbose lane/capability/evidence output can be used to diagnose missing-context or misrouting cases.

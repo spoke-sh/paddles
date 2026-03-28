@@ -1,5 +1,6 @@
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
+    GathererCapability,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -60,6 +61,10 @@ impl SiftContextGathererAdapter {
 
 #[async_trait]
 impl ContextGatherer for SiftContextGathererAdapter {
+    fn capability(&self) -> GathererCapability {
+        GathererCapability::Available
+    }
+
     async fn gather_context(
         &self,
         request: &ContextGatherRequest,

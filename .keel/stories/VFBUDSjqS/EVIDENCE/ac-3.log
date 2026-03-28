@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:24:29.960896010-07:00
+mode: manual
+---
+Context-1 fails closed by design: without --context1-harness-ready it reports harness-required, and with the flag it still reports unsupported until a real harness-backed provider exists. In both states the controller falls back to synthesizer-only execution instead of pretending the provider ran.

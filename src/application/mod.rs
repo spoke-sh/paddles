@@ -1,10 +1,13 @@
 use crate::domain::model::BootContext;
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherer, EvidenceBudget, ModelPaths, ModelRegistry,
+    ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability, ModelPaths,
+    ModelRegistry,
 };
+use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
 use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use anyhow::Result;
+use clap::ValueEnum;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -24,10 +27,18 @@ pub enum RuntimeLaneRole {
     Gatherer,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum GathererProvider {
+    Local,
+    Context1,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeLaneConfig {
     synthesizer_model_id: String,
     gatherer_model_id: Option<String>,
+    gatherer_provider: GathererProvider,
+    context1_harness_ready: bool,
 }
 
 impl RuntimeLaneConfig {
@@ -35,7 +46,19 @@ impl RuntimeLaneConfig {
         Self {
             synthesizer_model_id: synthesizer_model_id.into(),
             gatherer_model_id,
+            gatherer_provider: GathererProvider::Local,
+            context1_harness_ready: false,
         }
+    }
+
+    pub fn with_gatherer_provider(mut self, gatherer_provider: GathererProvider) -> Self {
+        self.gatherer_provider = gatherer_provider;
+        self
+    }
+
+    pub fn with_context1_harness_ready(mut self, harness_ready: bool) -> Self {
+        self.context1_harness_ready = harness_ready;
+        self
     }
 
     pub fn synthesizer_model_id(&self) -> &str {
@@ -44,6 +67,14 @@ impl RuntimeLaneConfig {
 
     pub fn gatherer_model_id(&self) -> Option<&str> {
         self.gatherer_model_id.as_deref()
+    }
+
+    pub fn gatherer_provider(&self) -> GathererProvider {
+        self.gatherer_provider
+    }
+
+    pub fn context1_harness_ready(&self) -> bool {
+        self.context1_harness_ready
     }
 
     pub fn default_response_role(&self) -> RuntimeLaneRole {
@@ -59,9 +90,17 @@ pub struct PreparedModelLane {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedGathererLane {
+    pub provider: GathererProvider,
+    pub label: String,
+    pub model_id: Option<String>,
+    pub paths: Option<ModelPaths>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedRuntimeLanes {
     pub synthesizer: PreparedModelLane,
-    pub gatherer: Option<PreparedModelLane>,
+    pub gatherer: Option<PreparedGathererLane>,
 }
 
 impl PreparedRuntimeLanes {
@@ -114,6 +153,20 @@ impl MechSuitService {
         }
     }
 
+    fn build_gatherer_lane(
+        provider: GathererProvider,
+        label: impl Into<String>,
+        model_id: Option<String>,
+        paths: Option<ModelPaths>,
+    ) -> PreparedGathererLane {
+        PreparedGathererLane {
+            provider,
+            label: label.into(),
+            model_id,
+            paths,
+        }
+    }
+
     /// Prepare the configured runtime lanes for inference.
     pub async fn prepare_runtime_lanes(
         &self,
@@ -129,16 +182,40 @@ impl MechSuitService {
             synthesizer_paths,
         );
 
-        let gatherer = if let Some(model_id) = config.gatherer_model_id() {
-            let paths = self.registry.get_model_paths(model_id).await?;
-            Some(Self::build_lane(RuntimeLaneRole::Gatherer, model_id, paths))
-        } else {
-            None
+        let (prepared_gatherer, gatherer) = match config.gatherer_provider() {
+            GathererProvider::Local => match config.gatherer_model_id() {
+                Some(model_id) => {
+                    let paths = self.registry.get_model_paths(model_id).await?;
+                    let lane = Self::build_gatherer_lane(
+                        GathererProvider::Local,
+                        model_id,
+                        Some(model_id.to_string()),
+                        Some(paths),
+                    );
+                    let adapter =
+                        SiftContextGathererAdapter::new(self.workspace_root.clone(), model_id);
+                    adapter.set_verbose(self.verbose.load(Ordering::Relaxed));
+                    (
+                        Some(lane),
+                        Some(Arc::new(adapter) as Arc<dyn ContextGatherer>),
+                    )
+                }
+                None => (None, None),
+            },
+            GathererProvider::Context1 => {
+                let lane =
+                    Self::build_gatherer_lane(GathererProvider::Context1, "context-1", None, None);
+                let adapter = Context1GathererAdapter::new(config.context1_harness_ready());
+                (
+                    Some(lane),
+                    Some(Arc::new(adapter) as Arc<dyn ContextGatherer>),
+                )
+            }
         };
 
         let prepared = PreparedRuntimeLanes {
             synthesizer,
-            gatherer,
+            gatherer: prepared_gatherer,
         };
 
         let engine = Arc::new(SiftAgentAdapter::new(
@@ -146,12 +223,7 @@ impl MechSuitService {
             &prepared.synthesizer.model_id,
         )?);
         engine.set_verbose(self.verbose.load(Ordering::Relaxed));
-        let gatherer = prepared.gatherer.as_ref().map(|lane| {
-            let adapter =
-                SiftContextGathererAdapter::new(self.workspace_root.clone(), lane.model_id.clone());
-            adapter.set_verbose(self.verbose.load(Ordering::Relaxed));
-            Arc::new(adapter) as Arc<dyn ContextGatherer>
-        });
+
         *self.runtime.write().await = Some(ActiveRuntimeState {
             prepared: prepared.clone(),
             synthesizer_engine: engine,
@@ -173,12 +245,12 @@ impl MechSuitService {
             if let Some(gatherer) = &runtime.prepared.gatherer {
                 match routing {
                     PromptExecutionPath::GatherThenSynthesize => println!(
-                        "[LANE] Routing retrieval-heavy prompt through gatherer lane '{}' before synthesizer lane '{}'.",
-                        gatherer.model_id, runtime.prepared.synthesizer.model_id,
+                        "[LANE] Routing retrieval-heavy prompt through gatherer lane '{}' ({:?}) before synthesizer lane '{}'.",
+                        gatherer.label, gatherer.provider, runtime.prepared.synthesizer.model_id,
                     ),
                     PromptExecutionPath::SynthesizerOnly => println!(
-                        "[LANE] Using synthesizer lane '{}' for this prompt; gatherer lane '{}' is available but not selected.",
-                        runtime.prepared.synthesizer.model_id, gatherer.model_id,
+                        "[LANE] Using synthesizer lane '{}' for this prompt; gatherer lane '{}' ({:?}) is available but not selected.",
+                        runtime.prepared.synthesizer.model_id, gatherer.label, gatherer.provider,
                     ),
                 }
             } else {
@@ -192,30 +264,52 @@ impl MechSuitService {
         let gathered_evidence = match routing {
             PromptExecutionPath::GatherThenSynthesize => match runtime.gatherer.as_ref() {
                 Some(gatherer) => {
-                    let request = ContextGatherRequest::new(
-                        prompt,
-                        self.workspace_root.clone(),
-                        "retrieval-heavy prompt routed through the gatherer lane",
-                        EvidenceBudget::default(),
-                    );
-                    match gatherer.gather_context(&request).await {
-                        Ok(result) if result.is_synthesis_ready() => result.evidence_bundle,
-                        Ok(_) => {
-                            if self.verbose.load(Ordering::Relaxed) >= 1 {
-                                println!(
-                                    "[LANE] Gatherer lane was unavailable for synthesis-ready evidence; falling back to the synthesizer lane."
-                                );
+                    let capability = gatherer.capability();
+                    if self.verbose.load(Ordering::Relaxed) >= 1 {
+                        println!(
+                            "[LANE] Gatherer capability: {}",
+                            format_gatherer_capability(&capability)
+                        );
+                    }
+
+                    match capability {
+                        GathererCapability::Available => {
+                            let request = ContextGatherRequest::new(
+                                prompt,
+                                self.workspace_root.clone(),
+                                "retrieval-heavy prompt routed through the gatherer lane",
+                                EvidenceBudget::default(),
+                            );
+                            match gatherer.gather_context(&request).await {
+                                Ok(result) if result.is_synthesis_ready() => {
+                                    if let Some(bundle) = result.evidence_bundle.as_ref()
+                                        && self.verbose.load(Ordering::Relaxed) >= 1
+                                    {
+                                        println!("[LANE] Evidence summary: {}", bundle.summary);
+                                    }
+                                    result.evidence_bundle
+                                }
+                                Ok(result) => {
+                                    if self.verbose.load(Ordering::Relaxed) >= 1 {
+                                        println!(
+                                            "[LANE] Gatherer returned non-synthesis-ready result ({}); falling back to the synthesizer lane.",
+                                            format_gatherer_capability(&result.capability)
+                                        );
+                                    }
+                                    None
+                                }
+                                Err(err) => {
+                                    if self.verbose.load(Ordering::Relaxed) >= 1 {
+                                        println!(
+                                            "[LANE] Gatherer lane failed ({err:#}); falling back to the synthesizer lane."
+                                        );
+                                    }
+                                    None
+                                }
                             }
-                            None
                         }
-                        Err(err) => {
-                            if self.verbose.load(Ordering::Relaxed) >= 1 {
-                                println!(
-                                    "[LANE] Gatherer lane failed ({err:#}); falling back to the synthesizer lane."
-                                );
-                            }
-                            None
-                        }
+                        GathererCapability::Unsupported { .. }
+                        | GathererCapability::HarnessRequired { .. } => None,
                     }
                 }
                 None => None,
@@ -288,9 +382,21 @@ fn should_route_through_context_gathering(prompt: &str) -> bool {
         .any(|needle| normalized.contains(needle))
 }
 
+fn format_gatherer_capability(capability: &GathererCapability) -> String {
+    match capability {
+        GathererCapability::Available => "available".to_string(),
+        GathererCapability::Unsupported { reason } => format!("unsupported: {reason}"),
+        GathererCapability::HarnessRequired { reason } => {
+            format!("harness-required: {reason}")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MechSuitService, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole};
+    use super::{
+        GathererProvider, MechSuitService, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
+    };
     use crate::domain::ports::ModelPaths;
     use std::path::PathBuf;
 
@@ -301,6 +407,8 @@ mod tests {
         assert_eq!(config.default_response_role(), RuntimeLaneRole::Synthesizer);
         assert_eq!(config.synthesizer_model_id(), "qwen-1.5b");
         assert_eq!(config.gatherer_model_id(), None);
+        assert_eq!(config.gatherer_provider(), GathererProvider::Local);
+        assert!(!config.context1_harness_ready());
     }
 
     #[test]
@@ -310,10 +418,11 @@ mod tests {
             "qwen-1.5b",
             sample_model_paths("synth"),
         );
-        let gatherer = MechSuitService::build_lane(
-            RuntimeLaneRole::Gatherer,
+        let gatherer = MechSuitService::build_gatherer_lane(
+            GathererProvider::Local,
             "qwen-7b",
-            sample_model_paths("gather"),
+            Some("qwen-7b".to_string()),
+            Some(sample_model_paths("gather")),
         );
         let lanes = PreparedRuntimeLanes {
             synthesizer: synthesizer.clone(),
@@ -322,6 +431,21 @@ mod tests {
 
         assert_eq!(lanes.default_response_lane(), &synthesizer);
         assert_eq!(lanes.gatherer.as_ref(), Some(&gatherer));
+    }
+
+    #[test]
+    fn context1_boundary_can_be_prepared_without_local_model_paths() {
+        let gatherer = MechSuitService::build_gatherer_lane(
+            GathererProvider::Context1,
+            "context-1",
+            None,
+            None,
+        );
+
+        assert_eq!(gatherer.provider, GathererProvider::Context1);
+        assert_eq!(gatherer.label, "context-1");
+        assert_eq!(gatherer.model_id, None);
+        assert_eq!(gatherer.paths, None);
     }
 
     #[test]

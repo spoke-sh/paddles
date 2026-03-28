@@ -72,9 +72,9 @@
 |--------|--------|
 | [Sift-Native Runtime Cutover](epics/VF7t633ux/voyages/VF7tAvs7B/) | done |
 
-### [Context Gathering Subagent Interface](epics/VFBTXlHli/) (active)
+### [Context Gathering Subagent Interface](epics/VFBTXlHli/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Subagent Interface and Routing Foundations](epics/VFBTXlHli/voyages/VFBTYpPo6/) | in-progress |
+| [Subagent Interface and Routing Foundations](epics/VFBTXlHli/voyages/VFBTYpPo6/) | done |
 

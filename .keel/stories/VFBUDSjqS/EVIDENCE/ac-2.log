@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:24:29.939754731-07:00
+mode: manual
+---
+Verbose runtime output now reports lane routing, gatherer capability, and gathered evidence summaries in src/application/mod.rs, while SiftAgentAdapter includes gathered evidence in the synthesizer prompt. Verified by the routing/evidence tests plus cargo nextest run.

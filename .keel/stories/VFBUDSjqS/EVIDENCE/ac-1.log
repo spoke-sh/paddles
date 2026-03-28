@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:24:29.912702334-07:00
+mode: manual
+---
+Added GathererProvider::Context1, Context1GathererAdapter, and explicit CLI/runtime selection for the experimental Context-1 boundary. The adapter reports capability via available/unsupported/harness-required states through the ContextGatherer port, and the new context1_gatherer tests cover the harness-required and unsupported cases.
