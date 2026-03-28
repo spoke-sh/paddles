@@ -1,0 +1,11 @@
+# COMPLIANCE REPORT: Sift-Native Runtime Cutover
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [VF7tCKEgw](../../../../stories/VF7tCKEgw/README.md) | [ac-1.log](../../../../stories/VF7tCKEgw/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VF7tCKEgw/EVIDENCE/ac-2.log)<br>[ac1-runtime-cutover.md](../../../../stories/VF7tCKEgw/EVIDENCE/ac1-runtime-cutover.md)<br>[ac2-retained-context.md](../../../../stories/VF7tCKEgw/EVIDENCE/ac2-retained-context.md) |
+| SRS-02 | ✓ VERIFIED | [VF7tCKEgw](../../../../stories/VF7tCKEgw/README.md) | [ac-1.log](../../../../stories/VF7tCKEgw/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VF7tCKEgw/EVIDENCE/ac-2.log)<br>[ac1-runtime-cutover.md](../../../../stories/VF7tCKEgw/EVIDENCE/ac1-runtime-cutover.md)<br>[ac2-retained-context.md](../../../../stories/VF7tCKEgw/EVIDENCE/ac2-retained-context.md) |
+| SRS-03 | ✓ VERIFIED | [VF7tCKUgx](../../../../stories/VF7tCKUgx/README.md) | [ac-1.log](../../../../stories/VF7tCKUgx/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VF7tCKUgx/EVIDENCE/ac-2.log)<br>[ac1-local-tool-surface.md](../../../../stories/VF7tCKUgx/EVIDENCE/ac1-local-tool-surface.md)<br>[ac2-tool-output-context.md](../../../../stories/VF7tCKUgx/EVIDENCE/ac2-tool-output-context.md) |
+| SRS-04 | ✓ VERIFIED | [VF7tCKUgx](../../../../stories/VF7tCKUgx/README.md) | [ac-1.log](../../../../stories/VF7tCKUgx/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VF7tCKUgx/EVIDENCE/ac-2.log)<br>[ac1-local-tool-surface.md](../../../../stories/VF7tCKUgx/EVIDENCE/ac1-local-tool-surface.md)<br>[ac2-tool-output-context.md](../../../../stories/VF7tCKUgx/EVIDENCE/ac2-tool-output-context.md) |
+| SRS-05 | ✓ VERIFIED | [VF7tCKsgv](../../../../stories/VF7tCKsgv/README.md) | [ac-1.log](../../../../stories/VF7tCKsgv/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VF7tCKsgv/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VF7tCKsgv/EVIDENCE/ac-3.log)<br>[ac1-cli-cutover.md](../../../../stories/VF7tCKsgv/EVIDENCE/ac1-cli-cutover.md)<br>[ac2-runtime-boundary.md](../../../../stories/VF7tCKsgv/EVIDENCE/ac2-runtime-boundary.md)<br>[ac3-verbose-debugging.md](../../../../stories/VF7tCKsgv/EVIDENCE/ac3-verbose-debugging.md) |

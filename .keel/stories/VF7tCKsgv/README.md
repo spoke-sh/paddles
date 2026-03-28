@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VF7tCKsgv
-status: needs-human-verification
+status: done
 created_at: 2026-03-27T19:44:45
-updated_at: 2026-03-27T23:13:58
+updated_at: 2026-03-27T23:14:32
 # authored
 title: Cut Over Runtime And Docs
 type: feat
@@ -12,6 +12,7 @@ scope: VF7t633ux/VF7tAvs7B
 index: 3
 started_at: 2026-03-27T23:13:21
 submitted_at: 2026-03-27T23:13:58
+completed_at: 2026-03-27T23:14:32
 ---
 
 # Cut Over Runtime And Docs
