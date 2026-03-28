@@ -13,3 +13,7 @@
 - Replaced the wonopcode prompt loop in `MechSuitService` with the new `SiftAgentAdapter` session controller and removed wonopcode runtime dependencies from the application entry path.
 - Hardened the local tool surface by rejecting symlink escapes and surfacing non-zero `shell` and `apply_patch` exits as recoverable tool failures, then added regression coverage for both cases.
 - Recorded proof for story `VF7tCKEgw` and submitted it for human verification.
+
+## 2026-03-28T06:10:57Z
+
+- Accepted story `VF7tCKEgw` as manager after review of the attached proof logs, clearing the workshop bench for the next delivery slice.
