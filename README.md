@@ -17,6 +17,55 @@ The core philosophy is **Human-Authoring Physics, Agent-Simulation Execution, an
 
 Paddles also treats inference as a routing problem, not a single-model problem. Requests should be classified by intent and runtime budget, then routed to the smallest model or toolchain that can satisfy the task. Straightforward conversation and light tool orchestration can stay on small local models; multi-hop context gathering should prefer retrieval systems or a dedicated context-gathering subagent; final synthesis can escalate to a stronger reasoning model only when the runtime supports it.
 
+## 🧭 Internal Architecture & Routing
+
+The current runtime shape is controller-driven. The CLI prepares runtime lanes once, then the application service routes each prompt through the right internal path instead of asking one model to do every job.
+
+```mermaid
+flowchart TD
+    U["User / REPL Turn"]
+    CLI["CLI<br/>src/main.rs"]
+    Boot["BootContext<br/>credits / weights / biases / dogma"]
+    Service["MechSuitService<br/>prepare_runtime_lanes + process_prompt"]
+    Registry["SiftRegistryAdapter<br/>model id -> local assets"]
+    Router{"Turn Router<br/>casual / action / retrieval-heavy"}
+
+    subgraph SynthLane["Synthesizer Lane"]
+        Memory["AgentMemory<br/>/etc -> ~/.config -> ancestor AGENTS.md"]
+        Agent["SiftAgentAdapter"]
+        Context["Sift Context Assembly<br/>workspace evidence + retained artifacts"]
+        Tools["Workspace Tools<br/>search / list / read / write / shell / diff / patch"]
+        Runtime["Reusable Local Qwen Runtime<br/>candle + sift"]
+    end
+
+    subgraph GatherLane["Optional Gatherer Lane"]
+        Gather["ContextGatherer<br/>local Sift gatherer or Context-1 boundary"]
+        Evidence["EvidenceBundle + Capability"]
+    end
+
+    U --> CLI --> Boot --> Service
+    Registry --> Service
+    Service --> Router
+    Router -->|casual or action| Agent
+    Router -->|retrieval-heavy| Gather
+    Gather --> Evidence --> Agent
+    Memory --> Agent
+    Agent --> Context
+    Agent --> Tools
+    Agent --> Runtime
+    Context --> Agent
+    Tools --> Agent
+    Runtime --> Agent
+    Agent --> Response["Final Response"]
+```
+
+Key architectural rules reflected in that flow:
+
+*   The controller owns routing. It decides when a turn stays on the synthesizer lane and when it must gather context first.
+*   The gatherer lane returns typed evidence for synthesis. It does not replace the final answer path.
+*   The REPL reloads hierarchical `AGENTS.md` memory on every turn, so operator guidance can change without restarting the process.
+*   The local Qwen runtime stays loaded, while turn-local prompt state is rebuilt per send.
+
 ## 📜 Foundational Principles & Philosophy
 
 The project operates under a strict set of guiding principles captured in the following documents:
@@ -94,7 +143,7 @@ The `paddles` REPL reloads `AGENTS.md` memory on every prompt. It searches in th
 *   `~/.config/paddles/AGENTS.md`
 *   Every `AGENTS.md` from the filesystem root down to the current working directory
 
-Later files are treated as more specific and override earlier guidance. That means edits to a local project `AGENTS.md` take effect on the next turn without restarting the REPL.
+Later files are treated as more specific and override earlier guidance. That means edits to a local project `AGENTS.md` take effect on the next turn without restarting the REPL, and those instructions are injected into both the direct-answer path and the tool-oriented prompt path.
 
 ## 🛠️ Key Tools & Components
 

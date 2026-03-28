@@ -37,12 +37,17 @@ That routing principle is foundational. `paddles` should not assume one model is
 - Routes obvious workspace actions directly to tools when the controller can infer the correct call.
 - Preserves short-turn session state such as recent turns, retained artifacts, and tool outputs.
 
-### 5. Local Generation Runtime (`src/infrastructure/adapters/sift_agent.rs`)
+### 5. Operator Memory Layer (`src/infrastructure/adapters/agent_memory.rs`)
+- Reloads `AGENTS.md` memory on every prompt so the REPL can absorb operator guidance without restarting.
+- Searches `/etc/paddles/AGENTS.md`, `~/.config/paddles/AGENTS.md`, and then every ancestor `AGENTS.md` from filesystem root to the current workspace.
+- Treats later files as more specific than earlier files and injects the merged result into both direct-answer and tool-oriented prompt paths.
+
+### 6. Local Generation Runtime (`src/infrastructure/adapters/sift_agent.rs`)
 - Uses a reusable local Qwen runtime backed by `candle`.
 - Keeps one loaded model runtime alive and resets turn state between sends.
 - Executes the default local reasoning and tool-orchestration path.
 
-### 6. Tool Surface
+### 7. Tool Surface
 - Search and context assembly
 - File listing and file reads
 - File writes and replacements
@@ -56,14 +61,16 @@ The controller is responsible for deciding when tools are necessary and when a d
 1. **Invoke**: The user runs `just paddles` or `paddles --prompt`.
 2. **Calibrate**: `BootContext` validates the clean-boot invariants.
 3. **Resolve Runtime**: The registry maps the requested model ID to local assets.
-4. **Route Turn**: The Sift session controller classifies the turn:
+4. **Load Operator Memory**: The REPL reloads hierarchical `AGENTS.md` files and prepares a merged instruction block for the turn.
+5. **Route Turn**: The Sift session controller classifies the turn:
    - Casual direct answer
    - Tool-backed workspace action
    - Context-assembled retrieval plus answer
-5. **Execute**:
+6. **Execute**:
    - The local model replies directly, or
    - The controller executes tools and feeds the results back through the turn loop.
-6. **Return**: The terminal prints the final response.
+   - A retrieval-heavy request can gather evidence first, then hand that evidence to the synthesizer lane.
+7. **Return**: The terminal prints the final response.
 
 ## Model Routing Strategy
 
@@ -140,6 +147,23 @@ intended to preserve these semantics:
 
 The important behavioral rule is simple: a gatherer returns evidence for a
 downstream synthesizer. It does not return the final user-facing answer.
+
+## Hierarchical Operator Memory
+
+`paddles` now has an explicit operator-memory layer in the REPL runtime.
+
+- Memory files are always named `AGENTS.md`.
+- The runtime loads them in this order:
+  1. `/etc/paddles/AGENTS.md`
+  2. `~/.config/paddles/AGENTS.md`
+  3. every ancestor `AGENTS.md` from filesystem root to the active workspace
+- The loaded content is reapplied on every turn, not just at process start.
+- More specific files override broader guidance by appearing later in the merged prompt.
+
+This memory layer is guidance for prompt construction, not a replacement for
+controller-side routing, typed evidence contracts, or deterministic tool
+execution. The controller still owns routing, and memory must not be used as an
+excuse to hide runtime behavior in prompt text.
 
 ### Experimental Context-1 Boundary
 
