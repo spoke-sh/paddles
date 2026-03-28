@@ -179,30 +179,45 @@ impl SiftAgentAdapter {
                 AgentTurnInput::new(&turn_id, "user", prompt).with_session_id(&state.session_id),
             ),
         );
-        let initial_local_context = self.combined_local_context(&working_local_context);
+        let casual_turn = is_casual_prompt(prompt);
+        let mut reply = if casual_turn {
+            self.send_to_model(&build_direct_turn_prompt(prompt))?
+        } else {
+            let initial_local_context = self.combined_local_context(&working_local_context);
+            let initial_context =
+                self.assemble_context(prompt, None, &initial_local_context, &working_retained)?;
+            working_retained = initial_context.retained_artifacts.clone();
+            self.log_context_assembly("initial", &initial_context);
 
-        let initial_context =
-            self.assemble_context(prompt, None, &initial_local_context, &working_retained)?;
-        working_retained = initial_context.retained_artifacts.clone();
-        self.log_context_assembly("initial", &initial_context);
+            self.send_to_model(&build_turn_prompt(
+                &self.workspace_root,
+                prompt,
+                &initial_context,
+            ))?
+        };
 
-        let mut reply = self.send_to_model(&build_turn_prompt(
-            &self.workspace_root,
-            prompt,
-            &initial_context,
-        ))?;
+        if casual_turn {
+            if parse_tool_call(&reply)?.is_some() {
+                reply = self.send_to_model(&build_direct_retry_prompt(prompt))?;
+            }
+            if parse_tool_call(&reply)?.is_some() {
+                reply = fallback_casual_reply(prompt);
+            }
+        } else {
+            for _ in 0..MAX_TOOL_STEPS {
+                let Some(tool_call) = parse_tool_call(&reply)? else {
+                    break;
+                };
 
-        for _ in 0..MAX_TOOL_STEPS {
-            let Some(tool_call) = parse_tool_call(&reply)? else {
-                break;
-            };
-
-            state.tool_counter += 1;
-            let call_id = format!("tool-{}", state.tool_counter);
-            let combined_context = self.combined_local_context(&working_local_context);
-            let result =
-                match self.execute_tool(&tool_call, &call_id, &combined_context, &working_retained)
-                {
+                state.tool_counter += 1;
+                let call_id = format!("tool-{}", state.tool_counter);
+                let combined_context = self.combined_local_context(&working_local_context);
+                let result = match self.execute_tool(
+                    &tool_call,
+                    &call_id,
+                    &combined_context,
+                    &working_retained,
+                ) {
                     Ok(result) => result,
                     Err(err) => ToolResult {
                         name: tool_call.name(),
@@ -211,29 +226,30 @@ impl SiftAgentAdapter {
                     },
                 };
 
-            if let Some(retained) = result.retained_artifacts {
-                working_retained = retained;
+                if let Some(retained) = result.retained_artifacts {
+                    working_retained = retained;
+                }
+
+                push_local_context(
+                    &mut working_local_context,
+                    LocalContextSource::ToolOutput(ToolOutputInput::new(
+                        result.name,
+                        &call_id,
+                        result.summary.clone(),
+                    )),
+                );
+
+                reply = self.send_to_model(&build_tool_follow_up_prompt(
+                    prompt,
+                    &call_id,
+                    result.name,
+                    &result.summary,
+                ))?;
             }
 
-            push_local_context(
-                &mut working_local_context,
-                LocalContextSource::ToolOutput(ToolOutputInput::new(
-                    result.name,
-                    &call_id,
-                    result.summary.clone(),
-                )),
-            );
-
-            reply = self.send_to_model(&build_tool_follow_up_prompt(
-                prompt,
-                &call_id,
-                result.name,
-                &result.summary,
-            ))?;
-        }
-
-        if parse_tool_call(&reply)?.is_some() {
-            bail!("tool step limit exceeded after {MAX_TOOL_STEPS} tool call(s)");
+            if parse_tool_call(&reply)?.is_some() {
+                bail!("tool step limit exceeded after {MAX_TOOL_STEPS} tool call(s)");
+            }
         }
 
         push_local_context(
@@ -537,6 +553,30 @@ Current user request:\n\
     )
 }
 
+fn build_direct_turn_prompt(user_prompt: &str) -> String {
+    format!(
+        "You are Paddles, a local-first coding assistant.\n\
+The user is making a conversational request that does not require workspace tools.\n\
+Answer directly in plain text.\n\
+Do not emit JSON, code fences, or tool calls.\n\
+Do not modify files or suggest workspace actions unless the user explicitly asks for them.\n\
+\n\
+Current user request:\n\
+{user_prompt}\n"
+    )
+}
+
+fn build_direct_retry_prompt(user_prompt: &str) -> String {
+    format!(
+        "Your last reply tried to call a workspace tool for a conversational message.\n\
+Answer the user directly in plain text.\n\
+Do not emit JSON, code fences, or tool calls.\n\
+\n\
+Current user request:\n\
+{user_prompt}\n"
+    )
+}
+
 fn build_tool_follow_up_prompt(
     user_prompt: &str,
     call_id: &str,
@@ -611,6 +651,52 @@ fn format_search_summary(query: &str, assembly: &ContextAssemblyResponse) -> Str
     }
 
     lines.join("\n")
+}
+
+fn is_casual_prompt(prompt: &str) -> bool {
+    let normalized = normalize_prompt(prompt);
+
+    matches!(
+        normalized.as_str(),
+        "hi" | "hello"
+            | "hey"
+            | "yo"
+            | "sup"
+            | "whats up"
+            | "what's up"
+            | "how are you"
+            | "who are you"
+            | "thanks"
+            | "thank you"
+            | "good morning"
+            | "good afternoon"
+            | "good evening"
+            | "bye"
+            | "goodbye"
+    ) || normalized.starts_with("hello ")
+        || normalized.starts_with("hi ")
+        || normalized.starts_with("hey ")
+        || normalized.starts_with("thanks ")
+        || normalized.starts_with("thank you ")
+}
+
+fn fallback_casual_reply(prompt: &str) -> String {
+    let normalized = normalize_prompt(prompt);
+
+    if matches!(normalized.as_str(), "hi" | "hello" | "hey" | "yo") {
+        return "Hello.".to_string();
+    }
+    if matches!(normalized.as_str(), "whats up" | "what's up" | "sup") {
+        return "Not much. What do you want to work on?".to_string();
+    }
+    if normalized == "how are you" {
+        return "I am here and ready to help.".to_string();
+    }
+    if matches!(normalized.as_str(), "thanks" | "thank you") {
+        return "You're welcome.".to_string();
+    }
+
+    "I am here. What do you want to work on?".to_string()
 }
 
 fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
@@ -804,6 +890,13 @@ fn format_command_summary(header: &str, command: &str, output: &std::process::Ou
     }
 
     trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
+}
+
+fn normalize_prompt(prompt: &str) -> String {
+    prompt
+        .trim()
+        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
+        .to_ascii_lowercase()
 }
 
 fn unix_timestamp() -> u64 {
@@ -1048,6 +1141,53 @@ mod tests {
             LocalContextSource::ToolOutput(output)
                 if output.tool_name == "read_file" && output.content.contains("failed")
         )));
+    }
+
+    #[test]
+    fn casual_prompts_retry_for_plain_text_instead_of_executing_tools() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                r#"{"tool":"replace_in_file","path":"PROTOCOL.md","old":"hello","new":"Hello","replace_all":true}"#
+                    .to_string(),
+                "Hello.".to_string(),
+            ])),
+        );
+
+        let reply = adapter.respond("Hello").expect("response");
+        assert_eq!(reply, "Hello.");
+
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 0);
+        assert!(
+            !state
+                .local_context
+                .iter()
+                .any(|item| matches!(item, LocalContextSource::ToolOutput(_)))
+        );
+    }
+
+    #[test]
+    fn casual_prompts_fall_back_to_plain_text_after_repeated_tool_calls() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                r#"{"tool":"replace_in_file","path":"PROTOCOL.md","old":"hello","new":"Hello","replace_all":true}"#
+                    .to_string(),
+                r#"{"tool":"replace_in_file","path":"PROTOCOL.md","old":"hello","new":"Hello","replace_all":true}"#
+                    .to_string(),
+            ])),
+        );
+
+        let reply = adapter.respond("What's up?").expect("response");
+        assert_eq!(reply, "Not much. What do you want to work on?");
+
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 0);
     }
 
     #[test]
