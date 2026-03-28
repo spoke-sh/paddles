@@ -45,7 +45,7 @@ paddles *args:
   #!/usr/bin/env bash
   FEATURES=""
   PASSED_ARGS=()
-  for arg in {{args}}; do
+  for arg in "$@"; do
     if [ "$arg" == "--cuda" ]; then
       FEATURES="--features cuda"
     else
@@ -58,7 +58,7 @@ paddles *args:
 mission *args:
   #!/usr/bin/env bash
   FEATURES=""
-  for arg in {{args}}; do
+  for arg in "$@"; do
     if [ "$arg" == "--cuda" ]; then
       FEATURES="--features cuda"
     fi
