@@ -15,6 +15,8 @@ Paddles empowers AI assistants by leveraging the **Keel Engine**, a sophisticate
 
 The core philosophy is **Human-Authoring Physics, Agent-Simulation Execution, and Verification-Confirmation of State**. Humans define the high-level strategy and architecture (the "physics"), while agents perform the tactical execution (the "simulation") within those bounds, with verification confirming the outcome.
 
+Paddles also treats inference as a routing problem, not a single-model problem. Requests should be classified by intent and runtime budget, then routed to the smallest model or toolchain that can satisfy the task. Straightforward conversation and light tool orchestration can stay on small local models; multi-hop context gathering should prefer retrieval systems or a dedicated context-gathering subagent; final synthesis can escalate to a stronger reasoning model only when the runtime supports it.
+
 ## 📜 Foundational Principles & Philosophy
 
 The project operates under a strict set of guiding principles captured in the following documents:
@@ -88,8 +90,8 @@ Every session follows a deterministic cycle:
 
 Paddles integrates these core components within the Keel Engine:
 
-*   **Keel Engine:** Manages the SDLC simulation, state transitions, verification, and collaboration queues. The current version is derived from `spoke-sh/keel`'s `main` branch (commit `0e078226c7bf61de9c1c6c6261697bc332411cf2`). Note: This is an older version, and the `health` command is not available; use `doctor` for diagnostics.
-*   **Agentic Capabilities:** AI assistants like `wonopcode` (coding), `sift` (retrieval), and `candle` (local AI models) execute tactical tasks.
+*   **Keel Engine:** Manages the SDLC simulation, state transitions, verification, and collaboration queues. The current version is pinned in `flake.lock`.
+*   **Agentic Capabilities:** AI assistants like `wonopcode` (coding), `sift` (retrieval), and `candle` (local AI models) execute tactical tasks. Search and context-gathering models should be treated as retrieval subagents that gather and rank evidence; answer models should synthesize the final response from that evidence.
 *   **Nix:** Manages the development environment for reproducibility.
 *   **Git:** Used for version control and audit logging, with commits adhering to Conventional Commits.
 
