@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:20:13.690913058-07:00
+mode: manual
+---
+Added a Sift-backed gatherer adapter in src/infrastructure/adapters/sift_context_gatherer.rs and controller-side routing in src/application/mod.rs. Retrieval-heavy prompts now select GatherThenSynthesize when a gatherer lane is configured, and the synthesizer consumes gathered EvidenceBundle data via SiftAgentAdapter::respond_with_evidence(). Verified by cargo test, cargo nextest run, and the new routing/evidence injection tests.

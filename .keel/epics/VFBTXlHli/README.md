@@ -22,8 +22,8 @@ mission: VFBTVtKh9
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/4 stories done
+**Progress:** 0/1 voyages complete, 3/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Subagent Interface and Routing Foundations](voyages/VFBTYpPo6/) | in-progress | 2/4 |
+| [Subagent Interface and Routing Foundations](voyages/VFBTYpPo6/) | in-progress | 3/4 |
 <!-- END GENERATED -->

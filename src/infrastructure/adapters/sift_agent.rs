@@ -1,3 +1,4 @@
+use crate::domain::ports::EvidenceBundle;
 use crate::infrastructure::adapters::sift_registry::qwen_spec_for;
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
@@ -429,6 +430,14 @@ impl SiftAgentAdapter {
     }
 
     pub fn respond(&self, prompt: &str) -> Result<String> {
+        self.respond_with_evidence(prompt, None)
+    }
+
+    pub fn respond_with_evidence(
+        &self,
+        prompt: &str,
+        gathered_evidence: Option<&EvidenceBundle>,
+    ) -> Result<String> {
         let mut state = self
             .state
             .lock()
@@ -474,6 +483,7 @@ impl SiftAgentAdapter {
                     prompt,
                     &recent_turns,
                     &initial_context,
+                    gathered_evidence,
                     prefer_tools,
                     follow_up_execution,
                 ),
@@ -822,6 +832,7 @@ fn build_turn_prompt(
     user_prompt: &str,
     recent_turns: &str,
     context: &ContextAssemblyResponse,
+    gathered_evidence: Option<&EvidenceBundle>,
     prefer_tools: bool,
     follow_up_execution: bool,
 ) -> String {
@@ -859,6 +870,9 @@ Available tools:\n\
 Recent conversation:\n\
 {}\n\
 \n\
+Gathered retrieval evidence:\n\
+{}\n\
+\n\
 Current workspace evidence:\n\
 {}\n\
 \n\
@@ -867,6 +881,7 @@ Current user request:\n\
         workspace_root.display(),
         routing_guidance,
         recent_turns,
+        format_gathered_evidence_digest(gathered_evidence),
         format_context_digest(context),
         user_prompt
     )
@@ -962,6 +977,32 @@ fn format_context_digest(context: &ContextAssemblyResponse) -> String {
             location,
             trim_for_context(&hit.snippet, 280)
         ));
+    }
+
+    lines.join("\n")
+}
+
+fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String {
+    let Some(evidence) = evidence else {
+        return "No pre-gathered retrieval evidence was provided.".to_string();
+    };
+
+    let mut lines = vec![evidence.summary.clone()];
+    if evidence.items.is_empty() {
+        lines.push("No ranked evidence items were attached.".to_string());
+    } else {
+        for item in evidence.items.iter().take(MAX_CONTEXT_HITS) {
+            lines.push(format!(
+                "- [{}] {}: {}",
+                item.rank,
+                item.source,
+                trim_for_context(&item.snippet, 240),
+            ));
+        }
+    }
+
+    if !evidence.warnings.is_empty() {
+        lines.push(format!("Warnings: {}", evidence.warnings.join(" | ")));
     }
 
     lines.join("\n")
@@ -1389,6 +1430,7 @@ mod tests {
         extract_json_payload, infer_tool_call, is_follow_up_execution_request,
         normalize_relative_path, should_prefer_tools, trim_for_context,
     };
+    use crate::domain::ports::{EvidenceBundle, EvidenceItem};
     use anyhow::{Result, anyhow};
     use sift::Conversation;
     use std::collections::VecDeque;
@@ -1396,6 +1438,7 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs as unix_fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
 
     struct MockConversation {
         responses: VecDeque<String>,
@@ -1421,6 +1464,34 @@ mod tests {
 
         fn history(&self) -> &[String] {
             &self.history
+        }
+    }
+
+    struct RecordingConversation {
+        response: String,
+        history: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl RecordingConversation {
+        fn new(response: impl Into<String>, history: Arc<Mutex<Vec<String>>>) -> Self {
+            Self {
+                response: response.into(),
+                history,
+            }
+        }
+    }
+
+    impl Conversation for RecordingConversation {
+        fn send(&mut self, message: &str, _max_tokens: usize) -> Result<String> {
+            self.history
+                .lock()
+                .expect("history lock")
+                .push(message.to_string());
+            Ok(self.response.clone())
+        }
+
+        fn history(&self) -> &[String] {
+            &[]
         }
     }
 
@@ -1517,6 +1588,47 @@ mod tests {
             LocalContextSource::AgentTurn(turn)
                 if turn.role == "assistant" && turn.content == "The entrypoint is src/main.rs."
         )));
+    }
+
+    #[test]
+    fn respond_with_evidence_includes_gathered_summary_in_prompt() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "Here is the answer.",
+                Arc::clone(&recorded_messages),
+            )),
+        );
+
+        let evidence = EvidenceBundle::new(
+            "Gathered repository evidence for runtime lanes.",
+            vec![EvidenceItem {
+                source: "src/application/mod.rs".to_string(),
+                snippet: "PreparedRuntimeLanes keeps synthesizer and gatherer lanes.".to_string(),
+                rationale: "Relevant runtime lane wiring.".to_string(),
+                rank: 1,
+            }],
+        );
+
+        let reply = adapter
+            .respond_with_evidence(
+                "Summarize how runtime lanes work across the repo.",
+                Some(&evidence),
+            )
+            .expect("response");
+        assert_eq!(reply, "Here is the answer.");
+
+        let prompt = recorded_messages
+            .lock()
+            .expect("history lock")
+            .first()
+            .cloned()
+            .expect("recorded prompt");
+        assert!(prompt.contains("Gathered repository evidence for runtime lanes."));
+        assert!(prompt.contains("src/application/mod.rs"));
     }
 
     #[test]

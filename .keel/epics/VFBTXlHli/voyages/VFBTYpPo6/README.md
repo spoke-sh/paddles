@@ -27,12 +27,12 @@ started_at: 2026-03-28T13:07:30
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Context-Gathering Subagent Contract](../../../../stories/VFBUBtylw/README.md) | feat | done |
 | [Refactor Runtime For Gatherer And Synthesizer Lanes](../../../../stories/VFBUCQeo0/README.md) | feat | done |
-| [Route Retrieval-Heavy Turns Through Context Gathering](../../../../stories/VFBUCxNpH/README.md) | feat | backlog |
+| [Route Retrieval-Heavy Turns Through Context Gathering](../../../../stories/VFBUCxNpH/README.md) | feat | done |
 | [Add Context-1 Adapter Boundary And Harness Gate](../../../../stories/VFBUDSjqS/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:20:13.709755734-07:00
+mode: manual
+---
+Non-retrieval prompts, casual prompts, action-oriented prompts, and prompts without a configured gatherer lane all stay on the existing synthesizer path. This is covered by the new application routing tests and by process_prompt() falling back to the synthesizer when the gatherer lane is absent.

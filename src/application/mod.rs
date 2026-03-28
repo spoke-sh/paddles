@@ -1,6 +1,9 @@
 use crate::domain::model::BootContext;
-use crate::domain::ports::{ModelPaths, ModelRegistry};
+use crate::domain::ports::{
+    ContextGatherRequest, ContextGatherer, EvidenceBudget, ModelPaths, ModelRegistry,
+};
 use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -70,6 +73,7 @@ impl PreparedRuntimeLanes {
 struct ActiveRuntimeState {
     prepared: PreparedRuntimeLanes,
     synthesizer_engine: Arc<SiftAgentAdapter>,
+    gatherer: Option<Arc<dyn ContextGatherer>>,
 }
 
 impl MechSuitService {
@@ -142,9 +146,16 @@ impl MechSuitService {
             &prepared.synthesizer.model_id,
         )?);
         engine.set_verbose(self.verbose.load(Ordering::Relaxed));
+        let gatherer = prepared.gatherer.as_ref().map(|lane| {
+            let adapter =
+                SiftContextGathererAdapter::new(self.workspace_root.clone(), lane.model_id.clone());
+            adapter.set_verbose(self.verbose.load(Ordering::Relaxed));
+            Arc::new(adapter) as Arc<dyn ContextGatherer>
+        });
         *self.runtime.write().await = Some(ActiveRuntimeState {
             prepared: prepared.clone(),
             synthesizer_engine: engine,
+            gatherer,
         });
 
         Ok(prepared)
@@ -156,13 +167,20 @@ impl MechSuitService {
         let runtime = runtime_guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
+        let routing = select_execution_path(prompt, runtime.gatherer.is_some());
 
         if self.verbose.load(Ordering::Relaxed) >= 1 {
             if let Some(gatherer) = &runtime.prepared.gatherer {
-                println!(
-                    "[LANE] Using synthesizer lane '{}' for direct response; gatherer lane '{}' is configured for future retrieval routing.",
-                    runtime.prepared.synthesizer.model_id, gatherer.model_id,
-                );
+                match routing {
+                    PromptExecutionPath::GatherThenSynthesize => println!(
+                        "[LANE] Routing retrieval-heavy prompt through gatherer lane '{}' before synthesizer lane '{}'.",
+                        gatherer.model_id, runtime.prepared.synthesizer.model_id,
+                    ),
+                    PromptExecutionPath::SynthesizerOnly => println!(
+                        "[LANE] Using synthesizer lane '{}' for this prompt; gatherer lane '{}' is available but not selected.",
+                        runtime.prepared.synthesizer.model_id, gatherer.model_id,
+                    ),
+                }
             } else {
                 println!(
                     "[LANE] Using synthesizer lane '{}' as the default response path.",
@@ -171,12 +189,103 @@ impl MechSuitService {
             }
         }
 
+        let gathered_evidence = match routing {
+            PromptExecutionPath::GatherThenSynthesize => match runtime.gatherer.as_ref() {
+                Some(gatherer) => {
+                    let request = ContextGatherRequest::new(
+                        prompt,
+                        self.workspace_root.clone(),
+                        "retrieval-heavy prompt routed through the gatherer lane",
+                        EvidenceBudget::default(),
+                    );
+                    match gatherer.gather_context(&request).await {
+                        Ok(result) if result.is_synthesis_ready() => result.evidence_bundle,
+                        Ok(_) => {
+                            if self.verbose.load(Ordering::Relaxed) >= 1 {
+                                println!(
+                                    "[LANE] Gatherer lane was unavailable for synthesis-ready evidence; falling back to the synthesizer lane."
+                                );
+                            }
+                            None
+                        }
+                        Err(err) => {
+                            if self.verbose.load(Ordering::Relaxed) >= 1 {
+                                println!(
+                                    "[LANE] Gatherer lane failed ({err:#}); falling back to the synthesizer lane."
+                                );
+                            }
+                            None
+                        }
+                    }
+                }
+                None => None,
+            },
+            PromptExecutionPath::SynthesizerOnly => None,
+        };
+
         let prompt = prompt.to_string();
         let engine = runtime.synthesizer_engine.clone();
-        tokio::task::spawn_blocking(move || engine.respond(&prompt))
-            .await
-            .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
+        tokio::task::spawn_blocking(move || {
+            engine.respond_with_evidence(&prompt, gathered_evidence.as_ref())
+        })
+        .await
+        .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptExecutionPath {
+    SynthesizerOnly,
+    GatherThenSynthesize,
+}
+
+fn select_execution_path(prompt: &str, gatherer_available: bool) -> PromptExecutionPath {
+    if gatherer_available && should_route_through_context_gathering(prompt) {
+        PromptExecutionPath::GatherThenSynthesize
+    } else {
+        PromptExecutionPath::SynthesizerOnly
+    }
+}
+
+fn should_route_through_context_gathering(prompt: &str) -> bool {
+    let normalized = prompt.to_ascii_lowercase();
+    let direct_action = [
+        "git status",
+        "git diff",
+        "run ",
+        "show ",
+        "check ",
+        "inspect ",
+        "open ",
+        "read ",
+        "edit ",
+        "replace ",
+        "write ",
+        "apply ",
+    ];
+    if direct_action
+        .iter()
+        .any(|needle| normalized.contains(needle))
+    {
+        return false;
+    }
+
+    let retrieval_markers = [
+        "summarize",
+        "context",
+        "architecture",
+        "explain how",
+        "across the repo",
+        "across the codebase",
+        "research",
+        "compare",
+        "what references",
+        "where is the context",
+    ];
+
+    retrieval_markers
+        .iter()
+        .any(|needle| normalized.contains(needle))
 }
 
 #[cfg(test)]
@@ -213,6 +322,35 @@ mod tests {
 
         assert_eq!(lanes.default_response_lane(), &synthesizer);
         assert_eq!(lanes.gatherer.as_ref(), Some(&gatherer));
+    }
+
+    #[test]
+    fn retrieval_heavy_prompts_use_gatherer_lane_when_available() {
+        let routing = super::select_execution_path(
+            "Summarize the runtime lane architecture across the repo",
+            true,
+        );
+
+        assert_eq!(routing, super::PromptExecutionPath::GatherThenSynthesize);
+    }
+
+    #[test]
+    fn action_or_casual_prompts_stay_on_synthesizer_lane() {
+        assert_eq!(
+            super::select_execution_path("Show me the git status", true),
+            super::PromptExecutionPath::SynthesizerOnly,
+        );
+        assert_eq!(
+            super::select_execution_path("Hello", true),
+            super::PromptExecutionPath::SynthesizerOnly,
+        );
+        assert_eq!(
+            super::select_execution_path(
+                "Summarize the runtime lane architecture across the repo",
+                false,
+            ),
+            super::PromptExecutionPath::SynthesizerOnly,
+        );
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

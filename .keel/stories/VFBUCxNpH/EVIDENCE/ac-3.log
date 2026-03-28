@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T13:20:13.736010772-07:00
+mode: manual
+---
+Gatherer routing degrades safely: unsupported, empty, or failed gatherer results fall back to synthesizer-only execution, and direct workspace actions are excluded from gatherer routing. Evidence injection into the synthesizer prompt is covered by the new SiftAgentAdapter test, and all gates passed under just quality plus cargo nextest run.
