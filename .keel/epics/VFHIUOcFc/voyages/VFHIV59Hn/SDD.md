@@ -57,7 +57,7 @@ This voyage does not cover:
 
 | Dependency | Type | Purpose | Version/API |
 |------------|------|---------|-------------|
-| `transit-core` | local library | Durable embedded append/branch/replay/checkpoint backend for thread lineage | existing workspace dependency |
+| `transit-core` | local library | Durable embedded append/branch/replay/checkpoint backend for thread lineage, now with stronger branch metadata helpers, branch replay views, and artifact descriptor helpers | existing workspace dependency |
 | paddles conversation/thread layer | paddles-owned crate or module | Extractable conversation API over recorder and transcript semantics | introduced by this voyage |
 | `TraceRecorder` boundary | paddles port | Keeps recorder mapping storage-neutral inside the runtime | existing paddles port |
 | Planner lane | paddles runtime | Selects bounded thread decisions from interpretation context | existing planner contract, extended |
@@ -71,6 +71,7 @@ This voyage does not cover:
 | Durability | Use a paddles-owned conversation layer over embedded `transit-core` | Keeps transit primitive while letting paddles define the higher-level conversation/thread contract |
 | Merge semantics | Explicit merge, backlink, or summary records instead of history rewrite | Keeps thread structure replayable and inspectable |
 | Active-turn handling | Capture immediately, decide at safe checkpoints | Avoids pretending one local session can handle unbounded true concurrency |
+| Upstream helper reuse | Consume `transit-core` branch metadata helpers, branch replay views, and artifact descriptor helpers inside the paddles-owned conversation layer | Reduces low-level glue while preserving the architecture boundary that keeps conversation APIs out of transit |
 
 ## Architecture
 
@@ -123,7 +124,8 @@ The voyage touches five cooperating layers:
 - Interface: reuses the recorder boundary and embedded transit adapter without
   leaking conversation semantics into `transit-core`.
 - Behavior: emits explicit branch creation, thread reply, backlink/summary,
-  merge decision, and checkpoint records.
+  merge decision, and checkpoint records, reusing upstream helper APIs for
+  branch metadata, replay views, and artifact descriptors where possible.
 
 ### Paddles Conversation Layer
 

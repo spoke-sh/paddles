@@ -24,5 +24,6 @@ threaded work without turning `transit-core` into a conversation API.
 ## Acceptance Criteria
 
 - [ ] A paddles-owned conversation/thread layer exists above the recorder boundary and owns the thread DTOs needed by runtime and UX code. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
+- [ ] The layer consumes the new upstream `transit-core` metadata, branch replay, and artifact helper APIs where they simplify low-level plumbing, without turning `transit-core` into the conversation API boundary. [SRS-03/AC-02] <!-- verify: manual, SRS-03:start:end -->
 - [ ] Thread-local replay reconstructs enough mainline and child-thread provenance for later planning and synthesis. [SRS-04/AC-02] <!-- verify: manual, SRS-04:start:end -->
 - [ ] The implementation works through the existing embedded recorder path, does not require a separate trace server, and remains extractable from paddles later. [SRS-NFR-04/AC-03] <!-- verify: manual, SRS-NFR-04:start:end -->
