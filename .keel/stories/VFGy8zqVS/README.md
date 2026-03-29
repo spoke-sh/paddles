@@ -27,3 +27,4 @@ repository-specific top-level intents.
 - [ ] Graph-mode gatherers remain local-first, bounded, and fail closed when graph planning is invalid or unavailable. [SRS-NFR-01/AC-02] <!-- verify: manual, SRS-NFR-01:start:end -->
 - [ ] Recursive planner/synthesizer handoff continues to operate with graph-capable gathered evidence instead of flattening the path back into an opaque linear summary. [SRS-03/AC-03] <!-- verify: manual, SRS-03:start:end -->
 - [ ] The default operator surface renders concise graph planner summaries, branch/frontier state, and graph stop reasons when graph-mode retrieval is active. [SRS-05/AC-04] <!-- verify: manual, SRS-05:start:end -->
+- [ ] The graph-capable route remains compatible with a future embedded recorder and does not assume a networked trace server. [SRS-NFR-04/AC-05] <!-- verify: manual, SRS-NFR-04:start:end -->

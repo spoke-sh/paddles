@@ -18,10 +18,11 @@ index: 2
 
 Map the richer upstream graph episode/frontier/branch state into typed
 `paddles` metadata so graph-mode gatherers can surface useful branch-local
-evidence, graph stop reasons, and concise operator-visible telemetry without
-leaking raw `sift` internals through the domain boundary.
+evidence, graph stop reasons, stable machine-readable lineage identifiers, and
+concise operator-visible telemetry without leaking raw `sift` internals
+through the domain boundary.
 
 ## Acceptance Criteria
 
-- [ ] Graph-mode gatherer results preserve typed graph episode/frontier/branch metadata and graph stop reasons in the gathered evidence bundle. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
+- [ ] Graph-mode gatherer results preserve typed graph episode/frontier/branch metadata, stable step/turn identifiers, and graph stop reasons in the gathered evidence bundle. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
 - [ ] The metadata boundary remains `paddles`-owned rather than exposing raw upstream `sift` graph DTOs across the domain. [SRS-NFR-02/AC-03] <!-- verify: manual, SRS-NFR-02:start:end -->
