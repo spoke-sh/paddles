@@ -143,12 +143,6 @@ flowchart TD
     D --> G --> X --> R
 ```
 
-### Role Of Keel
-
-Keel is important, but it is not supposed to become a first-class special-case runtime intent. It is one evidence domain inside the workspace. Mission files, charters, PRDs, voyage docs, and board commands should be reachable through the same recursive context mechanisms as source files and tool outputs.
-
-That is why the next architecture step is not “add a board intent.” It is “make the planner better at using recursive context.”
-
 ## Current Implementation Snapshot
 
 The repository now implements the recursive harness in a bounded local-first form.
