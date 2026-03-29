@@ -27,6 +27,11 @@ The backbone has five layers:
 5. `Renderer`
    The TUI/plain output surfaces show the recursive work and final answer.
 
+6. `RecorderBoundary`
+   A paddles-owned trace contract projects the same runtime transitions into a
+   `TraceRecorder` port, with transcript rendering staying a projection rather
+   than the durable source of truth.
+
 ## Why This Shape
 
 This architecture exists to solve three failures of one-shot small-model
@@ -119,6 +124,9 @@ The repo now contains the main pieces of the target architecture:
 - a local gatherer backend in [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs)
 - interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
+- a paddles-owned trace contract in [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs)
+- a recorder port in [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs)
+- embedded/noop/in-memory recorder adapters in [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs)
 
 The remaining transitional pieces are now smaller:
 
@@ -126,7 +134,23 @@ The remaining transitional pieces are now smaller:
 - legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
 - the default `sift-autonomous` gatherer path now runs bounded graph-mode retrieval for recursive planner `search` / `refine` work and preserves graph episode/frontier/branch state as typed `paddles` metadata
+- the recorder boundary is live, but the default runtime still uses the noop recorder until a policy/config slice chooses an always-on local recorder
+- artifact envelopes keep large payloads behind logical ids and optional locators, but there is no external artifact-store promotion policy yet
 - `context-1` remains an explicit experimental boundary
+
+## Recorder Boundary
+
+The recorder path is now:
+
+1. runtime transitions create typed `TraceRecord` values
+2. transcript rendering still flows through `TurnEventSink`
+3. durable recording flows through `TraceRecorder`
+4. noop and in-memory adapters preserve local safety and tests
+5. embedded `transit-core` maps roots, branch heads, appends, replay, and
+   checkpoints without leaking raw transit types into the domain
+
+This keeps the domain storage-neutral while making lineage durable enough for
+later replay, branch comparison, and graph-trace analysis.
 
 ## Transitional Gap: Tool Bridge And Legacy Helpers
 

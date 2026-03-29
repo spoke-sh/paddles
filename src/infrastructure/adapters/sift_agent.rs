@@ -2215,7 +2215,13 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
     if !request.loop_state.pending_branches.is_empty() {
         lines.push(format!(
             "Pending branches: {}",
-            request.loop_state.pending_branches.join(" | ")
+            request
+                .loop_state
+                .pending_branches
+                .iter()
+                .map(|branch| branch.summary())
+                .collect::<Vec<_>>()
+                .join(" | ")
         ));
     }
 
@@ -2672,7 +2678,7 @@ fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision
     if let Some(branch) = request.loop_state.pending_branches.first() {
         return RecursivePlannerDecision {
             action: PlannerAction::Search {
-                query: branch.clone(),
+                query: branch.label.clone(),
                 intent: Some("queued planner branch".to_string()),
             },
             rationale: "continue with the oldest queued branch".to_string(),

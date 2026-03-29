@@ -7,3 +7,4 @@ pub mod sift_autonomous_gatherer;
 pub mod sift_context_gatherer;
 pub mod sift_planner;
 pub mod sift_registry;
+pub mod trace_recorders;

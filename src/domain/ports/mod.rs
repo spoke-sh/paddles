@@ -1,5 +1,6 @@
 mod context_gathering;
 mod planning;
+mod trace_recording;
 
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ pub use planning::{
     PlannerAction, PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
     PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner,
 };
+pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
 
 /// Port for model discovery and acquisition.
 #[async_trait]

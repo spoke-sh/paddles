@@ -22,8 +22,8 @@ index: 18
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Trace Contract And Recorder Port](voyages/VFH4CCJ4d/) | draft | 0/5 |
+| [Trace Contract And Recorder Port](voyages/VFH4CCJ4d/) | done | 5/5 |
 <!-- END GENERATED -->

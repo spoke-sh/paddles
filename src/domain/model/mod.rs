@@ -1,6 +1,13 @@
 use anyhow::Result;
 
+pub mod traces;
 pub mod turns;
+pub use traces::{
+    ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
+    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TurnTraceId,
+};
 pub use turns::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 
 /// Constitutional bounds for environmental calibration.

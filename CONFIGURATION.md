@@ -264,3 +264,13 @@ mode = "constrained"
 [doctor.checks.story-id-uniqueness]
 disabled = false
 ```
+# Trace Recording
+
+The runtime recorder boundary is separate from transcript rendering:
+
+- default runtime policy: `noop` recorder
+- available local adapters in code: in-memory and embedded `transit-core`
+- current CLI/runtime policy: no user-facing recorder-selection flag yet
+
+This keeps the live runtime local-first and fail-closed while the recorder
+policy hardens.

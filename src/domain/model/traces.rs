@@ -1,0 +1,295 @@
+use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+macro_rules! trace_id {
+    ($name:ident) => {
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Result<Self> {
+                let value = value.into();
+                ensure!(
+                    !value.trim().is_empty(),
+                    concat!(stringify!($name), " must not be empty")
+                );
+                Ok(Self(value))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+    };
+}
+
+trace_id!(TaskTraceId);
+trace_id!(TurnTraceId);
+trace_id!(TraceRecordId);
+trace_id!(TraceBranchId);
+trace_id!(TraceArtifactId);
+trace_id!(TraceCheckpointId);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceLineage {
+    pub task_id: TaskTraceId,
+    pub turn_id: TurnTraceId,
+    pub branch_id: Option<TraceBranchId>,
+    pub parent_record_id: Option<TraceRecordId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceBranchStatus {
+    Pending,
+    Active,
+    Completed,
+    Merged,
+    Pruned,
+}
+
+impl TraceBranchStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Active => "active",
+            Self::Completed => "completed",
+            Self::Merged => "merged",
+            Self::Pruned => "pruned",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceBranch {
+    pub branch_id: TraceBranchId,
+    pub label: String,
+    pub status: TraceBranchStatus,
+    pub rationale: Option<String>,
+    pub parent_branch_id: Option<TraceBranchId>,
+    pub created_from_record_id: Option<TraceRecordId>,
+}
+
+impl TraceBranch {
+    pub fn summary(&self) -> String {
+        format!("{} ({})", self.label, self.status.label())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArtifactKind {
+    Prompt,
+    Interpretation,
+    ModelOutput,
+    ToolInvocation,
+    ToolOutput,
+    EvidenceBundle,
+    PlannerTrace,
+    Selection,
+    Checkpoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactEnvelope {
+    pub artifact_id: TraceArtifactId,
+    pub kind: ArtifactKind,
+    pub mime_type: String,
+    pub summary: String,
+    pub byte_count: usize,
+    pub inline_content: Option<String>,
+    pub locator: Option<String>,
+    pub truncated: bool,
+    pub labels: BTreeMap<String, String>,
+}
+
+impl ArtifactEnvelope {
+    pub fn text(
+        artifact_id: TraceArtifactId,
+        kind: ArtifactKind,
+        summary: impl Into<String>,
+        content: impl Into<String>,
+        inline_limit: usize,
+    ) -> Self {
+        let content = content.into();
+        let char_count = content.chars().count();
+        let truncated = char_count > inline_limit;
+        let inline_content = if content.is_empty() {
+            None
+        } else if truncated {
+            let prefix = content.chars().take(inline_limit).collect::<String>();
+            Some(format!("{}...[truncated]", prefix.trim_end()))
+        } else {
+            Some(content.clone())
+        };
+        let locator = truncated.then(|| format!("paddles-artifact://{}", artifact_id.as_str()));
+
+        Self {
+            artifact_id,
+            kind,
+            mime_type: "text/plain".to_string(),
+            summary: summary.into(),
+            byte_count: content.len(),
+            inline_content,
+            locator,
+            truncated,
+            labels: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.labels.insert(key.into(), value.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceSelectionKind {
+    Evidence,
+    PlannerTrace,
+    Branch,
+    Synthesis,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceSelectionArtifact {
+    pub selection_id: TraceArtifactId,
+    pub kind: TraceSelectionKind,
+    pub summary: String,
+    pub artifact: ArtifactEnvelope,
+    pub selected_from: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceToolCall {
+    pub call_id: String,
+    pub tool_name: String,
+    pub payload: ArtifactEnvelope,
+    pub success: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceCheckpointKind {
+    TurnCompleted,
+    TurnFailed,
+}
+
+impl TraceCheckpointKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::TurnCompleted => "turn-completed",
+            Self::TurnFailed => "turn-failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceCompletionCheckpoint {
+    pub checkpoint_id: TraceCheckpointId,
+    pub kind: TraceCheckpointKind,
+    pub summary: String,
+    pub response: Option<ArtifactEnvelope>,
+    pub citations: Vec<String>,
+    pub grounded: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceTaskRoot {
+    pub prompt: ArtifactEnvelope,
+    pub interpretation: Option<ArtifactEnvelope>,
+    pub planner_model: String,
+    pub synthesizer_model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceRecordKind {
+    TaskRootStarted(TraceTaskRoot),
+    PlannerAction { action: String, rationale: String },
+    PlannerBranchDeclared(TraceBranch),
+    SelectionArtifact(TraceSelectionArtifact),
+    ToolCallRequested(TraceToolCall),
+    ToolCallCompleted(TraceToolCall),
+    CompletionCheckpoint(TraceCompletionCheckpoint),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRecord {
+    pub record_id: TraceRecordId,
+    pub sequence: u64,
+    pub lineage: TraceLineage,
+    pub kind: TraceRecordKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceReplay {
+    pub task_id: TaskTraceId,
+    pub records: Vec<TraceRecord>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceBranch, TraceBranchId,
+        TraceBranchStatus, TraceLineage, TraceRecordId, TurnTraceId,
+    };
+
+    #[test]
+    fn artifact_envelope_uses_locator_when_truncated() {
+        let artifact = ArtifactEnvelope::text(
+            TraceArtifactId::new("artifact-1").expect("artifact id"),
+            ArtifactKind::Prompt,
+            "prompt",
+            "abcdefghij",
+            4,
+        );
+
+        assert!(artifact.truncated);
+        assert_eq!(
+            artifact.locator.as_deref(),
+            Some("paddles-artifact://artifact-1")
+        );
+        assert!(
+            artifact
+                .inline_content
+                .as_deref()
+                .expect("inline")
+                .contains("[truncated]")
+        );
+    }
+
+    #[test]
+    fn branch_summary_is_machine_readable_but_human_scannable() {
+        let branch = TraceBranch {
+            branch_id: TraceBranchId::new("branch-1").expect("branch id"),
+            label: "inspect mission state".to_string(),
+            status: TraceBranchStatus::Pending,
+            rationale: None,
+            parent_branch_id: None,
+            created_from_record_id: None,
+        };
+
+        assert_eq!(branch.summary(), "inspect mission state (pending)");
+    }
+
+    #[test]
+    fn lineage_references_keep_task_turn_and_parent_record() {
+        let lineage = TraceLineage {
+            task_id: TaskTraceId::new("task-1").expect("task id"),
+            turn_id: TurnTraceId::new("turn-1").expect("turn id"),
+            branch_id: None,
+            parent_record_id: Some(TraceRecordId::new("record-1").expect("record id")),
+        };
+
+        assert_eq!(lineage.task_id.as_str(), "task-1");
+        assert_eq!(lineage.turn_id.as_str(), "turn-1");
+        assert_eq!(
+            lineage.parent_record_id.as_ref().map(|id| id.as_str()),
+            Some("record-1")
+        );
+    }
+}

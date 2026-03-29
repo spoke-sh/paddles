@@ -114,9 +114,9 @@
 |--------|--------|
 | [Graph Retrieval Through The Gatherer Boundary](epics/VFGy53NJt/voyages/VFGy6j0OE/) | done |
 
-### [Transit-Aligned Turn Recording](epics/VFH4BXH4F/) (draft)
+### [Transit-Aligned Turn Recording](epics/VFH4BXH4F/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Trace Contract And Recorder Port](epics/VFH4BXH4F/voyages/VFH4CCJ4d/) | draft |
+| [Trace Contract And Recorder Port](epics/VFH4BXH4F/voyages/VFH4CCJ4d/) | done |
 

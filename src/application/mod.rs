@@ -1,10 +1,17 @@
-use crate::domain::model::{BootContext, TurnEvent, TurnEventSink, TurnIntent};
+use crate::domain::model::{
+    ArtifactEnvelope, ArtifactKind, BootContext, TaskTraceId, TraceArtifactId, TraceBranch,
+    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind,
+    TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot, TraceToolCall, TurnEvent,
+    TurnEventSink, TurnIntent, TurnTraceId,
+};
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
     GathererCapability, InitialAction, InitialActionDecision, InterpretationContext, ModelPaths,
-    ModelRegistry, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+    ModelRegistry, NoopTraceRecorder, PlannerAction, PlannerBudget, PlannerCapability,
+    PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
+    PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision,
+    RetainedEvidence, RetrievalMode, TraceRecorder,
 };
 use crate::infrastructure::adapters::agent_memory::AgentMemory;
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
@@ -14,10 +21,11 @@ use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererA
 use crate::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use anyhow::Result;
 use clap::ValueEnum;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
@@ -28,6 +36,8 @@ pub struct MechSuitService {
     runtime: RwLock<Option<ActiveRuntimeState>>,
     verbose: AtomicU8,
     event_sink: Arc<dyn TurnEventSink>,
+    trace_recorder: Arc<dyn TraceRecorder>,
+    trace_counter: AtomicU64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,6 +166,360 @@ impl TurnEventSink for ConsoleTurnEventSink {
     fn emit(&self, event: TurnEvent) {
         let _guard = self.render_lock.lock().expect("turn event render lock");
         println!("{}", render_turn_event(&event));
+    }
+}
+
+#[derive(Clone)]
+struct StructuredTurnTrace {
+    downstream: Arc<dyn TurnEventSink>,
+    recorder: Arc<dyn TraceRecorder>,
+    state: Arc<Mutex<StructuredTurnTraceState>>,
+}
+
+#[derive(Clone, Debug)]
+struct StructuredTurnTraceState {
+    task_id: TaskTraceId,
+    turn_id: TurnTraceId,
+    next_record_sequence: u64,
+    next_artifact_sequence: u64,
+    next_branch_sequence: u64,
+    root_last_record_id: Option<TraceRecordId>,
+    branch_last_record_ids: HashMap<TraceBranchId, TraceRecordId>,
+    recorder_warning_emitted: bool,
+    last_synthesis: Option<SynthesisTraceState>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SynthesisTraceState {
+    grounded: bool,
+    citations: Vec<String>,
+    insufficient_evidence: bool,
+}
+
+impl StructuredTurnTrace {
+    fn new(
+        downstream: Arc<dyn TurnEventSink>,
+        recorder: Arc<dyn TraceRecorder>,
+        task_id: TaskTraceId,
+        turn_id: TurnTraceId,
+    ) -> Self {
+        Self {
+            downstream,
+            recorder,
+            state: Arc::new(Mutex::new(StructuredTurnTraceState {
+                task_id,
+                turn_id,
+                next_record_sequence: 1,
+                next_artifact_sequence: 1,
+                next_branch_sequence: 1,
+                root_last_record_id: None,
+                branch_last_record_ids: HashMap::new(),
+                recorder_warning_emitted: false,
+                last_synthesis: None,
+            })),
+        }
+    }
+
+    fn as_event_sink(self: &Arc<Self>) -> Arc<dyn TurnEventSink> {
+        let sink: Arc<dyn TurnEventSink> = self.clone();
+        sink
+    }
+
+    fn record_task_root(
+        &self,
+        prompt: &str,
+        interpretation: &InterpretationContext,
+        prepared: &PreparedRuntimeLanes,
+    ) {
+        let prompt_artifact = self.text_artifact(
+            ArtifactKind::Prompt,
+            format!("user prompt `{}`", trim_for_planner(prompt, 80)),
+            prompt,
+            800,
+        );
+        let interpretation_artifact = (!interpretation.is_empty()).then(|| {
+            self.text_artifact(
+                ArtifactKind::Interpretation,
+                interpretation.summary.clone(),
+                interpretation.render(),
+                1_200,
+            )
+            .with_label("sources", interpretation.sources().join(", "))
+        });
+        let root = TraceTaskRoot {
+            prompt: prompt_artifact,
+            interpretation: interpretation_artifact,
+            planner_model: prepared.planner.model_id.clone(),
+            synthesizer_model: prepared.synthesizer.model_id.clone(),
+        };
+        self.record_kind(None, TraceRecordKind::TaskRootStarted(root));
+    }
+
+    fn record_planner_action(
+        &self,
+        action: &str,
+        rationale: &str,
+        branch_id: Option<TraceBranchId>,
+    ) {
+        self.record_kind(
+            branch_id,
+            TraceRecordKind::PlannerAction {
+                action: action.to_string(),
+                rationale: rationale.to_string(),
+            },
+        );
+    }
+
+    fn declare_branch(
+        &self,
+        label: &str,
+        rationale: Option<&str>,
+        parent_branch_id: Option<TraceBranchId>,
+    ) -> TraceBranch {
+        let branch = {
+            let mut state = self.state.lock().expect("structured turn trace lock");
+            let branch_id = TraceBranchId::new(format!(
+                "{}.branch-{:04}",
+                state.turn_id.as_str(),
+                state.next_branch_sequence
+            ))
+            .expect("generated branch id");
+            state.next_branch_sequence += 1;
+            TraceBranch {
+                branch_id,
+                label: label.to_string(),
+                status: TraceBranchStatus::Pending,
+                rationale: rationale.map(str::to_string),
+                parent_branch_id,
+                created_from_record_id: state.root_last_record_id.clone(),
+            }
+        };
+        self.record_kind(
+            Some(branch.branch_id.clone()),
+            TraceRecordKind::PlannerBranchDeclared(branch.clone()),
+        );
+        branch
+    }
+
+    fn record_selection_artifact(
+        &self,
+        kind: TraceSelectionKind,
+        summary: impl Into<String>,
+        sources: Vec<String>,
+        content: impl Into<String>,
+        artifact_kind: ArtifactKind,
+    ) {
+        let summary = summary.into();
+        let artifact = self.text_artifact(artifact_kind, summary.clone(), content.into(), 1_200);
+        self.record_kind(
+            None,
+            TraceRecordKind::SelectionArtifact(TraceSelectionArtifact {
+                selection_id: artifact.artifact_id.clone(),
+                kind,
+                summary,
+                artifact,
+                selected_from: sources,
+            }),
+        );
+    }
+
+    fn remember_synthesis(
+        &self,
+        grounded: bool,
+        citations: Vec<String>,
+        insufficient_evidence: bool,
+    ) {
+        let mut state = self.state.lock().expect("structured turn trace lock");
+        state.last_synthesis = Some(SynthesisTraceState {
+            grounded,
+            citations,
+            insufficient_evidence,
+        });
+    }
+
+    fn record_completion(&self, reply: &str) {
+        let synthesis = {
+            let state = self.state.lock().expect("structured turn trace lock");
+            state.last_synthesis.clone()
+        }
+        .unwrap_or(SynthesisTraceState {
+            grounded: false,
+            citations: Vec::new(),
+            insufficient_evidence: false,
+        });
+        let response = self
+            .text_artifact(
+                ArtifactKind::ModelOutput,
+                if synthesis.insufficient_evidence {
+                    "insufficient evidence response".to_string()
+                } else {
+                    "assistant response".to_string()
+                },
+                reply,
+                1_200,
+            )
+            .with_label("citations", synthesis.citations.join(", "));
+        self.record_kind(
+            None,
+            TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                checkpoint_id: self.next_checkpoint_id(),
+                kind: if synthesis.insufficient_evidence {
+                    TraceCheckpointKind::TurnFailed
+                } else {
+                    TraceCheckpointKind::TurnCompleted
+                },
+                summary: if synthesis.insufficient_evidence {
+                    "turn ended with insufficient evidence".to_string()
+                } else {
+                    "turn completed".to_string()
+                },
+                response: Some(response),
+                citations: synthesis.citations,
+                grounded: synthesis.grounded,
+            }),
+        );
+    }
+
+    fn record_kind(&self, branch_id: Option<TraceBranchId>, kind: TraceRecordKind) {
+        let record = {
+            let mut state = self.state.lock().expect("structured turn trace lock");
+            let sequence = state.next_record_sequence;
+            let record_id =
+                TraceRecordId::new(format!("{}.record-{:04}", state.turn_id.as_str(), sequence))
+                    .expect("generated record id");
+            state.next_record_sequence += 1;
+            let parent_record_id = branch_id
+                .as_ref()
+                .and_then(|branch| state.branch_last_record_ids.get(branch).cloned())
+                .or_else(|| state.root_last_record_id.clone());
+            let lineage = TraceLineage {
+                task_id: state.task_id.clone(),
+                turn_id: state.turn_id.clone(),
+                branch_id: branch_id.clone(),
+                parent_record_id,
+            };
+            if let Some(branch_id) = branch_id {
+                state
+                    .branch_last_record_ids
+                    .insert(branch_id, record_id.clone());
+            } else {
+                state.root_last_record_id = Some(record_id.clone());
+            }
+
+            TraceRecord {
+                record_id,
+                sequence,
+                lineage,
+                kind,
+            }
+        };
+        self.record_or_warn(record);
+    }
+
+    fn text_artifact(
+        &self,
+        kind: ArtifactKind,
+        summary: impl Into<String>,
+        content: impl Into<String>,
+        inline_limit: usize,
+    ) -> ArtifactEnvelope {
+        let artifact_id = {
+            let mut state = self.state.lock().expect("structured turn trace lock");
+            let artifact_id = TraceArtifactId::new(format!(
+                "{}.artifact-{:04}",
+                state.turn_id.as_str(),
+                state.next_artifact_sequence
+            ))
+            .expect("generated artifact id");
+            state.next_artifact_sequence += 1;
+            artifact_id
+        };
+        ArtifactEnvelope::text(artifact_id, kind, summary, content, inline_limit)
+    }
+
+    fn next_checkpoint_id(&self) -> TraceCheckpointId {
+        let state = self.state.lock().expect("structured turn trace lock");
+        TraceCheckpointId::new(format!("{}.checkpoint", state.turn_id.as_str()))
+            .expect("generated checkpoint id")
+    }
+
+    fn record_or_warn(&self, record: TraceRecord) {
+        if let Err(err) = self.recorder.record(record) {
+            let should_emit = {
+                let mut state = self.state.lock().expect("structured turn trace lock");
+                if state.recorder_warning_emitted {
+                    false
+                } else {
+                    state.recorder_warning_emitted = true;
+                    true
+                }
+            };
+            if should_emit {
+                self.downstream.emit(TurnEvent::Fallback {
+                    stage: "trace-recorder".to_string(),
+                    reason: format!("trace recording failed: {err:#}"),
+                });
+            }
+        }
+    }
+}
+
+impl TurnEventSink for StructuredTurnTrace {
+    fn emit(&self, event: TurnEvent) {
+        self.downstream.emit(event.clone());
+        match event {
+            TurnEvent::ToolCalled {
+                call_id,
+                tool_name,
+                invocation,
+            } => {
+                let artifact = self.text_artifact(
+                    ArtifactKind::ToolInvocation,
+                    format!("tool request `{tool_name}`"),
+                    invocation,
+                    800,
+                );
+                self.record_kind(
+                    None,
+                    TraceRecordKind::ToolCallRequested(TraceToolCall {
+                        call_id,
+                        tool_name,
+                        payload: artifact,
+                        success: None,
+                    }),
+                );
+            }
+            TurnEvent::ToolFinished {
+                call_id,
+                tool_name,
+                summary,
+            } => {
+                let success = !summary.to_ascii_lowercase().contains("failed:");
+                let artifact = self.text_artifact(
+                    ArtifactKind::ToolOutput,
+                    format!("tool result `{tool_name}`"),
+                    summary,
+                    1_000,
+                );
+                self.record_kind(
+                    None,
+                    TraceRecordKind::ToolCallCompleted(TraceToolCall {
+                        call_id,
+                        tool_name,
+                        payload: artifact,
+                        success: Some(success),
+                    }),
+                );
+            }
+            TurnEvent::SynthesisReady {
+                grounded,
+                citations,
+                insufficient_evidence,
+            } => {
+                self.remember_synthesis(grounded, citations, insufficient_evidence);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -313,17 +677,36 @@ fn trim_event_detail(input: &str, max_lines: usize) -> String {
 
 impl MechSuitService {
     pub fn new(workspace_root: impl Into<PathBuf>, registry: Arc<dyn ModelRegistry>) -> Self {
+        Self::with_trace_recorder(workspace_root, registry, Arc::new(NoopTraceRecorder))
+    }
+
+    pub fn with_trace_recorder(
+        workspace_root: impl Into<PathBuf>,
+        registry: Arc<dyn ModelRegistry>,
+        trace_recorder: Arc<dyn TraceRecorder>,
+    ) -> Self {
         Self {
             workspace_root: workspace_root.into(),
             registry,
             runtime: RwLock::new(None),
             verbose: AtomicU8::new(0),
             event_sink: Arc::new(ConsoleTurnEventSink::default()),
+            trace_recorder,
+            trace_counter: AtomicU64::new(1),
         }
     }
 
     pub fn set_verbose(&self, level: u8) {
         self.verbose.store(level, Ordering::Relaxed);
+    }
+
+    fn allocate_trace_ids(&self) -> (TaskTraceId, TurnTraceId) {
+        let sequence = self.trace_counter.fetch_add(1, Ordering::Relaxed);
+        let task_id =
+            TaskTraceId::new(format!("task-{sequence:06}")).expect("generated task trace id");
+        let turn_id =
+            TurnTraceId::new(format!("turn-{sequence:06}")).expect("generated turn trace id");
+        (task_id, turn_id)
     }
 
     /// Execute the boot sequence.
@@ -490,13 +873,21 @@ impl MechSuitService {
 
         let memory = AgentMemory::load(&self.workspace_root);
         let interpretation = memory.build_interpretation_context(prompt, &self.workspace_root);
-        event_sink.emit(TurnEvent::InterpretationContext {
+        let (task_id, turn_id) = self.allocate_trace_ids();
+        let trace = Arc::new(StructuredTurnTrace::new(
+            event_sink,
+            Arc::clone(&self.trace_recorder),
+            task_id,
+            turn_id,
+        ));
+        trace.record_task_root(prompt, &interpretation, &prepared);
+        trace.emit(TurnEvent::InterpretationContext {
             summary: interpretation.summary.clone(),
             sources: interpretation.sources(),
         });
 
         let planner_capability = planner_engine.capability();
-        event_sink.emit(TurnEvent::PlannerCapability {
+        trace.emit(TurnEvent::PlannerCapability {
             provider: prepared.planner.model_id.clone(),
             capability: format_planner_capability(&planner_capability),
         });
@@ -513,15 +904,16 @@ impl MechSuitService {
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
                 let decision = planner_engine.select_initial_action(&request).await?;
-                event_sink.emit(TurnEvent::PlannerActionSelected {
+                trace.emit(TurnEvent::PlannerActionSelected {
                     sequence: 1,
                     action: decision.action.summary(),
                     rationale: decision.rationale.clone(),
                 });
+                trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
                 execution_plan_from_initial_action(&prepared, decision)
             }
             PlannerCapability::Unsupported { reason } => {
-                event_sink.emit(TurnEvent::Fallback {
+                trace.emit(TurnEvent::Fallback {
                     stage: "planner".to_string(),
                     reason: format!("planner unavailable before first action selection: {reason}"),
                 });
@@ -529,10 +921,10 @@ impl MechSuitService {
             }
         };
 
-        event_sink.emit(TurnEvent::IntentClassified {
+        trace.emit(TurnEvent::IntentClassified {
             intent: execution_plan.intent.clone(),
         });
-        event_sink.emit(TurnEvent::RouteSelected {
+        trace.emit(TurnEvent::RouteSelected {
             summary: execution_plan.route_summary.clone(),
         });
 
@@ -552,7 +944,7 @@ impl MechSuitService {
                         recent_turns,
                     },
                     execution_plan.initial_planner_decision.clone(),
-                    Arc::clone(&event_sink),
+                    Arc::clone(&trace),
                 )
                 .await?
             }
@@ -562,12 +954,15 @@ impl MechSuitService {
         let prompt = prompt.to_string();
         let intent = execution_plan.intent;
         let engine = synthesizer_engine;
-        let event_sink = Arc::clone(&event_sink);
+        let event_sink = trace.as_event_sink();
         tokio::task::spawn_blocking(move || {
             engine.respond_for_turn(&prompt, intent, gathered_evidence.as_ref(), event_sink)
         })
         .await
         .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
+        .inspect(|reply| {
+            trace.record_completion(reply);
+        })
     }
 
     async fn execute_recursive_planner_loop(
@@ -575,7 +970,7 @@ impl MechSuitService {
         prompt: &str,
         context: PlannerLoopContext,
         initial_decision: Option<RecursivePlannerDecision>,
-        event_sink: Arc<dyn TurnEventSink>,
+        trace: Arc<StructuredTurnTrace>,
     ) -> Result<Option<EvidenceBundle>> {
         let budget = PlannerBudget::default();
         let mut loop_state = PlannerLoopState::default();
@@ -602,18 +997,19 @@ impl MechSuitService {
                 .with_recent_turns(context.recent_turns.clone())
                 .with_loop_state(loop_state.clone());
                 let decision = context.planner_engine.select_next_action(&request).await?;
-                event_sink.emit(TurnEvent::PlannerActionSelected {
+                trace.emit(TurnEvent::PlannerActionSelected {
                     sequence,
                     action: decision.action.summary(),
                     rationale: decision.rationale.clone(),
                 });
+                trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
                 decision
             };
 
             let outcome = match &decision.action {
                 PlannerAction::Search { query, intent } => {
                     if let Some(gatherer) = context.gatherer.as_ref() {
-                        event_sink.emit(TurnEvent::GathererCapability {
+                        trace.emit(TurnEvent::GathererCapability {
                             provider: gatherer_provider.clone(),
                             capability: format_gatherer_capability(&gatherer.capability()),
                         });
@@ -643,7 +1039,7 @@ impl MechSuitService {
                                     Ok(result) => {
                                         let bundle = result.evidence_bundle;
                                         if let Some(bundle) = bundle.as_ref() {
-                                            event_sink.emit(TurnEvent::GathererSummary {
+                                            trace.emit(TurnEvent::GathererSummary {
                                                 provider: gatherer_provider.clone(),
                                                 summary: bundle.summary.clone(),
                                                 sources: evidence_sources(
@@ -651,8 +1047,22 @@ impl MechSuitService {
                                                     bundle,
                                                 ),
                                             });
+                                            trace.record_selection_artifact(
+                                                TraceSelectionKind::Evidence,
+                                                bundle.summary.clone(),
+                                                evidence_sources(&self.workspace_root, bundle),
+                                                render_evidence_bundle_artifact(bundle),
+                                                ArtifactKind::EvidenceBundle,
+                                            );
                                             if let Some(planner) = bundle.planner.as_ref() {
-                                                event_sink.emit(planner_summary_event(planner));
+                                                trace.emit(planner_summary_event(planner));
+                                                trace.record_selection_artifact(
+                                                    TraceSelectionKind::PlannerTrace,
+                                                    "planner trace".to_string(),
+                                                    planner_retained_sources(planner),
+                                                    render_planner_trace_artifact(planner),
+                                                    ArtifactKind::PlannerTrace,
+                                                );
                                                 loop_state.latest_gatherer_trace =
                                                     Some(planner.clone());
                                             }
@@ -722,7 +1132,7 @@ impl MechSuitService {
                 }
                 PlannerAction::Refine { query, .. } => {
                     if let Some(gatherer) = context.gatherer.as_ref() {
-                        event_sink.emit(TurnEvent::GathererCapability {
+                        trace.emit(TurnEvent::GathererCapability {
                             provider: gatherer_provider.clone(),
                             capability: format_gatherer_capability(&gatherer.capability()),
                         });
@@ -750,7 +1160,7 @@ impl MechSuitService {
                                     Ok(result) => {
                                         let bundle = result.evidence_bundle;
                                         if let Some(bundle) = bundle.as_ref() {
-                                            event_sink.emit(TurnEvent::GathererSummary {
+                                            trace.emit(TurnEvent::GathererSummary {
                                                 provider: gatherer_provider.clone(),
                                                 summary: bundle.summary.clone(),
                                                 sources: evidence_sources(
@@ -758,8 +1168,22 @@ impl MechSuitService {
                                                     bundle,
                                                 ),
                                             });
+                                            trace.record_selection_artifact(
+                                                TraceSelectionKind::Evidence,
+                                                bundle.summary.clone(),
+                                                evidence_sources(&self.workspace_root, bundle),
+                                                render_evidence_bundle_artifact(bundle),
+                                                ArtifactKind::EvidenceBundle,
+                                            );
                                             if let Some(planner) = bundle.planner.as_ref() {
-                                                event_sink.emit(planner_summary_event(planner));
+                                                trace.emit(planner_summary_event(planner));
+                                                trace.record_selection_artifact(
+                                                    TraceSelectionKind::PlannerTrace,
+                                                    "planner trace".to_string(),
+                                                    planner_retained_sources(planner),
+                                                    render_planner_trace_artifact(planner),
+                                                    ArtifactKind::PlannerTrace,
+                                                );
                                                 loop_state.latest_gatherer_trace =
                                                     Some(planner.clone());
                                             }
@@ -789,8 +1213,17 @@ impl MechSuitService {
                 }
                 PlannerAction::Branch { branches, .. } => {
                     for branch in branches.iter().take(budget.max_branch_factor) {
-                        if !loop_state.pending_branches.contains(branch) {
-                            loop_state.pending_branches.push(branch.clone());
+                        let exists = loop_state
+                            .pending_branches
+                            .iter()
+                            .any(|pending| pending.label == *branch);
+                        if !exists {
+                            let branch_trace = trace.declare_branch(
+                                branch,
+                                Some(decision.rationale.as_str()),
+                                None,
+                            );
+                            loop_state.pending_branches.push(branch_trace);
                         }
                     }
                     format!(
@@ -805,7 +1238,9 @@ impl MechSuitService {
             };
 
             loop_state.steps.push(PlannerStepRecord {
+                step_id: format!("planner-step-{sequence}"),
                 sequence,
+                branch_id: None,
                 action: decision.action.clone(),
                 outcome: outcome.clone(),
             });
@@ -821,7 +1256,7 @@ impl MechSuitService {
 
         let completed = stop_reason.is_some();
         let stop_reason = stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string());
-        event_sink.emit(TurnEvent::PlannerSummary {
+        trace.emit(TurnEvent::PlannerSummary {
             strategy: "model-driven".to_string(),
             mode: loop_state
                 .latest_gatherer_trace
@@ -1022,7 +1457,7 @@ fn build_planner_prior_context(
         loop_state
             .pending_branches
             .iter()
-            .map(|branch| format!("pending branch: {branch}")),
+            .map(|branch| format!("pending branch: {}", branch.summary())),
     );
     prior
 }
@@ -1205,7 +1640,7 @@ fn build_planner_evidence_bundle(
             .steps
             .iter()
             .map(|step| PlannerTraceStep {
-                step_id: format!("planner-step-{}", step.sequence),
+                step_id: step.step_id.clone(),
                 sequence: step.sequence,
                 parent_step_id: None,
                 decisions: vec![crate::domain::ports::PlannerDecision {
@@ -1259,6 +1694,61 @@ fn planner_action_query(action: &PlannerAction) -> Option<String> {
     }
 }
 
+fn render_evidence_bundle_artifact(bundle: &EvidenceBundle) -> String {
+    let mut lines = vec![bundle.summary.clone()];
+    for item in &bundle.items {
+        lines.push(format!(
+            "- {}: {}",
+            item.source,
+            trim_for_planner(&item.snippet, 240)
+        ));
+    }
+    if !bundle.warnings.is_empty() {
+        lines.push("Warnings:".to_string());
+        for warning in &bundle.warnings {
+            lines.push(format!("- {}", trim_for_planner(warning, 160)));
+        }
+    }
+    lines.join("\n")
+}
+
+fn render_planner_trace_artifact(planner: &PlannerTraceMetadata) -> String {
+    let mut lines = vec![format!(
+        "strategy={}, mode={}, turns={}, steps={}, stop={}",
+        format_planner_strategy(&planner.strategy),
+        planner.mode.label(),
+        planner.turn_count,
+        planner.steps.len(),
+        planner.stop_reason.as_deref().unwrap_or("none"),
+    )];
+    for step in &planner.steps {
+        lines.push(format!(
+            "- {}#{} parent={}",
+            step.step_id,
+            step.sequence,
+            step.parent_step_id.as_deref().unwrap_or("none")
+        ));
+        for decision in &step.decisions {
+            lines.push(format!(
+                "  action={} query={} branch={} stop={}",
+                decision.action,
+                decision.query.as_deref().unwrap_or("none"),
+                decision.branch_id.as_deref().unwrap_or("none"),
+                decision.stop_reason.as_deref().unwrap_or("none")
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn planner_retained_sources(planner: &PlannerTraceMetadata) -> Vec<String> {
+    planner
+        .retained_artifacts
+        .iter()
+        .map(|artifact| artifact.source.clone())
+        .collect()
+}
+
 fn evidence_sources(
     workspace_root: &std::path::Path,
     bundle: &crate::domain::ports::EvidenceBundle,
@@ -1293,15 +1783,16 @@ mod tests {
         ActiveRuntimeState, GathererProvider, MechSuitService, PreparedModelLane,
         PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
     };
-    use crate::domain::model::{TurnEvent, TurnEventSink};
+    use crate::domain::model::{TraceRecordKind, TurnEvent, TurnEventSink};
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
         InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerAction,
         PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode,
         PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
-        RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, TraceRecorder,
     };
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+    use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use sift::Conversation;
@@ -1719,6 +2210,87 @@ mod tests {
                 intent: TurnIntent::DirectResponse
             }
         ));
+    }
+
+    #[test]
+    fn process_prompt_records_trace_contract_records_beside_turn_events() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nRecord durable traces for recursive turns.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "answer directly".to_string(),
+            },
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Recorded response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = MechSuitService::with_trace_recorder(
+            workspace.path(),
+            Arc::new(StaticRegistry),
+            recorder.clone(),
+        );
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Record this turn", sink)
+                .await
+                .expect("process prompt")
+        });
+
+        let task_ids = recorder.task_ids();
+        assert_eq!(task_ids.len(), 1);
+        let replay = recorder.replay(&task_ids[0]).expect("replay");
+        assert!(replay.records.len() >= 3);
+        assert!(matches!(
+            replay.records.first().map(|record| &record.kind),
+            Some(TraceRecordKind::TaskRootStarted(_))
+        ));
+        assert!(
+            replay
+                .records
+                .iter()
+                .any(|record| matches!(record.kind, TraceRecordKind::PlannerAction { .. }))
+        );
+        assert!(
+            replay
+                .records
+                .iter()
+                .any(|record| matches!(record.kind, TraceRecordKind::CompletionCheckpoint(_)))
+        );
     }
 
     #[test]

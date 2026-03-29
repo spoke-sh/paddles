@@ -1,4 +1,5 @@
 use super::context_gathering::{EvidenceItem, PlannerTraceMetadata};
+use crate::domain::model::{TraceBranch, TraceBranchId};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -128,13 +129,15 @@ pub struct PlannerLoopState {
     pub steps: Vec<PlannerStepRecord>,
     pub evidence_items: Vec<EvidenceItem>,
     pub notes: Vec<String>,
-    pub pending_branches: Vec<String>,
+    pub pending_branches: Vec<TraceBranch>,
     pub latest_gatherer_trace: Option<PlannerTraceMetadata>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannerStepRecord {
+    pub step_id: String,
     pub sequence: usize,
+    pub branch_id: Option<TraceBranchId>,
     pub action: PlannerAction,
     pub outcome: String,
 }

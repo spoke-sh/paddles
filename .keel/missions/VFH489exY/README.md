@@ -1,12 +1,14 @@
 ---
 # system-managed
 id: VFH489exY
-status: defining
+status: achieved
 created_at: 2026-03-29T09:24:37
-updated_at: 2026-03-29T09:24:37
+updated_at: 2026-03-29T09:57:55
 # authored
 title: Define Transit-Aligned Trace Recorder Boundary
 watch: ~
+activated_at: 2026-03-29T09:44:05
+achieved_at: 2026-03-29T09:57:55
 ---
 
 # Define Transit-Aligned Trace Recorder Boundary

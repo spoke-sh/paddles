@@ -95,6 +95,27 @@ flowchart TD
     L --> S
 ```
 
+### Recorder Boundary
+
+Recursive turns now have a paddles-owned recorder seam beside transcript
+rendering. The UI remains a projection; durable traces come from typed runtime
+records.
+
+```mermaid
+flowchart LR
+    Turn["Planner / Gatherer / Tool / Synth runtime"]
+    Records["Paddles trace contract<br/>task root | planner action | branch | tool pair | checkpoint"]
+    Events["Turn events / TUI rows"]
+    Port["TraceRecorder port"]
+    Noop["Noop / In-memory"]
+    Transit["Embedded transit-core"]
+
+    Turn --> Records --> Port --> Noop
+    Turn --> Events
+    Port --> Transit
+    Records --> Events
+```
+
 ### Role Of Keel
 
 Keel is important, but it is not supposed to become a first-class special-case runtime intent. It is one evidence domain inside the workspace. Mission files, charters, PRDs, voyage docs, and board commands should be reachable through the same recursive context mechanisms as source files and tool outputs.
@@ -113,13 +134,17 @@ Today, the runtime has:
 - a bounded recursive loop for `search`, `read`, `inspect`, `refine`, `branch`, and `stop`
 - a distinct synthesizer lane that answers from the resulting evidence bundle
 - a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
+- a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids
+- a `TraceRecorder` boundary beside `TurnEventSink`, with `noop`, in-memory, and embedded `transit-core` adapters
+- artifact envelopes for prompts, tool I/O, evidence bundles, planner traces, and final responses so larger payloads can move behind logical refs later
 
 The remaining gaps are narrower now:
 
 - the `tool` initial action is still a transitional bridge into the older deterministic tool runtime instead of a fully unified planner resource graph
 - legacy direct adapter helpers outside the main mech-suit service still contain heuristic intent inference and should not be treated as the backbone contract
 - the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
-- graph-mode gatherer traces remain inline today; the domain contract leaves room for future external artifact references, but no embedded recorder is wired yet
+- the runtime defaults to `noop` recording today; embedded `transit-core` recording is available through the recorder boundary but is not yet the default CLI/runtime policy
+- graph-mode gatherer traces still use inline envelopes today; the contract leaves room for external artifact refs, but no artifact store promotion policy exists yet
 - `context-1` is still an explicit experimental boundary, not the default planner lane
 
 ## Design Principles
