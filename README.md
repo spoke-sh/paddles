@@ -159,6 +159,7 @@ Today, the runtime has:
 - a distinct synthesizer lane that answers from the resulting evidence bundle
 - a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
 - a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids
+- an internal workspace crate for conversation/thread/session primitives in [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs), so the transit-facing conversation layer is no longer fused into the main binary crate
 - a `TraceRecorder` boundary beside `TurnEventSink`, with `noop`, in-memory, and embedded `transit-core` adapters
 - artifact envelopes for prompts, tool I/O, evidence bundles, planner traces, and final responses so larger payloads can move behind logical refs later
 - interactive conversation sessions with one durable root task, model-driven steering-thread decisions, and explicit merge-back records

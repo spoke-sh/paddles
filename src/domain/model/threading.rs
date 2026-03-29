@@ -1,156 +1,8 @@
-use super::{
-    ArtifactEnvelope, TraceBranchId, TraceBranchStatus, TraceRecordKind, TraceReplay, TurnTraceId,
+use super::{TraceBranchStatus, TraceRecordKind, TraceReplay};
+use paddles_conversation::{
+    ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadMergeRecord,
 };
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-macro_rules! thread_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> anyhow::Result<Self> {
-                let value = value.into();
-                anyhow::ensure!(
-                    !value.trim().is_empty(),
-                    concat!(stringify!($name), " must not be empty")
-                );
-                Ok(Self(value))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-    };
-}
-
-thread_id!(ThreadCandidateId);
-thread_id!(ThreadDecisionId);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ConversationThreadRef {
-    Mainline,
-    Branch(TraceBranchId),
-}
-
-impl ConversationThreadRef {
-    pub fn stable_id(&self) -> String {
-        match self {
-            Self::Mainline => "mainline".to_string(),
-            Self::Branch(branch_id) => branch_id.as_str().to_string(),
-        }
-    }
-
-    pub fn label(&self) -> String {
-        match self {
-            Self::Mainline => "mainline".to_string(),
-            Self::Branch(branch_id) => format!("thread {}", branch_id.as_str()),
-        }
-    }
-
-    pub fn branch_id(&self) -> Option<TraceBranchId> {
-        match self {
-            Self::Mainline => None,
-            Self::Branch(branch_id) => Some(branch_id.clone()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ConversationThreadStatus {
-    Active,
-    Waiting,
-    Merged,
-}
-
-impl ConversationThreadStatus {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Waiting => "waiting",
-            Self::Merged => "merged",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConversationThread {
-    pub thread_ref: ConversationThreadRef,
-    pub label: String,
-    pub parent: Option<ConversationThreadRef>,
-    pub status: ConversationThreadStatus,
-}
-
-impl ConversationThread {
-    pub fn summary(&self) -> String {
-        format!("{} ({})", self.label, self.status.label())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ThreadCandidate {
-    pub candidate_id: ThreadCandidateId,
-    pub prompt: String,
-    pub captured_from_turn_id: Option<TurnTraceId>,
-    pub active_thread: ConversationThreadRef,
-    pub captured_sequence: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThreadMergeMode {
-    Backlink,
-    Summary,
-    Merge,
-}
-
-impl ThreadMergeMode {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Backlink => "backlink",
-            Self::Summary => "summary",
-            Self::Merge => "merge",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThreadDecisionKind {
-    ContinueCurrent,
-    OpenChildThread,
-    MergeIntoTarget,
-}
-
-impl ThreadDecisionKind {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::ContinueCurrent => "continue-current-thread",
-            Self::OpenChildThread => "open-child-thread",
-            Self::MergeIntoTarget => "merge-into-target",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ThreadDecision {
-    pub decision_id: ThreadDecisionId,
-    pub candidate_id: ThreadCandidateId,
-    pub kind: ThreadDecisionKind,
-    pub rationale: String,
-    pub target_thread: ConversationThreadRef,
-    pub new_thread_label: Option<String>,
-    pub merge_mode: Option<ThreadMergeMode>,
-    pub merge_summary: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ThreadMergeRecord {
-    pub decision: ThreadDecision,
-    pub source_thread: ConversationThreadRef,
-    pub target_thread: ConversationThreadRef,
-    pub summary_artifact: Option<ArtifactEnvelope>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationReplayView {
@@ -232,13 +84,13 @@ impl ConversationReplayView {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConversationReplayView, ConversationThread, ConversationThreadRef,
-        ConversationThreadStatus, ThreadCandidateId, ThreadDecisionId, ThreadDecisionKind,
-        ThreadMergeMode,
+        ConversationReplayView, ConversationThread, ConversationThreadRef, ConversationThreadStatus,
     };
     use crate::domain::model::{
-        ArtifactEnvelope, TaskTraceId, TraceBranch, TraceBranchId, TraceBranchStatus, TraceLineage,
-        TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceTaskRoot, TurnTraceId,
+        ArtifactEnvelope, ArtifactKind, TaskTraceId, ThreadCandidateId, ThreadDecisionId,
+        ThreadDecisionKind, ThreadMergeMode, TraceArtifactId, TraceBranch, TraceBranchId,
+        TraceBranchStatus, TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
+        TraceTaskRoot, TurnTraceId,
     };
 
     #[test]
@@ -304,8 +156,8 @@ mod tests {
                     },
                     kind: TraceRecordKind::TaskRootStarted(TraceTaskRoot {
                         prompt: ArtifactEnvelope::text(
-                            super::super::TraceArtifactId::new("artifact-1").expect("artifact"),
-                            super::super::ArtifactKind::Prompt,
+                            TraceArtifactId::new("artifact-1").expect("artifact"),
+                            ArtifactKind::Prompt,
                             "prompt",
                             "hello",
                             256,

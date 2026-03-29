@@ -2741,6 +2741,7 @@ dependencies = [
  "crossterm 0.29.0",
  "directories",
  "hf-hub",
+ "paddles-conversation",
  "ratatui",
  "serde",
  "serde_json",
@@ -2751,6 +2752,14 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "transit-core",
+]
+
+[[package]]
+name = "paddles-conversation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
 ]
 
 [[package]]

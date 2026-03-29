@@ -1,43 +1,9 @@
-use anyhow::{Result, ensure};
+use paddles_conversation::{
+    ArtifactEnvelope, ConversationThreadRef, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
+    TurnTraceId,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-
-use super::{ConversationThreadRef, ThreadCandidate, ThreadDecision, ThreadMergeRecord};
-
-macro_rules! trace_id {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Result<Self> {
-                let value = value.into();
-                ensure!(
-                    !value.trim().is_empty(),
-                    concat!(stringify!($name), " must not be empty")
-                );
-                Ok(Self(value))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl From<$name> for String {
-            fn from(value: $name) -> Self {
-                value.0
-            }
-        }
-    };
-}
-
-trace_id!(TaskTraceId);
-trace_id!(TurnTraceId);
-trace_id!(TraceRecordId);
-trace_id!(TraceBranchId);
-trace_id!(TraceArtifactId);
-trace_id!(TraceCheckpointId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLineage {
@@ -81,72 +47,6 @@ pub struct TraceBranch {
 impl TraceBranch {
     pub fn summary(&self) -> String {
         format!("{} ({})", self.label, self.status.label())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ArtifactKind {
-    Prompt,
-    Interpretation,
-    ModelOutput,
-    ToolInvocation,
-    ToolOutput,
-    EvidenceBundle,
-    PlannerTrace,
-    Selection,
-    Checkpoint,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ArtifactEnvelope {
-    pub artifact_id: TraceArtifactId,
-    pub kind: ArtifactKind,
-    pub mime_type: String,
-    pub summary: String,
-    pub byte_count: usize,
-    pub inline_content: Option<String>,
-    pub locator: Option<String>,
-    pub truncated: bool,
-    pub labels: BTreeMap<String, String>,
-}
-
-impl ArtifactEnvelope {
-    pub fn text(
-        artifact_id: TraceArtifactId,
-        kind: ArtifactKind,
-        summary: impl Into<String>,
-        content: impl Into<String>,
-        inline_limit: usize,
-    ) -> Self {
-        let content = content.into();
-        let char_count = content.chars().count();
-        let truncated = char_count > inline_limit;
-        let inline_content = if content.is_empty() {
-            None
-        } else if truncated {
-            let prefix = content.chars().take(inline_limit).collect::<String>();
-            Some(format!("{}...[truncated]", prefix.trim_end()))
-        } else {
-            Some(content.clone())
-        };
-        let locator = truncated.then(|| format!("paddles-artifact://{}", artifact_id.as_str()));
-
-        Self {
-            artifact_id,
-            kind,
-            mime_type: "text/plain".to_string(),
-            summary: summary.into(),
-            byte_count: content.len(),
-            inline_content,
-            locator,
-            truncated,
-            labels: BTreeMap::new(),
-        }
-    }
-
-    pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.labels.insert(key.into(), value.into());
-        self
     }
 }
 
@@ -249,9 +149,10 @@ pub struct TraceReplay {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceBranch, TraceBranchId,
-        TraceBranchStatus, TraceLineage, TraceRecordId, TurnTraceId,
+        TaskTraceId, TraceBranch, TraceBranchId, TraceBranchStatus, TraceLineage, TraceRecordId,
+        TurnTraceId,
     };
+    use paddles_conversation::{ArtifactEnvelope, ArtifactKind, TraceArtifactId};
 
     #[test]
     fn artifact_envelope_uses_locator_when_truncated() {

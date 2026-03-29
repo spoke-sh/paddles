@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/paddles-conversation"]
+resolver = "2"
+
 [package]
 name = "paddles"
 version = "0.1.0"
@@ -26,6 +30,7 @@ tracing-subscriber = "0.3.19"
 crossterm = "0.29.0"
 ratatui = "0.29.0"
 transit-core = { git = "https://github.com/spoke-sh/transit.git", branch = "main" }
+paddles-conversation = { path = "crates/paddles-conversation" }
 
 [features]
 cuda = ["sift/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]

@@ -130,10 +130,11 @@ The repo now contains the main pieces of the target architecture:
 - interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
 - a paddles-owned trace contract in [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs)
-- a paddles-owned conversation/thread contract in [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs)
+- a reusable internal workspace crate for conversation/thread/session primitives in [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)
+- a paddles-side replay/projection layer for those conversation traces in [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs)
 - a recorder port in [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs)
 - embedded/noop/in-memory recorder adapters in [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs)
-- session-scoped thread and trace state in [src/application/session.rs](/home/alex/workspace/spoke-sh/paddles/src/application/session.rs)
+- session-scoped thread orchestration in [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs) using the shared conversation crate
 
 The remaining transitional pieces are now smaller:
 

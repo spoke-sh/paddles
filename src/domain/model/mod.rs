@@ -3,16 +3,17 @@ use anyhow::Result;
 pub mod threading;
 pub mod traces;
 pub mod turns;
-pub use threading::{
-    ConversationReplayView, ConversationThread, ConversationThreadRef, ConversationThreadStatus,
-    ThreadCandidate, ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
-    ThreadMergeMode, ThreadMergeRecord,
+pub use paddles_conversation::{
+    ArtifactEnvelope, ArtifactKind, ConversationThread, ConversationThreadRef,
+    ConversationThreadStatus, TaskTraceId, ThreadCandidate, ThreadCandidateId, ThreadDecision,
+    ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceArtifactId,
+    TraceBranchId, TraceCheckpointId, TraceRecordId, TurnTraceId,
 };
+pub use threading::ConversationReplayView;
 pub use traces::{
-    ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceBranch, TraceBranchId,
-    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
-    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnTraceId,
+    TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
+    TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted,
 };
 pub use turns::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 

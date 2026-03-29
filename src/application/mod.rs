@@ -1,6 +1,4 @@
-mod session;
-
-pub use session::ConversationSession;
+pub use paddles_conversation::ConversationSession;
 
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, ConversationThreadRef, TaskTraceId,
