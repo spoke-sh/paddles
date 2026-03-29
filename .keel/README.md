@@ -120,3 +120,9 @@
 |--------|--------|
 | [Trace Contract And Recorder Port](epics/VFH4BXH4F/voyages/VFH4CCJ4d/) | done |
 
+### [Transit-Backed Auto-Threading Harness](epics/VFHIUOcFc/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Model-Driven Thread Split And Merge UX](epics/VFHIUOcFc/voyages/VFHIV59Hn/) | planned |
+
