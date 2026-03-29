@@ -1,14 +1,15 @@
 ---
 # system-managed
 id: VFCzKKHHu
-status: achieved
+status: verified
 created_at: 2026-03-28T16:40:27
-updated_at: 2026-03-28T17:24:07
+updated_at: 2026-03-28T18:04:51
 # authored
 title: Integrate Sift Autonomous Retrieval Planning
 watch: ~
 activated_at: 2026-03-28T16:43:23
 achieved_at: 2026-03-28T17:24:07
+verified_at: 2026-03-28T18:04:51
 ---
 
 # Integrate Sift Autonomous Retrieval Planning
