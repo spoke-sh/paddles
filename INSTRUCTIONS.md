@@ -59,7 +59,7 @@ Paddles treats inference as a routing problem, not a single-model problem.
 12. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, thread semantics, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
 
 Current transitional note:
-- The main mech-suit runtime now uses model-directed first action selection. Remaining transitional debt is limited to the temporary `tool` bridge and legacy direct adapter helpers that still contain heuristic intent inference outside the main service path.
+- The main mech-suit runtime now uses model-directed first action selection and keeps explicit workspace actions inside the planner loop. Remaining transitional debt is limited to legacy direct adapter helpers that still contain heuristic intent inference outside the main service path.
 
 ## Human Interaction & Pokes
 

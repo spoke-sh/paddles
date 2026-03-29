@@ -16,6 +16,7 @@ pub use planning::{
     InitialAction, InitialActionDecision, InterpretationContext, InterpretationDocument,
     PlannerAction, PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
     PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest,
+    WorkspaceAction,
 };
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
 

@@ -28,8 +28,8 @@ flowchart TD
     I["Interpretation Context<br/>AGENTS.md + linked docs + recent turns + prior tool state"]
     P["Planner Lane<br/>planner-capable model"]
     D{"Next bounded action?"}
-    A["Validated resource action<br/>search / read / inspect / refine / branch"]
-    X["Deterministic tool bridge<br/>legacy tool runtime"]
+    A["Validated resource action<br/>search / list_files / read / inspect / shell / diff / edit / refine / branch"]
+    X["Concrete workspace action<br/>validated executor"]
     S["Planner Trace + Evidence State"]
     T["Stop condition<br/>enough evidence / budget exhausted / explicit stop"]
     Y["Synthesizer Lane<br/>final answer model"]
@@ -37,7 +37,7 @@ flowchart TD
 
     U --> I --> P --> D
     D -->|answer| Y
-    D -->|tool| X --> Y
+    D -->|workspace action| X --> S --> I
     D -->|search/read/refine| A --> S --> I
     D -->|stop| T --> Y
     S --> T
@@ -54,8 +54,8 @@ flowchart LR
     Interpret["Interpretation context<br/>AGENTS.md + linked docs + recent turns + local state"]
     Decide["Model-selected next action<br/>bounded schema"]
     Direct["Answer/synthesize now"]
-    Tool["Deterministic tool bridge"]
-    Resource["Validated resource action<br/>search / read / inspect / refine / branch"]
+    Tool["Concrete workspace action"]
+    Resource["Validated resource action<br/>search / list_files / read / inspect / shell / diff / edit / refine / branch"]
     LocalPlanner["Local planner path<br/>Sift autonomous / local Qwen planner"]
     HeavyPlanner["Specialized planner path<br/>Context-1 boundary or future planner model"]
     Evidence["Trace + Evidence Bundle"]
@@ -63,7 +63,7 @@ flowchart LR
 
     Turn --> Interpret --> Decide
     Decide --> Direct --> Synth
-    Decide --> Tool --> Synth
+    Decide --> Tool --> Evidence
     Decide --> Resource
     Resource --> LocalPlanner --> Evidence
     Resource --> HeavyPlanner --> Evidence
@@ -86,8 +86,8 @@ flowchart TD
     M["Action-selection model"]
     C{"Choose one"}
     A["answer / synthesize"]
-    T["tool bridge"]
-    R["search / read / inspect / refine / branch"]
+    T["workspace action"]
+    R["search / list_files / read / inspect / shell / diff / edit / refine / branch"]
     L["validated recursive loop"]
     S["grounded synthesizer answer"]
 
@@ -151,8 +151,8 @@ Today, the runtime has:
 
 - a planner lane that sees interpretation context before choosing the first bounded action
 - hierarchical `AGENTS.md` reload plus linked foundational guidance excerpts at interpretation time
-- a model-directed first action schema that can choose `answer`, `tool`, `search`, `read`, `inspect`, `refine`, `branch`, or `stop`
-- a bounded recursive loop for `search`, `read`, `inspect`, `refine`, `branch`, and `stop`
+- a model-directed first action schema that can choose `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), `refine`, `branch`, or `stop`
+- a bounded recursive loop for concrete workspace actions, `refine`, `branch`, and `stop`
 - a distinct synthesizer lane that answers from the resulting evidence bundle
 - a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
 - a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids
@@ -164,7 +164,6 @@ Today, the runtime has:
 
 The remaining gaps are narrower now:
 
-- the `tool` initial action is still a transitional bridge into the older deterministic tool runtime instead of a fully unified planner resource graph
 - legacy direct adapter helpers outside the main mech-suit service still contain heuristic intent inference and should not be treated as the backbone contract
 - the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
 - the runtime defaults to `noop` recording today; embedded `transit-core` recording is available through the recorder boundary but is not yet the default CLI/runtime policy

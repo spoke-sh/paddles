@@ -5,7 +5,7 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext, PlannerAction,
-    PlannerRequest, RecursivePlannerDecision, ThreadDecisionRequest,
+    PlannerRequest, RecursivePlannerDecision, ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -103,10 +103,10 @@ enum ToolCall {
 }
 
 #[derive(Debug)]
-struct ToolResult {
-    name: &'static str,
-    summary: String,
-    retained_artifacts: Option<Vec<RetainedArtifact>>,
+pub(crate) struct ToolResult {
+    pub(crate) name: &'static str,
+    pub(crate) summary: String,
+    pub(crate) retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -118,12 +118,43 @@ enum PlannerActionEnvelope {
         intent: Option<String>,
         rationale: String,
     },
+    ListFiles {
+        #[serde(default)]
+        pattern: Option<String>,
+        rationale: String,
+    },
     Read {
         path: String,
         rationale: String,
     },
     Inspect {
         command: String,
+        rationale: String,
+    },
+    Shell {
+        command: String,
+        rationale: String,
+    },
+    Diff {
+        #[serde(default)]
+        path: Option<String>,
+        rationale: String,
+    },
+    WriteFile {
+        path: String,
+        content: String,
+        rationale: String,
+    },
+    ReplaceInFile {
+        path: String,
+        old: String,
+        new: String,
+        #[serde(default)]
+        replace_all: bool,
+        rationale: String,
+    },
+    ApplyPatch {
+        patch: String,
         rationale: String,
     },
     Refine {
@@ -149,13 +180,15 @@ enum InitialActionEnvelope {
     Answer {
         rationale: String,
     },
-    Tool {
-        rationale: String,
-    },
     Search {
         query: String,
         #[serde(default)]
         intent: Option<String>,
+        rationale: String,
+    },
+    ListFiles {
+        #[serde(default)]
+        pattern: Option<String>,
         rationale: String,
     },
     Read {
@@ -164,6 +197,32 @@ enum InitialActionEnvelope {
     },
     Inspect {
         command: String,
+        rationale: String,
+    },
+    Shell {
+        command: String,
+        rationale: String,
+    },
+    Diff {
+        #[serde(default)]
+        path: Option<String>,
+        rationale: String,
+    },
+    WriteFile {
+        path: String,
+        content: String,
+        rationale: String,
+    },
+    ReplaceInFile {
+        path: String,
+        old: String,
+        new: String,
+        #[serde(default)]
+        replace_all: bool,
+        rationale: String,
+    },
+    ApplyPatch {
+        patch: String,
         rationale: String,
     },
     Refine {
@@ -1585,6 +1644,22 @@ impl SiftAgentAdapter {
             }
         }
     }
+
+    pub(crate) fn execute_workspace_action(&self, action: &WorkspaceAction) -> Result<ToolResult> {
+        let tool_call = tool_call_from_workspace_action(action).ok_or_else(|| {
+            anyhow!(
+                "workspace action `{}` is not executable via the tool adapter",
+                action.label()
+            )
+        })?;
+        self.execute_tool(
+            &tool_call,
+            "planner-workspace-action",
+            &[],
+            &[],
+            &NullTurnEventSink,
+        )
+    }
 }
 
 fn build_turn_prompt(turn: &TurnPrompt<'_>) -> String {
@@ -1740,10 +1815,15 @@ Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"tool\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
@@ -1751,8 +1831,10 @@ Allowed actions:\n\
 Rules:\n\
 - Read the interpretation context before choosing.\n\
 - Answer when the synthesizer can reply directly without more workspace resources.\n\
-- Tool means deterministic workspace/tool execution should happen next.\n\
-- Search, read, inspect, refine, or branch when more workspace evidence is needed.\n\
+- Choose the most specific next workspace action when the turn requires repository work.\n\
+- Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
+- Use write_file, replace_in_file, or apply_patch only when the requested next step is an explicit workspace edit.\n\
+- Search, list_files, read, inspect, shell, diff, refine, or branch when more workspace evidence or action is needed.\n\
 - Stop when the turn should not recurse further before synthesis.\n\
 - Never answer the user directly here.\n\
 - Inspect commands must stay read-only.\n\
@@ -1782,10 +1864,15 @@ Return ONLY one valid JSON initial action.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"tool\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
@@ -1814,16 +1901,24 @@ Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
+- List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
 - Inspect when a read-only workspace command would clarify state.\n\
+- Use shell, diff, or edit actions when the requested next step is a concrete workspace action that should stay inside the planner loop.\n\
 - Refine when an earlier search needs a sharper query.\n\
 - Branch when the investigation should split into multiple subqueries.\n\
 - Stop when you already have enough evidence or when the question does not require workspace resources.\n\
@@ -1859,8 +1954,14 @@ Return ONLY one valid JSON planner action.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
@@ -2626,6 +2727,13 @@ fn describe_tool_call(tool_call: &ToolCall) -> String {
     }
 }
 
+pub(crate) fn describe_workspace_action(action: &WorkspaceAction) -> String {
+    match tool_call_from_workspace_action(action) {
+        Some(tool_call) => describe_tool_call(&tool_call),
+        None => action.summary(),
+    }
+}
+
 fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
     let trimmed = response.trim();
     let Some(json) = extract_json_payload(trimmed) else {
@@ -2679,33 +2787,103 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             action: InitialAction::Answer,
             rationale: required_planner_field("rationale", rationale)?,
         },
-        InitialActionEnvelope::Tool { rationale } => InitialActionDecision {
-            action: InitialAction::Tool,
-            rationale: required_planner_field("rationale", rationale)?,
-        },
         InitialActionEnvelope::Search {
             query,
             intent,
             rationale,
         } => InitialActionDecision {
-            action: InitialAction::Search {
-                query: required_planner_field("query", query)?,
-                intent: intent.and_then(|value| {
-                    let trimmed = value.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                }),
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: required_planner_field("query", query)?,
+                    intent: intent.and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }),
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::ListFiles { pattern, rationale } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::ListFiles {
+                    pattern: pattern.and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }),
+                },
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
         InitialActionEnvelope::Read { path, rationale } => InitialActionDecision {
-            action: InitialAction::Read {
-                path: required_planner_field("path", path)?,
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: required_planner_field("path", path)?,
+                },
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
         InitialActionEnvelope::Inspect { command, rationale } => InitialActionDecision {
-            action: InitialAction::Inspect {
-                command: required_planner_field("command", command)?,
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: required_planner_field("command", command)?,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Shell { command, rationale } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Shell {
+                    command: required_planner_field("command", command)?,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Diff { path, rationale } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Diff {
+                    path: path.and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }),
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::WriteFile {
+            path,
+            content,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::WriteFile {
+                    path: required_planner_field("path", path)?,
+                    content,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::ReplaceInFile {
+            path,
+            old,
+            new,
+            replace_all,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::ReplaceInFile {
+                    path: required_planner_field("path", path)?,
+                    old: required_planner_field("old", old)?,
+                    new: required_planner_field("new", new)?,
+                    replace_all,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::ApplyPatch { patch, rationale } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::ApplyPatch {
+                    patch: required_planner_field("patch", patch)?,
+                },
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
@@ -2763,24 +2941,98 @@ fn planner_action_from_envelope(
             intent,
             rationale,
         } => RecursivePlannerDecision {
-            action: PlannerAction::Search {
-                query: required_planner_field("query", query)?,
-                intent: intent.and_then(|value| {
-                    let trimmed = value.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                }),
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: required_planner_field("query", query)?,
+                    intent: intent.and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }),
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::ListFiles { pattern, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::ListFiles {
+                    pattern: pattern.and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }),
+                },
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
         PlannerActionEnvelope::Read { path, rationale } => RecursivePlannerDecision {
-            action: PlannerAction::Read {
-                path: required_planner_field("path", path)?,
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: required_planner_field("path", path)?,
+                },
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
         PlannerActionEnvelope::Inspect { command, rationale } => RecursivePlannerDecision {
-            action: PlannerAction::Inspect {
-                command: required_planner_field("command", command)?,
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: required_planner_field("command", command)?,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::Shell { command, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Shell {
+                    command: required_planner_field("command", command)?,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::Diff { path, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Diff {
+                    path: path.and_then(|value| {
+                        let trimmed = value.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }),
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::WriteFile {
+            path,
+            content,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::WriteFile {
+                    path: required_planner_field("path", path)?,
+                    content,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::ReplaceInFile {
+            path,
+            old,
+            new,
+            replace_all,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::ReplaceInFile {
+                    path: required_planner_field("path", path)?,
+                    old: required_planner_field("old", old)?,
+                    new: required_planner_field("new", new)?,
+                    replace_all,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::ApplyPatch { patch, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::ApplyPatch {
+                    patch: required_planner_field("patch", patch)?,
+                },
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
@@ -2923,13 +3175,12 @@ fn parse_merge_mode(value: &str) -> Result<ThreadMergeMode> {
 }
 
 fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
-    if infer_shell_command(&request.user_prompt).is_some()
-        || is_follow_up_execution_request(&request.user_prompt)
-        || should_prefer_tools(&request.user_prompt)
-    {
+    if let Some(tool_call) = infer_tool_call(&request.user_prompt, &[]) {
         return InitialActionDecision {
-            action: InitialAction::Tool,
-            rationale: "prefer deterministic tool execution for an explicit workspace action when the initial action reply is invalid"
+            action: InitialAction::Workspace {
+                action: workspace_action_from_tool_call(tool_call),
+            },
+            rationale: "prefer a concrete workspace action inside the planner loop when the initial action reply is invalid"
                 .to_string(),
         };
     }
@@ -2943,9 +3194,11 @@ fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
     }
 
     InitialActionDecision {
-        action: InitialAction::Search {
-            query: fallback_planner_query(&request.user_prompt),
-            intent: Some("initial action fallback".to_string()),
+        action: InitialAction::Workspace {
+            action: WorkspaceAction::Search {
+                query: fallback_planner_query(&request.user_prompt),
+                intent: Some("initial action fallback".to_string()),
+            },
         },
         rationale: "start with a bounded workspace search when the initial action reply is invalid"
             .to_string(),
@@ -2955,9 +3208,11 @@ fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
 fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision {
     if let Some(branch) = request.loop_state.pending_branches.first() {
         return RecursivePlannerDecision {
-            action: PlannerAction::Search {
-                query: branch.label.clone(),
-                intent: Some("queued planner branch".to_string()),
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: branch.label.clone(),
+                    intent: Some("queued planner branch".to_string()),
+                },
             },
             rationale: "continue with the oldest queued branch".to_string(),
         };
@@ -2965,9 +3220,11 @@ fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision
 
     if request.loop_state.steps.is_empty() && request.loop_state.evidence_items.is_empty() {
         return RecursivePlannerDecision {
-            action: PlannerAction::Search {
-                query: fallback_planner_query(&request.user_prompt),
-                intent: Some("initial planner fallback".to_string()),
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: fallback_planner_query(&request.user_prompt),
+                    intent: Some("initial planner fallback".to_string()),
+                },
             },
             rationale: "start with a bounded workspace search when the planner reply is invalid"
                 .to_string(),
@@ -2998,6 +3255,65 @@ fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
         new_thread_label: None,
         merge_mode: None,
         merge_summary: None,
+    }
+}
+
+fn workspace_action_from_tool_call(tool_call: ToolCall) -> WorkspaceAction {
+    match tool_call {
+        ToolCall::Search { query, intent } => WorkspaceAction::Search { query, intent },
+        ToolCall::ListFiles { pattern } => WorkspaceAction::ListFiles { pattern },
+        ToolCall::ReadFile { path } => WorkspaceAction::Read { path },
+        ToolCall::WriteFile { path, content } => WorkspaceAction::WriteFile { path, content },
+        ToolCall::ReplaceInFile {
+            path,
+            old,
+            new,
+            replace_all,
+        } => WorkspaceAction::ReplaceInFile {
+            path,
+            old,
+            new,
+            replace_all,
+        },
+        ToolCall::Shell { command } => WorkspaceAction::Shell { command },
+        ToolCall::Diff { path } => WorkspaceAction::Diff { path },
+        ToolCall::ApplyPatch { patch } => WorkspaceAction::ApplyPatch { patch },
+    }
+}
+
+fn tool_call_from_workspace_action(action: &WorkspaceAction) -> Option<ToolCall> {
+    match action {
+        WorkspaceAction::Search { query, intent } => Some(ToolCall::Search {
+            query: query.clone(),
+            intent: intent.clone(),
+        }),
+        WorkspaceAction::ListFiles { pattern } => Some(ToolCall::ListFiles {
+            pattern: pattern.clone(),
+        }),
+        WorkspaceAction::Read { path } => Some(ToolCall::ReadFile { path: path.clone() }),
+        WorkspaceAction::Inspect { .. } => None,
+        WorkspaceAction::Shell { command } => Some(ToolCall::Shell {
+            command: command.clone(),
+        }),
+        WorkspaceAction::Diff { path } => Some(ToolCall::Diff { path: path.clone() }),
+        WorkspaceAction::WriteFile { path, content } => Some(ToolCall::WriteFile {
+            path: path.clone(),
+            content: content.clone(),
+        }),
+        WorkspaceAction::ReplaceInFile {
+            path,
+            old,
+            new,
+            replace_all,
+        } => Some(ToolCall::ReplaceInFile {
+            path: path.clone(),
+            old: old.clone(),
+            new: new.clone(),
+            replace_all: *replace_all,
+        }),
+        WorkspaceAction::ApplyPatch { patch } => Some(ToolCall::ApplyPatch {
+            patch: patch.clone(),
+        }),
     }
 }
 
@@ -3278,7 +3594,7 @@ mod tests {
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, PlannerDecision,
         PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-        RetainedEvidence,
+        RetainedEvidence, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -3782,6 +4098,38 @@ mod tests {
         assert!(prompt.contains("Use AGENTS guidance before choosing the next action."));
         assert!(prompt.contains("Recent turns"));
         assert!(prompt.contains("user: previous turn"));
+    }
+
+    #[test]
+    fn invalid_initial_action_replies_fall_back_to_concrete_workspace_actions() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "not json",
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+        );
+
+        let request = PlannerRequest::new(
+            "show me the git status",
+            workspace.path(),
+            InterpretationContext::default(),
+            crate::domain::ports::PlannerBudget::default(),
+        );
+
+        let decision = adapter
+            .select_initial_action(&request)
+            .expect("initial action fallback");
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Shell {
+                    command: "git status".to_string()
+                }
+            }
+        );
     }
 
     #[test]

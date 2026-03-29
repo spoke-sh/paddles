@@ -3,6 +3,7 @@ use crate::domain::model::{
     ConversationThread, ThreadCandidate, ThreadDecision, TraceBranch, TraceBranchId,
 };
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[async_trait]
@@ -194,29 +195,96 @@ pub struct PlannerStepRecord {
     pub outcome: String,
 }
 
-/// The first bounded action the planner may choose for a turn.
-///
-/// This contract is intentionally generic across repositories and evidence
-/// domains. The controller remains responsible for validating read-only
-/// inspect commands, enforcing budgets, and failing closed when the selected
-/// action cannot be executed safely.
-///
-/// `Tool` exists as a transitional bridge into the existing deterministic tool
-/// runtime while the harness still separates top-level action selection from
-/// lower-level tool execution.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum InitialAction {
-    Answer,
-    Tool,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum WorkspaceAction {
     Search {
         query: String,
+        #[serde(default)]
         intent: Option<String>,
+    },
+    ListFiles {
+        #[serde(default)]
+        pattern: Option<String>,
     },
     Read {
         path: String,
     },
     Inspect {
         command: String,
+    },
+    Shell {
+        command: String,
+    },
+    Diff {
+        #[serde(default)]
+        path: Option<String>,
+    },
+    WriteFile {
+        path: String,
+        content: String,
+    },
+    ReplaceInFile {
+        path: String,
+        old: String,
+        new: String,
+        #[serde(default)]
+        replace_all: bool,
+    },
+    ApplyPatch {
+        patch: String,
+    },
+}
+
+impl WorkspaceAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Search { .. } => "search",
+            Self::ListFiles { .. } => "list_files",
+            Self::Read { .. } => "read",
+            Self::Inspect { .. } => "inspect",
+            Self::Shell { .. } => "shell",
+            Self::Diff { .. } => "diff",
+            Self::WriteFile { .. } => "write_file",
+            Self::ReplaceInFile { .. } => "replace_in_file",
+            Self::ApplyPatch { .. } => "apply_patch",
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Search { query, .. } => format!("search `{query}`"),
+            Self::ListFiles { pattern } => match pattern {
+                Some(pattern) if !pattern.trim().is_empty() => {
+                    format!("list files matching `{pattern}`")
+                }
+                _ => "list files".to_string(),
+            },
+            Self::Read { path } => format!("read `{path}`"),
+            Self::Inspect { command } => format!("inspect `{command}`"),
+            Self::Shell { command } => command.clone(),
+            Self::Diff { path } => match path {
+                Some(path) if !path.trim().is_empty() => format!("diff `{path}`"),
+                _ => "git diff --no-ext-diff".to_string(),
+            },
+            Self::WriteFile { path, .. } => format!("write `{path}`"),
+            Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
+            Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+        }
+    }
+}
+
+/// The first bounded action the planner may choose for a turn.
+///
+/// This contract is intentionally generic across repositories and evidence
+/// domains. The controller remains responsible for validating read-only
+/// inspect commands, enforcing budgets, and failing closed when the selected
+/// action cannot be executed safely.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InitialAction {
+    Answer,
+    Workspace {
+        action: WorkspaceAction,
     },
     Refine {
         query: String,
@@ -235,10 +303,7 @@ impl InitialAction {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Answer => "answer",
-            Self::Tool => "tool",
-            Self::Search { .. } => "search",
-            Self::Read { .. } => "read",
-            Self::Inspect { .. } => "inspect",
+            Self::Workspace { action } => action.label(),
             Self::Refine { .. } => "refine",
             Self::Branch { .. } => "branch",
             Self::Stop { .. } => "stop",
@@ -248,10 +313,7 @@ impl InitialAction {
     pub fn summary(&self) -> String {
         match self {
             Self::Answer => "answer directly".to_string(),
-            Self::Tool => "use deterministic tool execution".to_string(),
-            Self::Search { query, .. } => format!("search `{query}`"),
-            Self::Read { path } => format!("read `{path}`"),
-            Self::Inspect { command } => format!("inspect `{command}`"),
+            Self::Workspace { action } => action.summary(),
             Self::Refine { query, .. } => format!("refine toward `{query}`"),
             Self::Branch { branches, .. } => format!("branch into {}", branches.join(" | ")),
             Self::Stop { reason } => format!("stop ({reason})"),
@@ -260,14 +322,9 @@ impl InitialAction {
 
     pub fn as_planner_action(&self) -> Option<PlannerAction> {
         match self {
-            Self::Answer | Self::Tool => None,
-            Self::Search { query, intent } => Some(PlannerAction::Search {
-                query: query.clone(),
-                intent: intent.clone(),
-            }),
-            Self::Read { path } => Some(PlannerAction::Read { path: path.clone() }),
-            Self::Inspect { command } => Some(PlannerAction::Inspect {
-                command: command.clone(),
+            Self::Answer => None,
+            Self::Workspace { action } => Some(PlannerAction::Workspace {
+                action: action.clone(),
             }),
             Self::Refine { query, rationale } => Some(PlannerAction::Refine {
                 query: query.clone(),
@@ -296,15 +353,8 @@ pub struct InitialActionDecision {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlannerAction {
-    Search {
-        query: String,
-        intent: Option<String>,
-    },
-    Read {
-        path: String,
-    },
-    Inspect {
-        command: String,
+    Workspace {
+        action: WorkspaceAction,
     },
     Refine {
         query: String,
@@ -322,9 +372,7 @@ pub enum PlannerAction {
 impl PlannerAction {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Search { .. } => "search",
-            Self::Read { .. } => "read",
-            Self::Inspect { .. } => "inspect",
+            Self::Workspace { action } => action.label(),
             Self::Refine { .. } => "refine",
             Self::Branch { .. } => "branch",
             Self::Stop { .. } => "stop",
@@ -333,9 +381,7 @@ impl PlannerAction {
 
     pub fn summary(&self) -> String {
         match self {
-            Self::Search { query, .. } => format!("search `{query}`"),
-            Self::Read { path } => format!("read `{path}`"),
-            Self::Inspect { command } => format!("inspect `{command}`"),
+            Self::Workspace { action } => action.summary(),
             Self::Refine { query, .. } => format!("refine toward `{query}`"),
             Self::Branch { branches, .. } => {
                 format!("branch into {}", branches.join(" | "))
@@ -359,7 +405,7 @@ pub struct PlannerDecision {
 mod tests {
     use super::{
         InitialAction, InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget,
-        ThreadDecisionRequest,
+        ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
         ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadCandidate,
@@ -392,9 +438,11 @@ mod tests {
 
     #[test]
     fn planner_action_reports_human_readable_summary() {
-        let action = PlannerAction::Search {
-            query: "memory reload".to_string(),
-            intent: None,
+        let action = PlannerAction::Workspace {
+            action: WorkspaceAction::Search {
+                query: "memory reload".to_string(),
+                intent: None,
+            },
         };
 
         assert_eq!(action.label(), "search");
@@ -404,16 +452,20 @@ mod tests {
 
     #[test]
     fn initial_action_reports_human_readable_summary() {
-        let action = InitialAction::Inspect {
-            command: "git status".to_string(),
+        let action = InitialAction::Workspace {
+            action: WorkspaceAction::Inspect {
+                command: "git status".to_string(),
+            },
         };
 
         assert_eq!(action.label(), "inspect");
         assert!(action.summary().contains("git status"));
         assert_eq!(
             action.as_planner_action(),
-            Some(PlannerAction::Inspect {
-                command: "git status".to_string()
+            Some(PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "git status".to_string()
+                }
             })
         );
     }

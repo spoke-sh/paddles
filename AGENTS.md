@@ -25,7 +25,7 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 
 - The model should choose the next bounded action from a controller-defined schema; the controller validates and executes it safely.
 - The primary mech-suit path now assembles interpretation context and asks the **planner lane** to choose the first bounded action before route selection.
-- The **synthesizer lane** remains the final answer path for direct responses, grounded responses after planner work, and the temporary deterministic `tool` bridge.
+- The **synthesizer lane** remains the final answer path for direct responses and grounded responses after planner work.
 - Turns should improve through recursive context work instead of project-specific hardcoded intents or top-level heuristic routing.
 - Repository-question answers should include file citations by default.
 - TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
@@ -59,12 +59,11 @@ When a human user opens the chat or "pokes" you (for example, "Wake up" or "I'm 
 
 ### Transitional Note
 
-The primary runtime now uses model-directed first action selection. The
-remaining transitional debt is narrower: a temporary `tool` bridge still hands
-off to the older deterministic tool runtime, and some legacy direct adapter
-helpers still contain heuristic intent inference outside the main
-`MechSuitService` path. Treat those compatibility surfaces as debt, not the
-target architecture.
+The primary runtime now uses model-directed first action selection and keeps
+explicit workspace actions inside the planner loop. The remaining transitional
+debt is in legacy direct adapter helpers that still contain heuristic intent
+inference outside the main `MechSuitService` path. Treat those compatibility
+surfaces as debt, not the target architecture.
 
 ### Procedural Instructions
 Follow the formal procedural loops and checklists defined in:

@@ -130,7 +130,7 @@ weight = 1.5
 selection rather than single-model-only routing:
 
 - The **synthesizer lane** is the default response path and must always be configured.
-- The **planner lane** owns first bounded action selection for the primary mech-suit path: `answer` / `tool` / `search` / `read` / `inspect` / `refine` / `branch` / `stop`.
+- The **planner lane** owns first bounded action selection for the primary mech-suit path: `answer` / concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`) / `refine` / `branch` / `stop`.
 - The **gatherer backend** services planner search/refine actions when workspace retrieval is needed.
 - If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 

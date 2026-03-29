@@ -17,7 +17,7 @@ The backbone has five layers:
 
 2. `PlannerLane`
    A planner-capable model chooses the next bounded action before route
-   selection: answer, tool, search, read, inspect, refine, branch, or stop.
+   selection: answer, concrete workspace actions, refine, branch, or stop.
 
 3. `RecursiveExecutionLoop`
    Validates and executes planner actions, appends outputs back into context,
@@ -82,10 +82,11 @@ inside bounded action and budget contracts.
 The planner boundary should be able to express actions like:
 
 - answer or synthesize now
-- bridge into deterministic tool execution when the controller/tool runtime is the best next step
 - search the workspace
+- list candidate files
 - read a file or artifact
-- inspect prior tool output
+- inspect read-only workspace state
+- run a concrete workspace action such as shell, diff, or an explicit edit
 - refine a search query
 - branch an investigation into subqueries
 - stop and request synthesis
@@ -141,7 +142,7 @@ The repo now contains the main pieces of the target architecture:
 
 The remaining transitional pieces are now smaller:
 
-- the main mech-suit service selects the first bounded action through the planner lane, but a temporary `tool` action still bridges into the older deterministic tool runtime
+- the main mech-suit service now keeps explicit workspace actions inside the planner loop instead of routing them through a separate top-level bridge
 - legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
 - the default `sift-autonomous` gatherer path now runs bounded graph-mode retrieval for recursive planner `search` / `refine` work and preserves graph episode/frontier/branch state as typed `paddles` metadata
@@ -176,9 +177,8 @@ The main runtime path now follows the target backbone shape:
 
 The remaining mismatch is narrower:
 
-1. a selected `tool` action still hands off to the existing deterministic tool runtime instead of a unified planner resource graph
-2. some legacy direct adapter helper methods still infer intent heuristically when called outside `MechSuitService`
-3. auto-threading is checkpoint-bounded and sequential today; it replays and
+1. some legacy direct adapter helper methods still infer intent heuristically when called outside `MechSuitService`
+2. auto-threading is checkpoint-bounded and sequential today; it replays and
    merges explicit thread lineage but does not provide simultaneous sibling
    generation on one local model session
 
