@@ -1,0 +1,49 @@
+# Codex-Style Interactive TUI Proof
+
+## Verification Summary
+
+- `cargo test`
+  - `infrastructure::cli::interactive_tui::tests::tty_interactive_mode_uses_tui_but_prompt_keeps_plain_path`
+  - `infrastructure::cli::interactive_tui::tests::turn_events_render_as_codex_like_action_rows`
+  - `infrastructure::cli::interactive_tui::tests::assistant_rows_style_sources_and_inline_code`
+  - `infrastructure::cli::interactive_tui::tests::assistant_reveal_finishes_with_full_text`
+  - `infrastructure::cli::interactive_tui::tests::app_tracks_busy_state_through_reveal_completion`
+
+These tests prove the core UX contract:
+
+1. TTY interactive sessions take the TUI path.
+2. One-shot `--prompt` keeps the plain path.
+3. Action rows render in the Codex-like transcript shape.
+4. Assistant answers reveal progressively and finish with the exact final content.
+5. Source lines and inline code receive distinct assistant styling.
+
+## Transcript Shape
+
+The default interactive transcript now follows this structure:
+
+```text
+• Interactive mode ready
+  └ Codex-style transcript active. Enter to send, Ctrl+C to quit.
+
+You
+  └ How does memory work in paddles?
+
+• Classified
+  └ repository-question
+
+• Routed
+  └ repository question will use gatherer lane 'sift-autonomous' before synthesizer lane 'qwen-1.5b'
+
+• Gathered context with sift-autonomous
+  └ Memory files are loaded from the operator memory adapter and documented in the README.
+    Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+
+Paddles
+  └ Memory files are reloaded on every turn from `/etc/paddles/AGENTS.md`, `~/.config/paddles/AGENTS.md`, and ancestor `AGENTS.md` files down to the workspace root.
+    Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+```
+
+## Plain Path Preservation
+
+- `paddles --prompt ...` still prints the plain final answer path instead of entering the alternate-screen UI.
+- Non-TTY stdin/stdout flows also stay on the plain path so shell composition and scripting remain stable.

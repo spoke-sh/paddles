@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:39:42.993700587-07:00
+mode: manual
+---
+The TUI palette adapts to common light and dark terminal backgrounds via COLORFGBG detection in detect_palette(), with separate user/assistant/event/error styles for each mode.

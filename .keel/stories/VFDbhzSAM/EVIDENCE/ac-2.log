@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:39:50.682506728-07:00
+mode: manual
+---
+PendingReveal in src/infrastructure/cli/interactive_tui.rs progressively reveals the final assistant answer while preserving the exact grounded and cited content returned by paddles.

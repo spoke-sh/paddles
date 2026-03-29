@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:39:48.453470781-07:00
+mode: manual
+---
+src/application/mod.rs now accepts a per-turn TurnEventSink and src/infrastructure/cli/interactive_tui.rs bridges those TurnEvent values into transcript action rows during execution.

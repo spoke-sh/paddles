@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:39:40.239225153-07:00
+mode: manual
+---
+render_row_lines and TranscriptRowKind in src/infrastructure/cli/interactive_tui.rs render distinct user, assistant, event, and error transcript cells with a stable Codex-style structure.

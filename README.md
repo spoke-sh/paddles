@@ -65,7 +65,8 @@ Key architectural rules reflected in that flow:
 *   Repository questions now use the gatherer lane by default. The synthesizer consumes typed evidence from that lane instead of relying on hidden private retrieval as the primary path.
 *   The gatherer lane returns typed evidence for synthesis. It does not replace the final answer path.
 *   `sift-autonomous` is the default local gatherer provider for repository investigation. It returns planner trace metadata with the evidence bundle, then hands that bundle to the normal synthesizer lane.
-*   The REPL renders a Codex-style action stream by default so routing, gathering, tool calls, fallbacks, and synthesis are visible without `-v`.
+*   TTY interactive sessions render a paddles-owned Codex-style TUI by default so routing, gathering, tool calls, fallbacks, and synthesis are visible without `-v`.
+*   One-shot `--prompt` usage and non-TTY stdin/stdout flows stay on the plain stdout path for scriptability.
 *   The REPL reloads hierarchical `AGENTS.md` memory on every turn, so operator guidance can change without restarting the process.
 *   The local Qwen runtime stays loaded, while turn-local prompt state is rebuilt per send.
 
@@ -152,22 +153,26 @@ The `paddles` REPL reloads `AGENTS.md` memory on every prompt. It searches in th
 
 Later files are treated as more specific and override earlier guidance. That means edits to a local project `AGENTS.md` take effect on the next turn without restarting the REPL, and those instructions are injected into both the direct-answer path and the tool-oriented prompt path.
 
-The REPL also renders a default turn event stream. Expect concise lines for intent classification, route selection, gatherer capability, gathered evidence, planner summaries, tool execution, fallback reasons, and synthesis readiness before the final `Chord Response`.
+When stdin/stdout are attached to a terminal and you do not pass `--prompt`, `paddles` enters an alternate-screen TUI built on `crossterm` and `ratatui`. That TUI owns transcript state for user turns, action/event rows, and assistant output. Live `TurnEvent` activity is rendered in-line, and the final assistant answer is progressively revealed in the transcript.
+
+When you use `--prompt`, or when stdin/stdout are not terminals, `paddles` stays on the plain stdout path. That keeps one-shot usage, pipes, and scripting predictable.
 
 Example shape:
 
 ```text
-• Classified turn
+• Classified
   └ repository-question
-• Routed turn
-  └ repository question will use gatherer lane 'sift-autonomous' before synthesizer lane 'qwen-1.5b'
-• Gathered context with sift-autonomous
-  └ ... Sources: src/infrastructure/adapters/agent_memory.rs, README.md
-• Synthesized grounded answer
-  └ Sources: src/infrastructure/adapters/agent_memory.rs, README.md
-Chord Response: ...
 
-Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+• Routed
+  └ repository question will use gatherer lane 'sift-autonomous' before synthesizer lane 'qwen-1.5b'
+
+• Gathered context with sift-autonomous
+  └ Memory files are loaded from the operator memory adapter and documented in the README.
+    Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+
+Paddles
+  └ Memory files are reloaded on every turn from `/etc/paddles/AGENTS.md`, `~/.config/paddles/AGENTS.md`, and ancestor `AGENTS.md` files down to the workspace root.
+    Sources: src/infrastructure/adapters/agent_memory.rs, README.md
 ```
 
 ## 🛠️ Key Tools & Components

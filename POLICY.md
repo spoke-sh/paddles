@@ -28,6 +28,7 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Grounded Answers Cite Sources**: Repository-question answers must include file citations by default and should degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
 - **Planner Metadata Must Stay Observable**: When a gatherer uses autonomous planning, planner strategy, stop reason, and retained-evidence summaries must remain observable in verbose output or evidence digests.
 - **Turn Events Stay Visible**: The interactive REPL must render a default action stream for classification, route selection, gatherer work, tool calls, fallbacks, and synthesis. This is not reserved for a quiet debug mode.
+- **TTY UI / Plain CLI Split**: Interactive terminal sessions should use the dedicated transcript UI, while `--prompt` and non-TTY stdin/stdout flows must remain plain output paths for scripting and pipes.
 - **Hierarchical Operator Memory**: The REPL must reload `AGENTS.md` memory on every turn from system, user, and ancestor scopes in that order, with more specific files overriding broader guidance.
 - **Memory Does Not Replace Control**: Instruction memory may shape prompt construction, but controller-owned routing, typed evidence contracts, and deterministic tool execution remain authoritative.
 - **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:39:33.214724238-07:00
+mode: manual
+---
+InteractiveApp in src/infrastructure/cli/interactive_tui.rs owns transcript rows for user, assistant, event, and error cells plus the composer input buffer and busy/reveal state.

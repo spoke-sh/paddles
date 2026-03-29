@@ -22,8 +22,8 @@ mission: VFDbdz8sH
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Transcript-Driven Interactive Terminal](voyages/VFDbfLe0E/) | in-progress | 0/4 |
+| [Transcript-Driven Interactive Terminal](voyages/VFDbfLe0E/) | done | 4/4 |
 <!-- END GENERATED -->

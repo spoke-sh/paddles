@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:39:30.792609443-07:00
+mode: manual
+---
+TTY interactive sessions now enter the alternate-screen TUI in src/infrastructure/cli/interactive_tui.rs, while src/main.rs keeps --prompt on the plain stdout path and falls back to plain lines for non-TTY stdin/stdout.

@@ -1,12 +1,16 @@
 use anyhow::Result;
 use clap::Parser;
 use std::env;
+use std::io::IsTerminal;
 use std::sync::Arc;
-use tokio::io::{self, AsyncBufReadExt, BufReader};
+use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
 // External Crate Modules
 use paddles::application::{GathererProvider, MechSuitService, RuntimeLaneConfig};
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
+use paddles::infrastructure::cli::interactive_tui::{
+    InteractiveFrontend, run_interactive_tui, select_interactive_frontend,
+};
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -60,27 +64,39 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let frontend = select_interactive_frontend(
+        cli.prompt.is_some(),
+        std::io::stdin().is_terminal(),
+        std::io::stdout().is_terminal(),
+    );
 
     // Initialize tracing based on verbosity
-    let log_level = match cli.verbose {
-        0 => tracing::Level::ERROR,
-        1 => tracing::Level::INFO,
-        2 => tracing::Level::DEBUG,
-        _ => tracing::Level::TRACE,
+    let log_level = match frontend {
+        InteractiveFrontend::Tui => tracing::Level::ERROR,
+        InteractiveFrontend::PlainLines => match cli.verbose {
+            0 => tracing::Level::ERROR,
+            1 => tracing::Level::INFO,
+            2 => tracing::Level::DEBUG,
+            _ => tracing::Level::TRACE,
+        },
     };
 
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
     let root_path = env::current_dir()?;
     let registry = Arc::new(SiftRegistryAdapter::new());
-    let service = MechSuitService::new(root_path, registry);
-    service.set_verbose(cli.verbose);
+    let service = Arc::new(MechSuitService::new(root_path, registry));
+    let runtime_verbose = match frontend {
+        InteractiveFrontend::Tui => 0,
+        InteractiveFrontend::PlainLines => cli.verbose,
+    };
+    service.set_verbose(runtime_verbose);
 
     // Boot sequence
     if cli.verbose >= 1 {
         println!("[BOOT] Initializing system...");
     }
-    let _boot_ctx = service.boot(
+    let boot_ctx = service.boot(
         cli.credits,
         cli.weights,
         cli.biases,
@@ -89,10 +105,10 @@ async fn main() -> Result<()> {
     )?;
 
     if cli.verbose >= 1 {
-        println!("[BOOT] Inherited Credits: {}", _boot_ctx.credits);
-        println!("[BOOT] Applying Foundational Weights: {}", _boot_ctx.weight);
-        println!("[BOOT] Applying Foundational Biases: {}", _boot_ctx.bias);
-        if _boot_ctx.hf_token.is_some() {
+        println!("[BOOT] Inherited Credits: {}", boot_ctx.credits);
+        println!("[BOOT] Applying Foundational Weights: {}", boot_ctx.weight);
+        println!("[BOOT] Applying Foundational Biases: {}", boot_ctx.bias);
+        if boot_ctx.hf_token.is_some() {
             println!("[BOOT] Hugging Face Token: [MASKED]");
         }
         println!("[BOOT] Calibration Successful.");
@@ -135,27 +151,36 @@ async fn main() -> Result<()> {
         let response = service.process_prompt(&prompt).await?;
         println!("Chord Response: {}", response);
     } else {
-        println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
-        let mut stdin_reader = BufReader::new(io::stdin()).lines();
-        loop {
-            print!(">> ");
-            use std::io::Write;
-            std::io::stdout().flush()?;
+        match frontend {
+            InteractiveFrontend::Tui => run_interactive_tui(service, cli.model.clone()).await?,
+            InteractiveFrontend::PlainLines => run_plain_interactive_loop(service).await?,
+        }
+    }
 
-            if let Some(line) = stdin_reader.next_line().await? {
-                let input = line.trim();
-                if input == "exit" || input == "quit" {
-                    break;
-                }
-                if input.is_empty() {
-                    continue;
-                }
+    Ok(())
+}
 
-                let response = service.process_prompt(input).await?;
-                println!("Chord Response: {}", response);
-            } else {
+async fn run_plain_interactive_loop(service: Arc<MechSuitService>) -> Result<()> {
+    println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
+    let mut stdin_reader = BufReader::new(tokio_io::stdin()).lines();
+    loop {
+        print!(">> ");
+        use std::io::Write;
+        std::io::stdout().flush()?;
+
+        if let Some(line) = stdin_reader.next_line().await? {
+            let input = line.trim();
+            if input == "exit" || input == "quit" {
                 break;
             }
+            if input.is_empty() {
+                continue;
+            }
+
+            let response = service.process_prompt(input).await?;
+            println!("Chord Response: {}", response);
+        } else {
+            break;
         }
     }
 

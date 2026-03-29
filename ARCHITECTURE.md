@@ -17,8 +17,9 @@ That routing principle is foundational. `paddles` should not assume one model is
 
 ### 1. CLI Entry (`src/main.rs`)
 - Parses boot and runtime arguments.
-- Supports one-shot prompts and interactive mode.
+- Supports one-shot prompts, non-TTY plain interactive input, and a TTY-only alternate-screen interactive TUI.
 - Selects the requested model ID from the registry.
+- Chooses the frontend path explicitly: plain stdout for `--prompt` and non-TTY flows, transcript TUI for interactive terminals.
 
 ### 2. Boot and Application Layer (`src/application/mod.rs`, `src/domain/model/mod.rs`)
 - Validates credits, weights, biases, and dogma.
@@ -58,8 +59,14 @@ support instead of a cross-cutting rewrite.
 
 ### 4a. Turn Event Stream (`src/domain/model/turns.rs`, `src/application/mod.rs`)
 - Emits typed turn events for intent classification, route selection, gatherer capability, gatherer summaries, planner summaries, tool execution, fallbacks, context assembly, and synthesis readiness.
-- Renders those events as the default interactive REPL UX in a Codex-style action stream.
+- Feeds those events into the default interactive TUI as Codex-style action rows.
 - Exists to make runtime behavior inspectable without requiring debug-only backend logs.
+
+### 4b. Interactive Terminal UI (`src/infrastructure/cli/interactive_tui.rs`)
+- Owns terminal raw-mode and alternate-screen lifecycle for TTY interactive sessions.
+- Maintains transcript state for user rows, assistant rows, error rows, and action/event rows.
+- Styles the transcript with distinct user/assistant/action palettes that adapt to light or dark terminals.
+- Progressively reveals the finalized assistant answer after the turn completes while preserving the grounded/cited final content.
 
 ### 5. Operator Memory Layer (`src/infrastructure/adapters/agent_memory.rs`)
 - Reloads `AGENTS.md` memory on every prompt so the REPL can absorb operator guidance without restarting.
@@ -96,8 +103,10 @@ The controller is responsible for deciding when tools are necessary and when a d
    - The local model replies directly, or
    - The controller executes tools and feeds the results back through the turn loop.
    - A repository or decomposition request gathers evidence first, then hands that evidence to the synthesizer lane.
-7. **Render**: The terminal prints the Codex-style turn event stream as execution proceeds.
-8. **Return**: The terminal prints the final response with source citations for repository-question turns.
+7. **Render**:
+   - TTY interactive sessions render the Codex-style transcript TUI with event rows and progressive assistant output.
+   - `--prompt` and non-TTY flows stay on the plain stdout path.
+8. **Return**: The final response preserves source citations for repository-question turns.
 
 ## Model Routing Strategy
 

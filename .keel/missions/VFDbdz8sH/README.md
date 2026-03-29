@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFDbdz8sH
-status: active
+status: achieved
 created_at: 2026-03-28T19:12:39
-updated_at: 2026-03-28T19:15:10
+updated_at: 2026-03-28T19:42:21
 # authored
 title: Codex-Style Interactive TUI For Paddles
 watch: ~
 activated_at: 2026-03-28T19:15:10
+achieved_at: 2026-03-28T19:42:21
 ---
 
 # Codex-Style Interactive TUI For Paddles

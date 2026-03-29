@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T19:40:02.305270304-07:00
+mode: manual
+---
+README.md, ARCHITECTURE.md, POLICY.md, AGENTS.md, and INSTRUCTIONS.md now describe the TTY transcript UI, the interactive-versus-one-shot split, and the operator-visible turn stream.

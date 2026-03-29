@@ -376,18 +376,27 @@ impl MechSuitService {
 
     /// Process a single prompt using the prepared synthesizer lane.
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
+        self.process_prompt_with_sink(prompt, Arc::clone(&self.event_sink))
+            .await
+    }
+
+    pub async fn process_prompt_with_sink(
+        &self,
+        prompt: &str,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<String> {
         let runtime_guard = self.runtime.read().await;
         let runtime = runtime_guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
         let execution_plan = select_execution_plan(prompt, runtime.gatherer.is_some());
-        self.event_sink.emit(TurnEvent::IntentClassified {
+        event_sink.emit(TurnEvent::IntentClassified {
             intent: execution_plan.intent.clone(),
         });
 
         if let Some(gatherer) = &runtime.prepared.gatherer {
             match execution_plan.path {
-                PromptExecutionPath::GatherThenSynthesize => self.event_sink.emit(
+                PromptExecutionPath::GatherThenSynthesize => event_sink.emit(
                     TurnEvent::RouteSelected {
                         summary: format!(
                             "repository question will use gatherer lane '{}' ({:?}) before synthesizer lane '{}'",
@@ -397,7 +406,7 @@ impl MechSuitService {
                         ),
                     },
                 ),
-                PromptExecutionPath::SynthesizerOnly => self.event_sink.emit(TurnEvent::RouteSelected {
+                PromptExecutionPath::SynthesizerOnly => event_sink.emit(TurnEvent::RouteSelected {
                     summary: format!(
                         "turn will stay on synthesizer lane '{}' while gatherer lane '{}' ({:?}) remains available",
                         runtime.prepared.synthesizer.model_id,
@@ -407,7 +416,7 @@ impl MechSuitService {
                 }),
             }
         } else {
-            self.event_sink.emit(TurnEvent::RouteSelected {
+            event_sink.emit(TurnEvent::RouteSelected {
                 summary: format!(
                     "turn will use synthesizer lane '{}' with no gatherer lane configured",
                     runtime.prepared.synthesizer.model_id
@@ -425,7 +434,7 @@ impl MechSuitService {
                         .as_ref()
                         .map(|lane| lane.label.clone())
                         .unwrap_or_else(|| "gatherer".to_string());
-                    self.event_sink.emit(TurnEvent::GathererCapability {
+                    event_sink.emit(TurnEvent::GathererCapability {
                         provider: provider.clone(),
                         capability: format_gatherer_capability(&capability),
                     });
@@ -449,13 +458,13 @@ impl MechSuitService {
                             match gatherer.gather_context(&request).await {
                                 Ok(result) if result.is_synthesis_ready() => {
                                     if let Some(bundle) = result.evidence_bundle.as_ref() {
-                                        self.event_sink.emit(TurnEvent::GathererSummary {
+                                        event_sink.emit(TurnEvent::GathererSummary {
                                             provider: provider.clone(),
                                             summary: bundle.summary.clone(),
                                             sources: evidence_sources(&self.workspace_root, bundle),
                                         });
                                         if let Some(planner) = bundle.planner.as_ref() {
-                                            self.event_sink.emit(TurnEvent::PlannerSummary {
+                                            event_sink.emit(TurnEvent::PlannerSummary {
                                                 strategy: format_planner_strategy(
                                                     &planner.strategy,
                                                 )
@@ -469,7 +478,7 @@ impl MechSuitService {
                                     result.evidence_bundle
                                 }
                                 Ok(result) => {
-                                    self.event_sink.emit(TurnEvent::Fallback {
+                                    event_sink.emit(TurnEvent::Fallback {
                                         stage: "gatherer".to_string(),
                                         reason: format!(
                                             "gatherer returned non-synthesis-ready result ({})",
@@ -479,7 +488,7 @@ impl MechSuitService {
                                     None
                                 }
                                 Err(err) => {
-                                    self.event_sink.emit(TurnEvent::Fallback {
+                                    event_sink.emit(TurnEvent::Fallback {
                                         stage: "gatherer".to_string(),
                                         reason: format!(
                                             "gatherer lane failed ({err:#}); switching to explicit fallback"
@@ -491,7 +500,7 @@ impl MechSuitService {
                         }
                         GathererCapability::Unsupported { reason }
                         | GathererCapability::HarnessRequired { reason } => {
-                            self.event_sink.emit(TurnEvent::Fallback {
+                            event_sink.emit(TurnEvent::Fallback {
                                 stage: "gatherer".to_string(),
                                 reason: format!(
                                     "gatherer unavailable for a repository question: {reason}"
@@ -509,7 +518,7 @@ impl MechSuitService {
         let prompt = prompt.to_string();
         let intent = execution_plan.intent;
         let engine = runtime.synthesizer_engine.clone();
-        let event_sink = Arc::clone(&self.event_sink);
+        let event_sink = Arc::clone(&event_sink);
         tokio::task::spawn_blocking(move || {
             engine.respond_for_turn(&prompt, intent, gathered_evidence.as_ref(), event_sink)
         })

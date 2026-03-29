@@ -47,9 +47,10 @@ Paddles treats inference as a routing problem, not a single-model problem.
 3. **Synthesizer Lane Default**: Casual chat, direct answers, and deterministic workspace/tool turns stay on the synthesizer lane.
 4. **Gatherer Lane for Repository Questions**: Repository-question and decomposition/research turns should use the gatherer lane by default when it is available, and that lane must return typed evidence and capability state for a downstream synthesizer.
 5. **Grounded Repository Answers**: Repository-question answers should cite source files by default and degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
-6. **Visible Turn Stream**: The interactive REPL should render a default Codex-style action stream for classification, route selection, gatherer work, tool calls, fallback reasons, and synthesis readiness.
-7. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
-8. **Docs Move With Behavior**: Whenever routing heuristics, lane contracts, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
+6. **Visible Turn Stream**: TTY interactive sessions should render a default Codex-style transcript UI for classification, route selection, gatherer work, tool calls, fallback reasons, and synthesis readiness.
+7. **One-Shot Path Stays Plain**: `--prompt` usage and non-TTY stdin/stdout flows must remain plain CLI output paths for scripting and shell composition.
+8. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
+9. **Docs Move With Behavior**: Whenever routing heuristics, lane contracts, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
 
 ## Human Interaction & Pokes
 

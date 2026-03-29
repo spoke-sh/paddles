@@ -23,7 +23,8 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 - The **synthesizer lane** is the default path for casual chat, direct answers, and deterministic workspace/tool turns.
 - The **gatherer lane** is the default path for repository questions when it is available. It must return typed evidence for synthesis.
 - Repository-question answers should include file citations by default.
-- The REPL should expose a default turn event stream rather than hiding runtime behavior behind verbose-only diagnostics.
+- TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
+- One-shot `--prompt` usage and non-TTY stdin/stdout flows must remain plain output paths.
 - Chroma `context-1` is an experimental **gatherer provider only**. It is never the default answer runtime and must fail closed when its harness/runtime is unavailable.
 - When runtime routing behavior changes, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same slice.
 
