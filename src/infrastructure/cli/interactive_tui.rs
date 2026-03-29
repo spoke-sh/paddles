@@ -12,6 +12,7 @@ use ratatui::prelude::{Color, Line, Modifier, Span, Style, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::cmp;
+use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +55,9 @@ pub async fn run_interactive_tui(
     loop {
         drain_messages(&mut app, &mut rx);
         app.tick();
+        if let Some(prompt) = app.dispatch_next_prompt() {
+            dispatch_prompt(prompt, Arc::clone(&service), tx.clone());
+        }
 
         terminal.draw(|frame| app.render(frame))?;
 
@@ -82,8 +86,8 @@ fn drain_messages(app: &mut InteractiveApp, rx: &mut UnboundedReceiver<UiMessage
 fn handle_key_event(
     app: &mut InteractiveApp,
     key: KeyEvent,
-    service: Arc<MechSuitService>,
-    tx: UnboundedSender<UiMessage>,
+    _service: Arc<MechSuitService>,
+    _tx: UnboundedSender<UiMessage>,
 ) -> bool {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
         return true;
@@ -92,33 +96,19 @@ fn handle_key_event(
     match key.code {
         KeyCode::Esc => true,
         KeyCode::Enter => {
-            if let Some(prompt) = app.submit_prompt() {
-                let sink = Arc::new(InteractiveTurnEventSink { tx: tx.clone() });
-                let tx_clone = tx.clone();
-                tokio::spawn(async move {
-                    let result = service
-                        .process_prompt_with_sink(&prompt, sink)
-                        .await
-                        .map_err(|err| format!("{err:#}"));
-                    let _ = tx_clone.send(UiMessage::TurnFinished(result));
-                });
-            }
+            app.submit_prompt();
             false
         }
         KeyCode::Backspace => {
-            if !app.is_busy() {
-                app.input.pop();
-            }
+            app.input.pop();
             false
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if !app.is_busy() {
-                app.input.clear();
-            }
+            app.input.clear();
             false
         }
         KeyCode::Char(ch) => {
-            if !key.modifiers.contains(KeyModifiers::CONTROL) && !app.is_busy() {
+            if !key.modifiers.contains(KeyModifiers::CONTROL) {
                 app.input.push(ch);
             }
             false
@@ -148,6 +138,17 @@ impl Drop for TerminalSession {
 enum UiMessage {
     TurnEvent(TurnEvent),
     TurnFinished(std::result::Result<String, String>),
+}
+
+fn dispatch_prompt(prompt: String, service: Arc<MechSuitService>, tx: UnboundedSender<UiMessage>) {
+    let sink = Arc::new(InteractiveTurnEventSink { tx: tx.clone() });
+    tokio::spawn(async move {
+        let result = service
+            .process_prompt_with_sink(&prompt, sink)
+            .await
+            .map_err(|err| format!("{err:#}"));
+        let _ = tx.send(UiMessage::TurnFinished(result));
+    });
 }
 
 #[derive(Clone)]
@@ -236,6 +237,7 @@ struct InteractiveApp {
     palette: Palette,
     rows: Vec<TranscriptRow>,
     input: String,
+    queued_prompts: VecDeque<String>,
     busy: bool,
     busy_phase: BusyPhase,
     pending_reveal: Option<PendingReveal>,
@@ -260,6 +262,7 @@ impl InteractiveApp {
                 "Codex-style transcript active. Enter to send, Ctrl+C to quit.",
             )],
             input: String::new(),
+            queued_prompts: VecDeque::new(),
             busy: false,
             busy_phase: BusyPhase::Idle,
             pending_reveal: None,
@@ -267,23 +270,35 @@ impl InteractiveApp {
         }
     }
 
-    fn is_busy(&self) -> bool {
-        self.busy
+    fn submit_prompt(&mut self) {
+        let prompt = self.input.trim().to_string();
+        if prompt.is_empty() {
+            return;
+        }
+
+        let was_busy = self.busy || self.pending_reveal.is_some();
+        self.rows
+            .push(TranscriptRow::new(TranscriptRowKind::User, "You", &prompt));
+        self.input.clear();
+        self.queued_prompts.push_back(prompt.clone());
+        if was_busy || self.queued_prompts.len() > 1 {
+            self.rows.push(TranscriptRow::new(
+                TranscriptRowKind::Event,
+                "• Queued steering prompt",
+                format!(
+                    "`{}` queued behind the active turn.",
+                    trim_for_display(&prompt, 96)
+                ),
+            ));
+        }
     }
 
-    fn submit_prompt(&mut self) -> Option<String> {
+    fn dispatch_next_prompt(&mut self) -> Option<String> {
         if self.busy {
             return None;
         }
 
-        let prompt = self.input.trim().to_string();
-        if prompt.is_empty() {
-            return None;
-        }
-
-        self.rows
-            .push(TranscriptRow::new(TranscriptRowKind::User, "You", &prompt));
-        self.input.clear();
+        let prompt = self.queued_prompts.pop_front()?;
         self.busy = true;
         self.busy_phase = BusyPhase::Thinking;
         Some(prompt)
@@ -354,7 +369,8 @@ impl InteractiveApp {
     fn render_header(&self) -> Paragraph<'static> {
         let spinner = SPINNER_FRAMES[self.spinner_index];
         let status = match self.busy_phase {
-            BusyPhase::Idle => "idle".to_string(),
+            BusyPhase::Idle if self.queued_prompts.is_empty() => "idle".to_string(),
+            BusyPhase::Idle => format!("idle · {} queued", self.queued_prompts.len()),
             BusyPhase::Thinking => format!("{spinner} thinking"),
             BusyPhase::Rendering => format!("{spinner} rendering"),
         };
@@ -400,15 +416,27 @@ impl InteractiveApp {
     }
 
     fn render_input(&self) -> Paragraph<'static> {
-        let input_style = if self.busy {
-            self.palette.input_disabled
-        } else {
-            self.palette.input_text
-        };
-        let input_text = if self.input.is_empty() && !self.busy {
+        let input_style = self.palette.input_text;
+        let input_text = if self.input.is_empty() {
             "Type a prompt...".to_string()
         } else {
             self.input.clone()
+        };
+        let queue_hint = if self.queued_prompts.is_empty() {
+            None
+        } else {
+            Some(format!("{} queued", self.queued_prompts.len()))
+        };
+        let turn_hint = if self.busy {
+            Some("Turn in progress".to_string())
+        } else {
+            Some("Enter to send".to_string())
+        };
+        let hint = match (turn_hint, queue_hint) {
+            (Some(turn), Some(queue)) => format!("{turn} • {queue}"),
+            (Some(turn), None) => turn,
+            (None, Some(queue)) => queue,
+            (None, None) => String::new(),
         };
         let mut lines = vec![
             Line::from(vec![
@@ -417,21 +445,14 @@ impl InteractiveApp {
                     self.palette.input_label.add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" "),
-                Span::styled(
-                    if self.busy {
-                        "Turn in progress"
-                    } else {
-                        "Enter to send"
-                    },
-                    self.palette.input_hint,
-                ),
+                Span::styled(hint, self.palette.input_hint),
             ]),
             Line::from(Span::styled(input_text, input_style)),
         ];
 
         if self.busy {
             lines.push(Line::from(Span::styled(
-                "Action events are streamed above while the turn executes.",
+                "Action events stream above while you can keep typing and queue steering prompts.",
                 self.palette.input_hint,
             )));
         }
@@ -468,6 +489,15 @@ impl InteractiveApp {
         visible.reverse();
         visible
     }
+}
+
+fn trim_for_display(input: &str, limit: usize) -> String {
+    if input.chars().count() <= limit {
+        return input.to_string();
+    }
+
+    let kept = input.chars().take(limit).collect::<String>();
+    format!("{}...", kept.trim_end())
 }
 
 fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>> {
@@ -758,7 +788,6 @@ struct Palette {
     error_body: Style,
     input_label: Style,
     input_text: Style,
-    input_disabled: Style,
     input_hint: Style,
     code: Style,
     citation: Style,
@@ -781,7 +810,6 @@ fn detect_palette() -> Palette {
             error_body: Style::default().fg(Color::Rgb(99, 39, 44)),
             input_label: Style::default().fg(Color::Rgb(24, 63, 115)),
             input_text: Style::default().fg(Color::Rgb(35, 43, 54)),
-            input_disabled: Style::default().fg(Color::Rgb(126, 133, 145)),
             input_hint: Style::default().fg(Color::Rgb(109, 117, 129)),
             code: Style::default().fg(Color::Rgb(87, 56, 130)),
             citation: Style::default().fg(Color::Rgb(94, 66, 0)),
@@ -802,7 +830,6 @@ fn detect_palette() -> Palette {
             error_body: Style::default().fg(Color::Rgb(238, 183, 190)),
             input_label: Style::default().fg(Color::Rgb(125, 194, 255)),
             input_text: Style::default().fg(Color::Rgb(236, 242, 250)),
-            input_disabled: Style::default().fg(Color::Rgb(139, 146, 160)),
             input_hint: Style::default().fg(Color::Rgb(145, 154, 168)),
             code: Style::default().fg(Color::Rgb(204, 171, 255)),
             citation: Style::default().fg(Color::Rgb(255, 216, 130)),
@@ -899,16 +926,17 @@ mod tests {
         let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette);
         app.input = "hello".to_string();
 
-        let prompt = app.submit_prompt();
+        app.submit_prompt();
+        let prompt = app.dispatch_next_prompt();
         assert_eq!(prompt.as_deref(), Some("hello"));
-        assert!(app.is_busy());
+        assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Thinking);
 
         app.handle_message(super::UiMessage::TurnFinished(Ok("hi there".to_string())));
-        assert!(app.is_busy());
+        assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Rendering);
 
-        while app.is_busy() {
+        while app.busy {
             app.tick();
         }
 
@@ -917,5 +945,53 @@ mod tests {
             Some("hi there")
         );
         assert_eq!(app.busy_phase, BusyPhase::Idle);
+    }
+
+    #[test]
+    fn app_accepts_steering_prompts_while_busy_and_queues_them() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette);
+
+        app.input = "first".to_string();
+        app.submit_prompt();
+        assert_eq!(app.dispatch_next_prompt().as_deref(), Some("first"));
+        assert!(app.busy);
+
+        app.input = "steer harder".to_string();
+        app.submit_prompt();
+
+        assert_eq!(app.input, "");
+        assert_eq!(app.queued_prompts.len(), 1);
+        assert_eq!(
+            app.queued_prompts.front().map(String::as_str),
+            Some("steer harder")
+        );
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.header == "• Queued steering prompt")
+        );
+    }
+
+    #[test]
+    fn queued_prompt_dispatches_after_current_turn_finishes() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette);
+
+        app.input = "first".to_string();
+        app.submit_prompt();
+        assert_eq!(app.dispatch_next_prompt().as_deref(), Some("first"));
+
+        app.input = "second".to_string();
+        app.submit_prompt();
+
+        app.handle_message(super::UiMessage::TurnFinished(Ok("done".to_string())));
+        while app.busy {
+            app.tick();
+        }
+
+        assert_eq!(app.dispatch_next_prompt().as_deref(), Some("second"));
+        assert!(app.busy);
+        assert_eq!(app.busy_phase, BusyPhase::Thinking);
     }
 }
