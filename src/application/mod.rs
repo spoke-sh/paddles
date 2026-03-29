@@ -1,10 +1,11 @@
 use crate::domain::model::BootContext;
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability, ModelPaths,
-    ModelRegistry,
+    ModelRegistry, PlannerConfig, PlannerStrategyKind,
 };
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
 use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+use crate::infrastructure::adapters::sift_autonomous_gatherer::SiftAutonomousGathererAdapter;
 use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use anyhow::Result;
 use clap::ValueEnum;
@@ -30,6 +31,7 @@ pub enum RuntimeLaneRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GathererProvider {
     Local,
+    SiftAutonomous,
     Context1,
 }
 
@@ -202,6 +204,20 @@ impl MechSuitService {
                 }
                 None => (None, None),
             },
+            GathererProvider::SiftAutonomous => {
+                let lane = Self::build_gatherer_lane(
+                    GathererProvider::SiftAutonomous,
+                    "sift-autonomous",
+                    None,
+                    None,
+                );
+                let adapter = SiftAutonomousGathererAdapter::new(self.workspace_root.clone());
+                adapter.set_verbose(self.verbose.load(Ordering::Relaxed));
+                (
+                    Some(lane),
+                    Some(Arc::new(adapter) as Arc<dyn ContextGatherer>),
+                )
+            }
             GathererProvider::Context1 => {
                 let lane =
                     Self::build_gatherer_lane(GathererProvider::Context1, "context-1", None, None);
@@ -279,13 +295,23 @@ impl MechSuitService {
                                 self.workspace_root.clone(),
                                 "retrieval-heavy prompt routed through the gatherer lane",
                                 EvidenceBudget::default(),
-                            );
+                            )
+                            .with_planning(PlannerConfig::default());
                             match gatherer.gather_context(&request).await {
                                 Ok(result) if result.is_synthesis_ready() => {
                                     if let Some(bundle) = result.evidence_bundle.as_ref()
                                         && self.verbose.load(Ordering::Relaxed) >= 1
                                     {
                                         println!("[LANE] Evidence summary: {}", bundle.summary);
+                                        if let Some(planner) = bundle.planner.as_ref() {
+                                            println!(
+                                                "[LANE] Planner summary: strategy={}, turns={}, steps={}, stop={}",
+                                                format_planner_strategy(&planner.strategy),
+                                                planner.turn_count,
+                                                planner.steps.len(),
+                                                planner.stop_reason.as_deref().unwrap_or("none"),
+                                            );
+                                        }
                                     }
                                     result.evidence_bundle
                                 }
@@ -369,6 +395,14 @@ fn should_route_through_context_gathering(prompt: &str) -> bool {
         "context",
         "architecture",
         "explain how",
+        "walk through",
+        "trace",
+        "why does",
+        "where does",
+        "dependency",
+        "dependencies",
+        "path from",
+        "flow through",
         "across the repo",
         "across the codebase",
         "research",
@@ -389,6 +423,13 @@ fn format_gatherer_capability(capability: &GathererCapability) -> String {
         GathererCapability::HarnessRequired { reason } => {
             format!("harness-required: {reason}")
         }
+    }
+}
+
+fn format_planner_strategy(strategy: &PlannerStrategyKind) -> &'static str {
+    match strategy {
+        PlannerStrategyKind::Heuristic => "heuristic",
+        PlannerStrategyKind::ModelDriven => "model-driven",
     }
 }
 
@@ -449,11 +490,34 @@ mod tests {
     }
 
     #[test]
+    fn sift_autonomous_boundary_can_be_prepared_without_local_model_paths() {
+        let gatherer = MechSuitService::build_gatherer_lane(
+            GathererProvider::SiftAutonomous,
+            "sift-autonomous",
+            None,
+            None,
+        );
+
+        assert_eq!(gatherer.provider, GathererProvider::SiftAutonomous);
+        assert_eq!(gatherer.label, "sift-autonomous");
+        assert_eq!(gatherer.model_id, None);
+        assert_eq!(gatherer.paths, None);
+    }
+
+    #[test]
     fn retrieval_heavy_prompts_use_gatherer_lane_when_available() {
         let routing = super::select_execution_path(
             "Summarize the runtime lane architecture across the repo",
             true,
         );
+
+        assert_eq!(routing, super::PromptExecutionPath::GatherThenSynthesize);
+    }
+
+    #[test]
+    fn decomposition_worthy_prompts_use_gatherer_lane_when_available() {
+        let routing =
+            super::select_execution_path("Trace the runtime lane architecture end-to-end", true);
 
         assert_eq!(routing, super::PromptExecutionPath::GatherThenSynthesize);
     }
@@ -473,6 +537,14 @@ mod tests {
                 "Summarize the runtime lane architecture across the repo",
                 false,
             ),
+            super::PromptExecutionPath::SynthesizerOnly,
+        );
+    }
+
+    #[test]
+    fn decomposition_prompts_without_a_gatherer_lane_stay_on_synthesizer() {
+        assert_eq!(
+            super::select_execution_path("Trace the runtime lane architecture end-to-end", false),
             super::PromptExecutionPath::SynthesizerOnly,
         );
     }

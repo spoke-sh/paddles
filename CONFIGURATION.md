@@ -143,6 +143,20 @@ This does not make the gatherer lane mandatory. It simply prepares a distinct
 lane so routing can opt into it later without changing the default response
 model.
 
+For local autonomous retrieval planning, select the explicit provider:
+
+```bash
+paddles --model qwen-1.5b --gatherer-provider sift-autonomous
+```
+
+That provider stays local-first and uses Sift's bounded autonomous planner.
+
+- It defaults to the heuristic planner strategy.
+- It returns planner trace metadata, stop reason, and retained artifact
+  summaries inside the evidence bundle consumed by the synthesizer lane.
+- Verbose mode surfaces the planner summary so operators can inspect why the
+  autonomous gatherer stopped and what evidence it carried forward.
+
 Current local model guidance on an 8 GB CUDA card:
 
 - `qwen-1.5b` is the default Qwen2 instruct local path.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:20.077355077-07:00
+mode: manual
+---
+The autonomous adapter defaults to heuristic planning through `PlannerConfig::default()` and `SiftAutonomousGathererAdapter::planner_strategy`, while model-driven support remains optional through request-side planner config or `with_model_driven_profile`.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:31.882606338-07:00
+mode: manual
+---
+Verbose mode now emits planner summaries from `src/application/mod.rs`, and the synthesizer evidence digest in `src/infrastructure/adapters/sift_agent.rs` includes planner strategy, step summaries, stop reason, and retained artifact sources for autonomous gatherer turns.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:25.137859403-07:00
+mode: manual
+---
+`process_prompt` still falls back to the synthesizer lane whenever no gatherer is configured or the active gatherer reports unsupported or non-synthesis-ready results, and `decomposition_prompts_without_a_gatherer_lane_stay_on_synthesizer` covers the no-gatherer case directly.

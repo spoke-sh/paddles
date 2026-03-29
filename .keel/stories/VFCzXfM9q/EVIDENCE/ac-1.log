@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:12:57.377184954-07:00
+mode: manual
+---
+Added planner-aware request/result contract fields in src/domain/ports/context_gathering.rs, including request-side PlannerConfig and result-side planner metadata on EvidenceBundle.

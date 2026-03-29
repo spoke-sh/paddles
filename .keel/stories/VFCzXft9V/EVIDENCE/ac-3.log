@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:20.112543794-07:00
+mode: manual
+---
+Targeted tests in `src/infrastructure/adapters/sift_autonomous_gatherer.rs` cover capability reporting, heuristic/model-driven strategy selection, planner metadata mapping, and the distinct evidence shape returned by the autonomous adapter versus the static gatherer.

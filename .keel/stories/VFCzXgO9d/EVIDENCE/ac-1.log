@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:25.107750440-07:00
+mode: manual
+---
+Controller routing in `src/application/mod.rs` keeps action and casual prompts on the synthesizer path while routing decomposition-worthy prompts such as `Trace the runtime lane architecture end-to-end` through the configured gatherer lane, with dedicated regression tests for both cases.

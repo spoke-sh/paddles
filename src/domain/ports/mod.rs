@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 pub use context_gathering::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBudget, EvidenceBundle,
-    EvidenceItem, GathererCapability,
+    EvidenceItem, GathererCapability, PlannerConfig, PlannerDecision, PlannerStrategyKind,
+    PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
 };
 
 /// Port for model discovery and acquisition.

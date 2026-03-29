@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:31.911760421-07:00
+mode: manual
+---
+The repository now contains direct comparison coverage between static context assembly and autonomous retrieval planning in `autonomous_and_static_gatherers_produce_distinct_evidence_shapes`, alongside autonomous adapter tests that validate planner metadata and retained evidence mapping.

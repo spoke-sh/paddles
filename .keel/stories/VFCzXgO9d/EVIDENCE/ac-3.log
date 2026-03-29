@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:25.172422785-07:00
+mode: manual
+---
+Integration-oriented regression coverage now exercises decomposition routing, autonomous evidence generation, and synthesizer prompt injection through `cargo test decomposition`, `cargo test autonomous_and_static_gatherers_produce_distinct_evidence_shapes`, and `cargo test respond_with_evidence_includes_gathered_summary_in_prompt`.

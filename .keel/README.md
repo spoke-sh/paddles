@@ -78,9 +78,9 @@
 |--------|--------|
 | [Subagent Interface and Routing Foundations](epics/VFBTXlHli/voyages/VFBTYpPo6/) | done |
 
-### [Autonomous Retrieval Planning Lane](epics/VFCzL9KKd/) (active)
+### [Autonomous Retrieval Planning Lane](epics/VFCzL9KKd/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Bounded Autonomous Gatherer Integration](epics/VFCzL9KKd/voyages/VFCzWHL1Y/) | planned |
+| [Bounded Autonomous Gatherer Integration](epics/VFCzL9KKd/voyages/VFCzWHL1Y/) | done |
 

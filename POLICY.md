@@ -24,6 +24,7 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Separate Catalog From Runtime From Prompting**: Model integration must isolate alias/asset resolution, family-specific inference runtime, and prompt/protocol behavior so new families can be added without cross-cutting regressions.
 - **Separate Search From Answering**: Retrieval-heavy or multi-hop tasks may use a dedicated context-gathering model, but answer generation should remain a distinct step.
 - **Evidence-First Gatherers**: Context-gathering adapters must return typed evidence bundles and capability state for a downstream synthesizer, not prose pretending to be the final answer.
+- **Planner Metadata Must Stay Observable**: When a gatherer uses autonomous planning, planner strategy, stop reason, and retained-evidence summaries must remain observable in verbose output or evidence digests.
 - **Hierarchical Operator Memory**: The REPL must reload `AGENTS.md` memory on every turn from system, user, and ancestor scopes in that order, with more specific files overriding broader guidance.
 - **Memory Does Not Replace Control**: Instruction memory may shape prompt construction, but controller-owned routing, typed evidence contracts, and deterministic tool execution remain authoritative.
 - **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.

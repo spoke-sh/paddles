@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:13:10.773230202-07:00
+mode: manual
+---
+The typed gatherer contract section in ARCHITECTURE.md now documents planner metadata as evidence for downstream synthesis rather than a final answer surface.

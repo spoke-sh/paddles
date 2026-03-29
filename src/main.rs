@@ -36,7 +36,7 @@ struct Cli {
     #[arg(short, long, default_value = "qwen-1.5b")]
     model: String,
 
-    /// Optional model ID for a dedicated context-gathering lane.
+    /// Optional model ID for the legacy static local context-gathering lane.
     #[arg(long)]
     gatherer_model: Option<String>,
 
@@ -110,11 +110,17 @@ async fn main() -> Result<()> {
                 gatherer_model
             );
         }
-        if matches!(cli.gatherer_provider, GathererProvider::Context1) {
-            println!(
-                "[BOOT] Context-1 gatherer provider selected (harness ready: {}).",
-                cli.context1_harness_ready
-            );
+        match cli.gatherer_provider {
+            GathererProvider::SiftAutonomous => {
+                println!("[BOOT] Sift autonomous gatherer provider selected.");
+            }
+            GathererProvider::Context1 => {
+                println!(
+                    "[BOOT] Context-1 gatherer provider selected (harness ready: {}).",
+                    cli.context1_harness_ready
+                );
+            }
+            GathererProvider::Local => {}
         }
     }
     let runtime_lanes = RuntimeLaneConfig::new(cli.model.clone(), cli.gatherer_model.clone())

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T17:21:20.044822096-07:00
+mode: manual
+---
+Added `src/infrastructure/adapters/sift_autonomous_gatherer.rs`, which maps `ContextGatherRequest` into `Sift::search_autonomous` and converts the autonomous response into a synthesis-ready `EvidenceBundle` with planner metadata.

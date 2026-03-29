@@ -163,10 +163,27 @@ intended to preserve these semantics:
 - `GathererCapability`
   Must distinguish `available`, `unsupported`, and `harness-required`.
 - `EvidenceBundle`
-  Carries a synthesis-ready summary, ranked evidence items, and warnings.
+  Carries a synthesis-ready summary, ranked evidence items, warnings, and
+  optional planner metadata for autonomous gatherers.
+- `PlannerTraceMetadata`
+  Carries planner strategy, step/decision trace, stop reason, and retained
+  artifact summaries when a gatherer used bounded autonomous planning.
 
 The important behavioral rule is simple: a gatherer returns evidence for a
 downstream synthesizer. It does not return the final user-facing answer.
+
+### Local Sift Autonomous Gatherer
+
+`paddles` now also exposes a local `sift-autonomous` gatherer provider.
+
+- It uses `Sift::search_autonomous` behind the typed gatherer contract.
+- It defaults to Sift's heuristic planner strategy.
+- It returns ranked evidence plus planner trace metadata, stop reason, and
+  retained artifact summaries.
+- It is intended for decomposition-worthy repository investigation, not for
+  casual chat or deterministic workspace actions.
+- It still feeds the normal synthesizer lane rather than bypassing the final
+  answer model.
 
 ## Hierarchical Operator Memory
 

@@ -1392,6 +1392,46 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
     };
 
     let mut lines = vec![evidence.summary.clone()];
+    if let Some(planner) = evidence.planner.as_ref() {
+        lines.push(format!(
+            "Planner: strategy={}, turns={}, steps={}, stop={}",
+            format_planner_strategy(&planner.strategy),
+            planner.turn_count,
+            planner.steps.len(),
+            planner.stop_reason.as_deref().unwrap_or("none"),
+        ));
+        for step in planner.steps.iter().take(3) {
+            let actions = step
+                .decisions
+                .iter()
+                .map(|decision| {
+                    decision
+                        .query
+                        .as_ref()
+                        .map(|query| format!("{}({query})", decision.action))
+                        .unwrap_or_else(|| decision.action.clone())
+                })
+                .collect::<Vec<_>>();
+            lines.push(format!(
+                "- planner step {}#{}: {}",
+                step.step_id,
+                step.sequence,
+                actions.join(" -> "),
+            ));
+        }
+        if !planner.retained_artifacts.is_empty() {
+            lines.push(format!(
+                "Retained artifacts: {}",
+                planner
+                    .retained_artifacts
+                    .iter()
+                    .take(3)
+                    .map(|artifact| artifact.source.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+        }
+    }
     if evidence.items.is_empty() {
         lines.push("No ranked evidence items were attached.".to_string());
     } else {
@@ -1410,6 +1450,13 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
     }
 
     lines.join("\n")
+}
+
+fn format_planner_strategy(strategy: &crate::domain::ports::PlannerStrategyKind) -> &'static str {
+    match strategy {
+        crate::domain::ports::PlannerStrategyKind::Heuristic => "heuristic",
+        crate::domain::ports::PlannerStrategyKind::ModelDriven => "model-driven",
+    }
 }
 
 fn format_search_summary(query: &str, assembly: &ContextAssemblyResponse) -> String {
@@ -1839,7 +1886,10 @@ mod tests {
         is_follow_up_execution_request, normalize_relative_path, preferred_qwen_weight_dtype,
         should_prefer_tools, should_retry_qwen_on_cpu_message, trim_for_context,
     };
-    use crate::domain::ports::{EvidenceBundle, EvidenceItem};
+    use crate::domain::ports::{
+        EvidenceBundle, EvidenceItem, PlannerDecision, PlannerStrategyKind, PlannerTraceMetadata,
+        PlannerTraceStep, RetainedEvidence,
+    };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
     use candle_core::{DType, Device};
@@ -2097,7 +2147,34 @@ mod tests {
                 rationale: "Relevant runtime lane wiring.".to_string(),
                 rank: 1,
             }],
-        );
+        )
+        .with_planner(PlannerTraceMetadata {
+            strategy: PlannerStrategyKind::Heuristic,
+            profile: None,
+            completed: true,
+            stop_reason: Some("goal-satisfied".to_string()),
+            turn_count: 2,
+            steps: vec![PlannerTraceStep {
+                step_id: "step-1".to_string(),
+                sequence: 1,
+                parent_step_id: None,
+                decisions: vec![PlannerDecision {
+                    action: "search".to_string(),
+                    query: Some("runtime lane architecture".to_string()),
+                    rationale: Some("start with the lane wiring".to_string()),
+                    next_step_id: None,
+                    turn_id: Some("turn-1".to_string()),
+                    stop_reason: None,
+                }],
+            }],
+            retained_artifacts: vec![RetainedEvidence {
+                source: "src/application/mod.rs".to_string(),
+                snippet: Some(
+                    "PreparedRuntimeLanes keeps synthesizer and gatherer lanes.".to_string(),
+                ),
+                rationale: Some("keep the runtime contract handy".to_string()),
+            }],
+        });
 
         let reply = adapter
             .respond_with_evidence(
@@ -2114,6 +2191,8 @@ mod tests {
             .cloned()
             .expect("recorded prompt");
         assert!(prompt.contains("Gathered repository evidence for runtime lanes."));
+        assert!(prompt.contains("Planner: strategy=heuristic"));
+        assert!(prompt.contains("planner step step-1#1"));
         assert!(prompt.contains("src/application/mod.rs"));
     }
 

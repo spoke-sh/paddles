@@ -39,7 +39,7 @@ flowchart TD
     end
 
     subgraph GatherLane["Optional Gatherer Lane"]
-        Gather["ContextGatherer<br/>local Sift gatherer or Context-1 boundary"]
+        Gather["ContextGatherer<br/>static Sift gatherer, Sift autonomous planner,<br/>or Context-1 boundary"]
         Evidence["EvidenceBundle + Capability"]
     end
 
@@ -63,6 +63,7 @@ Key architectural rules reflected in that flow:
 
 *   The controller owns routing. It decides when a turn stays on the synthesizer lane and when it must gather context first.
 *   The gatherer lane returns typed evidence for synthesis. It does not replace the final answer path.
+*   `sift-autonomous` is an explicit local gatherer provider for decomposition-worthy repo investigation. It returns planner trace metadata with the evidence bundle, then hands that bundle to the normal synthesizer lane.
 *   The REPL reloads hierarchical `AGENTS.md` memory on every turn, so operator guidance can change without restarting the process.
 *   The local Qwen runtime stays loaded, while turn-local prompt state is rebuilt per send.
 
