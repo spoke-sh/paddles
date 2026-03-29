@@ -869,7 +869,7 @@ impl SiftAgentAdapter {
         };
 
         if casual_turn {
-            if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
+            if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
                 self.log_retry_reason(
                     "casual-direct-retry",
                     &reply,
@@ -880,7 +880,7 @@ impl SiftAgentAdapter {
                     &build_direct_retry_prompt(prompt, &memory_prompt),
                 )?;
             }
-            if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
+            if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
                 self.log_retry_reason(
                     "casual-fallback",
                     &reply,
@@ -890,7 +890,7 @@ impl SiftAgentAdapter {
             }
         } else {
             if require_grounding {
-                if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
+                if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
                     self.log_retry_reason(
                         "grounded-retry",
                         &reply,
@@ -923,8 +923,14 @@ impl SiftAgentAdapter {
                         conversation.as_mut(),
                         &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
                     )?;
-                } else if is_blank_model_reply(&reply) {
-                    self.log_retry_reason("direct-retry", &reply, "empty direct response");
+                } else if is_blank_model_reply(&reply)
+                    || response_looks_like_malformed_tool_protocol(&reply)?
+                {
+                    self.log_retry_reason(
+                        "direct-retry",
+                        &reply,
+                        "empty or tool-like direct response",
+                    );
                     reply = self.send_to_model(
                         conversation.as_mut(),
                         &build_direct_retry_prompt(prompt, &memory_prompt),
@@ -1010,6 +1016,14 @@ impl SiftAgentAdapter {
                     "blank-fallback",
                     &reply,
                     "repeated empty response after retries",
+                );
+                reply =
+                    "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
+            } else if !prefer_tools && response_looks_like_malformed_tool_protocol(&reply)? {
+                self.log_retry_reason(
+                    "tool-like-fallback",
+                    &reply,
+                    "repeated tool-like response after retries",
                 );
                 reply =
                     "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
@@ -1817,6 +1831,7 @@ fn is_casual_prompt(prompt: &str) -> bool {
         normalized.as_str(),
         "hi" | "hello"
             | "hey"
+            | "howdy"
             | "yo"
             | "sup"
             | "whats up"
@@ -1833,6 +1848,7 @@ fn is_casual_prompt(prompt: &str) -> bool {
     ) || normalized.starts_with("hello ")
         || normalized.starts_with("hi ")
         || normalized.starts_with("hey ")
+        || normalized.starts_with("howdy ")
         || normalized.starts_with("thanks ")
         || normalized.starts_with("thank you ")
 }
@@ -1965,6 +1981,29 @@ fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
         return Ok(None);
     };
     Ok(serde_json::from_str(json).ok())
+}
+
+fn response_looks_like_tool_protocol(response: &str) -> Result<bool> {
+    Ok(parse_tool_call(response)?.is_some()
+        || response_looks_like_malformed_tool_protocol(response)?)
+}
+
+fn response_looks_like_malformed_tool_protocol(response: &str) -> Result<bool> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(false);
+    };
+    if parse_tool_call(response)?.is_some() {
+        return Ok(false);
+    }
+
+    Ok(match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(value) => value
+            .get("tool")
+            .and_then(serde_json::Value::as_str)
+            .is_some(),
+        Err(_) => json.contains("\"tool\""),
+    })
 }
 
 fn is_blank_model_reply(response: &str) -> bool {
@@ -2845,6 +2884,39 @@ mod tests {
 
         let state = adapter.state.lock().expect("state");
         assert_eq!(state.tool_counter, 0);
+    }
+
+    #[test]
+    fn general_prompts_retry_after_malformed_tool_protocol_response() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                r#"{"tool":"search","query_terms":"howdydy"}"#.to_string(),
+                "Sure. How can I help?".to_string(),
+            ])),
+        );
+
+        let reply = adapter
+            .respond_for_turn(
+                "What can you help with?",
+                TurnIntent::GeneralQuestion,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
+            .expect("response");
+
+        assert_eq!(reply, "Sure. How can I help?");
+
+        let state = adapter.state.lock().expect("state");
+        assert_eq!(state.tool_counter, 0);
+        assert!(
+            !state
+                .local_context
+                .iter()
+                .any(|item| matches!(item, LocalContextSource::ToolOutput(_)))
+        );
     }
 
     #[test]

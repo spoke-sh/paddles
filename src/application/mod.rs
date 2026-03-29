@@ -574,6 +574,7 @@ fn is_casual_turn(normalized: &str) -> bool {
         normalized,
         "hi" | "hello"
             | "hey"
+            | "howdy"
             | "yo"
             | "sup"
             | "whats up"
@@ -590,6 +591,7 @@ fn is_casual_turn(normalized: &str) -> bool {
     ) || normalized.starts_with("hello ")
         || normalized.starts_with("hi ")
         || normalized.starts_with("hey ")
+        || normalized.starts_with("howdy ")
         || normalized.starts_with("thanks ")
         || normalized.starts_with("thank you ")
 }
@@ -908,6 +910,10 @@ mod tests {
         assert_eq!(
             super::select_execution_plan("Hello", true).path,
             super::PromptExecutionPath::SynthesizerOnly
+        );
+        assert_eq!(
+            super::select_execution_plan("Howdy", true).intent,
+            TurnIntent::Casual
         );
         assert_eq!(
             super::select_execution_plan("What is a monad?", true).path,
