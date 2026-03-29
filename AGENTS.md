@@ -10,19 +10,20 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 1. **Maintain Calibration**: The boot sequence (credits, weights, biases) is foundational. Ensure changes to `src/main.rs` never weaken Constitution or Dogma validation.
 2. **Local First**: Prioritize local inference capacity via `candle`. Avoid introducing network dependencies into the core execution loop.
 3. **Interpret Before Routing**: Operator memory should influence first-pass interpretation of non-trivial turns. Do not commit to a route before the harness has assembled the relevant `AGENTS.md` and foundational context.
-4. **Recursive Planning Before Final Answer**: Difficult workspace questions should improve through bounded recursive resource use. Planner work and final synthesis are different roles and should not be collapsed into one brittle one-shot path.
-5. **Visible Turns**: The interactive REPL should render a default Codex-style action stream so interpretation, recursive actions, routing, retrieval, tools, fallbacks, and synthesis are observable without extra flags.
-6. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
-7. **Grounded Answers**: Repository answers should cite source files by default and admit insufficient evidence instead of improvising unsupported claims.
-8. **Pacemaker Hygiene**: Monitor system stability with `keel health --scene`, `keel flow --scene`, `keel doctor`, and dirty-worktree state. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
-9. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
+4. **Model-Directed Next Action**: After interpretation context is assembled, the model should choose the next bounded action from a constrained schema. The controller should validate and execute that action safely instead of heuristically guessing the route.
+5. **Recursive Planning Before Final Answer**: Difficult workspace questions should improve through bounded recursive resource use. Planner work and final synthesis are different roles and should not be collapsed into one brittle one-shot path.
+6. **Visible Turns**: The interactive REPL should render a default Codex-style action stream so interpretation, recursive actions, routing, retrieval, tools, fallbacks, and synthesis are observable without extra flags.
+7. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
+8. **Grounded Answers**: Repository answers should cite source files by default and admit insufficient evidence instead of improvising unsupported claims.
+9. **Pacemaker Hygiene**: Monitor system stability with `keel health --scene`, `keel flow --scene`, `keel doctor`, and dirty-worktree state. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
+10. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
 
 ### Runtime Routing Contract
 
-- Model/tool choice is a controller decision, not something delegated blindly to prompt text.
+- The model should choose the next bounded action from a controller-defined schema; the controller validates and executes it safely.
 - The harness uses a **planner lane** that owns bounded search/refine loops for non-trivial workspace questions.
 - The **synthesizer lane** remains the final answer path for casual chat, explicit deterministic actions, and grounded responses after planner work.
-- Non-trivial turns should improve through recursive context work instead of project-specific hardcoded intents.
+- Non-trivial turns should improve through recursive context work instead of project-specific hardcoded intents or top-level heuristic routing.
 - Repository-question answers should include file citations by default.
 - TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
 - One-shot `--prompt` usage and non-TTY stdin/stdout flows must remain plain output paths.
@@ -51,6 +52,12 @@ When a human user opens the chat or "pokes" you (for example, "Wake up" or "I'm 
 3. **Scan**: Run `keel mission next --status`, `keel pulse`, and `keel workshop`.
 4. **Confirm**: Run `keel flow --scene` to verify whether the board is actively lit or simply idle.
 5. **Diagnose**: Run `keel doctor --status` to ensure board integrity before proceeding.
+
+### Transitional Note
+
+The current implementation still has a narrow heuristic shortcut for some
+trivial turns before full model-directed top-level action selection lands.
+Treat that as transitional debt, not the target architecture.
 
 ### Procedural Instructions
 Follow the formal procedural loops and checklists defined in:

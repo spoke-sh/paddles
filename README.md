@@ -11,6 +11,7 @@
 The central idea is simple:
 
 - do not hardcode domain-specific turn types as the primary reasoning engine
+- do not let controller heuristics commit the route before the model has seen interpretation context and chosen its next bounded action
 - do not ask one small model to answer before it has done enough recursive context work
 - do not treat retrieval and final answering as the same workload
 
@@ -43,22 +44,47 @@ Routing is workload-specific. The point is not to find one default model for eve
 ```mermaid
 flowchart LR
     Turn["Incoming Turn"]
-    Gate{"Turn shape + runtime budget"}
-    Direct["Direct synthesizer lane<br/>casual / straightforward answer"]
-    Tools["Validated tool action<br/>deterministic workspace operation"]
-    Planner["Planner lane<br/>recursive search/refine"]
+    Interpret["Interpretation context<br/>AGENTS.md + linked docs + recent turns + local state"]
+    Decide["Model-selected next action<br/>bounded schema"]
+    Direct["Answer/synthesize now"]
+    Resource["Validated resource action<br/>search / read / inspect / refine / branch"]
     LocalPlanner["Local planner path<br/>Sift autonomous / local Qwen planner"]
     HeavyPlanner["Specialized planner path<br/>Context-1 boundary or future planner model"]
     Evidence["Trace + Evidence Bundle"]
     Synth["Synthesizer lane<br/>grounded final answer"]
 
-    Turn --> Gate
-    Gate --> Direct
-    Gate --> Tools
-    Gate --> Planner
-    Planner --> LocalPlanner --> Evidence
-    Planner --> HeavyPlanner --> Evidence
+    Turn --> Interpret --> Decide
+    Decide --> Direct --> Synth
+    Decide --> Resource
+    Resource --> LocalPlanner --> Evidence
+    Resource --> HeavyPlanner --> Evidence
+    Evidence --> Decide
     Evidence --> Synth
+```
+
+### Next Backbone Step
+
+The remaining major gap is the top-level heuristic gate. Today `paddles`
+already has a recursive planner loop, but it still uses a controller shortcut
+before the model owns first action selection. The next backbone step is to
+remove that heuristic pre-classification for non-trivial turns and let the model
+choose one bounded next action from interpretation context.
+
+```mermaid
+flowchart TD
+    U["User turn"]
+    I["Interpretation context<br/>AGENTS.md + linked docs + turns + local state"]
+    M["Action-selection model"]
+    C{"Choose one"}
+    A["answer / synthesize"]
+    R["search / read / inspect / refine / branch"]
+    L["validated recursive loop"]
+    S["grounded synthesizer answer"]
+
+    U --> I --> M --> C
+    C --> A --> S
+    C --> R --> L --> M
+    L --> S
 ```
 
 ### Role Of Keel
@@ -81,6 +107,7 @@ Today, the runtime has:
 
 The remaining gaps are narrower now:
 
+- non-trivial turns still cross a transitional heuristic top-level gate before first action selection is fully model-directed
 - trivial turns still use a cheap controller shortcut for `casual` and explicit deterministic-action requests
 - the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
 - `context-1` is still an explicit experimental boundary, not the default planner lane
@@ -88,6 +115,7 @@ The remaining gaps are narrower now:
 ## Design Principles
 
 - `AGENTS.md` should influence interpretation, not just answer style.
+- The model should choose the next bounded action from interpretation context; the controller should validate and execute it safely.
 - Recursive context refinement should do the heavy lifting for difficult workspace questions.
 - Planner and synthesizer are different roles and may use different models.
 - Keel and other project-specific artifacts are context, not hardcoded product logic.

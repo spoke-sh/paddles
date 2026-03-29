@@ -22,8 +22,10 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Smallest Capable Model**: Route each request to the smallest model that can satisfy the user's intent within the active runtime constraints.
 - **Intent Before Size**: Choose models based on workload shape first: direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
 - **Interpretation Before Routing**: Operator memory and foundational guidance should be available to first-pass planner interpretation before the runtime commits to a route for non-trivial turns.
+- **Model-Directed Top-Level Action Selection**: After interpretation context is assembled, non-trivial turns should choose their next bounded action through a constrained model response rather than controller string heuristics.
+- **Controller Owns Validation, Not Heuristic Intent**: The controller remains authoritative for schema validation, budgets, safe command allowlists, deterministic execution, and fail-closed behavior, but not for guessing the user's next resource action through ad hoc string rules.
 - **Recursive Planning Before Final Synthesis**: Difficult workspace questions should be improved through bounded recursive resource use rather than relying solely on one-shot controller heuristics.
-- **Planner Action Contract**: Non-trivial turns should flow through a constrained planner contract that can express search, read, inspect, refine, branch, and stop decisions.
+- **Planner Action Contract**: Non-trivial turns should flow through a constrained planner contract that can express direct answer or synthesize, search, read, inspect, refine, branch, and stop decisions.
 - **Separate Catalog From Runtime From Prompting**: Model integration must isolate alias/asset resolution, family-specific inference runtime, and prompt/protocol behavior so new families can be added without cross-cutting regressions.
 - **Separate Planner From Synthesizer**: Recursive planning or context gathering may use a dedicated planner-capable model, but final answer generation should remain a distinct step.
 - **Evidence-First Gatherers**: Context-gathering adapters must return typed evidence bundles and capability state for a downstream synthesizer, not prose pretending to be the final answer.
@@ -33,7 +35,7 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Turn Events Stay Visible**: The interactive REPL must render a default action stream for classification, route selection, gatherer work, tool calls, fallbacks, and synthesis. This is not reserved for a quiet debug mode.
 - **TTY UI / Plain CLI Split**: Interactive terminal sessions should use the dedicated transcript UI, while `--prompt` and non-TTY stdin/stdout flows must remain plain output paths for scripting and pipes.
 - **Hierarchical Operator Memory**: The REPL must reload `AGENTS.md` memory on every turn from system, user, and ancestor scopes in that order, with more specific files overriding broader guidance.
-- **Memory Does Not Replace Control**: Instruction memory may shape prompt construction, but controller-owned routing, typed evidence contracts, and deterministic tool execution remain authoritative.
+- **Memory Shapes Action Selection; Control Shapes Safety**: Instruction memory and linked foundational docs should influence first action selection, while typed evidence contracts, deterministic execution, validation, and budgets remain controller-owned.
 - **Keel Is Context, Not A Built-In Intent**: Project or board engines may inform planning through recursive context and tools, but the harness should not overfit by encoding one engine as a product-specific first-class turn type.
 - **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.
 - **No Silent Remote Regression**: The default `paddles` path remains local-first. Remote or heavyweight specialized models must be explicit, observable, and degradable to a local fallback.

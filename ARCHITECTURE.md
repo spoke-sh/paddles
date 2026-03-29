@@ -42,6 +42,7 @@ final synthesis.
 ## Core Rules
 
 - Interpretation should happen before routing commits to a path.
+- Top-level routing should come from a constrained model-selected next action, not a controller string heuristic.
 - `AGENTS.md` is part of interpretation context, not just answer prompting.
 - Planner and synthesizer are different roles and may use different models.
 - Keel is an evidence domain, not a first-class runtime intent.
@@ -67,6 +68,7 @@ inside bounded action and budget contracts.
 
 The planner boundary should be able to express actions like:
 
+- answer or synthesize now
 - search the workspace
 - read a file or artifact
 - inspect prior tool output
@@ -119,9 +121,32 @@ The repo now contains the main pieces of the target architecture:
 
 The remaining transitional pieces are narrower:
 
+- a heuristic top-level gate still exists before first non-trivial action selection; removing it is the next backbone mission
 - trivial `casual` and explicit deterministic-action turns still use a cheap controller shortcut before the planner loop
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
 - `context-1` remains an explicit experimental boundary
+
+## Transitional Gap: Heuristic Top-Level Gate
+
+The main remaining mismatch is that `paddles` still decides too much before the
+model chooses its first bounded action.
+
+Current transitional behavior:
+
+1. controller heuristics classify the turn
+2. non-trivial turns then enter the recursive planner loop
+3. the model chooses later planner actions
+4. synthesis happens from resulting evidence
+
+Target backbone behavior:
+
+1. assemble interpretation context
+2. ask the model for the first bounded action
+3. validate and execute it
+4. recurse until synthesis is appropriate
+
+That shift matters because `AGENTS.md` and linked foundational docs should shape
+the very first resource decision, not merely later search/refine steps.
 
 ## Current Model Routing
 

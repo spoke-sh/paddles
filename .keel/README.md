@@ -102,3 +102,9 @@
 |--------|--------|
 | [Recursive Planner Harness Backbone](epics/VFDv1i61H/voyages/VFDv3gE5m/) | done |
 
+### [Model-Directed Turn Routing](epics/VFECyWLL6/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Model-Directed Routing Backbone](epics/VFECyWLL6/voyages/VFED2RjSu/) | planned |
+

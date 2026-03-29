@@ -42,15 +42,18 @@ Focus on **technical discovery and fog reduction**.
 
 Paddles treats inference as a routing problem, not a single-model problem.
 
-1. **Controller Owns Routing**: Do not rely on the model to decide whether tools or context gathering are needed. The controller should route the turn.
-2. **Smallest Capable Path First**: Prefer the cheapest local runtime that can satisfy the request without degrading behavior.
-3. **Trivial Turn Shortcut Only**: Casual chat and explicit deterministic workspace/tool turns may bypass the planner loop, but other non-trivial turns should pass through planner action selection.
-4. **Planner Before Synthesizer**: Non-trivial turns should assemble interpretation context, let the planner lane choose bounded actions, and only then hand typed evidence to the synthesizer lane.
+1. **Interpretation Context First**: Assemble `AGENTS.md`, linked foundational guidance, recent turns, and relevant local state before choosing the next bounded action for non-trivial turns.
+2. **Model Selects The Next Bounded Action**: Do not rely on controller string heuristics as the primary reasoning engine. Present the model with the allowed action options and require it to return one of them.
+3. **Controller Owns Validation And Budgets**: The controller remains authoritative for schema validation, safe-command allowlists, deterministic execution, loop budgets, and fail-closed behavior.
+4. **Planner Before Synthesizer**: Resource-intensive turns should recurse through bounded planner actions and only then hand typed evidence to the synthesizer lane.
 5. **Grounded Repository Answers**: Repository-question answers should cite source files by default and degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
 6. **Visible Turn Stream**: TTY interactive sessions should render a default Codex-style transcript UI for interpretation, planner actions, gatherer work, tool calls, fallback reasons, and synthesis readiness.
 7. **One-Shot Path Stays Plain**: `--prompt` usage and non-TTY stdin/stdout flows must remain plain CLI output paths for scripting and shell composition.
 8. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
-9. **Docs Move With Behavior**: Whenever routing heuristics, lane contracts, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
+9. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
+
+Current transitional note:
+- The implementation still retains a narrow heuristic shortcut for some trivial turns. That is transitional debt; the backbone contract is model-directed bounded action selection.
 
 ## Human Interaction & Pokes
 
