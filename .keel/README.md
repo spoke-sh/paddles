@@ -84,3 +84,9 @@
 |--------|--------|
 | [Bounded Autonomous Gatherer Integration](epics/VFCzL9KKd/voyages/VFCzWHL1Y/) | done |
 
+### [Evidence-First Interactive Turns](epics/VFDMnu8k9/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Default Gatherer, Grounded Answers, And Action Stream](epics/VFDMnu8k9/voyages/VFDMp3Zn3/) | planned |
+
