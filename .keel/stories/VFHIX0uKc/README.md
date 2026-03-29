@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VFHIX0uKc
-status: backlog
+status: done
 created_at: 2026-03-29T10:21:50
-updated_at: 2026-03-29T10:25:12
+updated_at: 2026-03-29T11:58:34
 # authored
 title: Persist Transit Thread Branches And Artifacts
 type: feat
 operator-signal:
 scope: VFHIUOcFc/VFHIV59Hn
 index: 2
+started_at: 2026-03-29T11:56:51
+submitted_at: 2026-03-29T11:58:33
+completed_at: 2026-03-29T11:58:34
 ---
 
 # Persist Transit Thread Branches And Artifacts
@@ -23,7 +26,7 @@ threaded work without turning `transit-core` into a conversation API.
 
 ## Acceptance Criteria
 
-- [ ] A paddles-owned conversation/thread layer exists above the recorder boundary and owns the thread DTOs needed by runtime and UX code. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
-- [ ] The layer consumes the new upstream `transit-core` metadata, branch replay, and artifact helper APIs where they simplify low-level plumbing, without turning `transit-core` into the conversation API boundary. [SRS-03/AC-02] <!-- verify: manual, SRS-03:start:end -->
-- [ ] Thread-local replay reconstructs enough mainline and child-thread provenance for later planning and synthesis. [SRS-04/AC-02] <!-- verify: manual, SRS-04:start:end -->
-- [ ] The implementation works through the existing embedded recorder path, does not require a separate trace server, and remains extractable from paddles later. [SRS-NFR-04/AC-03] <!-- verify: manual, SRS-NFR-04:start:end -->
+- [x] A paddles-owned conversation/thread layer exists above the recorder boundary and owns the thread DTOs needed by runtime and UX code. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end, proof: ac-1.log-->
+- [x] The layer consumes the new upstream `transit-core` metadata, branch replay, and artifact helper APIs where they simplify low-level plumbing, without turning `transit-core` into the conversation API boundary. [SRS-03/AC-02] <!-- verify: manual, SRS-03:start:end, proof: ac-2.log-->
+- [x] Thread-local replay reconstructs enough mainline and child-thread provenance for later planning and synthesis. [SRS-04/AC-02] <!-- verify: manual, SRS-04:start:end, proof: ac-3.log-->
+- [x] The implementation works through the existing embedded recorder path, does not require a separate trace server, and remains extractable from paddles later. [SRS-NFR-04/AC-03] <!-- verify: manual, SRS-NFR-04:start:end, proof: ac-4.log-->

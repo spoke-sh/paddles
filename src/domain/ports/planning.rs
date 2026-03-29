@@ -1,5 +1,7 @@
 use super::context_gathering::{EvidenceItem, PlannerTraceMetadata};
-use crate::domain::model::{TraceBranch, TraceBranchId};
+use crate::domain::model::{
+    ConversationThread, ThreadCandidate, ThreadDecision, TraceBranch, TraceBranchId,
+};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -16,6 +18,11 @@ pub trait RecursivePlanner: Send + Sync {
         &self,
         request: &PlannerRequest,
     ) -> Result<PlannerDecision, anyhow::Error>;
+
+    async fn select_thread_decision(
+        &self,
+        request: &ThreadDecisionRequest,
+    ) -> Result<ThreadDecision, anyhow::Error>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,6 +127,51 @@ impl PlannerRequest {
 
     pub fn with_loop_state(mut self, loop_state: PlannerLoopState) -> Self {
         self.loop_state = loop_state;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadDecisionRequest {
+    pub workspace_root: PathBuf,
+    pub interpretation: InterpretationContext,
+    pub recent_turns: Vec<String>,
+    pub active_thread: ConversationThread,
+    pub known_threads: Vec<ConversationThread>,
+    pub candidate: ThreadCandidate,
+    pub recent_thread_summary: Option<String>,
+}
+
+impl ThreadDecisionRequest {
+    pub fn new(
+        workspace_root: impl Into<PathBuf>,
+        interpretation: InterpretationContext,
+        active_thread: ConversationThread,
+        candidate: ThreadCandidate,
+    ) -> Self {
+        Self {
+            workspace_root: workspace_root.into(),
+            interpretation,
+            recent_turns: Vec::new(),
+            active_thread,
+            known_threads: Vec::new(),
+            candidate,
+            recent_thread_summary: None,
+        }
+    }
+
+    pub fn with_recent_turns(mut self, recent_turns: Vec<String>) -> Self {
+        self.recent_turns = recent_turns;
+        self
+    }
+
+    pub fn with_known_threads(mut self, known_threads: Vec<ConversationThread>) -> Self {
+        self.known_threads = known_threads;
+        self
+    }
+
+    pub fn with_recent_thread_summary(mut self, recent_thread_summary: Option<String>) -> Self {
+        self.recent_thread_summary = recent_thread_summary;
         self
     }
 }
@@ -307,6 +359,11 @@ pub struct PlannerDecision {
 mod tests {
     use super::{
         InitialAction, InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget,
+        ThreadDecisionRequest,
+    };
+    use crate::domain::model::{
+        ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadCandidate,
+        ThreadCandidateId,
     };
 
     #[test]
@@ -359,5 +416,30 @@ mod tests {
                 command: "git status".to_string()
             })
         );
+    }
+
+    #[test]
+    fn thread_decision_request_keeps_generic_thread_state() {
+        let request = ThreadDecisionRequest::new(
+            ".",
+            InterpretationContext::default(),
+            ConversationThread {
+                thread_ref: ConversationThreadRef::Mainline,
+                label: "mainline".to_string(),
+                parent: None,
+                status: ConversationThreadStatus::Active,
+            },
+            ThreadCandidate {
+                candidate_id: ThreadCandidateId::new("candidate-1").expect("candidate"),
+                prompt: "Steer the current work".to_string(),
+                captured_from_turn_id: None,
+                active_thread: ConversationThreadRef::Mainline,
+                captured_sequence: 1,
+            },
+        );
+
+        assert_eq!(request.active_thread.label, "mainline");
+        assert_eq!(request.candidate.prompt, "Steer the current work");
+        assert!(request.recent_thread_summary.is_none());
     }
 }

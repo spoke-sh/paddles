@@ -32,6 +32,11 @@ The backbone has five layers:
    `TraceRecorder` port, with transcript rendering staying a projection rather
    than the durable source of truth.
 
+7. `ConversationThreadLayer`
+   Interactive sessions keep a paddles-owned conversation root, structured
+   steering candidates, model-driven thread decisions, and explicit merge-back
+   records above the recorder boundary.
+
 ## Why This Shape
 
 This architecture exists to solve three failures of one-shot small-model
@@ -125,8 +130,10 @@ The repo now contains the main pieces of the target architecture:
 - interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
 - a paddles-owned trace contract in [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs)
+- a paddles-owned conversation/thread contract in [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs)
 - a recorder port in [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs)
 - embedded/noop/in-memory recorder adapters in [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs)
+- session-scoped thread and trace state in [src/application/session.rs](/home/alex/workspace/spoke-sh/paddles/src/application/session.rs)
 
 The remaining transitional pieces are now smaller:
 
@@ -148,6 +155,8 @@ The recorder path is now:
 4. noop and in-memory adapters preserve local safety and tests
 5. embedded `transit-core` maps roots, branch heads, appends, replay, and
    checkpoints without leaking raw transit types into the domain
+6. interactive sessions add model-selected thread split/merge records on top of
+   the same recorder path instead of hiding thread structure in TUI-only state
 
 This keeps the domain storage-neutral while making lineage durable enough for
 later replay, branch comparison, and graph-trace analysis.
@@ -165,6 +174,9 @@ The remaining mismatch is narrower:
 
 1. a selected `tool` action still hands off to the existing deterministic tool runtime instead of a unified planner resource graph
 2. some legacy direct adapter helper methods still infer intent heuristically when called outside `MechSuitService`
+3. auto-threading is checkpoint-bounded and sequential today; it replays and
+   merges explicit thread lineage but does not provide simultaneous sibling
+   generation on one local model session
 
 That means the backbone contract is delivered for the primary interactive and
 `process_prompt` runtime, while a few compatibility surfaces still need to be

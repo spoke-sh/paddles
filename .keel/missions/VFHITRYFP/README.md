@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFHITRYFP
-status: active
+status: achieved
 created_at: 2026-03-29T10:21:36
-updated_at: 2026-03-29T10:25:12
+updated_at: 2026-03-29T11:58:43
 # authored
 title: Implement Model-Driven Auto-Threading With Transit
 watch: ~
 activated_at: 2026-03-29T10:25:12
+achieved_at: 2026-03-29T11:58:43
 ---
 
 # Implement Model-Driven Auto-Threading With Transit

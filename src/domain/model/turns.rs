@@ -62,6 +62,23 @@ pub enum TurnEvent {
         action: String,
         rationale: String,
     },
+    ThreadCandidateCaptured {
+        candidate_id: String,
+        active_thread: String,
+        prompt: String,
+    },
+    ThreadDecisionApplied {
+        candidate_id: String,
+        decision: String,
+        target_thread: String,
+        rationale: String,
+    },
+    ThreadMerged {
+        source_thread: String,
+        target_thread: String,
+        mode: String,
+        summary: Option<String>,
+    },
     GathererSummary {
         provider: String,
         summary: String,

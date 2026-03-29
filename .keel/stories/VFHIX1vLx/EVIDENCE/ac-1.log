@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T11:57:33.580078284-07:00
+mode: manual
+---
+Foundational docs now explain the thread decision contract, transit lineage mapping, explicit merge semantics, and the checkpoint-bounded concurrency limit in README.md, ARCHITECTURE.md, POLICY.md, AGENTS.md, and INSTRUCTIONS.md.

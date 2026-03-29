@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T11:57:19.217186690-07:00
+mode: manual
+---
+Added a paddles-owned conversation/session layer in src/application/session.rs plus conversation/thread DTOs in src/domain/model/threading.rs so runtime and TUI code work above the recorder boundary instead of queueing raw strings.

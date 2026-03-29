@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T11:57:13.958954555-07:00
+mode: manual
+---
+Merge/reconcile is first-class in the same bounded contract through ThreadDecisionKind::MergeIntoTarget plus ThreadMergeMode and explicit trace/event handling in src/domain/model/threading.rs, src/domain/model/traces.rs, and src/application/mod.rs.

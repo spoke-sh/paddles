@@ -217,6 +217,8 @@ impl TransitTraceRecorder {
             branch_stream.clone(),
             parent_position,
             LineageMetadata::new(Some("paddles".into()), Some("planner-branch".into()))
+                .with_branch_kind("conversation-thread")
+                .with_anchor_ref(parent_record_id.as_str())
                 .with_label("task_id", record.lineage.task_id.as_str())
                 .with_label("branch_id", branch.branch_id.as_str())
                 .with_label("label", branch.label.clone()),

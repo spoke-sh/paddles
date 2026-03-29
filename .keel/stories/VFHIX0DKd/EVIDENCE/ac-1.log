@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T11:57:13.916708877-07:00
+mode: manual
+---
+Added a generic thread decision contract in src/domain/model/threading.rs and src/domain/ports/planning.rs with stable candidate/decision ids, continue/open-child/merge decisions, and planner adapter support in src/infrastructure/adapters/sift_agent.rs and src/infrastructure/adapters/sift_planner.rs.

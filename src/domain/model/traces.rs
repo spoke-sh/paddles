@@ -2,6 +2,8 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use super::{ConversationThreadRef, ThreadCandidate, ThreadDecision, ThreadMergeRecord};
+
 macro_rules! trace_id {
     ($name:ident) => {
         #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -207,8 +209,21 @@ pub struct TraceTaskRoot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceTurnStarted {
+    pub prompt: ArtifactEnvelope,
+    pub interpretation: Option<ArtifactEnvelope>,
+    pub planner_model: String,
+    pub synthesizer_model: String,
+    pub thread: ConversationThreadRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TraceRecordKind {
     TaskRootStarted(TraceTaskRoot),
+    TurnStarted(TraceTurnStarted),
+    ThreadCandidateCaptured(ThreadCandidate),
+    ThreadDecisionSelected(ThreadDecision),
+    ThreadMerged(ThreadMergeRecord),
     PlannerAction { action: String, rationale: String },
     PlannerBranchDeclared(TraceBranch),
     SelectionArtifact(TraceSelectionArtifact),

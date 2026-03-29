@@ -1,8 +1,11 @@
 use super::agent_memory::AgentMemory;
-use crate::domain::model::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
+use crate::domain::model::{
+    ConversationThreadRef, NullTurnEventSink, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
+    ThreadMergeMode, TurnEvent, TurnEventSink, TurnIntent,
+};
 use crate::domain::ports::{
     EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext, PlannerAction,
-    PlannerRequest, RecursivePlannerDecision,
+    PlannerRequest, RecursivePlannerDecision, ThreadDecisionRequest,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -180,6 +183,25 @@ enum InitialActionEnvelope {
     },
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+enum ThreadDecisionEnvelope {
+    ContinueCurrentThread {
+        rationale: String,
+    },
+    OpenChildThread {
+        label: String,
+        rationale: String,
+    },
+    MergeIntoTarget {
+        target_thread_id: String,
+        merge_mode: String,
+        #[serde(default)]
+        summary: Option<String>,
+        rationale: String,
+    },
+}
+
 struct TurnPrompt<'a> {
     workspace_root: &'a Path,
     user_prompt: &'a str,
@@ -196,6 +218,12 @@ struct PlannerPrompt<'a> {
     user_prompt: &'a str,
     interpretation: &'a InterpretationContext,
     request: &'a PlannerRequest,
+}
+
+struct ThreadPlannerPrompt<'a> {
+    workspace_root: &'a Path,
+    interpretation: &'a InterpretationContext,
+    request: &'a ThreadDecisionRequest,
 }
 
 trait ConversationFactory: Send + Sync {
@@ -935,6 +963,44 @@ impl SiftAgentAdapter {
             "falling back to bounded heuristic planner action",
         );
         Ok(fallback_planner_action(request))
+    }
+
+    pub fn select_thread_decision(
+        &self,
+        request: &ThreadDecisionRequest,
+    ) -> Result<ThreadDecision> {
+        let mut conversation = self.conversation_factory.start_conversation()?;
+        let mut reply = self.send_to_model(
+            conversation.as_mut(),
+            &build_thread_decision_prompt(&ThreadPlannerPrompt {
+                workspace_root: &request.workspace_root,
+                interpretation: &request.interpretation,
+                request,
+            }),
+        )?;
+
+        if is_blank_model_reply(&reply) || parse_thread_decision(&reply, request)?.is_none() {
+            self.log_retry_reason(
+                "thread-decision-retry",
+                &reply,
+                "missing or invalid thread decision response",
+            );
+            reply = self.send_to_model(
+                conversation.as_mut(),
+                &build_thread_decision_retry_prompt(request),
+            )?;
+        }
+
+        if let Some(decision) = parse_thread_decision(&reply, request)? {
+            return Ok(decision);
+        }
+
+        self.log_retry_reason(
+            "thread-decision-fallback",
+            &reply,
+            "falling back to bounded continue-current-thread behavior",
+        );
+        Ok(fallback_thread_decision(request))
     }
 
     pub fn recent_turn_summaries(&self) -> Result<Vec<String>> {
@@ -1815,6 +1881,93 @@ Current user request:\n\
     )
 }
 
+fn build_thread_decision_prompt(prompt: &ThreadPlannerPrompt<'_>) -> String {
+    format!(
+        "You are the steering-thread planner for Paddles.\n\
+Choose how a steering prompt captured during an active turn should flow.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Allowed decisions:\n\
+- {{\"decision\":\"continue_current_thread\",\"rationale\":\"...\"}}\n\
+- {{\"decision\":\"open_child_thread\",\"label\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"decision\":\"merge_into_target\",\"target_thread_id\":\"mainline-or-thread-id\",\"merge_mode\":\"summary|backlink|merge\",\"summary\":\"optional\",\"rationale\":\"...\"}}\n\
+\n\
+Rules:\n\
+- Continue when the steering prompt belongs on the active thread.\n\
+- Open a child thread when the work should branch without mutating the mainline.\n\
+- Merge into target when a child thread should reconcile back into a known thread or mainline.\n\
+- Use ONLY target thread ids that exist in the known thread list.\n\
+- Never answer the user directly here.\n\
+\n\
+Workspace root:\n\
+{}\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Recent turns:\n\
+{}\n\
+\n\
+Active thread:\n\
+- id={}\n\
+- label={}\n\
+\n\
+Known threads:\n\
+{}\n\
+\n\
+Recent thread summary:\n\
+{}\n\
+\n\
+Steering candidate:\n\
+- id={}\n\
+- active_thread={}\n\
+- prompt={}\n",
+        prompt.workspace_root.display(),
+        format_interpretation_context_digest(prompt.interpretation),
+        format_recent_turn_list(&prompt.request.recent_turns),
+        prompt.request.active_thread.thread_ref.stable_id(),
+        prompt.request.active_thread.label,
+        format_known_threads(&prompt.request.known_threads),
+        prompt
+            .request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
+        prompt.request.candidate.candidate_id.as_str(),
+        prompt.request.candidate.active_thread.stable_id(),
+        prompt.request.candidate.prompt,
+    )
+}
+
+fn build_thread_decision_retry_prompt(request: &ThreadDecisionRequest) -> String {
+    format!(
+        "Your last steering-thread decision reply was empty or invalid.\n\
+Return ONLY one valid JSON thread decision.\n\
+\n\
+Allowed decisions:\n\
+- {{\"decision\":\"continue_current_thread\",\"rationale\":\"...\"}}\n\
+- {{\"decision\":\"open_child_thread\",\"label\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"decision\":\"merge_into_target\",\"target_thread_id\":\"mainline-or-thread-id\",\"merge_mode\":\"summary|backlink|merge\",\"summary\":\"optional\",\"rationale\":\"...\"}}\n\
+\n\
+Known threads:\n\
+{}\n\
+\n\
+Recent thread summary:\n\
+{}\n\
+\n\
+Steering candidate:\n\
+- id={}\n\
+- prompt={}\n",
+        format_known_threads(&request.known_threads),
+        request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
+        request.candidate.candidate_id.as_str(),
+        request.candidate.prompt,
+    )
+}
+
 fn build_grounded_retry_prompt(
     user_prompt: &str,
     recent_turns: &str,
@@ -2164,6 +2317,31 @@ fn format_recent_turn_list(turns: &[String]) -> String {
         .join("\n")
 }
 
+fn format_known_threads(threads: &[crate::domain::model::ConversationThread]) -> String {
+    if threads.is_empty() {
+        return "No known threads.".to_string();
+    }
+
+    threads
+        .iter()
+        .map(|thread| {
+            let parent = thread
+                .parent
+                .as_ref()
+                .map(|parent| parent.stable_id())
+                .unwrap_or_else(|| "none".to_string());
+            format!(
+                "- id={} label={} status={} parent={}",
+                thread.thread_ref.stable_id(),
+                thread.label,
+                thread.status.label(),
+                parent
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
     let remaining_steps = request
         .budget
@@ -2480,6 +2658,21 @@ fn parse_planner_action(response: &str) -> Result<Option<RecursivePlannerDecisio
     Ok(Some(planner_action_from_envelope(action)?))
 }
 
+fn parse_thread_decision(
+    response: &str,
+    request: &ThreadDecisionRequest,
+) -> Result<Option<ThreadDecision>> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(None);
+    };
+    let Ok(decision) = serde_json::from_str::<ThreadDecisionEnvelope>(json) else {
+        return Ok(None);
+    };
+
+    Ok(Some(thread_decision_from_envelope(decision, request)?))
+}
+
 fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
     let decision = match envelope {
         InitialActionEnvelope::Answer { rationale } => InitialActionDecision {
@@ -2636,12 +2829,97 @@ fn planner_action_from_envelope(
     Ok(decision)
 }
 
+fn thread_decision_from_envelope(
+    envelope: ThreadDecisionEnvelope,
+    request: &ThreadDecisionRequest,
+) -> Result<ThreadDecision> {
+    let decision_id = ThreadDecisionId::new(format!(
+        "{}.decision",
+        request.candidate.candidate_id.as_str()
+    ))?;
+
+    let decision = match envelope {
+        ThreadDecisionEnvelope::ContinueCurrentThread { rationale } => ThreadDecision {
+            decision_id,
+            candidate_id: request.candidate.candidate_id.clone(),
+            kind: ThreadDecisionKind::ContinueCurrent,
+            rationale: required_planner_field("rationale", rationale)?,
+            target_thread: request.active_thread.thread_ref.clone(),
+            new_thread_label: None,
+            merge_mode: None,
+            merge_summary: None,
+        },
+        ThreadDecisionEnvelope::OpenChildThread { label, rationale } => ThreadDecision {
+            decision_id,
+            candidate_id: request.candidate.candidate_id.clone(),
+            kind: ThreadDecisionKind::OpenChildThread,
+            rationale: required_planner_field("rationale", rationale)?,
+            target_thread: request.active_thread.thread_ref.clone(),
+            new_thread_label: Some(required_planner_field("label", label)?),
+            merge_mode: None,
+            merge_summary: None,
+        },
+        ThreadDecisionEnvelope::MergeIntoTarget {
+            target_thread_id,
+            merge_mode,
+            summary,
+            rationale,
+        } => ThreadDecision {
+            decision_id,
+            candidate_id: request.candidate.candidate_id.clone(),
+            kind: ThreadDecisionKind::MergeIntoTarget,
+            rationale: required_planner_field("rationale", rationale)?,
+            target_thread: required_thread_target(request, &target_thread_id)?,
+            new_thread_label: None,
+            merge_mode: Some(parse_merge_mode(&merge_mode)?),
+            merge_summary: summary
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        },
+    };
+
+    Ok(decision)
+}
+
 fn required_planner_field(name: &str, value: String) -> Result<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         bail!("planner field `{name}` must not be empty");
     }
     Ok(trimmed.to_string())
+}
+
+fn required_thread_target(
+    request: &ThreadDecisionRequest,
+    target_thread_id: &str,
+) -> Result<ConversationThreadRef> {
+    let normalized = target_thread_id.trim();
+    if normalized.eq_ignore_ascii_case("mainline") {
+        return Ok(ConversationThreadRef::Mainline);
+    }
+
+    request
+        .known_threads
+        .iter()
+        .find_map(|thread| match &thread.thread_ref {
+            ConversationThreadRef::Mainline => None,
+            ConversationThreadRef::Branch(branch_id) if branch_id.as_str() == normalized => {
+                Some(ConversationThreadRef::Branch(branch_id.clone()))
+            }
+            _ => None,
+        })
+        .ok_or_else(|| anyhow!("unknown target thread `{normalized}`"))
+}
+
+fn parse_merge_mode(value: &str) -> Result<ThreadMergeMode> {
+    match value.trim() {
+        "backlink" => Ok(ThreadMergeMode::Backlink),
+        "summary" => Ok(ThreadMergeMode::Summary),
+        "merge" => Ok(ThreadMergeMode::Merge),
+        other => bail!("unknown merge mode `{other}`"),
+    }
 }
 
 fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
@@ -2702,6 +2980,24 @@ fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision
         },
         rationale: "stop after invalid planner replies once some loop state already exists"
             .to_string(),
+    }
+}
+
+fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
+    ThreadDecision {
+        decision_id: ThreadDecisionId::new(format!(
+            "{}.decision-fallback",
+            request.candidate.candidate_id.as_str()
+        ))
+        .expect("fallback decision id"),
+        candidate_id: request.candidate.candidate_id.clone(),
+        kind: ThreadDecisionKind::ContinueCurrent,
+        rationale: "keep the steering prompt on the active thread when the thread decision reply is invalid"
+            .to_string(),
+        target_thread: request.active_thread.thread_ref.clone(),
+        new_thread_label: None,
+        merge_mode: None,
+        merge_summary: None,
     }
 }
 

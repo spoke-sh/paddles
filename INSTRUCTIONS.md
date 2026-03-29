@@ -48,9 +48,12 @@ Paddles treats inference as a routing problem, not a single-model problem.
 4. **Planner Before Synthesizer**: Resource-intensive turns should recurse through bounded planner actions and only then hand typed evidence to the synthesizer lane.
 5. **Grounded Repository Answers**: Repository-question answers should cite source files by default and degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
 6. **Visible Turn Stream**: TTY interactive sessions should render a default Codex-style transcript UI for interpretation, planner actions, gatherer work, tool calls, fallback reasons, and synthesis readiness.
-7. **One-Shot Path Stays Plain**: `--prompt` usage and non-TTY stdin/stdout flows must remain plain CLI output paths for scripting and shell composition.
-8. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
-9. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
+7. **Model-Driven Auto-Threading**: Steering prompts captured during an active turn should become structured thread candidates, then flow through a constrained model-selected thread decision (`continue`, `open-child-thread`, or `merge/reconcile`) at a safe checkpoint.
+8. **Explicit Merge Outcomes**: Merge-back behavior must be recorded as explicit lineage plus visible transcript output rather than implied history rewrite.
+9. **One Local Turn At A Time**: Until true concurrent local generation exists, auto-threading must remain checkpoint-bounded and honest about sequential execution.
+10. **One-Shot Path Stays Plain**: `--prompt` usage and non-TTY stdin/stdout flows must remain plain CLI output paths for scripting and shell composition.
+11. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
+12. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, thread semantics, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
 
 Current transitional note:
 - The main mech-suit runtime now uses model-directed first action selection. Remaining transitional debt is limited to the temporary `tool` bridge and legacy direct adapter helpers that still contain heuristic intent inference outside the main service path.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T11:57:19.307292069-07:00
+mode: manual
+---
+Thread-local replay is reconstructed through ConversationReplayView in src/domain/model/threading.rs, which rebuilds mainline and child-thread provenance from durable trace records and is covered by replay_view_reconstructs_threads_and_merges.

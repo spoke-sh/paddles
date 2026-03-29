@@ -22,8 +22,8 @@ index: 19
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Model-Driven Thread Split And Merge UX](voyages/VFHIV59Hn/) | planned | 0/5 |
+| [Model-Driven Thread Split And Merge UX](voyages/VFHIV59Hn/) | done | 5/5 |
 <!-- END GENERATED -->

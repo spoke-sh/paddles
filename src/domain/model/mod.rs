@@ -1,12 +1,18 @@
 use anyhow::Result;
 
+pub mod threading;
 pub mod traces;
 pub mod turns;
+pub use threading::{
+    ConversationReplayView, ConversationThread, ConversationThreadRef, ConversationThreadStatus,
+    ThreadCandidate, ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
+    ThreadMergeMode, ThreadMergeRecord,
+};
 pub use traces::{
     ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceBranch, TraceBranchId,
     TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
     TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
-    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TurnTraceId,
+    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnTraceId,
 };
 pub use turns::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 

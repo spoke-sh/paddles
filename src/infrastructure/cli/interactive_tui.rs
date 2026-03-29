@@ -1,5 +1,5 @@
-use crate::application::MechSuitService;
-use crate::domain::model::{TurnEvent, TurnEventSink};
+use crate::application::{ConversationSession, MechSuitService};
+use crate::domain::model::{ThreadCandidate, TurnEvent, TurnEventSink};
 use anyhow::Result;
 use crossterm::cursor;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -50,13 +50,14 @@ pub async fn run_interactive_tui(
     terminal.clear()?;
 
     let (tx, mut rx) = unbounded_channel();
-    let mut app = InteractiveApp::new(model_label.into(), detect_palette());
+    let session = service.create_conversation_session();
+    let mut app = InteractiveApp::new(model_label.into(), detect_palette(), session.clone());
 
     loop {
         drain_messages(&mut app, &mut rx);
         app.tick();
         if let Some(prompt) = app.dispatch_next_prompt() {
-            dispatch_prompt(prompt, Arc::clone(&service), tx.clone());
+            dispatch_prompt(prompt, Arc::clone(&service), session.clone(), tx.clone());
         }
 
         terminal.draw(|frame| app.render(frame))?;
@@ -64,7 +65,13 @@ pub async fn run_interactive_tui(
         if event::poll(FRAME_INTERVAL)? {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if handle_key_event(&mut app, key, Arc::clone(&service), tx.clone()) {
+                    if handle_key_event(
+                        &mut app,
+                        key,
+                        Arc::clone(&service),
+                        session.clone(),
+                        tx.clone(),
+                    ) {
                         break;
                     }
                 }
@@ -87,6 +94,7 @@ fn handle_key_event(
     app: &mut InteractiveApp,
     key: KeyEvent,
     _service: Arc<MechSuitService>,
+    _session: ConversationSession,
     _tx: UnboundedSender<UiMessage>,
 ) -> bool {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
@@ -140,13 +148,27 @@ enum UiMessage {
     TurnFinished(std::result::Result<String, String>),
 }
 
-fn dispatch_prompt(prompt: String, service: Arc<MechSuitService>, tx: UnboundedSender<UiMessage>) {
+fn dispatch_prompt(
+    prompt: QueuedPrompt,
+    service: Arc<MechSuitService>,
+    session: ConversationSession,
+    tx: UnboundedSender<UiMessage>,
+) {
     let sink = Arc::new(InteractiveTurnEventSink { tx: tx.clone() });
     tokio::spawn(async move {
-        let result = service
-            .process_prompt_with_sink(&prompt, sink)
-            .await
-            .map_err(|err| format!("{err:#}"));
+        let result = match prompt {
+            QueuedPrompt::Prompt(prompt) => {
+                service
+                    .process_prompt_in_session_with_sink(&prompt, session, sink)
+                    .await
+            }
+            QueuedPrompt::Steering(candidate) => {
+                service
+                    .process_thread_candidate_in_session_with_sink(candidate, session, sink)
+                    .await
+            }
+        }
+        .map_err(|err| format!("{err:#}"));
         let _ = tx.send(UiMessage::TurnFinished(result));
     });
 }
@@ -235,13 +257,20 @@ impl PendingReveal {
 struct InteractiveApp {
     model_label: String,
     palette: Palette,
+    session: ConversationSession,
     rows: Vec<TranscriptRow>,
     input: String,
-    queued_prompts: VecDeque<String>,
+    queued_prompts: VecDeque<QueuedPrompt>,
     busy: bool,
     busy_phase: BusyPhase,
     pending_reveal: Option<PendingReveal>,
     spinner_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum QueuedPrompt {
+    Prompt(String),
+    Steering(ThreadCandidate),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,10 +281,11 @@ enum BusyPhase {
 }
 
 impl InteractiveApp {
-    fn new(model_label: String, palette: Palette) -> Self {
+    fn new(model_label: String, palette: Palette, session: ConversationSession) -> Self {
         Self {
             model_label,
             palette,
+            session,
             rows: vec![TranscriptRow::new(
                 TranscriptRowKind::Event,
                 "• Interactive mode ready",
@@ -280,7 +310,14 @@ impl InteractiveApp {
         self.rows
             .push(TranscriptRow::new(TranscriptRowKind::User, "You", &prompt));
         self.input.clear();
-        self.queued_prompts.push_back(prompt.clone());
+        if was_busy || !self.queued_prompts.is_empty() {
+            self.queued_prompts.push_back(QueuedPrompt::Steering(
+                self.session.capture_candidate(prompt.clone()),
+            ));
+        } else {
+            self.queued_prompts
+                .push_back(QueuedPrompt::Prompt(prompt.clone()));
+        }
         if was_busy || self.queued_prompts.len() > 1 {
             self.rows.push(TranscriptRow::new(
                 TranscriptRowKind::Event,
@@ -293,7 +330,7 @@ impl InteractiveApp {
         }
     }
 
-    fn dispatch_next_prompt(&mut self) -> Option<String> {
+    fn dispatch_next_prompt(&mut self) -> Option<QueuedPrompt> {
         if self.busy {
             return None;
         }
@@ -368,6 +405,7 @@ impl InteractiveApp {
 
     fn render_header(&self) -> Paragraph<'static> {
         let spinner = SPINNER_FRAMES[self.spinner_index];
+        let active_thread = self.session.active_thread().thread_ref.stable_id();
         let status = match self.busy_phase {
             BusyPhase::Idle if self.queued_prompts.is_empty() => "idle".to_string(),
             BusyPhase::Idle => format!("idle · {} queued", self.queued_prompts.len()),
@@ -386,7 +424,10 @@ impl InteractiveApp {
                 self.palette.header_meta,
             ),
             Span::raw(" "),
-            Span::styled(status, self.palette.header_status),
+            Span::styled(
+                format!("{status} · {active_thread}"),
+                self.palette.header_status,
+            ),
         ]);
 
         Paragraph::new(Text::from(vec![line]))
@@ -636,6 +677,55 @@ fn format_turn_event_row(event: TurnEvent) -> TranscriptRow {
                 collapse_event_details(&rationale, EVENT_DETAIL_LINE_LIMIT)
             ),
         ),
+        TurnEvent::ThreadCandidateCaptured {
+            candidate_id,
+            active_thread,
+            prompt,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Captured steering prompt",
+            format!(
+                "{} on {}\n{}",
+                candidate_id,
+                active_thread,
+                collapse_event_details(&prompt, EVENT_DETAIL_LINE_LIMIT)
+            ),
+        ),
+        TurnEvent::ThreadDecisionApplied {
+            candidate_id,
+            decision,
+            target_thread,
+            rationale,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Applied thread decision",
+            format!(
+                "{}: {} -> {}\nRationale: {}",
+                candidate_id,
+                decision,
+                target_thread,
+                collapse_event_details(&rationale, EVENT_DETAIL_LINE_LIMIT)
+            ),
+        ),
+        TurnEvent::ThreadMerged {
+            source_thread,
+            target_thread,
+            mode,
+            summary,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Merged thread",
+            format!(
+                "{} -> {} via {}\n{}",
+                source_thread,
+                target_thread,
+                mode,
+                collapse_event_details(
+                    summary.as_deref().unwrap_or("No merge summary recorded."),
+                    EVENT_DETAIL_LINE_LIMIT
+                )
+            ),
+        ),
         TurnEvent::GathererSummary {
             provider,
             summary,
@@ -852,11 +942,16 @@ fn terminal_uses_light_background() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BusyPhase, InteractiveApp, InteractiveFrontend, PendingReveal, TranscriptRow,
+        BusyPhase, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt, TranscriptRow,
         TranscriptRowKind, collapse_event_details, detect_palette, format_turn_event_row,
         render_row_lines, select_interactive_frontend,
     };
-    use crate::domain::model::TurnEvent;
+    use crate::application::ConversationSession;
+    use crate::domain::model::{TaskTraceId, TurnEvent};
+
+    fn session() -> ConversationSession {
+        ConversationSession::new(TaskTraceId::new("task-1").expect("task"))
+    }
 
     #[test]
     fn tty_interactive_mode_uses_tui_but_prompt_keeps_plain_path() {
@@ -923,12 +1018,12 @@ mod tests {
     #[test]
     fn app_tracks_busy_state_through_reveal_completion() {
         let palette = detect_palette();
-        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette);
+        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette, session());
         app.input = "hello".to_string();
 
         app.submit_prompt();
         let prompt = app.dispatch_next_prompt();
-        assert_eq!(prompt.as_deref(), Some("hello"));
+        assert_eq!(prompt, Some(QueuedPrompt::Prompt("hello".to_string())));
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Thinking);
 
@@ -950,11 +1045,14 @@ mod tests {
     #[test]
     fn app_accepts_steering_prompts_while_busy_and_queues_them() {
         let palette = detect_palette();
-        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette);
+        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette, session());
 
         app.input = "first".to_string();
         app.submit_prompt();
-        assert_eq!(app.dispatch_next_prompt().as_deref(), Some("first"));
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("first".to_string()))
+        );
         assert!(app.busy);
 
         app.input = "steer harder".to_string();
@@ -962,10 +1060,10 @@ mod tests {
 
         assert_eq!(app.input, "");
         assert_eq!(app.queued_prompts.len(), 1);
-        assert_eq!(
-            app.queued_prompts.front().map(String::as_str),
-            Some("steer harder")
-        );
+        assert!(matches!(
+            app.queued_prompts.front(),
+            Some(QueuedPrompt::Steering(candidate)) if candidate.prompt == "steer harder"
+        ));
         assert!(
             app.rows
                 .iter()
@@ -976,11 +1074,14 @@ mod tests {
     #[test]
     fn queued_prompt_dispatches_after_current_turn_finishes() {
         let palette = detect_palette();
-        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette);
+        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette, session());
 
         app.input = "first".to_string();
         app.submit_prompt();
-        assert_eq!(app.dispatch_next_prompt().as_deref(), Some("first"));
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("first".to_string()))
+        );
 
         app.input = "second".to_string();
         app.submit_prompt();
@@ -990,7 +1091,10 @@ mod tests {
             app.tick();
         }
 
-        assert_eq!(app.dispatch_next_prompt().as_deref(), Some("second"));
+        assert!(matches!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Steering(candidate)) if candidate.prompt == "second"
+        ));
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Thinking);
     }

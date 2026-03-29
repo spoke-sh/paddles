@@ -34,17 +34,23 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Grounded Answers Cite Sources**: Repository-question answers must include file citations by default and should degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
 - **Planner Metadata Must Stay Observable**: When a gatherer uses autonomous planning, planner strategy, stop reason, and retained-evidence summaries must remain observable in verbose output or evidence digests.
 - **Graph Lineage Must Stay Typed**: Branch ids, frontier ids, node ids, edge kinds, and graph stop state should remain in `paddles`-owned structured metadata so future embedded recorders do not need to reconstruct lineage from UI prose.
+- **Interactive Sessions Own A Durable Conversation Root**: Multi-turn interactive work should reuse one paddles-owned task root with stable turn, branch, candidate, and decision ids rather than minting unrelated prompt-local traces.
+- **Steering Prompts Become Structured Thread Candidates**: A prompt captured during an active turn must be preserved as a typed candidate with stable lineage, not an opaque queue string.
+- **Thread Selection Is Model-Directed**: Continue-current-thread, open-child-thread, and merge-back decisions should come from a constrained model response using interpretation context and known thread state.
+- **Merge-Back Must Stay Explicit**: Reconciliation into the mainline or another thread must be recorded as an explicit outcome with replayable lineage and transcript visibility, never as hidden history rewrite.
 - **Trace Recording Is Separate From Rendering**: Transcript rows and default TUI events remain operator-facing projections. Durable turn lineage must flow through the `paddles`-owned trace contract and `TraceRecorder` boundary.
 - **Storage Neutral Domain Contract**: `paddles` may use embedded `transit-core` as the first durable recorder backend, but raw transit kernel or server types must not leak across the domain boundary.
 - **Artifact Envelopes Before Blob Sprawl**: Large prompts, tool outputs, model outputs, and graph traces should be represented through artifact envelopes with stable logical ids plus inline metadata instead of assuming inline-only storage forever.
 - **Recorder Failures Must Fail Closed**: Recorder unavailability or storage failure must not corrupt turn execution. The runtime should degrade to noop recording and surface the loss of durability explicitly.
 - **Turn Events Stay Visible**: The interactive REPL must render a default action stream for classification, route selection, gatherer work, tool calls, fallbacks, and synthesis. This is not reserved for a quiet debug mode.
+- **Thread Events Stay Visible**: The default transcript should show steering capture, thread split/continue decisions, active-thread changes, and merge-back outcomes without requiring a debug-only renderer.
 - **TTY UI / Plain CLI Split**: Interactive terminal sessions should use the dedicated transcript UI, while `--prompt` and non-TTY stdin/stdout flows must remain plain output paths for scripting and pipes.
 - **Hierarchical Operator Memory**: The REPL must reload `AGENTS.md` memory on every turn from system, user, and ancestor scopes in that order, with more specific files overriding broader guidance.
 - **Memory Shapes Action Selection; Control Shapes Safety**: Instruction memory and linked foundational docs should influence first action selection, while typed evidence contracts, deterministic execution, validation, and budgets remain controller-owned.
 - **Keel Is Context, Not A Built-In Intent**: Project or board engines may inform planning through recursive context and tools, but the harness should not overfit by encoding one engine as a product-specific first-class turn type.
 - **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.
 - **No Silent Remote Regression**: The default `paddles` path remains local-first. Remote or heavyweight specialized models must be explicit, observable, and degradable to a local fallback.
+- **No Pretend Concurrency**: Auto-threading may queue, branch, replay, and merge work, but it must not imply simultaneous sibling generation on one local runtime unless that capability is actually implemented.
 
 ## 5. Entity State Machine
 Follow strict transition gates for all `.keel/` entities:

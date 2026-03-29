@@ -1,9 +1,14 @@
+mod session;
+
+pub use session::ConversationSession;
+
 use crate::domain::model::{
-    ArtifactEnvelope, ArtifactKind, BootContext, TaskTraceId, TraceArtifactId, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    ArtifactEnvelope, ArtifactKind, BootContext, ConversationThreadRef, TaskTraceId,
+    ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord,
+    TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
     TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind,
-    TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot, TraceToolCall, TurnEvent,
-    TurnEventSink, TurnIntent, TurnTraceId,
+    TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
@@ -11,7 +16,7 @@ use crate::domain::ports::{
     ModelRegistry, NoopTraceRecorder, PlannerAction, PlannerBudget, PlannerCapability,
     PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
     PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision,
-    RetainedEvidence, RetrievalMode, TraceRecorder,
+    RetainedEvidence, RetrievalMode, ThreadDecisionRequest, TraceRecorder,
 };
 use crate::infrastructure::adapters::agent_memory::AgentMemory;
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
@@ -173,20 +178,10 @@ impl TurnEventSink for ConsoleTurnEventSink {
 struct StructuredTurnTrace {
     downstream: Arc<dyn TurnEventSink>,
     recorder: Arc<dyn TraceRecorder>,
-    state: Arc<Mutex<StructuredTurnTraceState>>,
-}
-
-#[derive(Clone, Debug)]
-struct StructuredTurnTraceState {
-    task_id: TaskTraceId,
+    session: ConversationSession,
     turn_id: TurnTraceId,
-    next_record_sequence: u64,
-    next_artifact_sequence: u64,
-    next_branch_sequence: u64,
-    root_last_record_id: Option<TraceRecordId>,
-    branch_last_record_ids: HashMap<TraceBranchId, TraceRecordId>,
-    recorder_warning_emitted: bool,
-    last_synthesis: Option<SynthesisTraceState>,
+    active_thread: ConversationThreadRef,
+    last_synthesis: Arc<Mutex<Option<SynthesisTraceState>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,23 +195,17 @@ impl StructuredTurnTrace {
     fn new(
         downstream: Arc<dyn TurnEventSink>,
         recorder: Arc<dyn TraceRecorder>,
-        task_id: TaskTraceId,
+        session: ConversationSession,
         turn_id: TurnTraceId,
+        active_thread: ConversationThreadRef,
     ) -> Self {
         Self {
             downstream,
             recorder,
-            state: Arc::new(Mutex::new(StructuredTurnTraceState {
-                task_id,
-                turn_id,
-                next_record_sequence: 1,
-                next_artifact_sequence: 1,
-                next_branch_sequence: 1,
-                root_last_record_id: None,
-                branch_last_record_ids: HashMap::new(),
-                recorder_warning_emitted: false,
-                last_synthesis: None,
-            })),
+            session,
+            turn_id,
+            active_thread,
+            last_synthesis: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -225,7 +214,11 @@ impl StructuredTurnTrace {
         sink
     }
 
-    fn record_task_root(
+    fn default_branch_id(&self) -> Option<TraceBranchId> {
+        self.active_thread.branch_id()
+    }
+
+    fn record_turn_start(
         &self,
         prompt: &str,
         interpretation: &InterpretationContext,
@@ -246,13 +239,40 @@ impl StructuredTurnTrace {
             )
             .with_label("sources", interpretation.sources().join(", "))
         });
-        let root = TraceTaskRoot {
-            prompt: prompt_artifact,
-            interpretation: interpretation_artifact,
-            planner_model: prepared.planner.model_id.clone(),
-            synthesizer_model: prepared.synthesizer.model_id.clone(),
+        let record_task_root = {
+            let state = self.session.state();
+            let mut state = state.lock().expect("conversation session lock");
+            if state.root_started {
+                false
+            } else {
+                state.root_started = true;
+                true
+            }
         };
-        self.record_kind(None, TraceRecordKind::TaskRootStarted(root));
+
+        if record_task_root {
+            self.record_kind(
+                None,
+                TraceRecordKind::TaskRootStarted(TraceTaskRoot {
+                    prompt: prompt_artifact,
+                    interpretation: interpretation_artifact,
+                    planner_model: prepared.planner.model_id.clone(),
+                    synthesizer_model: prepared.synthesizer.model_id.clone(),
+                }),
+            );
+            return;
+        }
+
+        self.record_kind(
+            self.default_branch_id(),
+            TraceRecordKind::TurnStarted(TraceTurnStarted {
+                prompt: prompt_artifact,
+                interpretation: interpretation_artifact,
+                planner_model: prepared.planner.model_id.clone(),
+                synthesizer_model: prepared.synthesizer.model_id.clone(),
+                thread: self.active_thread.clone(),
+            }),
+        );
     }
 
     fn record_planner_action(
@@ -262,7 +282,7 @@ impl StructuredTurnTrace {
         branch_id: Option<TraceBranchId>,
     ) {
         self.record_kind(
-            branch_id,
+            branch_id.or_else(|| self.default_branch_id()),
             TraceRecordKind::PlannerAction {
                 action: action.to_string(),
                 rationale: rationale.to_string(),
@@ -272,26 +292,25 @@ impl StructuredTurnTrace {
 
     fn declare_branch(
         &self,
+        branch_id: TraceBranchId,
         label: &str,
         rationale: Option<&str>,
         parent_branch_id: Option<TraceBranchId>,
     ) -> TraceBranch {
         let branch = {
-            let mut state = self.state.lock().expect("structured turn trace lock");
-            let branch_id = TraceBranchId::new(format!(
-                "{}.branch-{:04}",
-                state.turn_id.as_str(),
-                state.next_branch_sequence
-            ))
-            .expect("generated branch id");
-            state.next_branch_sequence += 1;
+            let state = self.session.state();
+            let state = state.lock().expect("conversation session lock");
             TraceBranch {
                 branch_id,
                 label: label.to_string(),
                 status: TraceBranchStatus::Pending,
                 rationale: rationale.map(str::to_string),
                 parent_branch_id,
-                created_from_record_id: state.root_last_record_id.clone(),
+                created_from_record_id: self.parent_record_id_for(
+                    state.root_last_record_id.clone(),
+                    &state.branch_last_record_ids,
+                    self.default_branch_id().as_ref(),
+                ),
             }
         };
         self.record_kind(
@@ -312,7 +331,7 @@ impl StructuredTurnTrace {
         let summary = summary.into();
         let artifact = self.text_artifact(artifact_kind, summary.clone(), content.into(), 1_200);
         self.record_kind(
-            None,
+            self.default_branch_id(),
             TraceRecordKind::SelectionArtifact(TraceSelectionArtifact {
                 selection_id: artifact.artifact_id.clone(),
                 kind,
@@ -323,14 +342,63 @@ impl StructuredTurnTrace {
         );
     }
 
+    fn record_thread_candidate(&self, candidate: &ThreadCandidate) {
+        self.record_kind(
+            candidate.active_thread.branch_id(),
+            TraceRecordKind::ThreadCandidateCaptured(candidate.clone()),
+        );
+    }
+
+    fn record_thread_decision(
+        &self,
+        decision: &ThreadDecision,
+        source_thread: &ConversationThreadRef,
+    ) {
+        self.record_kind(
+            source_thread.branch_id(),
+            TraceRecordKind::ThreadDecisionSelected(decision.clone()),
+        );
+    }
+
+    fn record_thread_merge(
+        &self,
+        decision: &ThreadDecision,
+        source_thread: &ConversationThreadRef,
+        target_thread: &ConversationThreadRef,
+    ) {
+        let summary_artifact = decision.merge_summary.as_ref().map(|summary| {
+            self.text_artifact(
+                ArtifactKind::Selection,
+                format!(
+                    "thread {} outcome",
+                    decision
+                        .merge_mode
+                        .unwrap_or(ThreadMergeMode::Summary)
+                        .label()
+                ),
+                summary,
+                800,
+            )
+        });
+        self.record_kind(
+            source_thread.branch_id(),
+            TraceRecordKind::ThreadMerged(ThreadMergeRecord {
+                decision: decision.clone(),
+                source_thread: source_thread.clone(),
+                target_thread: target_thread.clone(),
+                summary_artifact,
+            }),
+        );
+    }
+
     fn remember_synthesis(
         &self,
         grounded: bool,
         citations: Vec<String>,
         insufficient_evidence: bool,
     ) {
-        let mut state = self.state.lock().expect("structured turn trace lock");
-        state.last_synthesis = Some(SynthesisTraceState {
+        let mut state = self.last_synthesis.lock().expect("synthesis trace lock");
+        *state = Some(SynthesisTraceState {
             grounded,
             citations,
             insufficient_evidence,
@@ -338,15 +406,16 @@ impl StructuredTurnTrace {
     }
 
     fn record_completion(&self, reply: &str) {
-        let synthesis = {
-            let state = self.state.lock().expect("structured turn trace lock");
-            state.last_synthesis.clone()
-        }
-        .unwrap_or(SynthesisTraceState {
-            grounded: false,
-            citations: Vec::new(),
-            insufficient_evidence: false,
-        });
+        let synthesis = self
+            .last_synthesis
+            .lock()
+            .expect("synthesis trace lock")
+            .clone()
+            .unwrap_or(SynthesisTraceState {
+                grounded: false,
+                citations: Vec::new(),
+                insufficient_evidence: false,
+            });
         let response = self
             .text_artifact(
                 ArtifactKind::ModelOutput,
@@ -360,7 +429,7 @@ impl StructuredTurnTrace {
             )
             .with_label("citations", synthesis.citations.join(", "));
         self.record_kind(
-            None,
+            self.default_branch_id(),
             TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
                 checkpoint_id: self.next_checkpoint_id(),
                 kind: if synthesis.insufficient_evidence {
@@ -380,21 +449,34 @@ impl StructuredTurnTrace {
         );
     }
 
+    fn parent_record_id_for(
+        &self,
+        root_last_record_id: Option<TraceRecordId>,
+        branch_last_record_ids: &HashMap<TraceBranchId, TraceRecordId>,
+        branch_id: Option<&TraceBranchId>,
+    ) -> Option<TraceRecordId> {
+        branch_id
+            .and_then(|branch| branch_last_record_ids.get(branch).cloned())
+            .or(root_last_record_id)
+    }
+
     fn record_kind(&self, branch_id: Option<TraceBranchId>, kind: TraceRecordKind) {
         let record = {
-            let mut state = self.state.lock().expect("structured turn trace lock");
+            let session_state = self.session.state();
+            let mut state = session_state.lock().expect("conversation session lock");
             let sequence = state.next_record_sequence;
             let record_id =
-                TraceRecordId::new(format!("{}.record-{:04}", state.turn_id.as_str(), sequence))
+                TraceRecordId::new(format!("{}.record-{:04}", self.turn_id.as_str(), sequence))
                     .expect("generated record id");
             state.next_record_sequence += 1;
-            let parent_record_id = branch_id
-                .as_ref()
-                .and_then(|branch| state.branch_last_record_ids.get(branch).cloned())
-                .or_else(|| state.root_last_record_id.clone());
+            let parent_record_id = self.parent_record_id_for(
+                state.root_last_record_id.clone(),
+                &state.branch_last_record_ids,
+                branch_id.as_ref(),
+            );
             let lineage = TraceLineage {
                 task_id: state.task_id.clone(),
-                turn_id: state.turn_id.clone(),
+                turn_id: self.turn_id.clone(),
                 branch_id: branch_id.clone(),
                 parent_record_id,
             };
@@ -423,30 +505,20 @@ impl StructuredTurnTrace {
         content: impl Into<String>,
         inline_limit: usize,
     ) -> ArtifactEnvelope {
-        let artifact_id = {
-            let mut state = self.state.lock().expect("structured turn trace lock");
-            let artifact_id = TraceArtifactId::new(format!(
-                "{}.artifact-{:04}",
-                state.turn_id.as_str(),
-                state.next_artifact_sequence
-            ))
-            .expect("generated artifact id");
-            state.next_artifact_sequence += 1;
-            artifact_id
-        };
+        let artifact_id = self.session.next_artifact_id(&self.turn_id);
         ArtifactEnvelope::text(artifact_id, kind, summary, content, inline_limit)
     }
 
     fn next_checkpoint_id(&self) -> TraceCheckpointId {
-        let state = self.state.lock().expect("structured turn trace lock");
-        TraceCheckpointId::new(format!("{}.checkpoint", state.turn_id.as_str()))
+        TraceCheckpointId::new(format!("{}.checkpoint", self.turn_id.as_str()))
             .expect("generated checkpoint id")
     }
 
     fn record_or_warn(&self, record: TraceRecord) {
         if let Err(err) = self.recorder.record(record) {
             let should_emit = {
-                let mut state = self.state.lock().expect("structured turn trace lock");
+                let state = self.session.state();
+                let mut state = state.lock().expect("conversation session lock");
                 if state.recorder_warning_emitted {
                     false
                 } else {
@@ -480,7 +552,7 @@ impl TurnEventSink for StructuredTurnTrace {
                     800,
                 );
                 self.record_kind(
-                    None,
+                    self.default_branch_id(),
                     TraceRecordKind::ToolCallRequested(TraceToolCall {
                         call_id,
                         tool_name,
@@ -502,7 +574,7 @@ impl TurnEventSink for StructuredTurnTrace {
                     1_000,
                 );
                 self.record_kind(
-                    None,
+                    self.default_branch_id(),
                     TraceRecordKind::ToolCallCompleted(TraceToolCall {
                         call_id,
                         tool_name,
@@ -564,6 +636,38 @@ fn render_turn_event(event: &TurnEvent) -> String {
             "• Selected planner action\n  └ step {sequence}: {}\n    Rationale: {}",
             trim_event_detail(action, 2),
             trim_event_detail(rationale, 2)
+        ),
+        TurnEvent::ThreadCandidateCaptured {
+            candidate_id,
+            active_thread,
+            prompt,
+        } => format!(
+            "• Captured steering prompt\n  └ {candidate_id} on {active_thread}: {}",
+            trim_event_detail(prompt, 2)
+        ),
+        TurnEvent::ThreadDecisionApplied {
+            candidate_id,
+            decision,
+            target_thread,
+            rationale,
+        } => format!(
+            "• Applied thread decision\n  └ {candidate_id}: {decision} -> {target_thread}\n    Rationale: {}",
+            trim_event_detail(rationale, 2)
+        ),
+        TurnEvent::ThreadMerged {
+            source_thread,
+            target_thread,
+            mode,
+            summary,
+        } => format!(
+            "• Merged thread\n  └ {} -> {} via {}\n    {}",
+            source_thread,
+            target_thread,
+            mode,
+            trim_event_detail(
+                summary.as_deref().unwrap_or("No merge summary recorded."),
+                2
+            )
         ),
         TurnEvent::GathererSummary {
             provider,
@@ -700,13 +804,13 @@ impl MechSuitService {
         self.verbose.store(level, Ordering::Relaxed);
     }
 
-    fn allocate_trace_ids(&self) -> (TaskTraceId, TurnTraceId) {
+    fn allocate_task_id(&self) -> TaskTraceId {
         let sequence = self.trace_counter.fetch_add(1, Ordering::Relaxed);
-        let task_id =
-            TaskTraceId::new(format!("task-{sequence:06}")).expect("generated task trace id");
-        let turn_id =
-            TurnTraceId::new(format!("turn-{sequence:06}")).expect("generated turn trace id");
-        (task_id, turn_id)
+        TaskTraceId::new(format!("task-{sequence:06}")).expect("generated task trace id")
+    }
+
+    pub fn create_conversation_session(&self) -> ConversationSession {
+        ConversationSession::new(self.allocate_task_id())
     }
 
     /// Execute the boot sequence.
@@ -852,13 +956,25 @@ impl MechSuitService {
 
     /// Process a single prompt using the prepared synthesizer lane.
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
-        self.process_prompt_with_sink(prompt, Arc::clone(&self.event_sink))
+        let session = self.create_conversation_session();
+        self.process_prompt_in_session_with_sink(prompt, session, Arc::clone(&self.event_sink))
             .await
     }
 
     pub async fn process_prompt_with_sink(
         &self,
         prompt: &str,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<String> {
+        let session = self.create_conversation_session();
+        self.process_prompt_in_session_with_sink(prompt, session, event_sink)
+            .await
+    }
+
+    pub async fn process_prompt_in_session_with_sink(
+        &self,
+        prompt: &str,
+        session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
         let runtime_guard = self.runtime.read().await;
@@ -873,14 +989,16 @@ impl MechSuitService {
 
         let memory = AgentMemory::load(&self.workspace_root);
         let interpretation = memory.build_interpretation_context(prompt, &self.workspace_root);
-        let (task_id, turn_id) = self.allocate_trace_ids();
+        let turn_id = session.allocate_turn_id();
+        let active_thread = session.active_thread().thread_ref;
         let trace = Arc::new(StructuredTurnTrace::new(
             event_sink,
             Arc::clone(&self.trace_recorder),
-            task_id,
+            session.clone(),
             turn_id,
+            active_thread.clone(),
         ));
-        trace.record_task_root(prompt, &interpretation, &prepared);
+        trace.record_turn_start(prompt, &interpretation, &prepared);
         trace.emit(TurnEvent::InterpretationContext {
             summary: interpretation.summary.clone(),
             sources: interpretation.sources(),
@@ -955,14 +1073,117 @@ impl MechSuitService {
         let intent = execution_plan.intent;
         let engine = synthesizer_engine;
         let event_sink = trace.as_event_sink();
+        let session_for_reply = session.clone();
+        let thread_for_reply = active_thread;
+        let prompt_for_model = prompt.clone();
         tokio::task::spawn_blocking(move || {
-            engine.respond_for_turn(&prompt, intent, gathered_evidence.as_ref(), event_sink)
+            engine.respond_for_turn(
+                &prompt_for_model,
+                intent,
+                gathered_evidence.as_ref(),
+                event_sink,
+            )
         })
         .await
         .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
         .inspect(|reply| {
             trace.record_completion(reply);
+            session_for_reply.note_thread_reply(&thread_for_reply, &prompt, reply);
         })
+    }
+
+    pub async fn process_thread_candidate_in_session_with_sink(
+        &self,
+        candidate: ThreadCandidate,
+        session: ConversationSession,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<String> {
+        let runtime_guard = self.runtime.read().await;
+        let runtime = runtime_guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
+        let planner_engine = Arc::clone(&runtime.planner_engine);
+        let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
+        drop(runtime_guard);
+
+        let interpretation = AgentMemory::load(&self.workspace_root)
+            .build_interpretation_context(&candidate.prompt, &self.workspace_root);
+        let source_thread = candidate.active_thread.clone();
+        let turn_id = session.allocate_turn_id();
+        let trace = Arc::new(StructuredTurnTrace::new(
+            event_sink,
+            Arc::clone(&self.trace_recorder),
+            session.clone(),
+            turn_id,
+            source_thread.clone(),
+        ));
+        trace.emit(TurnEvent::ThreadCandidateCaptured {
+            candidate_id: candidate.candidate_id.as_str().to_string(),
+            active_thread: candidate.active_thread.stable_id(),
+            prompt: candidate.prompt.clone(),
+        });
+        trace.record_thread_candidate(&candidate);
+
+        let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+        let active_thread = session.active_thread();
+        let thread_request = ThreadDecisionRequest::new(
+            self.workspace_root.clone(),
+            interpretation,
+            active_thread.clone(),
+            candidate.clone(),
+        )
+        .with_recent_turns(recent_turns)
+        .with_known_threads(session.known_threads())
+        .with_recent_thread_summary(session.recent_thread_summary(&active_thread.thread_ref));
+
+        let decision = planner_engine
+            .select_thread_decision(&thread_request)
+            .await?;
+        trace.emit(TurnEvent::ThreadDecisionApplied {
+            candidate_id: candidate.candidate_id.as_str().to_string(),
+            decision: decision.kind.label().to_string(),
+            target_thread: decision.target_thread.stable_id(),
+            rationale: decision.rationale.clone(),
+        });
+        trace.record_thread_decision(&decision, &source_thread);
+
+        let branch_id = if matches!(decision.kind, ThreadDecisionKind::OpenChildThread) {
+            let branch_id = session.next_branch_id();
+            trace.declare_branch(
+                branch_id.clone(),
+                decision
+                    .new_thread_label
+                    .as_deref()
+                    .unwrap_or(candidate.prompt.as_str()),
+                Some(decision.rationale.as_str()),
+                source_thread.branch_id(),
+            );
+            Some(branch_id)
+        } else {
+            None
+        };
+
+        if matches!(decision.kind, ThreadDecisionKind::MergeIntoTarget) {
+            trace.emit(TurnEvent::ThreadMerged {
+                source_thread: source_thread.stable_id(),
+                target_thread: decision.target_thread.stable_id(),
+                mode: decision
+                    .merge_mode
+                    .unwrap_or(ThreadMergeMode::Summary)
+                    .label()
+                    .to_string(),
+                summary: decision.merge_summary.clone(),
+            });
+            trace.record_thread_merge(&decision, &source_thread, &decision.target_thread);
+        }
+
+        session.apply_thread_decision(&decision, branch_id, &candidate.prompt);
+        self.process_prompt_in_session_with_sink(
+            &candidate.prompt,
+            session,
+            trace.downstream.clone(),
+        )
+        .await
     }
 
     async fn execute_recursive_planner_loop(
@@ -1218,7 +1439,9 @@ impl MechSuitService {
                             .iter()
                             .any(|pending| pending.label == *branch);
                         if !exists {
+                            let branch_id = trace.session.next_branch_id();
                             let branch_trace = trace.declare_branch(
+                                branch_id,
                                 branch,
                                 Some(decision.rationale.as_str()),
                                 None,
@@ -1783,13 +2006,17 @@ mod tests {
         ActiveRuntimeState, GathererProvider, MechSuitService, PreparedModelLane,
         PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
     };
-    use crate::domain::model::{TraceRecordKind, TurnEvent, TurnEventSink};
+    use crate::domain::model::{
+        ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceRecordKind, TurnEvent,
+        TurnEventSink,
+    };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
         InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerAction,
         PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode,
         PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
-        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, TraceRecorder,
+        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, ThreadDecisionRequest,
+        TraceRecorder,
     };
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -1861,6 +2088,25 @@ mod tests {
                 .expect("planner decisions lock")
                 .pop_front()
                 .ok_or_else(|| anyhow!("test planner exhausted"))
+        }
+
+        async fn select_thread_decision(
+            &self,
+            request: &ThreadDecisionRequest,
+        ) -> Result<ThreadDecision> {
+            Ok(ThreadDecision {
+                decision_id: ThreadDecisionId::new(format!(
+                    "{}.decision",
+                    request.candidate.candidate_id.as_str()
+                ))?,
+                candidate_id: request.candidate.candidate_id.clone(),
+                kind: ThreadDecisionKind::ContinueCurrent,
+                rationale: "test planner keeps steering on the active thread".to_string(),
+                target_thread: request.active_thread.thread_ref.clone(),
+                new_thread_label: None,
+                merge_mode: None,
+                merge_summary: None,
+            })
         }
     }
 

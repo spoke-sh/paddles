@@ -26,6 +26,7 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 - Turns should improve through recursive context work instead of project-specific hardcoded intents or top-level heuristic routing.
 - Repository-question answers should include file citations by default.
 - TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
+- Interactive sessions should keep a paddles-owned conversation root so steering prompts can be classified into mainline continuation, child-thread splits, or merge-back outcomes with durable lineage.
 - One-shot `--prompt` usage and non-TTY stdin/stdout flows must remain plain output paths.
 - Chroma `context-1` is an experimental **gatherer provider only**. It is never the default answer runtime and must fail closed when its harness/runtime is unavailable.
 - Keel is part of workspace context, not a special-case product feature in routing.

@@ -116,6 +116,30 @@ flowchart LR
     Records --> Events
 ```
 
+### Threaded Interactive Sessions
+
+Interactive sessions now keep one durable conversation root and let the planner
+classify queued steering prompts into mainline continuation, child-thread
+splits, or merge-back transitions.
+
+```mermaid
+flowchart TD
+    U["Active turn running"]
+    Q["Steering prompt captured<br/>structured thread candidate"]
+    M["Thread decision model"]
+    D{"Decision"}
+    C["Continue current thread"]
+    B["Open child thread<br/>new transit branch"]
+    G["Merge / summarize back<br/>explicit recorded outcome"]
+    X["Run queued prompt on selected thread"]
+    R["Thread-aware transcript + replay"]
+
+    U --> Q --> M --> D
+    D --> C --> X --> R
+    D --> B --> X --> R
+    D --> G --> X --> R
+```
+
 ### Role Of Keel
 
 Keel is important, but it is not supposed to become a first-class special-case runtime intent. It is one evidence domain inside the workspace. Mission files, charters, PRDs, voyage docs, and board commands should be reachable through the same recursive context mechanisms as source files and tool outputs.
@@ -137,6 +161,8 @@ Today, the runtime has:
 - a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids
 - a `TraceRecorder` boundary beside `TurnEventSink`, with `noop`, in-memory, and embedded `transit-core` adapters
 - artifact envelopes for prompts, tool I/O, evidence bundles, planner traces, and final responses so larger payloads can move behind logical refs later
+- interactive conversation sessions with one durable root task, model-driven steering-thread decisions, and explicit merge-back records
+- structured thread candidates and thread replay views instead of opaque queued prompt strings
 
 The remaining gaps are narrower now:
 
@@ -146,6 +172,7 @@ The remaining gaps are narrower now:
 - the runtime defaults to `noop` recording today; embedded `transit-core` recording is available through the recorder boundary but is not yet the default CLI/runtime policy
 - graph-mode gatherer traces still use inline envelopes today; the contract leaves room for external artifact refs, but no artifact store promotion policy exists yet
 - `context-1` is still an explicit experimental boundary, not the default planner lane
+- auto-threading remains bounded to safe checkpoints between turns; paddles does not yet run true concurrent local generation across sibling threads on one model session
 
 ## Design Principles
 
