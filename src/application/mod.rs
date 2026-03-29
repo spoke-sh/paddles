@@ -1,14 +1,21 @@
 use crate::domain::model::{BootContext, TurnEvent, TurnEventSink, TurnIntent};
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability, ModelPaths,
-    ModelRegistry, PlannerConfig, PlannerStrategyKind,
+    ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
+    GathererCapability, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
+    PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest,
+    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RecursivePlanner, RetainedEvidence,
 };
+use crate::infrastructure::adapters::agent_memory::AgentMemory;
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
 use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use crate::infrastructure::adapters::sift_autonomous_gatherer::SiftAutonomousGathererAdapter;
 use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
+use crate::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use anyhow::Result;
 use clap::ValueEnum;
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,6 +32,7 @@ pub struct MechSuitService {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeLaneRole {
+    Planner,
     Synthesizer,
     Gatherer,
 }
@@ -38,6 +46,7 @@ pub enum GathererProvider {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeLaneConfig {
+    planner_model_id: Option<String>,
     synthesizer_model_id: String,
     gatherer_model_id: Option<String>,
     gatherer_provider: GathererProvider,
@@ -47,11 +56,17 @@ pub struct RuntimeLaneConfig {
 impl RuntimeLaneConfig {
     pub fn new(synthesizer_model_id: impl Into<String>, gatherer_model_id: Option<String>) -> Self {
         Self {
+            planner_model_id: None,
             synthesizer_model_id: synthesizer_model_id.into(),
             gatherer_model_id,
             gatherer_provider: GathererProvider::SiftAutonomous,
             context1_harness_ready: false,
         }
+    }
+
+    pub fn with_planner_model_id(mut self, planner_model_id: Option<String>) -> Self {
+        self.planner_model_id = planner_model_id;
+        self
     }
 
     pub fn with_gatherer_provider(mut self, gatherer_provider: GathererProvider) -> Self {
@@ -66,6 +81,10 @@ impl RuntimeLaneConfig {
 
     pub fn synthesizer_model_id(&self) -> &str {
         &self.synthesizer_model_id
+    }
+
+    pub fn planner_model_id(&self) -> Option<&str> {
+        self.planner_model_id.as_deref()
     }
 
     pub fn gatherer_model_id(&self) -> Option<&str> {
@@ -102,6 +121,7 @@ pub struct PreparedGathererLane {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedRuntimeLanes {
+    pub planner: PreparedModelLane,
     pub synthesizer: PreparedModelLane,
     pub gatherer: Option<PreparedGathererLane>,
 }
@@ -114,8 +134,17 @@ impl PreparedRuntimeLanes {
 
 struct ActiveRuntimeState {
     prepared: PreparedRuntimeLanes,
+    planner_engine: Arc<dyn RecursivePlanner>,
     synthesizer_engine: Arc<SiftAgentAdapter>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
+}
+
+struct PlannerLoopContext {
+    prepared: PreparedRuntimeLanes,
+    planner_engine: Arc<dyn RecursivePlanner>,
+    gatherer: Option<Arc<dyn ContextGatherer>>,
+    interpretation: InterpretationContext,
+    recent_turns: Vec<String>,
 }
 
 #[derive(Default)]
@@ -135,8 +164,27 @@ fn render_turn_event(event: &TurnEvent) -> String {
         TurnEvent::IntentClassified { intent } => {
             format!("• Classified turn\n  └ {}", intent.label())
         }
+        TurnEvent::InterpretationContext { summary, sources } => {
+            let mut lines = vec![
+                "• Assembled interpretation context".to_string(),
+                format!("  └ {}", trim_event_detail(summary, 3)),
+            ];
+            if !sources.is_empty() {
+                lines.push(format!(
+                    "    Sources: {}",
+                    trim_event_detail(&sources.join(", "), 2)
+                ));
+            }
+            lines.join("\n")
+        }
         TurnEvent::RouteSelected { summary } => {
             format!("• Routed turn\n  └ {}", trim_event_detail(summary, 2))
+        }
+        TurnEvent::PlannerCapability {
+            provider,
+            capability,
+        } => {
+            format!("• Checked planner capability\n  └ {provider}: {capability}")
         }
         TurnEvent::GathererCapability {
             provider,
@@ -144,6 +192,15 @@ fn render_turn_event(event: &TurnEvent) -> String {
         } => {
             format!("• Checked gatherer capability\n  └ {provider}: {capability}")
         }
+        TurnEvent::PlannerActionSelected {
+            sequence,
+            action,
+            rationale,
+        } => format!(
+            "• Selected planner action\n  └ step {sequence}: {}\n    Rationale: {}",
+            trim_event_detail(action, 2),
+            trim_event_detail(rationale, 2)
+        ),
         TurnEvent::GathererSummary {
             provider,
             summary,
@@ -303,6 +360,16 @@ impl MechSuitService {
             .registry
             .get_model_paths(config.synthesizer_model_id())
             .await?;
+        let planner_model_id = config
+            .planner_model_id()
+            .unwrap_or(config.synthesizer_model_id())
+            .to_string();
+        let planner_paths = if planner_model_id == config.synthesizer_model_id() {
+            synthesizer_paths.clone()
+        } else {
+            self.registry.get_model_paths(&planner_model_id).await?
+        };
+        let planner = Self::build_lane(RuntimeLaneRole::Planner, &planner_model_id, planner_paths);
         let synthesizer = Self::build_lane(
             RuntimeLaneRole::Synthesizer,
             config.synthesizer_model_id(),
@@ -355,6 +422,7 @@ impl MechSuitService {
         };
 
         let prepared = PreparedRuntimeLanes {
+            planner,
             synthesizer,
             gatherer: prepared_gatherer,
         };
@@ -364,9 +432,21 @@ impl MechSuitService {
             &prepared.synthesizer.model_id,
         )?);
         engine.set_verbose(self.verbose.load(Ordering::Relaxed));
+        let planner_engine: Arc<dyn RecursivePlanner> =
+            if prepared.planner.model_id == prepared.synthesizer.model_id {
+                Arc::new(SiftPlannerAdapter::new(Arc::clone(&engine)))
+            } else {
+                let planner_model = Arc::new(SiftAgentAdapter::new(
+                    self.workspace_root.clone(),
+                    &prepared.planner.model_id,
+                )?);
+                planner_model.set_verbose(self.verbose.load(Ordering::Relaxed));
+                Arc::new(SiftPlannerAdapter::new(planner_model))
+            };
 
         *self.runtime.write().await = Some(ActiveRuntimeState {
             prepared: prepared.clone(),
+            planner_engine,
             synthesizer_engine: engine,
             gatherer,
         });
@@ -389,141 +469,359 @@ impl MechSuitService {
         let runtime = runtime_guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
-        let execution_plan = select_execution_plan(prompt, runtime.gatherer.is_some());
+        let prepared = runtime.prepared.clone();
+        let planner_engine = Arc::clone(&runtime.planner_engine);
+        let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
+        let gatherer = runtime.gatherer.clone();
+        drop(runtime_guard);
+
+        let execution_plan = select_execution_plan(prompt, true);
         event_sink.emit(TurnEvent::IntentClassified {
             intent: execution_plan.intent.clone(),
         });
 
-        if let Some(gatherer) = &runtime.prepared.gatherer {
+        if let Some(gatherer_lane) = &prepared.gatherer {
             match execution_plan.path {
-                PromptExecutionPath::GatherThenSynthesize => event_sink.emit(
+                PromptExecutionPath::PlannerThenSynthesize => event_sink.emit(
                     TurnEvent::RouteSelected {
                         summary: format!(
-                            "repository question will use gatherer lane '{}' ({:?}) before synthesizer lane '{}'",
-                            gatherer.label,
-                            gatherer.provider,
-                            runtime.prepared.synthesizer.model_id
+                            "turn will use planner lane '{}' with gatherer backend '{}' ({:?}) before synthesizer lane '{}'",
+                            prepared.planner.model_id,
+                            gatherer_lane.label,
+                            gatherer_lane.provider,
+                            prepared.synthesizer.model_id
                         ),
                     },
                 ),
                 PromptExecutionPath::SynthesizerOnly => event_sink.emit(TurnEvent::RouteSelected {
                     summary: format!(
-                        "turn will stay on synthesizer lane '{}' while gatherer lane '{}' ({:?}) remains available",
-                        runtime.prepared.synthesizer.model_id,
-                        gatherer.label,
-                        gatherer.provider
+                        "turn will stay on synthesizer lane '{}' while planner lane '{}' and gatherer backend '{}' remain available",
+                        prepared.synthesizer.model_id,
+                        prepared.planner.model_id,
+                        gatherer_lane.label,
                     ),
                 }),
             }
         } else {
             event_sink.emit(TurnEvent::RouteSelected {
                 summary: format!(
-                    "turn will use synthesizer lane '{}' with no gatherer lane configured",
-                    runtime.prepared.synthesizer.model_id
+                    "turn will use planner lane '{}' and synthesizer lane '{}' with no dedicated gatherer backend configured",
+                    prepared.planner.model_id,
+                    prepared.synthesizer.model_id
                 ),
             });
         }
 
         let gathered_evidence = match execution_plan.path {
-            PromptExecutionPath::GatherThenSynthesize => match runtime.gatherer.as_ref() {
-                Some(gatherer) => {
-                    let capability = gatherer.capability();
-                    let provider = runtime
-                        .prepared
-                        .gatherer
-                        .as_ref()
-                        .map(|lane| lane.label.clone())
-                        .unwrap_or_else(|| "gatherer".to_string());
-                    event_sink.emit(TurnEvent::GathererCapability {
-                        provider: provider.clone(),
-                        capability: format_gatherer_capability(&capability),
-                    });
+            PromptExecutionPath::PlannerThenSynthesize => {
+                let memory = AgentMemory::load(&self.workspace_root);
+                let interpretation =
+                    memory.build_interpretation_context(prompt, &self.workspace_root);
+                event_sink.emit(TurnEvent::InterpretationContext {
+                    summary: interpretation.summary.clone(),
+                    sources: interpretation.sources(),
+                });
 
-                    match capability {
-                        GathererCapability::Available => {
-                            let gather_query = build_gather_query(prompt, &execution_plan.intent);
-                            let planning = match execution_plan.intent {
-                                TurnIntent::DecompositionResearch => {
-                                    PlannerConfig::default().with_step_limit(4)
-                                }
-                                _ => PlannerConfig::default(),
-                            };
-                            let request = ContextGatherRequest::new(
-                                gather_query,
-                                self.workspace_root.clone(),
-                                execution_plan.intent.label(),
-                                EvidenceBudget::default(),
-                            )
-                            .with_planning(planning);
-                            match gatherer.gather_context(&request).await {
-                                Ok(result) if result.is_synthesis_ready() => {
-                                    if let Some(bundle) = result.evidence_bundle.as_ref() {
-                                        event_sink.emit(TurnEvent::GathererSummary {
-                                            provider: provider.clone(),
-                                            summary: bundle.summary.clone(),
-                                            sources: evidence_sources(&self.workspace_root, bundle),
-                                        });
-                                        if let Some(planner) = bundle.planner.as_ref() {
-                                            event_sink.emit(TurnEvent::PlannerSummary {
-                                                strategy: format_planner_strategy(
-                                                    &planner.strategy,
-                                                )
-                                                .to_string(),
-                                                turns: planner.turn_count,
-                                                steps: planner.steps.len(),
-                                                stop_reason: planner.stop_reason.clone(),
-                                            });
-                                        }
-                                    }
-                                    result.evidence_bundle
-                                }
-                                Ok(result) => {
-                                    event_sink.emit(TurnEvent::Fallback {
-                                        stage: "gatherer".to_string(),
-                                        reason: format!(
-                                            "gatherer returned non-synthesis-ready result ({})",
-                                            format_gatherer_capability(&result.capability)
-                                        ),
-                                    });
-                                    None
-                                }
-                                Err(err) => {
-                                    event_sink.emit(TurnEvent::Fallback {
-                                        stage: "gatherer".to_string(),
-                                        reason: format!(
-                                            "gatherer lane failed ({err:#}); switching to explicit fallback"
-                                        ),
-                                    });
-                                    None
-                                }
-                            }
-                        }
-                        GathererCapability::Unsupported { reason }
-                        | GathererCapability::HarnessRequired { reason } => {
-                            event_sink.emit(TurnEvent::Fallback {
-                                stage: "gatherer".to_string(),
-                                reason: format!(
-                                    "gatherer unavailable for a repository question: {reason}"
-                                ),
-                            });
-                            None
-                        }
+                let planner_capability = planner_engine.capability();
+                event_sink.emit(TurnEvent::PlannerCapability {
+                    provider: prepared.planner.model_id.clone(),
+                    capability: format_planner_capability(&planner_capability),
+                });
+
+                match planner_capability {
+                    PlannerCapability::Available => {
+                        let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+                        self.execute_recursive_planner_loop(
+                            prompt,
+                            PlannerLoopContext {
+                                prepared: prepared.clone(),
+                                planner_engine,
+                                gatherer,
+                                interpretation,
+                                recent_turns,
+                            },
+                            Arc::clone(&event_sink),
+                        )
+                        .await?
+                    }
+                    PlannerCapability::Unsupported { reason } => {
+                        event_sink.emit(TurnEvent::Fallback {
+                            stage: "planner".to_string(),
+                            reason: format!("planner unavailable: {reason}"),
+                        });
+                        None
                     }
                 }
-                None => None,
-            },
+            }
             PromptExecutionPath::SynthesizerOnly => None,
         };
 
         let prompt = prompt.to_string();
         let intent = execution_plan.intent;
-        let engine = runtime.synthesizer_engine.clone();
+        let engine = synthesizer_engine;
         let event_sink = Arc::clone(&event_sink);
         tokio::task::spawn_blocking(move || {
             engine.respond_for_turn(&prompt, intent, gathered_evidence.as_ref(), event_sink)
         })
         .await
         .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
+    }
+
+    async fn execute_recursive_planner_loop(
+        &self,
+        prompt: &str,
+        context: PlannerLoopContext,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<Option<EvidenceBundle>> {
+        let budget = PlannerBudget::default();
+        let mut loop_state = PlannerLoopState::default();
+        let mut used_workspace_resources = false;
+        let mut stop_reason = None;
+        let gatherer_provider = context
+            .prepared
+            .gatherer
+            .as_ref()
+            .map(|lane| lane.label.clone())
+            .unwrap_or_else(|| "workspace".to_string());
+
+        for sequence in 1..=budget.max_steps {
+            let request = PlannerRequest::new(
+                prompt,
+                self.workspace_root.clone(),
+                context.interpretation.clone(),
+                budget.clone(),
+            )
+            .with_recent_turns(context.recent_turns.clone())
+            .with_loop_state(loop_state.clone());
+            let decision = context.planner_engine.select_next_action(&request).await?;
+            event_sink.emit(TurnEvent::PlannerActionSelected {
+                sequence,
+                action: decision.action.summary(),
+                rationale: decision.rationale.clone(),
+            });
+
+            let outcome = match &decision.action {
+                PlannerAction::Search { query, intent } => {
+                    if let Some(gatherer) = context.gatherer.as_ref() {
+                        event_sink.emit(TurnEvent::GathererCapability {
+                            provider: gatherer_provider.clone(),
+                            capability: format_gatherer_capability(&gatherer.capability()),
+                        });
+                        match gatherer.capability() {
+                            GathererCapability::Available => {
+                                let request = ContextGatherRequest::new(
+                                    query.clone(),
+                                    self.workspace_root.clone(),
+                                    intent
+                                        .clone()
+                                        .unwrap_or_else(|| "planner-search".to_string()),
+                                    EvidenceBudget::default(),
+                                )
+                                .with_planning(PlannerConfig::default().with_step_limit(1))
+                                .with_prior_context(
+                                    build_planner_prior_context(
+                                        &context.interpretation,
+                                        &context.recent_turns,
+                                        &loop_state,
+                                    ),
+                                );
+                                match gatherer.gather_context(&request).await {
+                                    Ok(result) => {
+                                        let bundle = result.evidence_bundle;
+                                        if let Some(bundle) = bundle.as_ref() {
+                                            event_sink.emit(TurnEvent::GathererSummary {
+                                                provider: gatherer_provider.clone(),
+                                                summary: bundle.summary.clone(),
+                                                sources: evidence_sources(
+                                                    &self.workspace_root,
+                                                    bundle,
+                                                ),
+                                            });
+                                            if let Some(planner) = bundle.planner.as_ref() {
+                                                event_sink.emit(TurnEvent::PlannerSummary {
+                                                    strategy: format_planner_strategy(
+                                                        &planner.strategy,
+                                                    )
+                                                    .to_string(),
+                                                    turns: planner.turn_count,
+                                                    steps: planner.steps.len(),
+                                                    stop_reason: planner.stop_reason.clone(),
+                                                });
+                                            }
+                                            merge_evidence_items(
+                                                &mut loop_state.evidence_items,
+                                                bundle.items.clone(),
+                                                budget.max_evidence_items,
+                                            );
+                                            loop_state.notes.extend(bundle.warnings.clone());
+                                            used_workspace_resources = true;
+                                            bundle.summary.clone()
+                                        } else {
+                                            "planner search returned no evidence bundle".to_string()
+                                        }
+                                    }
+                                    Err(err) => format!("planner search failed: {err:#}"),
+                                }
+                            }
+                            GathererCapability::Unsupported { reason }
+                            | GathererCapability::HarnessRequired { reason } => {
+                                format!("planner search backend unavailable: {reason}")
+                            }
+                        }
+                    } else {
+                        "no gatherer backend is configured for planner search".to_string()
+                    }
+                }
+                PlannerAction::Read { path } => {
+                    if read_steps(&loop_state) >= budget.max_reads {
+                        stop_reason = Some("read-budget-exhausted".to_string());
+                        "planner read budget exhausted".to_string()
+                    } else {
+                        let (source, snippet) = read_planner_file(&self.workspace_root, path)?;
+                        append_evidence_item(
+                            &mut loop_state.evidence_items,
+                            EvidenceItem {
+                                source: source.clone(),
+                                snippet,
+                                rationale: decision.rationale.clone(),
+                                rank: 0,
+                            },
+                            budget.max_evidence_items,
+                        );
+                        used_workspace_resources = true;
+                        format!("read {source}")
+                    }
+                }
+                PlannerAction::Inspect { command } => {
+                    if inspect_steps(&loop_state) >= budget.max_inspects {
+                        stop_reason = Some("inspect-budget-exhausted".to_string());
+                        "planner inspect budget exhausted".to_string()
+                    } else {
+                        let output = run_planner_inspect_command(&self.workspace_root, command)?;
+                        append_evidence_item(
+                            &mut loop_state.evidence_items,
+                            EvidenceItem {
+                                source: format!("command: {command}"),
+                                snippet: trim_for_planner(&output, 800),
+                                rationale: decision.rationale.clone(),
+                                rank: 0,
+                            },
+                            budget.max_evidence_items,
+                        );
+                        used_workspace_resources = true;
+                        format!("inspected {command}")
+                    }
+                }
+                PlannerAction::Refine { query, .. } => {
+                    if let Some(gatherer) = context.gatherer.as_ref() {
+                        event_sink.emit(TurnEvent::GathererCapability {
+                            provider: gatherer_provider.clone(),
+                            capability: format_gatherer_capability(&gatherer.capability()),
+                        });
+                        match gatherer.capability() {
+                            GathererCapability::Available => {
+                                let request = ContextGatherRequest::new(
+                                    query.clone(),
+                                    self.workspace_root.clone(),
+                                    "planner-refine",
+                                    EvidenceBudget::default(),
+                                )
+                                .with_planning(PlannerConfig::default().with_step_limit(1))
+                                .with_prior_context(
+                                    build_planner_prior_context(
+                                        &context.interpretation,
+                                        &context.recent_turns,
+                                        &loop_state,
+                                    ),
+                                );
+                                match gatherer.gather_context(&request).await {
+                                    Ok(result) => {
+                                        let bundle = result.evidence_bundle;
+                                        if let Some(bundle) = bundle.as_ref() {
+                                            event_sink.emit(TurnEvent::GathererSummary {
+                                                provider: gatherer_provider.clone(),
+                                                summary: bundle.summary.clone(),
+                                                sources: evidence_sources(
+                                                    &self.workspace_root,
+                                                    bundle,
+                                                ),
+                                            });
+                                            merge_evidence_items(
+                                                &mut loop_state.evidence_items,
+                                                bundle.items.clone(),
+                                                budget.max_evidence_items,
+                                            );
+                                            loop_state.notes.extend(bundle.warnings.clone());
+                                            used_workspace_resources = true;
+                                            format!("refined search toward `{query}`")
+                                        } else {
+                                            "planner refine returned no evidence bundle".to_string()
+                                        }
+                                    }
+                                    Err(err) => format!("planner refine failed: {err:#}"),
+                                }
+                            }
+                            GathererCapability::Unsupported { reason }
+                            | GathererCapability::HarnessRequired { reason } => {
+                                format!("planner refine backend unavailable: {reason}")
+                            }
+                        }
+                    } else {
+                        "no gatherer backend is configured for refined planner search".to_string()
+                    }
+                }
+                PlannerAction::Branch { branches, .. } => {
+                    for branch in branches.iter().take(budget.max_branch_factor) {
+                        if !loop_state.pending_branches.contains(branch) {
+                            loop_state.pending_branches.push(branch.clone());
+                        }
+                    }
+                    format!(
+                        "queued {} planner branch(es)",
+                        branches.len().min(budget.max_branch_factor)
+                    )
+                }
+                PlannerAction::Stop { reason } => {
+                    stop_reason = Some(reason.clone());
+                    format!("planner requested synthesis: {reason}")
+                }
+            };
+
+            loop_state.steps.push(PlannerStepRecord {
+                sequence,
+                action: decision.action.clone(),
+                outcome: outcome.clone(),
+            });
+
+            if let PlannerAction::Stop { .. } = decision.action {
+                break;
+            }
+
+            if stop_reason.is_some() {
+                break;
+            }
+        }
+
+        let completed = stop_reason.is_some();
+        let stop_reason = stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string());
+        event_sink.emit(TurnEvent::PlannerSummary {
+            strategy: "model-driven".to_string(),
+            turns: loop_state.steps.len(),
+            steps: loop_state.steps.len(),
+            stop_reason: Some(stop_reason.clone()),
+        });
+
+        if !used_workspace_resources && planner_stopped_without_resource_use(&loop_state) {
+            return Ok(None);
+        }
+
+        Ok(Some(build_planner_evidence_bundle(
+            &context.prepared,
+            prompt,
+            &loop_state,
+            completed,
+            &stop_reason,
+        )))
     }
 }
 
@@ -536,13 +834,13 @@ struct PromptExecutionPlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptExecutionPath {
     SynthesizerOnly,
-    GatherThenSynthesize,
+    PlannerThenSynthesize,
 }
 
-fn select_execution_plan(prompt: &str, gatherer_available: bool) -> PromptExecutionPlan {
+fn select_execution_plan(prompt: &str, planner_available: bool) -> PromptExecutionPlan {
     let intent = classify_turn(prompt);
-    let path = if gatherer_available && intent.requires_gathered_evidence() {
-        PromptExecutionPath::GatherThenSynthesize
+    let path = if planner_available && intent.uses_planner() {
+        PromptExecutionPath::PlannerThenSynthesize
     } else {
         PromptExecutionPath::SynthesizerOnly
     };
@@ -559,14 +857,8 @@ fn classify_turn(prompt: &str) -> TurnIntent {
     if is_deterministic_action_turn(&normalized) {
         return TurnIntent::DeterministicAction;
     }
-    if is_decomposition_research_turn(&normalized) {
-        return TurnIntent::DecompositionResearch;
-    }
-    if is_repository_question_turn(&normalized) {
-        return TurnIntent::RepositoryQuestion;
-    }
 
-    TurnIntent::GeneralQuestion
+    TurnIntent::Planned
 }
 
 fn is_casual_turn(normalized: &str) -> bool {
@@ -622,138 +914,11 @@ fn is_deterministic_action_turn(normalized: &str) -> bool {
         || normalized.starts_with("write ")
 }
 
-fn is_decomposition_research_turn(normalized: &str) -> bool {
-    let decomposition_markers = [
-        "walk through",
-        "trace",
-        "dependency",
-        "dependencies",
-        "path from",
-        "flow through",
-        "across the repo",
-        "across the codebase",
-        "end-to-end",
-        "research",
-        "compare",
-        "what references",
-        "which files",
-        "which modules",
-    ];
-
-    decomposition_markers
-        .iter()
-        .any(|needle| normalized.contains(needle))
-}
-
-fn is_repository_question_turn(normalized: &str) -> bool {
-    let repo_markers = [
-        "paddles",
-        "repo",
-        "repository",
-        "codebase",
-        "workspace",
-        "module",
-        "file",
-        "runtime",
-        "lane",
-        "gatherer",
-        "synthesizer",
-        "context gathering",
-        "architecture",
-        "memory",
-        "agents.md",
-        "keel",
-        "turn",
-    ];
-
-    repo_markers
-        .iter()
-        .any(|needle| normalized.contains(needle))
-}
-
 fn normalize_turn_prompt(prompt: &str) -> String {
     prompt
         .trim()
         .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
         .to_ascii_lowercase()
-}
-
-fn build_gather_query(prompt: &str, intent: &TurnIntent) -> String {
-    if !intent.requires_gathered_evidence() {
-        return prompt.to_string();
-    }
-
-    let normalized = prompt.to_ascii_lowercase();
-    let mut terms = normalized
-        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.')
-        .filter(|term| !term.is_empty())
-        .filter(|term| {
-            !matches!(
-                *term,
-                "how"
-                    | "does"
-                    | "what"
-                    | "is"
-                    | "are"
-                    | "why"
-                    | "where"
-                    | "the"
-                    | "a"
-                    | "an"
-                    | "in"
-                    | "on"
-                    | "of"
-                    | "to"
-                    | "for"
-                    | "from"
-                    | "and"
-                    | "across"
-                    | "through"
-                    | "work"
-                    | "works"
-            )
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    if normalized.contains("memory") {
-        terms.extend([
-            "agents.md".to_string(),
-            "agent_memory".to_string(),
-            "reload".to_string(),
-        ]);
-    }
-    if normalized.contains("routing") || normalized.contains("lane") {
-        terms.extend([
-            "runtime".to_string(),
-            "gatherer".to_string(),
-            "synthesizer".to_string(),
-        ]);
-    }
-    if normalized.contains("context") {
-        terms.extend([
-            "evidence".to_string(),
-            "gatherer".to_string(),
-            "search".to_string(),
-        ]);
-    }
-    if matches!(intent, TurnIntent::DecompositionResearch) {
-        terms.extend([
-            "trace".to_string(),
-            "flow".to_string(),
-            "dependencies".to_string(),
-        ]);
-    }
-
-    terms.extend(["implementation".to_string(), "source".to_string()]);
-    terms.sort();
-    terms.dedup();
-
-    if terms.is_empty() {
-        prompt.to_string()
-    } else {
-        terms.join(" ")
-    }
 }
 
 fn format_gatherer_capability(capability: &GathererCapability) -> String {
@@ -766,10 +931,257 @@ fn format_gatherer_capability(capability: &GathererCapability) -> String {
     }
 }
 
+fn format_planner_capability(capability: &PlannerCapability) -> String {
+    match capability {
+        PlannerCapability::Available => "available".to_string(),
+        PlannerCapability::Unsupported { reason } => format!("unsupported: {reason}"),
+    }
+}
+
 fn format_planner_strategy(strategy: &PlannerStrategyKind) -> &'static str {
     match strategy {
         PlannerStrategyKind::Heuristic => "heuristic",
         PlannerStrategyKind::ModelDriven => "model-driven",
+    }
+}
+
+fn build_planner_prior_context(
+    interpretation: &InterpretationContext,
+    recent_turns: &[String],
+    loop_state: &PlannerLoopState,
+) -> Vec<String> {
+    let mut prior = Vec::new();
+    if !interpretation.is_empty() {
+        prior.push(interpretation.render());
+    }
+    prior.extend(recent_turns.iter().cloned());
+    prior.extend(
+        loop_state
+            .steps
+            .iter()
+            .map(|step| format!("step {}: {}", step.sequence, step.outcome)),
+    );
+    prior.extend(
+        loop_state
+            .pending_branches
+            .iter()
+            .map(|branch| format!("pending branch: {branch}")),
+    );
+    prior
+}
+
+fn read_steps(loop_state: &PlannerLoopState) -> usize {
+    loop_state
+        .steps
+        .iter()
+        .filter(|step| matches!(step.action, PlannerAction::Read { .. }))
+        .count()
+}
+
+fn inspect_steps(loop_state: &PlannerLoopState) -> usize {
+    loop_state
+        .steps
+        .iter()
+        .filter(|step| matches!(step.action, PlannerAction::Inspect { .. }))
+        .count()
+}
+
+fn merge_evidence_items(target: &mut Vec<EvidenceItem>, items: Vec<EvidenceItem>, limit: usize) {
+    for item in items {
+        append_evidence_item(target, item, limit);
+    }
+}
+
+fn append_evidence_item(target: &mut Vec<EvidenceItem>, item: EvidenceItem, limit: usize) {
+    let duplicate = target
+        .iter()
+        .any(|existing| existing.source == item.source && existing.snippet == item.snippet);
+    if duplicate {
+        return;
+    }
+
+    target.push(item);
+    if target.len() > limit {
+        target.truncate(limit);
+    }
+    for (index, item) in target.iter_mut().enumerate() {
+        item.rank = index + 1;
+    }
+}
+
+fn read_planner_file(workspace_root: &Path, path: &str) -> Result<(String, String)> {
+    let resolved = resolve_planner_path(workspace_root, path)?;
+    let contents = fs::read_to_string(&resolved)?;
+    let relative = relative_workspace_path(workspace_root, &resolved);
+    Ok((relative, trim_for_planner(&contents, 1_200)))
+}
+
+fn run_planner_inspect_command(workspace_root: &Path, command: &str) -> Result<String> {
+    validate_inspect_command(command)?;
+    let output = std::process::Command::new("sh")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(workspace_root)
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let rendered = if stderr.trim().is_empty() {
+        stdout
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+
+    Ok(trim_for_planner(&rendered, 1_200))
+}
+
+fn validate_inspect_command(command: &str) -> Result<()> {
+    let normalized = command.trim();
+    if normalized.is_empty() {
+        anyhow::bail!("planner inspect command must not be empty");
+    }
+    if normalized.contains("&&")
+        || normalized.contains("||")
+        || normalized.contains(';')
+        || normalized.contains('>')
+        || normalized.contains('<')
+    {
+        anyhow::bail!("planner inspect command must stay read-only and single-step");
+    }
+
+    let allowed_prefixes = [
+        "git status",
+        "git diff",
+        "git log",
+        "keel ",
+        "rg ",
+        "ls",
+        "find ",
+        "cat ",
+        "sed -n",
+        "head ",
+        "tail ",
+        "pwd",
+    ];
+    if allowed_prefixes
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("planner inspect command is outside the safe read-only allowlist")
+    }
+}
+
+fn resolve_planner_path(workspace_root: &Path, requested: &str) -> Result<PathBuf> {
+    let requested_path = Path::new(requested);
+    if requested_path.is_absolute() {
+        anyhow::bail!("absolute planner paths are not allowed");
+    }
+
+    let canonical_root = workspace_root.canonicalize()?;
+    let resolved = canonical_root.join(requested_path);
+    let canonical = resolved.canonicalize()?;
+    if !canonical.starts_with(&canonical_root) {
+        anyhow::bail!("planner path escapes workspace root");
+    }
+    Ok(canonical)
+}
+
+fn relative_workspace_path(workspace_root: &Path, path: &Path) -> String {
+    path.strip_prefix(workspace_root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+fn trim_for_planner(input: &str, limit: usize) -> String {
+    if input.chars().count() <= limit {
+        return input.trim().to_string();
+    }
+
+    let kept = input.chars().take(limit).collect::<String>();
+    format!("{}...[truncated]", kept.trim_end())
+}
+
+fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
+    matches!(
+        loop_state.steps.last().map(|step| &step.action),
+        Some(PlannerAction::Stop { .. })
+    ) && loop_state.steps.iter().all(|step| {
+        matches!(
+            step.action,
+            PlannerAction::Stop { .. } | PlannerAction::Branch { .. }
+        )
+    })
+}
+
+fn build_planner_evidence_bundle(
+    prepared: &PreparedRuntimeLanes,
+    prompt: &str,
+    loop_state: &PlannerLoopState,
+    completed: bool,
+    stop_reason: &str,
+) -> EvidenceBundle {
+    let summary = format!(
+        "Planner lane `{}` executed {} step(s) for `{}` and collected {} evidence item(s); stop reason: {}.",
+        prepared.planner.model_id,
+        loop_state.steps.len(),
+        prompt,
+        loop_state.evidence_items.len(),
+        stop_reason
+    );
+    let planner = PlannerTraceMetadata {
+        strategy: PlannerStrategyKind::ModelDriven,
+        profile: Some(prepared.planner.model_id.clone()),
+        completed,
+        stop_reason: Some(stop_reason.to_string()),
+        turn_count: loop_state.steps.len(),
+        steps: loop_state
+            .steps
+            .iter()
+            .map(|step| PlannerTraceStep {
+                step_id: format!("planner-step-{}", step.sequence),
+                sequence: step.sequence,
+                parent_step_id: None,
+                decisions: vec![crate::domain::ports::PlannerDecision {
+                    action: step.action.label().to_string(),
+                    query: planner_action_query(&step.action),
+                    rationale: Some(step.outcome.clone()),
+                    next_step_id: None,
+                    turn_id: None,
+                    stop_reason: matches!(step.action, PlannerAction::Stop { .. })
+                        .then(|| stop_reason.to_string()),
+                }],
+            })
+            .collect(),
+        retained_artifacts: loop_state
+            .evidence_items
+            .iter()
+            .take(5)
+            .map(|item| RetainedEvidence {
+                source: item.source.clone(),
+                snippet: Some(item.snippet.clone()),
+                rationale: Some(item.rationale.clone()),
+            })
+            .collect(),
+    };
+    let mut bundle =
+        EvidenceBundle::new(summary, loop_state.evidence_items.clone()).with_planner(planner);
+    if !loop_state.notes.is_empty() {
+        bundle = bundle.with_warnings(loop_state.notes.clone());
+    }
+    bundle
+}
+
+fn planner_action_query(action: &PlannerAction) -> Option<String> {
+    match action {
+        PlannerAction::Search { query, .. } | PlannerAction::Refine { query, .. } => {
+            Some(query.clone())
+        }
+        PlannerAction::Branch { branches, .. } => Some(branches.join(" | ")),
+        PlannerAction::Read { path } => Some(path.clone()),
+        PlannerAction::Inspect { command } => Some(command.clone()),
+        PlannerAction::Stop { reason } => Some(reason.clone()),
     }
 }
 
@@ -823,6 +1235,11 @@ mod tests {
 
     #[test]
     fn prepared_runtime_lanes_keep_synthesizer_as_default_response_lane() {
+        let planner = MechSuitService::build_lane(
+            RuntimeLaneRole::Planner,
+            "qwen-1.5b",
+            sample_model_paths("planner"),
+        );
         let synthesizer = MechSuitService::build_lane(
             RuntimeLaneRole::Synthesizer,
             "qwen-1.5b",
@@ -835,6 +1252,7 @@ mod tests {
             Some(sample_model_paths("gather")),
         );
         let lanes = PreparedRuntimeLanes {
+            planner,
             synthesizer: synthesizer.clone(),
             gatherer: Some(gatherer.clone()),
         };
@@ -880,8 +1298,8 @@ mod tests {
             true,
         );
 
-        assert_eq!(plan.intent, TurnIntent::DecompositionResearch);
-        assert_eq!(plan.path, super::PromptExecutionPath::GatherThenSynthesize);
+        assert_eq!(plan.intent, TurnIntent::Planned);
+        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
     }
 
     #[test]
@@ -889,20 +1307,20 @@ mod tests {
         let plan =
             super::select_execution_plan("Trace the runtime lane architecture end-to-end", true);
 
-        assert_eq!(plan.intent, TurnIntent::DecompositionResearch);
-        assert_eq!(plan.path, super::PromptExecutionPath::GatherThenSynthesize);
+        assert_eq!(plan.intent, TurnIntent::Planned);
+        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
     }
 
     #[test]
     fn repository_questions_use_gatherer_lane_when_available() {
         let plan = super::select_execution_plan("How does memory work in paddles?", true);
 
-        assert_eq!(plan.intent, TurnIntent::RepositoryQuestion);
-        assert_eq!(plan.path, super::PromptExecutionPath::GatherThenSynthesize);
+        assert_eq!(plan.intent, TurnIntent::Planned);
+        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
     }
 
     #[test]
-    fn action_or_casual_prompts_stay_on_synthesizer_lane() {
+    fn only_casual_and_explicit_actions_skip_the_planner() {
         assert_eq!(
             super::select_execution_plan("Show me the git status", true).path,
             super::PromptExecutionPath::SynthesizerOnly
@@ -917,30 +1335,17 @@ mod tests {
         );
         assert_eq!(
             super::select_execution_plan("What is a monad?", true).path,
-            super::PromptExecutionPath::SynthesizerOnly
+            super::PromptExecutionPath::PlannerThenSynthesize
         );
     }
 
     #[test]
-    fn decomposition_prompts_without_a_gatherer_lane_stay_on_synthesizer() {
+    fn planned_prompts_without_a_planner_lane_stay_on_synthesizer() {
         assert_eq!(
             super::select_execution_plan("Trace the runtime lane architecture end-to-end", false)
                 .path,
             super::PromptExecutionPath::SynthesizerOnly
         );
-    }
-
-    #[test]
-    fn repository_queries_are_normalized_for_gathering() {
-        let query = super::build_gather_query(
-            "How does memory work in paddles?",
-            &TurnIntent::RepositoryQuestion,
-        );
-
-        assert!(query.contains("memory"));
-        assert!(query.contains("agents.md"));
-        assert!(query.contains("agent_memory"));
-        assert!(query.contains("implementation"));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

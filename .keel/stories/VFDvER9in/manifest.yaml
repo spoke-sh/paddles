@@ -1,0 +1,9 @@
+id: VFDvER9in
+git_sha: 34458777940ee067354721187edb1b8bd47d200e
+evidence:
+  EVIDENCE/ac-1.log: af8c05fadae01e55c7750a39a9fefc0a69f06b6420066a5d6979210ac175411b
+  EVIDENCE/ac-2.log: b7eb0a5556b5f61567b13a27488127178a77dd89f48a0ee99c3d41df156455ec
+  EVIDENCE/ac-3.log: b0610fe8c3d846fb964df22163aec0293ff8415011ce21022908b694c1d9e8f4
+  EVIDENCE/llm-judge-loop-execution-honors-explicit-depth-action-and-evidence-budgets-so-it-cannot-spin-indefinitely.txt: 2d93788c93df201f74e9d7204ebc701cb76f79dcfa1d23d4b83c09cd27b8c842
+  EVIDENCE/llm-judge-loop-execution-is-bounded-by-explicit-depth-action-evidence-budgets-with-observable-stop-reasons.txt: 9468a0795264e412396dfd2787f92c7dcae77c8a30a4fdefb110fb9fd0639a2d
+  EVIDENCE/llm-judge-the-planner-loop-can-execute-multiple-validated-resource-steps-before-final-answer-synthesis.txt: 76a9eee29e25ff7ad6afe3108fdf9967caa654156eb8f7ea4de07c2b723f3acb

@@ -23,10 +23,11 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **Intent Before Size**: Choose models based on workload shape first: direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
 - **Interpretation Before Routing**: Operator memory and foundational guidance should be available to first-pass planner interpretation before the runtime commits to a route for non-trivial turns.
 - **Recursive Planning Before Final Synthesis**: Difficult workspace questions should be improved through bounded recursive resource use rather than relying solely on one-shot controller heuristics.
+- **Planner Action Contract**: Non-trivial turns should flow through a constrained planner contract that can express search, read, inspect, refine, branch, and stop decisions.
 - **Separate Catalog From Runtime From Prompting**: Model integration must isolate alias/asset resolution, family-specific inference runtime, and prompt/protocol behavior so new families can be added without cross-cutting regressions.
 - **Separate Planner From Synthesizer**: Recursive planning or context gathering may use a dedicated planner-capable model, but final answer generation should remain a distinct step.
 - **Evidence-First Gatherers**: Context-gathering adapters must return typed evidence bundles and capability state for a downstream synthesizer, not prose pretending to be the final answer.
-- **Repository Questions Gather First**: Repository-question turns should use the configured gatherer lane by default when it is available. Hidden synthesizer-private retrieval is a fallback/debug path, not the normal repository-answer path.
+- **Non-Trivial Turns Plan First**: Non-trivial turns should use the configured planner lane by default. Hidden synthesizer-private retrieval is a fallback/debug path, not the normal repository-answer path.
 - **Grounded Answers Cite Sources**: Repository-question answers must include file citations by default and should degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
 - **Planner Metadata Must Stay Observable**: When a gatherer uses autonomous planning, planner strategy, stop reason, and retained-evidence summaries must remain observable in verbose output or evidence digests.
 - **Turn Events Stay Visible**: The interactive REPL must render a default action stream for classification, route selection, gatherer work, tool calls, fallbacks, and synthesis. This is not reserved for a quiet debug mode.

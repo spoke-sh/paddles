@@ -1,6 +1,8 @@
 use super::agent_memory::AgentMemory;
 use crate::domain::model::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
-use crate::domain::ports::EvidenceBundle;
+use crate::domain::ports::{
+    EvidenceBundle, InterpretationContext, PlannerAction, PlannerRequest, RecursivePlannerDecision,
+};
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
 };
@@ -103,6 +105,40 @@ struct ToolResult {
     retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum PlannerActionEnvelope {
+    Search {
+        query: String,
+        #[serde(default)]
+        intent: Option<String>,
+        rationale: String,
+    },
+    Read {
+        path: String,
+        rationale: String,
+    },
+    Inspect {
+        command: String,
+        rationale: String,
+    },
+    Refine {
+        query: String,
+        #[serde(default)]
+        rationale: Option<String>,
+    },
+    Branch {
+        branches: Vec<String>,
+        #[serde(default)]
+        rationale: Option<String>,
+    },
+    Stop {
+        reason: String,
+        #[serde(default)]
+        rationale: Option<String>,
+    },
+}
+
 struct TurnPrompt<'a> {
     workspace_root: &'a Path,
     user_prompt: &'a str,
@@ -112,6 +148,13 @@ struct TurnPrompt<'a> {
     gathered_evidence: Option<&'a EvidenceBundle>,
     prefer_tools: bool,
     follow_up_execution: bool,
+}
+
+struct PlannerPrompt<'a> {
+    workspace_root: &'a Path,
+    user_prompt: &'a str,
+    interpretation: &'a InterpretationContext,
+    request: &'a PlannerRequest,
 }
 
 trait ConversationFactory: Send + Sync {
@@ -780,6 +823,68 @@ impl SiftAgentAdapter {
         self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
     }
 
+    pub fn select_planner_action(
+        &self,
+        request: &PlannerRequest,
+    ) -> Result<RecursivePlannerDecision> {
+        let mut conversation = self.conversation_factory.start_conversation()?;
+        let mut reply = self.send_to_model(
+            conversation.as_mut(),
+            &build_planner_action_prompt(&PlannerPrompt {
+                workspace_root: &request.workspace_root,
+                user_prompt: &request.user_prompt,
+                interpretation: &request.interpretation,
+                request,
+            }),
+        )?;
+
+        if is_blank_model_reply(&reply) || parse_planner_action(&reply)?.is_none() {
+            self.log_retry_reason(
+                "planner-retry",
+                &reply,
+                "missing or invalid planner action response",
+            );
+            reply =
+                self.send_to_model(conversation.as_mut(), &build_planner_retry_prompt(request))?;
+        }
+
+        if let Some(decision) = parse_planner_action(&reply)? {
+            return Ok(decision);
+        }
+
+        self.log_retry_reason(
+            "planner-fallback",
+            &reply,
+            "falling back to bounded heuristic planner action",
+        );
+        Ok(fallback_planner_action(request))
+    }
+
+    pub fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow!("Sift session state lock poisoned"))?;
+
+        Ok(state
+            .local_context
+            .iter()
+            .rev()
+            .filter_map(|item| match item {
+                LocalContextSource::AgentTurn(turn) => Some(format!(
+                    "{}: {}",
+                    turn.role,
+                    trim_for_context(&turn.content, 180)
+                )),
+                _ => None,
+            })
+            .take(6)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect())
+    }
+
     fn respond_internal(
         &self,
         prompt: &str,
@@ -814,7 +919,7 @@ impl SiftAgentAdapter {
             ),
         );
         let casual_turn = turn_intent.is_casual();
-        let require_grounding = turn_intent.requires_gathered_evidence();
+        let require_grounding = gathered_evidence.is_some_and(|bundle| !bundle.items.is_empty());
         let prefer_tools = turn_intent.prefers_tools();
         let follow_up_execution = is_follow_up_execution_request(prompt);
         let mut pending_tool_call = if casual_turn {
@@ -839,14 +944,13 @@ impl SiftAgentAdapter {
                 None => {
                     event_sink.emit(TurnEvent::Fallback {
                         stage: "grounded-synthesis".to_string(),
-                        reason:
-                            "no explicit evidence bundle was available for this repository question"
-                                .to_string(),
+                        reason: "no explicit evidence bundle was available for this planned turn"
+                            .to_string(),
                     });
                     String::new()
                 }
             }
-        } else {
+        } else if prefer_tools {
             let initial_local_context = self.combined_local_context(&working_local_context);
             let initial_context =
                 self.assemble_context(prompt, None, &initial_local_context, &working_retained)?;
@@ -865,6 +969,16 @@ impl SiftAgentAdapter {
                     prefer_tools,
                     follow_up_execution,
                 }),
+            )?
+        } else {
+            self.send_to_model(
+                conversation.as_mut(),
+                &build_planned_direct_prompt(
+                    prompt,
+                    &recent_turns,
+                    &memory_prompt,
+                    gathered_evidence,
+                ),
             )?
         };
 
@@ -1394,7 +1508,7 @@ fn build_grounded_turn_prompt(
 ) -> String {
     format!(
         "You are Paddles, a local-first coding assistant operating inside a repository.\n\
-The user asked a repository question.\n\
+The planner lane gathered repository evidence for this workspace question.\n\
 Answer ONLY from the gathered repository evidence below.\n\
 Do not refer the user to external documentation.\n\
 If the evidence is insufficient, say that explicitly.\n\
@@ -1432,6 +1546,35 @@ Current user request:\n\
     )
 }
 
+fn build_planned_direct_prompt(
+    user_prompt: &str,
+    recent_turns: &str,
+    memory_prompt: &str,
+    gathered_evidence: Option<&EvidenceBundle>,
+) -> String {
+    format!(
+        "You are Paddles, a local-first coding assistant.\n\
+This turn has already passed through the planner lane.\n\
+Answer directly in plain text.\n\
+If planner evidence is attached, use it and stay grounded.\n\
+If no planner evidence is attached, do not invent repository-specific claims.\n\
+Do not emit JSON or tool calls.\n\
+\n\
+Persistent operator memory:\n\
+{memory_prompt}\n\
+\n\
+Recent conversation:\n\
+{recent_turns}\n\
+\n\
+Planner evidence handoff:\n\
+{}\n\
+\n\
+Current user request:\n\
+{user_prompt}\n",
+        format_gathered_evidence_digest(gathered_evidence),
+    )
+}
+
 fn build_direct_retry_prompt(user_prompt: &str, memory_prompt: &str) -> String {
     format!(
         "Your last reply tried to call a workspace tool for a conversational message.\n\
@@ -1443,6 +1586,81 @@ Persistent operator memory:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n"
+    )
+}
+
+fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
+    format!(
+        "You are the recursive planner lane for Paddles.\n\
+Choose the NEXT bounded workspace resource action for this turn.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Allowed actions:\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+\n\
+Rules:\n\
+- Search when you need workspace retrieval.\n\
+- Read when a specific file or artifact should be opened.\n\
+- Inspect when a read-only workspace command would clarify state.\n\
+- Refine when an earlier search needs a sharper query.\n\
+- Branch when the investigation should split into multiple subqueries.\n\
+- Stop when you already have enough evidence or when the question does not require workspace resources.\n\
+- Never answer the user directly here.\n\
+- Inspect commands must stay read-only.\n\
+\n\
+Workspace root:\n\
+{}\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Recent turns:\n\
+{}\n\
+\n\
+Current loop state:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n",
+        prompt.workspace_root.display(),
+        format_interpretation_context_digest(prompt.interpretation),
+        format_recent_turn_list(&prompt.request.recent_turns),
+        format_planner_loop_state_digest(prompt.request),
+        prompt.user_prompt,
+    )
+}
+
+fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
+    format!(
+        "Your last planner reply was empty or invalid.\n\
+Return ONLY one valid JSON planner action.\n\
+\n\
+Allowed actions:\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+\n\
+Do not answer the user directly.\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Current loop state:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n",
+        format_interpretation_context_digest(&request.interpretation),
+        format_planner_loop_state_digest(request),
+        request.user_prompt,
     )
 }
 
@@ -1532,23 +1750,28 @@ fn finalize_turn_reply(
     gathered_evidence: Option<&EvidenceBundle>,
     event_sink: &dyn TurnEventSink,
 ) -> String {
-    if !turn_intent.requires_gathered_evidence() {
+    let Some(evidence) = gathered_evidence else {
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: false,
             citations: Vec::new(),
             insufficient_evidence: false,
         });
         return reply;
-    }
+    };
 
-    let Some(evidence) = gathered_evidence.filter(|bundle| !bundle.items.is_empty()) else {
+    if evidence.items.is_empty() {
+        let insufficient = turn_intent.uses_planner();
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: false,
             citations: Vec::new(),
-            insufficient_evidence: true,
+            insufficient_evidence: insufficient,
         });
-        return insufficient_evidence_reply(prompt);
-    };
+        return if insufficient {
+            insufficient_evidence_reply(prompt)
+        } else {
+            reply
+        };
+    }
 
     let citations = citation_sources(workspace_root, evidence);
     let reply = if is_blank_model_reply(&reply)
@@ -1754,6 +1977,80 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
     lines.join("\n")
 }
 
+fn format_interpretation_context_digest(context: &InterpretationContext) -> String {
+    context.render()
+}
+
+fn format_recent_turn_list(turns: &[String]) -> String {
+    if turns.is_empty() {
+        return "No recent turns were attached.".to_string();
+    }
+
+    turns
+        .iter()
+        .map(|turn| format!("- {}", trim_for_context(turn, 240)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
+    let remaining_steps = request
+        .budget
+        .max_steps
+        .saturating_sub(request.loop_state.steps.len());
+    let mut lines = vec![format!(
+        "Budget remaining: steps={}, evidence_limit={}, pending_branches={}",
+        remaining_steps,
+        request.budget.max_evidence_items,
+        request.loop_state.pending_branches.len()
+    )];
+
+    if request.loop_state.steps.is_empty() {
+        lines.push("No planner steps have executed yet.".to_string());
+    } else {
+        for step in request.loop_state.steps.iter().rev().take(4).rev() {
+            lines.push(format!(
+                "- step {}: {} -> {}",
+                step.sequence,
+                step.action.summary(),
+                trim_for_context(&step.outcome, 180)
+            ));
+        }
+    }
+
+    if !request.loop_state.evidence_items.is_empty() {
+        lines.push("Current evidence:".to_string());
+        for item in request
+            .loop_state
+            .evidence_items
+            .iter()
+            .take(request.budget.max_evidence_items.min(4))
+        {
+            lines.push(format!(
+                "- {}: {}",
+                item.source,
+                trim_for_context(&item.snippet, 180)
+            ));
+        }
+    }
+
+    if !request.loop_state.notes.is_empty() {
+        lines.push("Current notes:".to_string());
+        for note in request.loop_state.notes.iter().take(3) {
+            lines.push(format!("- {}", trim_for_context(note, 180)));
+        }
+    }
+
+    if !request.loop_state.pending_branches.is_empty() {
+        lines.push(format!(
+            "Pending branches: {}",
+            request.loop_state.pending_branches.join(" | ")
+        ));
+    }
+
+    lines.join("\n")
+}
+
 fn format_planner_strategy(strategy: &crate::domain::ports::PlannerStrategyKind) -> &'static str {
     match strategy {
         crate::domain::ports::PlannerStrategyKind::Heuristic => "heuristic",
@@ -1817,10 +2114,9 @@ fn legacy_turn_intent(prompt: &str, gathered_evidence: Option<&EvidenceBundle>) 
         TurnIntent::Casual
     } else if should_prefer_tools(prompt) {
         TurnIntent::DeterministicAction
-    } else if gathered_evidence.is_some() {
-        TurnIntent::RepositoryQuestion
     } else {
-        TurnIntent::GeneralQuestion
+        let _ = gathered_evidence;
+        TurnIntent::Planned
     }
 }
 
@@ -1981,6 +2277,141 @@ fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
         return Ok(None);
     };
     Ok(serde_json::from_str(json).ok())
+}
+
+fn parse_planner_action(response: &str) -> Result<Option<RecursivePlannerDecision>> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(None);
+    };
+    let Ok(action) = serde_json::from_str::<PlannerActionEnvelope>(json) else {
+        return Ok(None);
+    };
+
+    Ok(Some(planner_action_from_envelope(action)?))
+}
+
+fn planner_action_from_envelope(
+    envelope: PlannerActionEnvelope,
+) -> Result<RecursivePlannerDecision> {
+    let decision = match envelope {
+        PlannerActionEnvelope::Search {
+            query,
+            intent,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Search {
+                query: required_planner_field("query", query)?,
+                intent: intent.and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                }),
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::Read { path, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Read {
+                path: required_planner_field("path", path)?,
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::Inspect { command, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Inspect {
+                command: required_planner_field("command", command)?,
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        PlannerActionEnvelope::Refine { query, rationale } => {
+            let rationale_text = rationale
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            RecursivePlannerDecision {
+                action: PlannerAction::Refine {
+                    query: required_planner_field("query", query)?,
+                    rationale: rationale_text.clone(),
+                },
+                rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
+            }
+        }
+        PlannerActionEnvelope::Branch {
+            branches,
+            rationale,
+        } => {
+            let branches = branches
+                .into_iter()
+                .map(|branch| branch.trim().to_string())
+                .filter(|branch| !branch.is_empty())
+                .collect::<Vec<_>>();
+            if branches.is_empty() {
+                bail!("planner branch action must include at least one branch");
+            }
+            RecursivePlannerDecision {
+                action: PlannerAction::Branch {
+                    branches,
+                    rationale: rationale.clone(),
+                },
+                rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
+            }
+        }
+        PlannerActionEnvelope::Stop { reason, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Stop {
+                reason: required_planner_field("reason", reason)?,
+            },
+            rationale: rationale.unwrap_or_else(|| "stop planning".to_string()),
+        },
+    };
+
+    Ok(decision)
+}
+
+fn required_planner_field(name: &str, value: String) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("planner field `{name}` must not be empty");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision {
+    if let Some(branch) = request.loop_state.pending_branches.first() {
+        return RecursivePlannerDecision {
+            action: PlannerAction::Search {
+                query: branch.clone(),
+                intent: Some("queued planner branch".to_string()),
+            },
+            rationale: "continue with the oldest queued branch".to_string(),
+        };
+    }
+
+    if request.loop_state.steps.is_empty() && request.loop_state.evidence_items.is_empty() {
+        return RecursivePlannerDecision {
+            action: PlannerAction::Search {
+                query: fallback_planner_query(&request.user_prompt),
+                intent: Some("initial planner fallback".to_string()),
+            },
+            rationale: "start with a bounded workspace search when the planner reply is invalid"
+                .to_string(),
+        };
+    }
+
+    RecursivePlannerDecision {
+        action: PlannerAction::Stop {
+            reason: "planner fallback stop".to_string(),
+        },
+        rationale: "stop after invalid planner replies once some loop state already exists"
+            .to_string(),
+    }
+}
+
+fn fallback_planner_query(user_prompt: &str) -> String {
+    let query = user_prompt.trim();
+    if query.is_empty() {
+        "workspace context".to_string()
+    } else {
+        query.to_string()
+    }
 }
 
 fn response_looks_like_tool_protocol(response: &str) -> Result<bool> {
@@ -2587,7 +3018,7 @@ mod tests {
         let reply = adapter
             .respond_for_turn(
                 "How does memory work in paddles?",
-                TurnIntent::RepositoryQuestion,
+                TurnIntent::Planned,
                 Some(&evidence),
                 Arc::new(NullTurnEventSink),
             )
@@ -2604,14 +3035,18 @@ mod tests {
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
+            Box::new(MockConversation::new(vec!["I do not know.".to_string()])),
+        );
+        let evidence = EvidenceBundle::new(
+            "Planner reached synthesis without retained evidence.",
+            Vec::new(),
         );
 
         let reply = adapter
             .respond_for_turn(
                 "How does memory work in paddles?",
-                TurnIntent::RepositoryQuestion,
-                None,
+                TurnIntent::Planned,
+                Some(&evidence),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -2653,7 +3088,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_prompts_include_loaded_agents_memory() {
+    fn planned_prompts_include_loaded_agents_memory() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::write(
             workspace.path().join("AGENTS.md"),
@@ -2683,7 +3118,7 @@ mod tests {
             .expect("recorded prompt");
         assert!(prompt.contains("Persistent operator memory"));
         assert!(prompt.contains("Prefer concrete repository answers over generic advice."));
-        assert!(prompt.contains("Current workspace evidence"));
+        assert!(prompt.contains("Planner evidence handoff"));
     }
 
     #[test]
@@ -2901,7 +3336,7 @@ mod tests {
         let reply = adapter
             .respond_for_turn(
                 "What can you help with?",
-                TurnIntent::GeneralQuestion,
+                TurnIntent::Planned,
                 None,
                 Arc::new(NullTurnEventSink),
             )

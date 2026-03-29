@@ -1,0 +1,9 @@
+id: VFDvEQ7iu
+git_sha: 34458777940ee067354721187edb1b8bd47d200e
+evidence:
+  EVIDENCE/ac-1.log: 77452fd7d55470011a82a12de4623808996111b9b63c5b31be7a6a5c69b29430
+  EVIDENCE/ac-2.log: 3b0b4eadec56d68593486c7bb92fb3040d9ca4bfba5e9891149ba7f1b7ec9938
+  ? EVIDENCE/llm-judge-interpretation-time-context-assembly-includes-operator-memory-and-relevant-foundational-guidance-instead-of-injecting-that-memory-only-into-late-answer-prompts.txt
+  : e25696ff942e59a03db726e765123a61f75c73af62c22225447cb54fcec5de16
+  ? EVIDENCE/llm-judge-planner-visible-context-can-reference-linked-foundational-docs-without-turning-them-into-hardcoded-domain-specific-intents.txt
+  : 7d51d8ab204bf2bdd0d553eadd63ab50a33a8d8239ebbd77465a5c474cef5bef

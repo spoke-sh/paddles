@@ -1,0 +1,30 @@
+---
+recorded_at: 2026-03-28T21:20:02.315162826-07:00
+mode: manual
+files: [".keel/epics/VFDv1i61H/voyages/VFDv3gE5m/RECURSIVE_PLANNER_PROOF.md"]
+---
+
+--- File: RECURSIVE_PLANNER_PROOF.md ---
+# Recursive Planner Proof
+
+## Implemented Backbone
+
+- Interpretation-time operator memory now includes `AGENTS.md` plus linked foundational guidance excerpts in [agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs).
+- The recursive planner contract lives in [planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs) and is rendered through typed turn events in [turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs).
+- The application now routes non-trivial turns through a planner-owned loop in [mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs), with bounded `search`, `read`, `inspect`, `refine`, `branch`, and `stop` actions.
+- Planner and synthesizer roles are independently configurable through [main.rs](/home/alex/workspace/spoke-sh/paddles/src/main.rs) and [mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs), with the planner adapter wired in [sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs) and planner action selection implemented in [sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs).
+- The default transcript UI now renders interpretation context, planner capability, planner actions, and planner summaries in [interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs).
+
+## Documentation Sync
+
+- The recursive harness backbone, current runtime lanes, and planner/synth split were updated in [README.md](/home/alex/workspace/spoke-sh/paddles/README.md).
+- The detailed implementation snapshot was updated in [ARCHITECTURE.md](/home/alex/workspace/spoke-sh/paddles/ARCHITECTURE.md).
+- Operational invariants and operator guidance were updated in [POLICY.md](/home/alex/workspace/spoke-sh/paddles/POLICY.md), [AGENTS.md](/home/alex/workspace/spoke-sh/paddles/AGENTS.md), [INSTRUCTIONS.md](/home/alex/workspace/spoke-sh/paddles/INSTRUCTIONS.md), and [CONFIGURATION.md](/home/alex/workspace/spoke-sh/paddles/CONFIGURATION.md).
+
+## Verification
+
+- `cargo test`
+- `cargo fmt --all --check`
+- `just quality`
+- `cargo nextest run`
+

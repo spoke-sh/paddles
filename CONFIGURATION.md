@@ -123,27 +123,27 @@ weight = 1.5
 
 ## Runtime Lane Selection
 
-`paddles` now treats runtime configuration as lane-based rather than
-single-model-only:
+`paddles` now treats runtime configuration as planner/synth/gatherer lane
+selection rather than single-model-only routing:
 
-- The **synthesizer lane** is the default response path and must always be
-  configured.
-- The **gatherer lane** is optional at configuration time but is the default
-  execution path for repository-question and decomposition/research turns when
-  it is available.
-- If no gatherer lane is configured, or if it reports failure/unsupported
-  capability, `paddles` emits a labeled fallback event and degrades honestly to
-  the synthesizer path.
+- The **synthesizer lane** is the default response path and must always be configured.
+- The **planner lane** owns bounded `search` / `read` / `inspect` / `refine` / `branch` / `stop` action selection for non-trivial turns.
+- The **gatherer backend** services planner search/refine actions when workspace retrieval is needed.
+- If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
 Today the lane wiring is exposed through CLI/runtime configuration:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-model qwen-coder-1.5b
+paddles --model qwen-1.5b --planner-model qwen3.5-2b --gatherer-provider sift-autonomous
 ```
 
-This prepares a distinct gatherer lane that the controller can use as the
-default path for repository questions without changing the default response
-model.
+This keeps a light synthesizer while assigning a heavier planner to the recursive loop.
+
+If you want a distinct local gatherer model instead of the autonomous backend:
+
+```bash
+paddles --model qwen-1.5b --gatherer-model qwen-coder-1.5b --gatherer-provider local
+```
 
 For local autonomous retrieval planning, select the explicit provider:
 
@@ -151,14 +151,13 @@ For local autonomous retrieval planning, select the explicit provider:
 paddles --model qwen-1.5b --gatherer-provider sift-autonomous
 ```
 
-That provider stays local-first and uses Sift's bounded autonomous planner.
+That backend stays local-first and services bounded planner search.
 
 - It defaults to the heuristic planner strategy.
 - It returns planner trace metadata, stop reason, and retained artifact
   summaries inside the evidence bundle consumed by the synthesizer lane.
-- The default REPL event stream surfaces the planner summary so operators can
-  inspect why the autonomous gatherer stopped and what evidence it carried
-  forward.
+- The default REPL event stream surfaces planner action selection, gatherer
+  summaries, and final planner stop reasons so operators can inspect the loop.
 
 Current local model guidance on an 8 GB CUDA card:
 
@@ -175,9 +174,11 @@ The REPL now renders a default Codex-style action stream. Expect visible steps
 for:
 
 - turn classification
+- interpretation context assembly
 - route selection
+- planner action selection
 - gatherer capability and gathered evidence
-- planner summaries for autonomous gatherers
+- planner summaries and stop reasons
 - tool calls and results
 - fallback reasons
 - synthesis readiness

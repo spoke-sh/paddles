@@ -40,6 +40,10 @@ struct Cli {
     #[arg(short, long, default_value = "qwen-1.5b")]
     model: String,
 
+    /// Optional planner model ID. Defaults to the synthesizer model when unset.
+    #[arg(long)]
+    planner_model: Option<String>,
+
     /// Optional model ID for the legacy static local context-gathering lane.
     #[arg(long)]
     gatherer_model: Option<String>,
@@ -120,6 +124,12 @@ async fn main() -> Result<()> {
             "[BOOT] Syncing synthesizer lane via SIFT for: {}...",
             cli.model
         );
+        if let Some(planner_model) = &cli.planner_model {
+            println!(
+                "[BOOT] Syncing planner lane via SIFT for: {}...",
+                planner_model
+            );
+        }
         if let Some(gatherer_model) = &cli.gatherer_model {
             println!(
                 "[BOOT] Syncing gatherer lane via SIFT for: {}...",
@@ -140,6 +150,7 @@ async fn main() -> Result<()> {
         }
     }
     let runtime_lanes = RuntimeLaneConfig::new(cli.model.clone(), cli.gatherer_model.clone())
+        .with_planner_model_id(cli.planner_model.clone())
         .with_gatherer_provider(cli.gatherer_provider)
         .with_context1_harness_ready(cli.context1_harness_ready);
     let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;

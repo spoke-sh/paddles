@@ -557,10 +557,33 @@ fn format_turn_event_row(event: TurnEvent) -> TranscriptRow {
         TurnEvent::IntentClassified { intent } => {
             TranscriptRow::new(TranscriptRowKind::Event, "• Classified", intent.label())
         }
+        TurnEvent::InterpretationContext { summary, sources } => {
+            let mut content = collapse_event_details(&summary, EVENT_DETAIL_LINE_LIMIT);
+            if !sources.is_empty() {
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                content.push_str("Sources: ");
+                content.push_str(&sources.join(", "));
+            }
+            TranscriptRow::new(
+                TranscriptRowKind::Event,
+                "• Assembled interpretation context",
+                content,
+            )
+        }
         TurnEvent::RouteSelected { summary } => TranscriptRow::new(
             TranscriptRowKind::Event,
             "• Routed",
             collapse_event_details(&summary, EVENT_DETAIL_LINE_LIMIT),
+        ),
+        TurnEvent::PlannerCapability {
+            provider,
+            capability,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Checked planner capability",
+            format!("{provider}: {capability}"),
         ),
         TurnEvent::GathererCapability {
             provider,
@@ -569,6 +592,19 @@ fn format_turn_event_row(event: TurnEvent) -> TranscriptRow {
             TranscriptRowKind::Event,
             "• Checked gatherer capability",
             format!("{provider}: {capability}"),
+        ),
+        TurnEvent::PlannerActionSelected {
+            sequence,
+            action,
+            rationale,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Selected planner action",
+            format!(
+                "step {sequence}: {}\nRationale: {}",
+                collapse_event_details(&action, EVENT_DETAIL_LINE_LIMIT),
+                collapse_event_details(&rationale, EVENT_DETAIL_LINE_LIMIT)
+            ),
         ),
         TurnEvent::GathererSummary {
             provider,

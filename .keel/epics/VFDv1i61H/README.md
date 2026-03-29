@@ -22,8 +22,8 @@ mission: VFDv1ha1G
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Recursive Planner Harness Backbone](voyages/VFDv3gE5m/) | in-progress | 0/5 |
+| [Recursive Planner Harness Backbone](voyages/VFDv3gE5m/) | done | 5/5 |
 <!-- END GENERATED -->

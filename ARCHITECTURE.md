@@ -1,6 +1,6 @@
 # Paddles Architecture: Recursive Harness Backbone
 
-This document describes the intended backbone architecture of `paddles` and the current implementation snapshot while the recursive planner mission is still in flight.
+This document describes the implemented recursive harness backbone of `paddles` and the remaining experimental edges around it.
 
 ## Backbone Architecture
 
@@ -107,39 +107,33 @@ That preserves generality and keeps `paddles` useful outside one board engine.
 
 ## Current Implementation Snapshot
 
-The repo already contains several pieces of the target architecture:
+The repo now contains the main pieces of the target architecture:
 
 - a controller-owned runtime in [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs)
-- typed turn events in [src/domain/model/turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs)
-- a Sift-backed synthesizer/tool adapter in [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs)
-- a local autonomous gatherer in [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs)
-- hierarchical operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
+- typed turn and planner events in [src/domain/model/turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs)
+- a planner contract in [src/domain/ports/planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs)
+- a Sift-backed planner/synth model adapter in [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) and [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs)
+- a local gatherer backend in [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs)
+- interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
 
-But the current runtime is still transitional:
+The remaining transitional pieces are narrower:
 
-- static `TurnIntent` classification still exists and is controller-first
-- `AGENTS.md` is loaded every turn, but mainly into prompt construction rather
-  than first-pass interpretation
-- repository questions usually get one gather pass rather than a true recursive
-  planner loop
-- planner and synthesizer roles are not yet cleanly separated
-
-Mission [VFDv1ha1G](.keel/missions/VFDv1ha1G/README.md) exists to close that gap.
+- trivial `casual` and explicit deterministic-action turns still use a cheap controller shortcut before the planner loop
+- planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
+- `context-1` remains an explicit experimental boundary
 
 ## Current Model Routing
 
-Current routing still favors the existing synthesizer/gatherer split:
+Current routing now uses explicit planner/synth roles:
 
 - synthesizer default: `qwen-1.5b`
-- optional coding-oriented synthesizers: `qwen-coder-0.5b`,
+- planner default: synthesizer model unless `--planner-model` overrides it
+- optional coding-oriented planner/synth models: `qwen-coder-0.5b`,
   `qwen-coder-1.5b`, `qwen-coder-3b`
-- heavier opt-in lane: `qwen3.5-2b`
-- local gatherer provider: `sift-autonomous`
+- heavier opt-in planner/synth lane: `qwen3.5-2b`
+- local gatherer backend: `sift-autonomous`
 - experimental planner/gatherer boundary: `context-1`
-
-The backbone direction is to evolve those lanes into explicit planner and
-synthesizer roles instead of tying them to the older static controller shape.
 
 ## Context-1 Fit
 
@@ -152,7 +146,7 @@ answer should still come from a separate synthesizer contract.
 
 ## Documentation Contract
 
-Because the implementation is mid-transition, the docs must stay honest:
+Because the implementation still has experimental edges, the docs must stay honest:
 
 - README explains the backbone architecture and current status at a high level
 - ARCHITECTURE.md explains the target/current split in more detail

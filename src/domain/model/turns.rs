@@ -4,9 +4,7 @@ use std::fmt;
 pub enum TurnIntent {
     Casual,
     DeterministicAction,
-    RepositoryQuestion,
-    DecompositionResearch,
-    GeneralQuestion,
+    Planned,
 }
 
 impl TurnIntent {
@@ -14,14 +12,12 @@ impl TurnIntent {
         match self {
             Self::Casual => "casual",
             Self::DeterministicAction => "deterministic-action",
-            Self::RepositoryQuestion => "repository-question",
-            Self::DecompositionResearch => "decomposition-research",
-            Self::GeneralQuestion => "general-question",
+            Self::Planned => "planned",
         }
     }
 
-    pub fn requires_gathered_evidence(&self) -> bool {
-        matches!(self, Self::RepositoryQuestion | Self::DecompositionResearch)
+    pub fn uses_planner(&self) -> bool {
+        matches!(self, Self::Planned)
     }
 
     pub fn prefers_tools(&self) -> bool {
@@ -44,12 +40,25 @@ pub enum TurnEvent {
     IntentClassified {
         intent: TurnIntent,
     },
+    InterpretationContext {
+        summary: String,
+        sources: Vec<String>,
+    },
     RouteSelected {
         summary: String,
+    },
+    PlannerCapability {
+        provider: String,
+        capability: String,
     },
     GathererCapability {
         provider: String,
         capability: String,
+    },
+    PlannerActionSelected {
+        sequence: usize,
+        action: String,
+        rationale: String,
     },
     GathererSummary {
         provider: String,

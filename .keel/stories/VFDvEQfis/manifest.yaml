@@ -1,0 +1,8 @@
+id: VFDvEQfis
+git_sha: 34458777940ee067354721187edb1b8bd47d200e
+evidence:
+  EVIDENCE/ac-1.log: 6abdba5d01370121f8edc19f58efe501037b4b0f1cf5d9f0f2ba1fe7254bcdab
+  EVIDENCE/ac-2.log: f297162da3fa883e7b253d0d17260dc404cc3d19b615795d9f47d298663af1c8
+  EVIDENCE/llm-judge-non-trivial-turns-use-planner-action-selection-instead-of-relying-solely-on-coarse-static-intent-buckets.txt: d2ea7b43cb99ea42b987f6b7d94b937a5cb4826f7341dc682fb635cf732d3a3e
+  ? EVIDENCE/llm-judge-the-runtime-exposes-a-planner-action-contract-that-can-express-at-least-search-read-inspect-refine-branch-and-stop-decisions.txt
+  : 79699b7537621884655cab452323ac8cc60a9159d8cd95ad437a925cb36bcf7c

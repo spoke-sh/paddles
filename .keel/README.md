@@ -96,9 +96,9 @@
 |--------|--------|
 | [Transcript-Driven Interactive Terminal](epics/VFDbdzqtU/voyages/VFDbfLe0E/) | done |
 
-### [Recursive Planner Loop And Memory-Driven Routing](epics/VFDv1i61H/) (active)
+### [Recursive Planner Loop And Memory-Driven Routing](epics/VFDv1i61H/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Recursive Planner Harness Backbone](epics/VFDv1i61H/voyages/VFDv3gE5m/) | in-progress |
+| [Recursive Planner Harness Backbone](epics/VFDv1i61H/voyages/VFDv3gE5m/) | done |
 

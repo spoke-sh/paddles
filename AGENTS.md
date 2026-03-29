@@ -20,9 +20,9 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Runtime Routing Contract
 
 - Model/tool choice is a controller decision, not something delegated blindly to prompt text.
-- The harness should move toward a **planner lane** that owns bounded search/refine loops for non-trivial workspace questions.
-- The **synthesizer lane** remains the final answer path for casual chat, direct answers, and grounded responses after planner work.
-- Repository and research turns should improve through recursive context work instead of project-specific hardcoded intents.
+- The harness uses a **planner lane** that owns bounded search/refine loops for non-trivial workspace questions.
+- The **synthesizer lane** remains the final answer path for casual chat, explicit deterministic actions, and grounded responses after planner work.
+- Non-trivial turns should improve through recursive context work instead of project-specific hardcoded intents.
 - Repository-question answers should include file citations by default.
 - TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
 - One-shot `--prompt` usage and non-TTY stdin/stdout flows must remain plain output paths.

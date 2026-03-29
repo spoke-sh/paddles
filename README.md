@@ -69,24 +69,21 @@ That is why the next architecture step is not “add a board intent.” It is �
 
 ## Current Implementation Snapshot
 
-The repository is mid-transition toward that backbone.
+The repository now implements the recursive harness in a bounded local-first form.
 
-Today, the runtime already has useful pieces:
+Today, the runtime has:
 
-- a local-first synthesizer lane
-- a gatherer/synthesizer split
-- hierarchical `AGENTS.md` memory reload on every turn
-- a default TUI with visible turn events
-- Sift-backed autonomous gathering for some repository questions
+- a planner lane that sees interpretation context before choosing the next action
+- hierarchical `AGENTS.md` reload plus linked foundational guidance excerpts at interpretation time
+- a bounded recursive loop for `search`, `read`, `inspect`, `refine`, `branch`, and `stop`
+- a distinct synthesizer lane that answers from the resulting evidence bundle
+- a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
 
-But the current implementation is still more rigid than the backbone above:
+The remaining gaps are narrower now:
 
-- interpretation is still controller-first for many turns
-- `AGENTS.md` currently influences prompt construction more than first-pass routing
-- repository questions usually get one gather step, not a true recursive planner loop
-- the final answer path is still stronger than the planner path, rather than clearly separate from it
-
-That migration is tracked by mission [VFDv1ha1G](.keel/missions/VFDv1ha1G/README.md) and epic [VFDv1i61H](.keel/epics/VFDv1i61H/README.md).
+- trivial turns still use a cheap controller shortcut for `casual` and explicit deterministic-action requests
+- the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
+- `context-1` is still an explicit experimental boundary, not the default planner lane
 
 ## Design Principles
 
@@ -99,14 +96,11 @@ That migration is tracked by mission [VFDv1ha1G](.keel/missions/VFDv1ha1G/README
 
 ## Current Runtime Lanes
 
-The current repo still exposes the existing synthesizer/gatherer topology while the recursive planner mission is in progress.
-
 - The synthesizer lane defaults to `qwen-1.5b`.
-- `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in variants.
-- `sift-autonomous` is the current local gatherer provider for retrieval-heavy turns.
-- `context-1` is still an explicit experimental planner/gatherer boundary and remains fail-closed until its harness is real.
-
-The long-term direction is to treat those as interchangeable planner/synth providers behind stable contracts instead of baking routing assumptions into one controller path.
+- The planner lane defaults to the synthesizer model unless `--planner-model <id>` selects a different planner-capable model.
+- `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in planner or synthesizer variants.
+- `sift-autonomous` is the current local gatherer/search backend used by planner `search` and `refine` actions.
+- `context-1` remains an explicit experimental planner/gatherer boundary and stays fail-closed until its harness is real.
 
 ## Foundational Documents
 
@@ -162,6 +156,12 @@ Run the interactive assistant:
 just paddles --cuda
 ```
 
+Use a heavier planner lane while keeping a lighter synthesizer:
+
+```bash
+paddles --model qwen-1.5b --planner-model qwen3.5-2b
+```
+
 One-shot prompt mode stays plain for scripts:
 
 ```bash
@@ -176,7 +176,7 @@ paddles --prompt "Summarize the current runtime lanes"
 2. `~/.config/paddles/AGENTS.md`
 3. every ancestor `AGENTS.md` from filesystem root to the current workspace
 
-Later files are more specific. The recursive planner mission will push this one step further by making that memory part of turn interpretation rather than only late prompt shaping.
+Later files are more specific. That memory now participates in turn interpretation before planner action selection, and linked foundational docs are pulled in as compact excerpts rather than late prompt-only baggage.
 
 ## Why This Architecture
 
