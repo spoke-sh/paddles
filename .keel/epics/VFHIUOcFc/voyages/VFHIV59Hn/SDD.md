@@ -15,13 +15,16 @@ reconciled back into the mainline through an explicit summary or merge record.
 
 The controller continues to own bounded execution, recorder safety, and replay
 plumbing. The model owns the classification decision through a constrained
-contract. Embedded `transit-core` remains the first durable backend.
+contract. Embedded `transit-core` remains the first durable backend, but the
+conversation-specific thread API lives in a paddles-owned layer or crate so it
+can be extracted later rather than pushed into `transit-core`.
 
 ## Context & Boundaries
 
 This voyage covers:
 - turning steering prompts into structured thread candidates
 - model-driven thread decision selection
+- a paddles-owned conversation/thread layer above the recorder boundary
 - durable recorder projection into embedded `transit-core`
 - thread replay and merge-back transcript rendering
 
@@ -55,6 +58,7 @@ This voyage does not cover:
 | Dependency | Type | Purpose | Version/API |
 |------------|------|---------|-------------|
 | `transit-core` | local library | Durable embedded append/branch/replay/checkpoint backend for thread lineage | existing workspace dependency |
+| paddles conversation/thread layer | paddles-owned crate or module | Extractable conversation API over recorder and transcript semantics | introduced by this voyage |
 | `TraceRecorder` boundary | paddles port | Keeps recorder mapping storage-neutral inside the runtime | existing paddles port |
 | Planner lane | paddles runtime | Selects bounded thread decisions from interpretation context | existing planner contract, extended |
 | Interactive TUI | paddles CLI | Renders thread split, active-thread, and merge-back state | existing transcript frontend, extended |
@@ -64,7 +68,7 @@ This voyage does not cover:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Thread classifier | Model-driven through a constrained contract | Matches the recursive harness direction and avoids hardcoded routing heuristics |
-| Durability | Use embedded `transit-core` first | Local-first, already aligned with the recorder boundary |
+| Durability | Use a paddles-owned conversation layer over embedded `transit-core` | Keeps transit primitive while letting paddles define the higher-level conversation/thread contract |
 | Merge semantics | Explicit merge, backlink, or summary records instead of history rewrite | Keeps thread structure replayable and inspectable |
 | Active-turn handling | Capture immediately, decide at safe checkpoints | Avoids pretending one local session can handle unbounded true concurrency |
 
@@ -84,9 +88,10 @@ The voyage touches five cooperating layers:
    The controller validates the decision, opens/continues/merges thread state,
    and keeps execution budgets bounded.
 
-4. Recorder projection
-   Runtime transitions are mapped into paddles-owned trace records and artifact
-   envelopes, then persisted through the existing recorder boundary into
+4. Conversation layer and recorder projection
+   Runtime transitions are first mapped into a paddles-owned conversation
+   contract, then projected into paddles-owned trace records and artifact
+   envelopes, and finally persisted through the existing recorder boundary into
    embedded `transit-core`.
 
 5. Thread-aware transcript and replay
@@ -113,11 +118,20 @@ The voyage touches five cooperating layers:
 
 ### Thread Recorder Projection
 
-- Purpose: map thread decisions into paddles-owned trace records and artifact
-  envelopes before persisting through `TraceRecorder`.
-- Interface: reuses the recorder boundary and embedded transit adapter.
+- Purpose: map conversation-layer thread decisions into paddles-owned trace
+  records and artifact envelopes before persisting through `TraceRecorder`.
+- Interface: reuses the recorder boundary and embedded transit adapter without
+  leaking conversation semantics into `transit-core`.
 - Behavior: emits explicit branch creation, thread reply, backlink/summary,
   merge decision, and checkpoint records.
+
+### Paddles Conversation Layer
+
+- Purpose: own the conversation/thread semantics needed by the UI and runtime,
+  while staying extractable into a shared crate later.
+- Interface: paddles-owned thread candidate, decision, replay, and merge DTOs.
+- Behavior: translates between planner/TUI needs and the lower-level recorder
+  primitives.
 
 ### Thread Replay Loader
 
@@ -159,8 +173,8 @@ Planned contract additions:
   - merge decision recorded
   - checkpoint recorded
 
-These stay paddles-owned. Raw transit DTOs should not leak across the domain
-boundary.
+These stay paddles-owned and should naturally fit into a future extracted crate.
+Raw transit DTOs should not leak across the domain boundary.
 
 ## Data Flow
 
@@ -178,7 +192,8 @@ boundary.
    - continues current thread, or
    - opens child branch, or
    - records merge/summarize-back intent
-7. Trace records and artifact envelopes are persisted through TraceRecorder
+7. Conversation-layer records are projected into trace records and artifact
+   envelopes, then persisted through TraceRecorder
 8. Transcript renders the visible outcome
 9. Replay can later rebuild mainline and child-thread context from the same records
 ```

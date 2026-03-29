@@ -16,13 +16,13 @@ index: 2
 
 ## Summary
 
-Project thread creation, reply, backlink/summary, merge, and checkpoint
-transitions through the existing recorder boundary so embedded `transit-core`
-can durably replay threaded work without leaking raw transit types into the
-domain.
+Create the paddles-owned conversation/thread layer and project its thread
+creation, reply, backlink/summary, merge, and checkpoint transitions through
+the existing recorder boundary so embedded `transit-core` can durably replay
+threaded work without turning `transit-core` into a conversation API.
 
 ## Acceptance Criteria
 
-- [ ] The recorder path persists explicit thread branch creation, replies, backlinks or summaries, merge decisions, and checkpoints through embedded `transit-core`. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
+- [ ] A paddles-owned conversation/thread layer exists above the recorder boundary and owns the thread DTOs needed by runtime and UX code. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
 - [ ] Thread-local replay reconstructs enough mainline and child-thread provenance for later planning and synthesis. [SRS-04/AC-02] <!-- verify: manual, SRS-04:start:end -->
-- [ ] The implementation works through the existing embedded recorder path and does not require a separate trace server. [SRS-NFR-04/AC-03] <!-- verify: manual, SRS-NFR-04:start:end -->
+- [ ] The implementation works through the existing embedded recorder path, does not require a separate trace server, and remains extractable from paddles later. [SRS-NFR-04/AC-03] <!-- verify: manual, SRS-NFR-04:start:end -->
