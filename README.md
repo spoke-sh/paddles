@@ -7,7 +7,7 @@
 > `paddles` is the mech suit around a local-first coding agent. Its backbone architecture is a recursive in-context planning harness: operator memory shapes turn interpretation, a planner model recursively gathers and refines evidence through bounded resource use, and a separate synthesizer model produces the final answer from that trace.
 
 > Foundational stack position: `3/8`
-> Read this after [AGENTS.md](AGENTS.md) and [INSTRUCTIONS.md](INSTRUCTIONS.md), then continue to [CONSTITUTION.md](CONSTITUTION.md).
+> This is the repository entrypoint and navigation hub. In the formal foundational reading order it follows [AGENTS.md](AGENTS.md) and [INSTRUCTIONS.md](INSTRUCTIONS.md), then leads into [CONSTITUTION.md](CONSTITUTION.md).
 
 ## Backbone Architecture
 
