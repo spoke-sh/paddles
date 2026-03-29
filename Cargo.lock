@@ -4191,6 +4191,7 @@ dependencies = [
 [[package]]
 name = "transit-core"
 version = "0.1.0"
+source = "git+https://github.com/spoke-sh/transit.git?branch=main#f2c400ef3e523ab3ec90bcb6641dc09d3d31c9b1"
 dependencies = [
  "anyhow",
  "async-trait",
