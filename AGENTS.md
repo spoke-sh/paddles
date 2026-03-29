@@ -9,9 +9,9 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Core Principles
 1. **Maintain Calibration**: The boot sequence (credits, weights, biases) is foundational. Ensure changes to `src/main.rs` never weaken Constitution or Dogma validation.
 2. **Local First**: Prioritize local inference capacity via `candle`. Avoid introducing network dependencies into the core execution loop.
-3. **Intent Before Size**: Treat runtime selection as controller-owned routing. Default to the smallest capable local path, keep direct answer/tool turns on the synthesizer lane, and use a gatherer lane for repository questions or other retrieval-heavy work when it is available.
-4. **Evidence Before Prose**: Repository questions should gather evidence first when a gatherer is available. Gatherers return evidence bundles and capability state for a downstream synthesizer. They do not pretend to be the final answer model.
-5. **Visible Turns**: The interactive REPL should render a default Codex-style action stream so classification, routing, retrieval, tools, fallbacks, and synthesis are observable without extra flags.
+3. **Interpret Before Routing**: Operator memory should influence first-pass interpretation of non-trivial turns. Do not commit to a route before the harness has assembled the relevant `AGENTS.md` and foundational context.
+4. **Recursive Planning Before Final Answer**: Difficult workspace questions should improve through bounded recursive resource use. Planner work and final synthesis are different roles and should not be collapsed into one brittle one-shot path.
+5. **Visible Turns**: The interactive REPL should render a default Codex-style action stream so interpretation, recursive actions, routing, retrieval, tools, fallbacks, and synthesis are observable without extra flags.
 6. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
 7. **Grounded Answers**: Repository answers should cite source files by default and admit insufficient evidence instead of improvising unsupported claims.
 8. **Pacemaker Hygiene**: Monitor system stability with `keel health --scene`, `keel flow --scene`, `keel doctor`, and dirty-worktree state. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
@@ -20,12 +20,14 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Runtime Routing Contract
 
 - Model/tool choice is a controller decision, not something delegated blindly to prompt text.
-- The **synthesizer lane** is the default path for casual chat, direct answers, and deterministic workspace/tool turns.
-- The **gatherer lane** is the default path for repository questions when it is available. It must return typed evidence for synthesis.
+- The harness should move toward a **planner lane** that owns bounded search/refine loops for non-trivial workspace questions.
+- The **synthesizer lane** remains the final answer path for casual chat, direct answers, and grounded responses after planner work.
+- Repository and research turns should improve through recursive context work instead of project-specific hardcoded intents.
 - Repository-question answers should include file citations by default.
 - TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
 - One-shot `--prompt` usage and non-TTY stdin/stdout flows must remain plain output paths.
 - Chroma `context-1` is an experimental **gatherer provider only**. It is never the default answer runtime and must fail closed when its harness/runtime is unavailable.
+- Keel is part of workspace context, not a special-case product feature in routing.
 - When runtime routing behavior changes, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same slice.
 
 ### Canonical Turn Loop

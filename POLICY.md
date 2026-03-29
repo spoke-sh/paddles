@@ -21,8 +21,10 @@ Features should be implemented using local inference (`candle`) or local-first t
 Model selection is an architectural decision, not an incidental prompt tweak.
 - **Smallest Capable Model**: Route each request to the smallest model that can satisfy the user's intent within the active runtime constraints.
 - **Intent Before Size**: Choose models based on workload shape first: direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
+- **Interpretation Before Routing**: Operator memory and foundational guidance should be available to first-pass planner interpretation before the runtime commits to a route for non-trivial turns.
+- **Recursive Planning Before Final Synthesis**: Difficult workspace questions should be improved through bounded recursive resource use rather than relying solely on one-shot controller heuristics.
 - **Separate Catalog From Runtime From Prompting**: Model integration must isolate alias/asset resolution, family-specific inference runtime, and prompt/protocol behavior so new families can be added without cross-cutting regressions.
-- **Separate Search From Answering**: Retrieval-heavy or multi-hop tasks may use a dedicated context-gathering model, but answer generation should remain a distinct step.
+- **Separate Planner From Synthesizer**: Recursive planning or context gathering may use a dedicated planner-capable model, but final answer generation should remain a distinct step.
 - **Evidence-First Gatherers**: Context-gathering adapters must return typed evidence bundles and capability state for a downstream synthesizer, not prose pretending to be the final answer.
 - **Repository Questions Gather First**: Repository-question turns should use the configured gatherer lane by default when it is available. Hidden synthesizer-private retrieval is a fallback/debug path, not the normal repository-answer path.
 - **Grounded Answers Cite Sources**: Repository-question answers must include file citations by default and should degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
@@ -31,6 +33,7 @@ Model selection is an architectural decision, not an incidental prompt tweak.
 - **TTY UI / Plain CLI Split**: Interactive terminal sessions should use the dedicated transcript UI, while `--prompt` and non-TTY stdin/stdout flows must remain plain output paths for scripting and pipes.
 - **Hierarchical Operator Memory**: The REPL must reload `AGENTS.md` memory on every turn from system, user, and ancestor scopes in that order, with more specific files overriding broader guidance.
 - **Memory Does Not Replace Control**: Instruction memory may shape prompt construction, but controller-owned routing, typed evidence contracts, and deterministic tool execution remain authoritative.
+- **Keel Is Context, Not A Built-In Intent**: Project or board engines may inform planning through recursive context and tools, but the harness should not overfit by encoding one engine as a product-specific first-class turn type.
 - **Explicit Harness Requirement**: A specialized retrieval model must not be treated as a drop-in answer model when it depends on a custom tool harness, pruning loop, or context manager.
 - **No Silent Remote Regression**: The default `paddles` path remains local-first. Remote or heavyweight specialized models must be explicit, observable, and degradable to a local fallback.
 
