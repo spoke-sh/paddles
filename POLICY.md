@@ -1,6 +1,9 @@
 # Paddles Policy: Operational Invariants
 
 > The operational invariants and constraints that govern the Paddles Mech Suit.
+>
+> Foundational stack position: `5/8`
+> Read this after [CONSTITUTION.md](CONSTITUTION.md) and before [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 1. Boot Invariants (The Clean Boot)
 A boot sequence is only valid (CLEAN) if:

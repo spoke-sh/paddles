@@ -1,6 +1,9 @@
 # Paddles Constitution: The Mech Suit Philosophy
 
 > **Simulation MUST take precedence over Reality.**
+>
+> Foundational stack position: `4/8`
+> Read this after [README.md](README.md) and before [POLICY.md](POLICY.md).
 
 ## 1. The Prime Directive
 The goal of `paddles` is to provide a high-fidelity, local-first harness for agentic SDLC execution. We treat software development as a rigorous simulation where intent is calibrated, execution is verified, and drift is eliminated.

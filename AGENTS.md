@@ -2,6 +2,9 @@
 
 Shared guidance for AI agents operating the `paddles` mech suit.
 
+> Foundational stack position: `1/8`
+> Read this document first. Then move to [INSTRUCTIONS.md](INSTRUCTIONS.md).
+
 ## Operational Guidance
 
 You are an operator within the `paddles` harness. Keel is an engine with strict constraints (see [POLICY.md](POLICY.md)). Your primary responsibility is to execute tactical moves that advance the board state while maintaining mech-suit integrity and local-first runtime constraints.
@@ -78,17 +81,21 @@ When faced with ambiguity, resolve decisions in this descending order:
 
 ## Foundational Documents
 
-These define the constraints and workflow of the `paddles` environment:
+These define the primary reading flow of the `paddles` environment:
 
-- `README.md` — Entrypoint and canonical document navigation.
-- `INSTRUCTIONS.md` — Step-by-step procedural loops and checklists.
-- `POLICY.md` — Operational invariants and engine constraints.
-- `CONSTITUTION.md` — Collaboration philosophy and decision hierarchy.
-- `ARCHITECTURE.md` — Implementation architecture and flow model.
-- `STAGE.md` — Visual philosophy and scene rendering.
-- `PROTOCOL.md` — Communications protocol and data contracts.
-- `CONFIGURATION.md` — Role-based and config-driven topology.
-- `RELEASE.md` — Release process and artifacts.
-- `.keel/adrs/` — Binding architecture decisions.
+1. `AGENTS.md` — operator entrypoint and working contract.
+2. `INSTRUCTIONS.md` — canonical turn loop and procedural checklists.
+3. `README.md` — backbone architecture and navigation map.
+4. `CONSTITUTION.md` — collaboration philosophy and bounds.
+5. `POLICY.md` — runtime and operational invariants.
+6. `ARCHITECTURE.md` — implementation boundaries and runtime shape.
+7. `PROTOCOL.md` — communications and data contracts.
+8. `CONFIGURATION.md` — concrete runtime and topology settings.
 
-Use this order when interpreting constraints: ADRs -> Constitution -> Policy -> Architecture -> Configuration -> Planning artifacts.
+Supplementary references:
+
+- `STAGE.md` — visual philosophy and scene rendering.
+- `RELEASE.md` — release process and artifacts.
+- `.keel/adrs/` — binding architecture decisions.
+
+The list above is the foundational reading order. The decision-resolution hierarchy remains separate: ADRs -> Constitution -> Policy -> Architecture -> Planning artifacts.

@@ -2,6 +2,9 @@
 
 The Keel CLI implements an asynchronous communication layer through the `ping` and `poke` commands. This system allows the workflow engine to field requests, route messages, and provide either synchronous automated responses or facilitate asynchronous offline interactions.
 
+> Foundational stack position: `7/8`
+> Read this after [ARCHITECTURE.md](ARCHITECTURE.md) and before [CONFIGURATION.md](CONFIGURATION.md).
+
 This document defines the expected message structures, the routing logic, and the lifecycle of an inbox message.
 
 ## 1. The Inbox Lifecycle

@@ -2,6 +2,9 @@
 
 Procedural instructions and workflow guidance for agents and operators working with the `paddles` mech suit.
 
+> Foundational stack position: `2/8`
+> Read this after [AGENTS.md](AGENTS.md) and before [README.md](README.md).
+
 ## The Turn Loop
 
 Keel is an engine with strict constraints. Your job is to move the board through the canonical `Orient -> Inspect -> Pull -> Ship -> Close` loop while eliminating drift.

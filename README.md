@@ -6,6 +6,9 @@
 
 > `paddles` is the mech suit around a local-first coding agent. Its backbone architecture is a recursive in-context planning harness: operator memory shapes turn interpretation, a planner model recursively gathers and refines evidence through bounded resource use, and a separate synthesizer model produces the final answer from that trace.
 
+> Foundational stack position: `3/8`
+> Read this after [AGENTS.md](AGENTS.md) and [INSTRUCTIONS.md](INSTRUCTIONS.md), then continue to [CONSTITUTION.md](CONSTITUTION.md).
+
 ## Backbone Architecture
 
 The central idea is simple:
@@ -197,16 +200,24 @@ The remaining gaps are narrower now:
 
 ## Foundational Documents
 
-Use these in this order when interpreting the mech suit:
+Use these in this order when reading the foundational stack:
 
-- [AGENTS.md](AGENTS.md) for operator guidance and the canonical turn loop
-- [README.md](README.md) for the backbone architecture and document map
-- [ARCHITECTURE.md](ARCHITECTURE.md) for the detailed target/current architecture split
-- [POLICY.md](POLICY.md) for runtime invariants and safety rules
-- [INSTRUCTIONS.md](INSTRUCTIONS.md) for procedural Keel loops
-- [CONFIGURATION.md](CONFIGURATION.md) for lane/runtime configuration
-- [PROTOCOL.md](PROTOCOL.md) for communications and data contracts
-- [CONSTITUTION.md](CONSTITUTION.md) for collaboration philosophy and decision hierarchy
+1. [AGENTS.md](AGENTS.md) for operator guidance and the top-level working contract
+2. [INSTRUCTIONS.md](INSTRUCTIONS.md) for the canonical Keel turn loop and checklists
+3. [README.md](README.md) for the backbone architecture and navigation map
+4. [CONSTITUTION.md](CONSTITUTION.md) for collaboration philosophy and bounds
+5. [POLICY.md](POLICY.md) for runtime invariants and safety rules
+6. [ARCHITECTURE.md](ARCHITECTURE.md) for the target/current implementation split
+7. [PROTOCOL.md](PROTOCOL.md) for communications and data contracts
+8. [CONFIGURATION.md](CONFIGURATION.md) for concrete lane/runtime configuration
+
+Supplementary references:
+
+- [STAGE.md](STAGE.md) for visual philosophy
+- [RELEASE.md](RELEASE.md) for release process
+- [.keel/adrs/](.keel/adrs/) for binding architecture decisions
+
+This reading order is not the same thing as the decision hierarchy. For ambiguous design decisions, defer to ADRs first, then Constitution, Policy, Architecture, and current planning artifacts.
 
 ## Working With The Board
 

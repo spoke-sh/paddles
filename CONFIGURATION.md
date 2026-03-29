@@ -2,6 +2,9 @@
 
 Keel is configured via a `keel.toml` file. This document describes the available configuration options and how they drive Keel's behavior.
 
+> Foundational stack position: `8/8`
+> Read this after [PROTOCOL.md](PROTOCOL.md). This is the concrete settings reference at the end of the foundational stack.
+
 ## Configuration Resolution
 
 Keel resolves configuration in the following order:

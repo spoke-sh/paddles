@@ -2,6 +2,9 @@
 
 This document describes the implemented recursive harness backbone of `paddles` and the remaining experimental edges around it.
 
+> Foundational stack position: `6/8`
+> Read this after [POLICY.md](POLICY.md) and before [PROTOCOL.md](PROTOCOL.md).
+
 ## Backbone Architecture
 
 `paddles` should operate as a recursive in-context planning harness.
