@@ -1,0 +1,29 @@
+---
+# system-managed
+id: VFGy8zqVS
+status: backlog
+created_at: 2026-03-29T09:00:51
+updated_at: 2026-03-29T09:05:52
+# authored
+title: Route Recursive Search Through Graph-Capable Sift Gatherers
+type: feat
+operator-signal:
+scope: VFGy53NJt/VFGy6j0OE
+index: 3
+---
+
+# Route Recursive Search Through Graph-Capable Sift Gatherers
+
+## Summary
+
+Use the new graph-capable gatherer path from the existing model-directed
+recursive harness so search/refine work can benefit from bounded graph-mode
+retrieval while preserving local-first fallback behavior and avoiding new
+repository-specific top-level intents.
+
+## Acceptance Criteria
+
+- [ ] Recursive search/refine work can request graph-capable gatherer behavior through the generic planner/gatherer path. [SRS-04/AC-01] <!-- verify: manual, SRS-04:start:end -->
+- [ ] Graph-mode gatherers remain local-first, bounded, and fail closed when graph planning is invalid or unavailable. [SRS-NFR-01/AC-02] <!-- verify: manual, SRS-NFR-01:start:end -->
+- [ ] Recursive planner/synthesizer handoff continues to operate with graph-capable gathered evidence instead of flattening the path back into an opaque linear summary. [SRS-03/AC-03] <!-- verify: manual, SRS-03:start:end -->
+- [ ] The default operator surface renders concise graph planner summaries, branch/frontier state, and graph stop reasons when graph-mode retrieval is active. [SRS-05/AC-04] <!-- verify: manual, SRS-05:start:end -->

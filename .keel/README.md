@@ -108,3 +108,9 @@
 |--------|--------|
 | [Model-Directed Routing Backbone](epics/VFECyWLL6/voyages/VFED2RjSu/) | done |
 
+### [Graph-Mode Gatherer Integration](epics/VFGy53NJt/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Graph Retrieval Through The Gatherer Boundary](epics/VFGy53NJt/voyages/VFGy6j0OE/) | planned |
+
