@@ -90,3 +90,9 @@
 |--------|--------|
 | [Default Gatherer, Grounded Answers, And Action Stream](epics/VFDMnu8k9/voyages/VFDMp3Zn3/) | done |
 
+### [Codex-Style Interactive TUI](epics/VFDbdzqtU/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Transcript-Driven Interactive Terminal](epics/VFDbdzqtU/voyages/VFDbfLe0E/) | in-progress |
+

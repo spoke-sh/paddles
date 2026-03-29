@@ -34,7 +34,12 @@ Keel's operator rhythm is the `Orient -> Inspect -> Pull -> Ship -> Close` loop 
 - **Inspect**: Read current demand with `keel mission next --status`, `keel pulse`, and `keel workshop`. Use `keel screen --static` or `keel topology --static` when board geometry or queue state is unclear.
 - **Pull**: Select one role-scoped slice with `keel next --role <role>` or operate on the explicit mission/story the human just requested.
 - **Ship**: Execute the slice, record proof, and advance lifecycle state.
-- **Close**: Land the relevant transition and the sealing commit that clears open-loop energy.
+- **Close**:
+  - Record the move in the mission `LOG.md` when operating under an active mission.
+  - Run `git status` when you need an open-loop check before the commit boundary.
+  - Execute `git commit` to land the sealing commit. The installed hooks run repo checks automatically and append `keel doctor --status` output to the commit message.
+  - If the commit is rejected, resolve the reported lint/test/board issue and retry the commit instead of leaving the loop partially open.
+- **Re-orient**: After the commit lands, run `keel doctor --status` and `keel flow --scene` to see what the board needs next. Continue immediately unless the next step is genuinely manual or the human redirected the task.
 
 ### Session Start & Human Interaction
 When a human user opens the chat or "pokes" you (for example, "Wake up" or "I'm poking you"), you MUST immediately perform the `Orient` and `Inspect` halves of the turn loop by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
