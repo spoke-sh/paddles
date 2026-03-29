@@ -1832,6 +1832,7 @@ Rules:\n\
 - Read the interpretation context before choosing.\n\
 - Answer when the synthesizer can reply directly without more workspace resources.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
+- Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
 - Use write_file, replace_in_file, or apply_patch only when the requested next step is an explicit workspace edit.\n\
 - Search, list_files, read, inspect, shell, diff, refine, or branch when more workspace evidence or action is needed.\n\
@@ -1845,6 +1846,9 @@ Workspace root:\n\
 Interpretation context:\n\
 {}\n\
 \n\
+Interpretation tool hints:\n\
+{}\n\
+\n\
 Recent turns:\n\
 {}\n\
 \n\
@@ -1852,6 +1856,7 @@ Current user request:\n\
 {}\n",
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
+        format_interpretation_tool_hints(prompt.interpretation),
         format_recent_turn_list(&prompt.request.recent_turns),
         prompt.user_prompt,
     )
@@ -1882,12 +1887,16 @@ Do not answer the user directly.\n\
 Interpretation context:\n\
 {}\n\
 \n\
+Interpretation tool hints:\n\
+{}\n\
+\n\
 Recent turns:\n\
 {}\n\
 \n\
 Current user request:\n\
 {}\n",
         format_interpretation_context_digest(&request.interpretation),
+        format_interpretation_tool_hints(&request.interpretation),
         format_recent_turn_list(&request.recent_turns),
         request.user_prompt,
     )
@@ -1918,6 +1927,7 @@ Rules:\n\
 - List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
 - Inspect when a read-only workspace command would clarify state.\n\
+- Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request and has not been used yet.\n\
 - Use shell, diff, or edit actions when the requested next step is a concrete workspace action that should stay inside the planner loop.\n\
 - Refine when an earlier search needs a sharper query.\n\
 - Branch when the investigation should split into multiple subqueries.\n\
@@ -1931,6 +1941,9 @@ Workspace root:\n\
 Interpretation context:\n\
 {}\n\
 \n\
+Interpretation tool hints:\n\
+{}\n\
+\n\
 Recent turns:\n\
 {}\n\
 \n\
@@ -1941,6 +1954,7 @@ Current user request:\n\
 {}\n",
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
+        format_interpretation_tool_hints(prompt.interpretation),
         format_recent_turn_list(&prompt.request.recent_turns),
         format_planner_loop_state_digest(prompt.request),
         prompt.user_prompt,
@@ -1971,12 +1985,16 @@ Do not answer the user directly.\n\
 Interpretation context:\n\
 {}\n\
 \n\
+Interpretation tool hints:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
 Current user request:\n\
 {}\n",
         format_interpretation_context_digest(&request.interpretation),
+        format_interpretation_tool_hints(&request.interpretation),
         format_planner_loop_state_digest(request),
         request.user_prompt,
     )
@@ -2205,7 +2223,7 @@ fn insufficient_evidence_reply(prompt: &str) -> String {
 
 fn citation_sources(workspace_root: &Path, evidence: &EvidenceBundle) -> Vec<String> {
     let mut sources = Vec::new();
-    for item in &evidence.items {
+    for item in prioritized_evidence_items(evidence) {
         let source = normalize_citation_source(workspace_root, &item.source);
         if !sources.contains(&source) {
             sources.push(source);
@@ -2278,7 +2296,7 @@ fn grounded_answer_fallback(workspace_root: &Path, evidence: &EvidenceBundle) ->
         evidence.summary.clone(),
     ];
 
-    for item in evidence.items.iter().take(3) {
+    for item in prioritized_evidence_items(evidence).into_iter().take(3) {
         lines.push(format!(
             "- {}: {}",
             normalize_citation_source(workspace_root, &item.source),
@@ -2287,6 +2305,27 @@ fn grounded_answer_fallback(workspace_root: &Path, evidence: &EvidenceBundle) ->
     }
 
     lines.join("\n")
+}
+
+fn prioritized_evidence_items(
+    evidence: &EvidenceBundle,
+) -> Vec<&crate::domain::ports::EvidenceItem> {
+    let mut items = evidence.items.iter().enumerate().collect::<Vec<_>>();
+    items.sort_by_key(|(index, item)| (evidence_source_priority(&item.source), *index));
+    items.into_iter().map(|(_, item)| item).collect()
+}
+
+fn evidence_source_priority(source: &str) -> usize {
+    if source.starts_with("command: ")
+        || source.starts_with("git diff")
+        || source.starts_with("diff: ")
+    {
+        return 0;
+    }
+    if source.contains('/') || source.ends_with(".md") {
+        return 1;
+    }
+    2
 }
 
 fn normalize_citation_source(workspace_root: &Path, source: &str) -> String {
@@ -2385,7 +2424,10 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
     if evidence.items.is_empty() {
         lines.push("No ranked evidence items were attached.".to_string());
     } else {
-        for item in evidence.items.iter().take(MAX_CONTEXT_HITS) {
+        for item in prioritized_evidence_items(evidence)
+            .into_iter()
+            .take(MAX_CONTEXT_HITS)
+        {
             lines.push(format!(
                 "- [{}] {}: {}",
                 item.rank,
@@ -2404,6 +2446,26 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
 
 fn format_interpretation_context_digest(context: &InterpretationContext) -> String {
     context.render()
+}
+
+fn format_interpretation_tool_hints(context: &InterpretationContext) -> String {
+    if context.tool_hints.is_empty() {
+        return "No interpretation tool hints were available.".to_string();
+    }
+
+    context
+        .tool_hints
+        .iter()
+        .map(|hint| {
+            format!(
+                "- {} ({}) — {}",
+                hint.action.summary(),
+                hint.source,
+                trim_for_context(&hint.note, 160)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn format_recent_turn_list(turns: &[String]) -> String {
@@ -3185,6 +3247,14 @@ fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
         };
     }
 
+    if let Some(action) = best_interpretation_workspace_hint(request, true) {
+        return InitialActionDecision {
+            action: InitialAction::Workspace { action },
+            rationale: "prefer a concrete interpretation-derived workspace action when the initial action reply is invalid"
+                .to_string(),
+        };
+    }
+
     if request.user_prompt.split_whitespace().count() <= 6 && request.loop_state.steps.is_empty() {
         return InitialActionDecision {
             action: InitialAction::Answer,
@@ -3218,6 +3288,14 @@ fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision
         };
     }
 
+    if let Some(action) = best_interpretation_workspace_hint(request, false) {
+        return RecursivePlannerDecision {
+            action: PlannerAction::Workspace { action },
+            rationale: "use a relevant interpretation-derived workspace action when the planner reply is invalid"
+                .to_string(),
+        };
+    }
+
     if request.loop_state.steps.is_empty() && request.loop_state.evidence_items.is_empty() {
         return RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -3238,6 +3316,28 @@ fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision
         rationale: "stop after invalid planner replies once some loop state already exists"
             .to_string(),
     }
+}
+
+fn best_interpretation_workspace_hint(
+    request: &PlannerRequest,
+    allow_reuse: bool,
+) -> Option<WorkspaceAction> {
+    request
+        .interpretation
+        .tool_hints
+        .iter()
+        .find(|hint| allow_reuse || !planner_loop_used_action(&request.loop_state, &hint.action))
+        .map(|hint| hint.action.clone())
+}
+
+fn planner_loop_used_action(
+    loop_state: &crate::domain::ports::PlannerLoopState,
+    action: &WorkspaceAction,
+) -> bool {
+    loop_state.steps.iter().any(|step| match &step.action {
+        PlannerAction::Workspace { action: existing } => existing == action,
+        _ => false,
+    })
 }
 
 fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
@@ -3586,15 +3686,17 @@ impl ConversationFactory for StaticConversationFactory {
 mod tests {
     use super::{
         AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, QwenGenerationConfig, SiftAgentAdapter,
-        ToolCall, extract_json_payload, format_qwen_prompt, generation_sampling, infer_tool_call,
-        is_follow_up_execution_request, normalize_relative_path, preferred_qwen_weight_dtype,
-        should_prefer_tools, should_retry_qwen_on_cpu_message, trim_for_context,
+        ToolCall, extract_json_payload, format_qwen_prompt, generation_sampling,
+        grounded_answer_fallback, infer_tool_call, is_follow_up_execution_request,
+        normalize_relative_path, preferred_qwen_weight_dtype, should_prefer_tools,
+        should_retry_qwen_on_cpu_message, trim_for_context,
     };
     use crate::domain::model::{NullTurnEventSink, TurnIntent};
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, PlannerDecision,
-        PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-        RetainedEvidence, WorkspaceAction,
+        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, InterpretationToolHint,
+        PlannerAction, PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+        PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -4072,6 +4174,13 @@ mod tests {
                         .to_string(),
                 },
             ],
+            tool_hints: vec![InterpretationToolHint {
+                source: "INSTRUCTIONS.md".to_string(),
+                action: WorkspaceAction::Inspect {
+                    command: "keel mission next --status".to_string(),
+                },
+                note: "Inspect current demand on the board.".to_string(),
+            }],
         };
         let request = PlannerRequest::new(
             "What's next on the board?",
@@ -4096,6 +4205,8 @@ mod tests {
         assert!(prompt.contains("AGENTS.md"));
         assert!(prompt.contains("POLICY.md"));
         assert!(prompt.contains("Use AGENTS guidance before choosing the next action."));
+        assert!(prompt.contains("Interpretation tool hints"));
+        assert!(prompt.contains("keel mission next --status"));
         assert!(prompt.contains("Recent turns"));
         assert!(prompt.contains("user: previous turn"));
     }
@@ -4130,6 +4241,142 @@ mod tests {
                 }
             }
         );
+    }
+
+    #[test]
+    fn invalid_initial_action_replies_fall_back_to_interpretation_tool_hints() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "not json",
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+        );
+
+        let request = PlannerRequest::new(
+            "What's the next step on the keel board?",
+            workspace.path(),
+            InterpretationContext {
+                summary: "Operator docs include relevant keel inspection commands.".to_string(),
+                documents: vec![],
+                tool_hints: vec![InterpretationToolHint {
+                    source: "INSTRUCTIONS.md".to_string(),
+                    action: WorkspaceAction::Inspect {
+                        command: "keel mission next --status".to_string(),
+                    },
+                    note: "Inspect current demand on the board.".to_string(),
+                }],
+            },
+            crate::domain::ports::PlannerBudget::default(),
+        );
+
+        let decision = adapter
+            .select_initial_action(&request)
+            .expect("initial action fallback");
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "keel mission next --status".to_string()
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_planner_replies_fall_back_to_unused_interpretation_tool_hints() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "not json",
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+        );
+
+        let request = PlannerRequest::new(
+            "What's the next step on the keel board?",
+            workspace.path(),
+            InterpretationContext {
+                summary: "Operator docs include relevant keel inspection commands.".to_string(),
+                documents: vec![],
+                tool_hints: vec![InterpretationToolHint {
+                    source: "INSTRUCTIONS.md".to_string(),
+                    action: WorkspaceAction::Inspect {
+                        command: "keel mission next --status".to_string(),
+                    },
+                    note: "Inspect current demand on the board.".to_string(),
+                }],
+            },
+            crate::domain::ports::PlannerBudget::default(),
+        )
+        .with_loop_state(PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Search {
+                        query: "What's the next step on the keel board?".to_string(),
+                        intent: Some("initial planner fallback".to_string()),
+                    },
+                },
+                outcome: "searched operator docs".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "AGENTS.md".to_string(),
+                snippet: "Inspect current demand with `keel mission next --status`.".to_string(),
+                rationale: "board navigation guidance".to_string(),
+                rank: 1,
+            }],
+            notes: vec![],
+            pending_branches: vec![],
+            latest_gatherer_trace: None,
+        });
+
+        let decision = adapter
+            .select_planner_action(&request)
+            .expect("planner action fallback");
+        assert_eq!(
+            decision.action,
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "keel mission next --status".to_string()
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn grounded_answer_fallback_prioritizes_command_evidence() {
+        let evidence = EvidenceBundle::new(
+            "Planner collected board evidence.",
+            vec![
+                EvidenceItem {
+                    source: "AGENTS.md".to_string(),
+                    snippet: "Inspect current demand with `keel mission next --status`."
+                        .to_string(),
+                    rationale: "operator guidance".to_string(),
+                    rank: 1,
+                },
+                EvidenceItem {
+                    source: "command: keel mission next --status".to_string(),
+                    snippet: "No actionable missions found.".to_string(),
+                    rationale: "live board state".to_string(),
+                    rank: 0,
+                },
+            ],
+        );
+
+        let reply = grounded_answer_fallback(Path::new("."), &evidence);
+        let command_index = reply
+            .find("command: keel mission next --status")
+            .expect("command evidence");
+        let agents_index = reply.find("AGENTS.md").expect("doc evidence");
+        assert!(command_index < agents_index);
     }
 
     #[test]

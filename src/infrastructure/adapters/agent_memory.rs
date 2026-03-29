@@ -1,5 +1,7 @@
-use crate::domain::ports::{InterpretationContext, InterpretationDocument};
-use std::collections::HashSet;
+use crate::domain::ports::{
+    InterpretationContext, InterpretationDocument, InterpretationToolHint, WorkspaceAction,
+};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,6 +11,7 @@ const USER_MEMORY_RELATIVE_PATH: &str = ".config/paddles/AGENTS.md";
 const SYSTEM_MEMORY_PATH: &str = "/etc/paddles/AGENTS.md";
 const MAX_MEMORY_FILE_CHARS: usize = 12_000;
 const MAX_INTERPRETATION_DOCS: usize = 5;
+const MAX_INTERPRETATION_TOOL_HINTS: usize = 6;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AgentMemory {
@@ -87,13 +90,14 @@ impl AgentMemory {
             return InterpretationContext::default();
         }
 
-        let mut documents = self
+        let mut scored_documents = self
             .documents
             .iter()
             .map(|document| {
                 let (excerpt, score) = select_relevant_excerpt(&document.contents, user_prompt);
                 (
                     score + interpretation_kind_score(document.kind),
+                    document,
                     InterpretationDocument {
                         source: display_path(workspace_root, &document.path),
                         excerpt,
@@ -101,23 +105,30 @@ impl AgentMemory {
                 )
             })
             .collect::<Vec<_>>();
-        documents.sort_by(|(left_score, left_doc), (right_score, right_doc)| {
+        scored_documents.sort_by(|(left_score, _, left_doc), (right_score, _, right_doc)| {
             right_score
                 .cmp(left_score)
                 .then_with(|| left_doc.source.cmp(&right_doc.source))
         });
-        let documents = documents
+        let selected_documents = scored_documents
             .into_iter()
             .take(MAX_INTERPRETATION_DOCS)
-            .map(|(_, document)| document)
             .collect::<Vec<_>>();
+        let documents = selected_documents
+            .iter()
+            .map(|(_, _, document)| document.clone())
+            .collect::<Vec<_>>();
+        let tool_hints =
+            select_relevant_tool_hints(user_prompt, workspace_root, &selected_documents);
 
         InterpretationContext {
             summary: format!(
-                "Operator interpretation context assembled from {} memory and linked guidance document(s). Use it before choosing recursive workspace actions.",
-                documents.len()
+                "Operator interpretation context assembled from {} memory and linked guidance document(s) and {} tool hint(s). Use it before choosing recursive workspace actions.",
+                documents.len(),
+                tool_hints.len()
             ),
             documents,
+            tool_hints,
         }
     }
 
@@ -441,6 +452,174 @@ fn prompt_terms(user_prompt: &str) -> Vec<String> {
     terms
 }
 
+fn select_relevant_tool_hints(
+    user_prompt: &str,
+    workspace_root: &Path,
+    selected_documents: &[(usize, &MemoryDocument, InterpretationDocument)],
+) -> Vec<InterpretationToolHint> {
+    let query_terms = prompt_terms(user_prompt);
+    let mut deduped = HashMap::<String, (usize, InterpretationToolHint)>::new();
+
+    for (document_score, memory_document, interpretation_document) in selected_documents {
+        for (command, note) in extract_command_hints(&memory_document.contents) {
+            let Some(action) = tool_hint_action_for_command(&command) else {
+                continue;
+            };
+            let normalized = format!(
+                "{}\n{}",
+                command.to_ascii_lowercase(),
+                note.to_ascii_lowercase()
+            );
+            let overlap = query_terms
+                .iter()
+                .filter(|term| normalized.contains(term.as_str()))
+                .count();
+            let score = document_score.saturating_mul(4)
+                + overlap.saturating_mul(6)
+                + usize::from(matches!(action, WorkspaceAction::Inspect { .. })) * 2;
+            if score == 0 {
+                continue;
+            }
+
+            let hint = InterpretationToolHint {
+                source: display_path(workspace_root, &memory_document.path),
+                action,
+                note,
+            };
+            let key = format!("{}::{}", hint.action.label(), hint.action.summary());
+            let replace = deduped
+                .get(&key)
+                .map(|(existing_score, _)| score > *existing_score)
+                .unwrap_or(true);
+            if replace {
+                deduped.insert(key, (score, hint));
+            }
+        }
+
+        if query_terms.is_empty() {
+            for (command, note) in extract_command_hints(&interpretation_document.excerpt) {
+                let Some(action) = tool_hint_action_for_command(&command) else {
+                    continue;
+                };
+                let hint = InterpretationToolHint {
+                    source: interpretation_document.source.clone(),
+                    action,
+                    note,
+                };
+                let key = format!("{}::{}", hint.action.label(), hint.action.summary());
+                deduped
+                    .entry(key)
+                    .or_insert((document_score.saturating_mul(2), hint));
+            }
+        }
+    }
+
+    let mut hints = deduped.into_values().collect::<Vec<_>>();
+    hints.sort_by(|(left_score, left_hint), (right_score, right_hint)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left_hint.source.cmp(&right_hint.source))
+            .then_with(|| left_hint.action.summary().cmp(&right_hint.action.summary()))
+    });
+    hints
+        .into_iter()
+        .take(MAX_INTERPRETATION_TOOL_HINTS)
+        .map(|(_, hint)| hint)
+        .collect()
+}
+
+fn extract_command_hints(contents: &str) -> Vec<(String, String)> {
+    let mut hints = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        for snippet in extract_inline_code_spans(trimmed) {
+            if looks_like_shell_command(&snippet) {
+                hints.push((snippet, trimmed.to_string()));
+            }
+        }
+    }
+    hints
+}
+
+fn extract_inline_code_spans(line: &str) -> Vec<String> {
+    let mut spans = Vec::new();
+    let mut in_tick = false;
+    let mut current = String::new();
+
+    for ch in line.chars() {
+        if ch == '`' {
+            if in_tick {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    spans.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            in_tick = !in_tick;
+            continue;
+        }
+
+        if in_tick {
+            current.push(ch);
+        }
+    }
+
+    spans
+}
+
+fn looks_like_shell_command(candidate: &str) -> bool {
+    let normalized = candidate.trim();
+    [
+        "keel ", "git ", "rg ", "find ", "cat ", "sed -n", "head ", "tail ", "pwd", "ls",
+    ]
+    .iter()
+    .any(|prefix| normalized.starts_with(prefix))
+}
+
+fn tool_hint_action_for_command(command: &str) -> Option<WorkspaceAction> {
+    let normalized = command.trim();
+    if normalized.is_empty() || !is_read_only_command(normalized) {
+        return None;
+    }
+
+    Some(WorkspaceAction::Inspect {
+        command: normalized.to_string(),
+    })
+}
+
+fn is_read_only_command(command: &str) -> bool {
+    [
+        "keel health",
+        "keel flow",
+        "keel doctor",
+        "keel mission ",
+        "keel pulse",
+        "keel workshop",
+        "keel screen ",
+        "keel topology ",
+        "keel story show",
+        "keel voyage show",
+        "keel epic show",
+        "keel bearing list",
+        "git status",
+        "git diff",
+        "git log",
+        "rg ",
+        "ls",
+        "find ",
+        "cat ",
+        "sed -n",
+        "head ",
+        "tail ",
+        "pwd",
+    ]
+    .iter()
+    .any(|prefix| command.starts_with(prefix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AgentMemory, MemorySearchPaths};
@@ -514,5 +693,41 @@ mod tests {
         assert!(interpretation.sources().contains(&"AGENTS.md".to_string()));
         assert!(interpretation.sources().contains(&"POLICY.md".to_string()));
         assert!(interpretation.sources().contains(&"README.md".to_string()));
+    }
+
+    #[test]
+    fn interpretation_context_extracts_relevant_read_only_tool_hints() {
+        let sandbox = tempfile::tempdir().expect("sandbox");
+        let session_root = sandbox.path().join("workspace/project");
+        fs::create_dir_all(&session_root).expect("session root");
+        fs::write(
+            session_root.join("AGENTS.md"),
+            "Inspect current demand with `keel mission next --status`, `keel pulse`, and `keel workshop`.\nDo not use `keel story submit <id>` as a read-only probe.",
+        )
+        .expect("agents");
+
+        let memory = AgentMemory::load_with_search_paths(
+            &session_root,
+            MemorySearchPaths {
+                system: None,
+                user: None,
+            },
+        );
+
+        let interpretation =
+            memory.build_interpretation_context("What's next on the keel board?", &session_root);
+
+        assert!(
+            interpretation
+                .tool_hints
+                .iter()
+                .any(|hint| hint.action.summary().contains("keel mission next --status"))
+        );
+        assert!(
+            interpretation
+                .tool_hints
+                .iter()
+                .all(|hint| !hint.action.summary().contains("keel story submit"))
+        );
     }
 }

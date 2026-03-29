@@ -24,7 +24,7 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Runtime Routing Contract
 
 - The model should choose the next bounded action from a controller-defined schema; the controller validates and executes it safely.
-- The primary mech-suit path now assembles interpretation context and asks the **planner lane** to choose the first bounded action before route selection.
+- The primary mech-suit path now assembles interpretation context, extracted tool hints from foundational docs, and asks the **planner lane** to choose the first bounded action before route selection.
 - The **synthesizer lane** remains the final answer path for direct responses and grounded responses after planner work.
 - Turns should improve through recursive context work instead of project-specific hardcoded intents or top-level heuristic routing.
 - Repository-question answers should include file citations by default.

@@ -13,7 +13,8 @@ The backbone has five layers:
 
 1. `InterpretationContextAssembler`
    Builds turn-time context from `AGENTS.md`, linked foundational docs, recent
-   turns, retained evidence, and prior tool outputs.
+   turns, retained evidence, prior tool outputs, and extracted read-only tool
+   hints from foundational guidance.
 
 2. `PlannerLane`
    A planner-capable model chooses the next bounded action before route
@@ -57,6 +58,7 @@ final synthesis.
 - Interpretation should happen before routing commits to a path.
 - Top-level routing should come from a constrained model-selected next action, not a controller string heuristic.
 - `AGENTS.md` is part of interpretation context, not just answer prompting.
+- linked foundational docs should be able to bootstrap concrete read-only tool hints for the planner before it falls back to generic search
 - Planner and synthesizer are different roles and may use different models.
 - Keel is an evidence domain, not a first-class runtime intent.
 - Recursive planning must stay bounded and observable.
@@ -132,6 +134,7 @@ The repo now contains the main pieces of the target architecture:
 - a Sift-backed planner/synth model adapter in [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) and [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs)
 - a local gatherer backend in [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs)
 - interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
+- interpretation-time tool hint extraction from that same memory/guidance layer in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
 - a paddles-owned trace contract in [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs)
 - a reusable internal workspace crate for conversation/thread/session primitives in [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)
@@ -143,6 +146,7 @@ The repo now contains the main pieces of the target architecture:
 The remaining transitional pieces are now smaller:
 
 - the main mech-suit service now keeps explicit workspace actions inside the planner loop instead of routing them through a separate top-level bridge
+- interpretation-driven fallbacks now prefer relevant read-only command hints from foundational docs before generic search/stop
 - legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
 - the default `sift-autonomous` gatherer path now runs bounded graph-mode retrieval for recursive planner `search` / `refine` work and preserves graph episode/frontier/branch state as typed `paddles` metadata

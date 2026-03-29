@@ -36,11 +36,12 @@ pub enum PlannerCapability {
 pub struct InterpretationContext {
     pub summary: String,
     pub documents: Vec<InterpretationDocument>,
+    pub tool_hints: Vec<InterpretationToolHint>,
 }
 
 impl InterpretationContext {
     pub fn is_empty(&self) -> bool {
-        self.summary.trim().is_empty() && self.documents.is_empty()
+        self.summary.trim().is_empty() && self.documents.is_empty() && self.tool_hints.is_empty()
     }
 
     pub fn sources(&self) -> Vec<String> {
@@ -63,6 +64,17 @@ impl InterpretationContext {
                 document.excerpt.trim()
             ));
         }
+        if !self.tool_hints.is_empty() {
+            sections.push("--- Tool Hints ---".to_string());
+            sections.extend(self.tool_hints.iter().map(|hint| {
+                format!(
+                    "- {} ({}) — {}",
+                    hint.action.summary(),
+                    hint.source,
+                    hint.note
+                )
+            }));
+        }
         sections.join("\n\n")
     }
 }
@@ -71,6 +83,13 @@ impl InterpretationContext {
 pub struct InterpretationDocument {
     pub source: String,
     pub excerpt: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterpretationToolHint {
+    pub source: String,
+    pub action: WorkspaceAction,
+    pub note: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -404,8 +423,8 @@ pub struct PlannerDecision {
 #[cfg(test)]
 mod tests {
     use super::{
-        InitialAction, InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget,
-        ThreadDecisionRequest, WorkspaceAction,
+        InitialAction, InterpretationContext, InterpretationDocument, InterpretationToolHint,
+        PlannerAction, PlannerBudget, ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
         ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadCandidate,
@@ -420,11 +439,20 @@ mod tests {
                 source: "AGENTS.md".to_string(),
                 excerpt: "guidance".to_string(),
             }],
+            tool_hints: vec![InterpretationToolHint {
+                source: "INSTRUCTIONS.md".to_string(),
+                action: WorkspaceAction::Inspect {
+                    command: "keel mission next --status".to_string(),
+                },
+                note: "Inspect current demand on the board.".to_string(),
+            }],
         };
 
         let rendered = context.render();
         assert!(rendered.contains("operator memory"));
         assert!(rendered.contains("AGENTS.md"));
+        assert!(rendered.contains("Tool Hints"));
+        assert!(rendered.contains("keel mission next --status"));
         assert_eq!(context.sources(), vec!["AGENTS.md".to_string()]);
     }
 

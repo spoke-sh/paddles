@@ -25,7 +25,7 @@ Instead, `paddles` should behave like a bounded recursive harness.
 ```mermaid
 flowchart TD
     U["User Turn"]
-    I["Interpretation Context<br/>AGENTS.md + linked docs + recent turns + prior tool state"]
+    I["Interpretation Context<br/>AGENTS.md + linked docs + tool hints + recent turns + prior tool state"]
     P["Planner Lane<br/>planner-capable model"]
     D{"Next bounded action?"}
     A["Validated resource action<br/>search / list_files / read / inspect / shell / diff / edit / refine / branch"]
@@ -51,7 +51,7 @@ Routing is workload-specific. The point is not to find one default model for eve
 ```mermaid
 flowchart LR
     Turn["Incoming Turn"]
-    Interpret["Interpretation context<br/>AGENTS.md + linked docs + recent turns + local state"]
+    Interpret["Interpretation context<br/>AGENTS.md + linked docs + tool hints + recent turns + local state"]
     Decide["Model-selected next action<br/>bounded schema"]
     Direct["Answer/synthesize now"]
     Tool["Concrete workspace action"]
@@ -82,7 +82,7 @@ initial path for normal turns.
 ```mermaid
 flowchart TD
     U["User turn"]
-    I["Interpretation context<br/>AGENTS.md + linked docs + turns + local state"]
+    I["Interpretation context<br/>AGENTS.md + linked docs + tool hints + turns + local state"]
     M["Action-selection model"]
     C{"Choose one"}
     A["answer / synthesize"]
@@ -150,8 +150,9 @@ The repository now implements the recursive harness in a bounded local-first for
 Today, the runtime has:
 
 - a planner lane that sees interpretation context before choosing the first bounded action
-- hierarchical `AGENTS.md` reload plus linked foundational guidance excerpts at interpretation time
+- hierarchical `AGENTS.md` reload plus linked foundational guidance excerpts and read-only command hints at interpretation time
 - a model-directed first action schema that can choose `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), `refine`, `branch`, or `stop`
+- interpretation-aware fallback selection that prefers relevant command hints from foundational docs before generic search/stop
 - a bounded recursive loop for concrete workspace actions, `refine`, `branch`, and `stop`
 - a distinct synthesizer lane that answers from the resulting evidence bundle
 - a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
