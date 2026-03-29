@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.528075750-07:00
+mode: manual
+---
+The stream now covers gatherer capability, gatherer summary, planner summary, tool called/finished, fallback, context assembly, and synthesis readiness via TurnEvent variants and render_turn_event in src/application/mod.rs. The repository-question, context1 fallback, and git status transcripts in EVIDENCE_FIRST_TURNS.md exercise those paths.

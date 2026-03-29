@@ -1,0 +1,127 @@
+---
+recorded_at: 2026-03-28T18:47:15.601224739-07:00
+mode: manual
+files: [".keel/epics/VFDMnu8k9/voyages/VFDMp3Zn3/EVIDENCE_FIRST_TURNS.md"]
+---
+
+--- File: EVIDENCE_FIRST_TURNS.md ---
+# Evidence-First Turn Proof
+
+This artifact captures the mission outcome for the default evidence-first,
+observable REPL turn model.
+
+## Prior Failure Mode
+
+Before this slice, repository questions could stay on a hidden synthesizer-side
+retrieval path and return weak generic prose without visible routing steps or
+default file citations.
+
+Representative symptom:
+
+```text
+>> How does memory work in paddles?
+[INFO] Context assembly (initial) produced 5 hit(s), retained 5 artifact(s), pruned 0.
+Chord Response: To help you understand how memory works in PaddleS, I could suggest that we have a look at the documentation...
+```
+
+That behavior hid the retrieval path and did not ground the answer in cited
+repository evidence.
+
+## New Default Repository-Question Route
+
+Live command:
+
+```bash
+just paddles --prompt "How does memory work in paddles?"
+```
+
+Observed turn stream:
+
+```text
+• Classified turn
+  └ repository-question
+• Routed turn
+  └ repository question will use gatherer lane 'sift-autonomous' (SiftAutonomous) before synthesizer lane 'qwen-1.5b'
+• Checked gatherer capability
+  └ sift-autonomous: available
+• Gathered context with sift-autonomous
+  └ Autonomous `heuristic` gatherer collected 5 evidence item(s) for `agent_memory agents.md implementation memory paddles reload source` across 1 turn(s); stop reason: no-further-queries.
+    Sources: src/infrastructure/adapters/agent_memory.rs, README.md, ARCHITECTURE.md, POLICY.md
+• Reviewed planner trace
+  └ strategy=heuristic, turns=1, steps=1, stop=no-further-queries
+```
+
+Grounded cited synthesis is also covered by regression tests:
+
+- `application::tests::repository_questions_use_gatherer_lane_when_available`
+- `infrastructure::adapters::sift_agent::tests::repository_turns_fall_back_to_grounded_evidence_when_model_is_confused`
+
+Those tests prove that repository questions take the explicit gatherer path and
+that weak model synthesis degrades to cited evidence instead of unsupported
+repository prose.
+
+## Gatherer-Missing Fallback
+
+Live command:
+
+```bash
+just paddles --gatherer-provider context1 --prompt "How does memory work in paddles?"
+```
+
+Observed turn stream:
+
+```text
+• Classified turn
+  └ repository-question
+• Routed turn
+  └ repository question will use gatherer lane 'context-1' (Context1) before synthesizer lane 'qwen-1.5b'
+• Checked gatherer capability
+  └ context-1: harness-required: Context-1 requires a dedicated search harness. Re-run with --context1-harness-ready only when that external harness is actually available.
+• Fell back
+  └ gatherer: gatherer unavailable for a repository question: Context-1 requires a dedicated search harness. Re-run with --context1-harness-ready only when that external harness is actually available.
+• Fell back
+  └ grounded-synthesis: no explicit evidence bundle was available for this repository question
+• Reported insufficient evidence
+  └ No cited repository sources were available.
+Chord Response: I couldn't gather enough repository evidence to answer `How does memory work in paddles?` confidently.
+
+Sources: none
+```
+
+This proves the controller no longer pretends that gatherer-backed evidence ran
+when the gatherer is unavailable.
+
+## Default Action Stream For Workspace Actions
+
+Live command:
+
+```bash
+just paddles --prompt "What's the current git status"
+```
+
+Observed turn stream:
+
+```text
+• Classified turn
+  └ deterministic-action
+• Routed turn
+  └ turn will stay on synthesizer lane 'qwen-1.5b' while gatherer lane 'sift-autonomous' (SiftAutonomous) remains available
+• Ran shell command
+  └ git status
+• Completed shell
+  └ Shell command: git status
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+```
+
+This proves the Codex-style action stream is the default REPL UX rather than a
+verbose-only mode.
+
+## Quality Gates
+
+The completed slice passed:
+
+- `cargo test`
+- `cargo nextest run`
+- `just quality`
+

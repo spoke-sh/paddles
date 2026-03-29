@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.357149800-07:00
+mode: manual
+---
+Natural repo questions are covered directly. The controller normalizes 'How does memory work in paddles?' into a repository gather query in application::tests::repository_queries_are_normalized_for_gathering, and the live transcript shows it routing through sift-autonomous instead of generic chat handling.

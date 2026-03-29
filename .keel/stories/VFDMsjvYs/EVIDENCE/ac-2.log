@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.429292401-07:00
+mode: manual
+---
+Missing evidence now produces an explicit insufficiency response rather than unsupported repository prose. Regression coverage: infrastructure::adapters::sift_agent::tests::repository_turns_without_evidence_report_insufficient_evidence. Live fallback transcript is captured in EVIDENCE_FIRST_TURNS.md.

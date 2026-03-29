@@ -22,8 +22,8 @@ mission: VFDMn6Be7
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Default Gatherer, Grounded Answers, And Action Stream](voyages/VFDMp3Zn3/) | planned | 0/5 |
+| [Default Gatherer, Grounded Answers, And Action Stream](voyages/VFDMp3Zn3/) | done | 5/5 |
 <!-- END GENERATED -->

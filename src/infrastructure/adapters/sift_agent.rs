@@ -1,4 +1,5 @@
 use super::agent_memory::AgentMemory;
+use crate::domain::model::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 use crate::domain::ports::EvidenceBundle;
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -36,6 +37,7 @@ const MAX_FILE_CHARS: usize = 16_000;
 const MAX_LISTED_FILES: usize = 200;
 const MAX_CONTEXT_HITS: usize = 5;
 const RETAINED_ARTIFACT_LIMIT: usize = 5;
+const MAX_CITATIONS: usize = 4;
 const QWEN_SYSTEM_PROMPT: &str = "<|im_start|>system\nYou are Paddles, a helpful AI assistant and mech suit operator. You provide concise and accurate technical advice.<|im_end|>\n";
 
 pub struct SiftAgentAdapter {
@@ -755,13 +757,35 @@ impl SiftAgentAdapter {
     }
 
     pub fn respond(&self, prompt: &str) -> Result<String> {
-        self.respond_with_evidence(prompt, None)
+        let intent = legacy_turn_intent(prompt, None);
+        self.respond_internal(prompt, intent, None, &NullTurnEventSink)
     }
 
     pub fn respond_with_evidence(
         &self,
         prompt: &str,
         gathered_evidence: Option<&EvidenceBundle>,
+    ) -> Result<String> {
+        let intent = legacy_turn_intent(prompt, gathered_evidence);
+        self.respond_internal(prompt, intent, gathered_evidence, &NullTurnEventSink)
+    }
+
+    pub fn respond_for_turn(
+        &self,
+        prompt: &str,
+        turn_intent: TurnIntent,
+        gathered_evidence: Option<&EvidenceBundle>,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<String> {
+        self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
+    }
+
+    fn respond_internal(
+        &self,
+        prompt: &str,
+        turn_intent: TurnIntent,
+        gathered_evidence: Option<&EvidenceBundle>,
+        event_sink: &dyn TurnEventSink,
     ) -> Result<String> {
         let memory = AgentMemory::load(&self.workspace_root);
         if self.verbose.load(Ordering::Relaxed) >= 1 {
@@ -789,8 +813,9 @@ impl SiftAgentAdapter {
                 AgentTurnInput::new(&turn_id, "user", prompt).with_session_id(&state.session_id),
             ),
         );
-        let casual_turn = is_casual_prompt(prompt);
-        let prefer_tools = should_prefer_tools(prompt);
+        let casual_turn = turn_intent.is_casual();
+        let require_grounding = turn_intent.requires_gathered_evidence();
+        let prefer_tools = turn_intent.prefers_tools();
         let follow_up_execution = is_follow_up_execution_request(prompt);
         let mut pending_tool_call = if casual_turn {
             None
@@ -805,12 +830,28 @@ impl SiftAgentAdapter {
             )?
         } else if pending_tool_call.is_some() {
             String::new()
+        } else if require_grounding {
+            match gathered_evidence.filter(|bundle| !bundle.items.is_empty()) {
+                Some(evidence) => self.send_to_model(
+                    conversation.as_mut(),
+                    &build_grounded_turn_prompt(prompt, &recent_turns, &memory_prompt, evidence),
+                )?,
+                None => {
+                    event_sink.emit(TurnEvent::Fallback {
+                        stage: "grounded-synthesis".to_string(),
+                        reason:
+                            "no explicit evidence bundle was available for this repository question"
+                                .to_string(),
+                    });
+                    String::new()
+                }
+            }
         } else {
             let initial_local_context = self.combined_local_context(&working_local_context);
             let initial_context =
                 self.assemble_context(prompt, None, &initial_local_context, &working_retained)?;
             working_retained = initial_context.retained_artifacts.clone();
-            self.log_context_assembly("initial", &initial_context);
+            self.log_context_assembly("initial", &initial_context, event_sink);
 
             self.send_to_model(
                 conversation.as_mut(),
@@ -848,7 +889,28 @@ impl SiftAgentAdapter {
                 reply = fallback_casual_reply(prompt);
             }
         } else {
-            if pending_tool_call.is_none() {
+            if require_grounding {
+                if is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_some() {
+                    self.log_retry_reason(
+                        "grounded-retry",
+                        &reply,
+                        "empty or tool-like grounded response",
+                    );
+                    if let Some(evidence) =
+                        gathered_evidence.filter(|bundle| !bundle.items.is_empty())
+                    {
+                        reply = self.send_to_model(
+                            conversation.as_mut(),
+                            &build_grounded_retry_prompt(
+                                prompt,
+                                &recent_turns,
+                                &memory_prompt,
+                                evidence,
+                            ),
+                        )?;
+                    }
+                }
+            } else if pending_tool_call.is_none() {
                 if prefer_tools
                     && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
                 {
@@ -884,11 +946,17 @@ impl SiftAgentAdapter {
                 state.tool_counter += 1;
                 let call_id = format!("tool-{}", state.tool_counter);
                 let combined_context = self.combined_local_context(&working_local_context);
+                event_sink.emit(TurnEvent::ToolCalled {
+                    call_id: call_id.clone(),
+                    tool_name: tool_call.name().to_string(),
+                    invocation: describe_tool_call(&tool_call),
+                });
                 let result = match self.execute_tool(
                     &tool_call,
                     &call_id,
                     &combined_context,
                     &working_retained,
+                    event_sink,
                 ) {
                     Ok(result) => result,
                     Err(err) => ToolResult {
@@ -901,6 +969,11 @@ impl SiftAgentAdapter {
                 if let Some(retained) = result.retained_artifacts {
                     working_retained = retained;
                 }
+                event_sink.emit(TurnEvent::ToolFinished {
+                    call_id: call_id.clone(),
+                    tool_name: result.name.to_string(),
+                    summary: result.summary.clone(),
+                });
 
                 push_local_context(
                     &mut working_local_context,
@@ -942,6 +1015,15 @@ impl SiftAgentAdapter {
                     "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
             }
         }
+
+        reply = finalize_turn_reply(
+            &self.workspace_root,
+            prompt,
+            reply,
+            &turn_intent,
+            gathered_evidence,
+            event_sink,
+        );
 
         push_local_context(
             &mut working_local_context,
@@ -1000,7 +1082,12 @@ impl SiftAgentAdapter {
         }
     }
 
-    fn log_context_assembly(&self, label: &str, response: &ContextAssemblyResponse) {
+    fn log_context_assembly(
+        &self,
+        label: &str,
+        response: &ContextAssemblyResponse,
+        event_sink: &dyn TurnEventSink,
+    ) {
         if self.verbose.load(Ordering::Relaxed) >= 1 {
             println!(
                 "[INFO] Context assembly ({label}) produced {} hit(s), retained {} artifact(s), pruned {}.",
@@ -1009,6 +1096,12 @@ impl SiftAgentAdapter {
                 response.pruned_artifacts
             );
         }
+        event_sink.emit(TurnEvent::ContextAssembly {
+            label: label.to_string(),
+            hits: response.response.hits.len(),
+            retained_artifacts: response.retained_artifacts.len(),
+            pruned_artifacts: response.pruned_artifacts,
+        });
     }
 
     fn assemble_context(
@@ -1036,6 +1129,7 @@ impl SiftAgentAdapter {
         call_id: &str,
         local_context: &[LocalContextSource],
         retained_artifacts: &[RetainedArtifact],
+        event_sink: &dyn TurnEventSink,
     ) -> Result<ToolResult> {
         let verbose = self.verbose.load(Ordering::Relaxed);
         if verbose >= 1 {
@@ -1050,7 +1144,7 @@ impl SiftAgentAdapter {
                     local_context,
                     retained_artifacts,
                 )?;
-                self.log_context_assembly("search", &assembly);
+                self.log_context_assembly("search", &assembly, event_sink);
                 Ok(ToolResult {
                     name: "search",
                     summary: format_search_summary(query, &assembly),
@@ -1278,6 +1372,36 @@ Current user request:\n\
     )
 }
 
+fn build_grounded_turn_prompt(
+    user_prompt: &str,
+    recent_turns: &str,
+    memory_prompt: &str,
+    evidence: &EvidenceBundle,
+) -> String {
+    format!(
+        "You are Paddles, a local-first coding assistant operating inside a repository.\n\
+The user asked a repository question.\n\
+Answer ONLY from the gathered repository evidence below.\n\
+Do not refer the user to external documentation.\n\
+If the evidence is insufficient, say that explicitly.\n\
+Include source/file citations in the final answer.\n\
+Do not emit JSON or tool calls.\n\
+\n\
+Persistent operator memory:\n\
+{memory_prompt}\n\
+\n\
+Recent conversation:\n\
+{recent_turns}\n\
+\n\
+Gathered repository evidence:\n\
+{}\n\
+\n\
+Current user request:\n\
+{user_prompt}\n",
+        format_gathered_evidence_digest(Some(evidence)),
+    )
+}
+
 fn build_direct_turn_prompt(user_prompt: &str, memory_prompt: &str) -> String {
     format!(
         "You are Paddles, a local-first coding assistant.\n\
@@ -1305,6 +1429,34 @@ Persistent operator memory:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n"
+    )
+}
+
+fn build_grounded_retry_prompt(
+    user_prompt: &str,
+    recent_turns: &str,
+    memory_prompt: &str,
+    evidence: &EvidenceBundle,
+) -> String {
+    format!(
+        "Your last reply was empty or tried to call a tool for a repository question.\n\
+Answer directly in plain text using ONLY the gathered repository evidence.\n\
+Include source/file citations in the final answer.\n\
+If the evidence is insufficient, say so explicitly.\n\
+Do not emit JSON or tool calls.\n\
+\n\
+Persistent operator memory:\n\
+{memory_prompt}\n\
+\n\
+Recent conversation:\n\
+{recent_turns}\n\
+\n\
+Gathered repository evidence:\n\
+{}\n\
+\n\
+Current user request:\n\
+{user_prompt}\n",
+        format_gathered_evidence_digest(Some(evidence)),
     )
 }
 
@@ -1356,6 +1508,142 @@ Original user request:\n\
 If you need another tool, respond with ONLY one JSON tool call.\n\
 Otherwise answer the user directly and concisely."
     )
+}
+
+fn finalize_turn_reply(
+    workspace_root: &Path,
+    prompt: &str,
+    reply: String,
+    turn_intent: &TurnIntent,
+    gathered_evidence: Option<&EvidenceBundle>,
+    event_sink: &dyn TurnEventSink,
+) -> String {
+    if !turn_intent.requires_gathered_evidence() {
+        event_sink.emit(TurnEvent::SynthesisReady {
+            grounded: false,
+            citations: Vec::new(),
+            insufficient_evidence: false,
+        });
+        return reply;
+    }
+
+    let Some(evidence) = gathered_evidence.filter(|bundle| !bundle.items.is_empty()) else {
+        event_sink.emit(TurnEvent::SynthesisReady {
+            grounded: false,
+            citations: Vec::new(),
+            insufficient_evidence: true,
+        });
+        return insufficient_evidence_reply(prompt);
+    };
+
+    let citations = citation_sources(workspace_root, evidence);
+    let reply = if is_blank_model_reply(&reply)
+        || response_looks_ungrounded(&reply)
+        || !reply_contains_citation(&reply, &citations)
+    {
+        grounded_answer_fallback(workspace_root, evidence)
+    } else {
+        reply
+    };
+    let reply = ensure_citation_section(&reply, &citations);
+    event_sink.emit(TurnEvent::SynthesisReady {
+        grounded: true,
+        citations: citations.clone(),
+        insufficient_evidence: false,
+    });
+    reply
+}
+
+fn insufficient_evidence_reply(prompt: &str) -> String {
+    format!(
+        "I couldn't gather enough repository evidence to answer `{}` confidently.\n\nSources: none",
+        prompt.trim()
+    )
+}
+
+fn citation_sources(workspace_root: &Path, evidence: &EvidenceBundle) -> Vec<String> {
+    let mut sources = Vec::new();
+    for item in &evidence.items {
+        let source = normalize_citation_source(workspace_root, &item.source);
+        if !sources.contains(&source) {
+            sources.push(source);
+        }
+    }
+    if let Some(planner) = evidence.planner.as_ref() {
+        for artifact in &planner.retained_artifacts {
+            let source = normalize_citation_source(workspace_root, &artifact.source);
+            if !sources.contains(&source) {
+                sources.push(source);
+            }
+        }
+    }
+    let has_non_keel = sources.iter().any(|source| !is_keel_source(source));
+    if has_non_keel {
+        sources.retain(|source| !is_keel_source(source));
+    }
+    if sources.len() > MAX_CITATIONS {
+        sources.truncate(MAX_CITATIONS);
+    }
+    sources
+}
+
+fn is_keel_source(source: &str) -> bool {
+    source.starts_with(".keel/") || source.contains("/.keel/")
+}
+
+fn ensure_citation_section(reply: &str, citations: &[String]) -> String {
+    if citations.is_empty() || reply.contains("Sources:") {
+        return reply.to_string();
+    }
+
+    format!("{reply}\n\nSources: {}", citations.join(", "))
+}
+
+fn reply_contains_citation(reply: &str, citations: &[String]) -> bool {
+    citations.iter().any(|citation| {
+        reply.contains(citation)
+            || std::path::Path::new(citation)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|basename| reply.contains(basename))
+    })
+}
+
+fn response_looks_ungrounded(reply: &str) -> bool {
+    let normalized = reply.to_ascii_lowercase();
+    normalized.starts_with("i'm sorry")
+        || normalized.contains("i didn't understand")
+        || normalized.contains("could you please rephrase")
+        || normalized.contains("couldn't produce a usable response")
+        || normalized.contains("official documentation")
+        || normalized.contains("refer to")
+}
+
+fn grounded_answer_fallback(workspace_root: &Path, evidence: &EvidenceBundle) -> String {
+    let mut lines = vec![
+        "I couldn't verify a clean grounded synthesis from the model reply, so here is the gathered repository evidence directly:"
+            .to_string(),
+        evidence.summary.clone(),
+    ];
+
+    for item in evidence.items.iter().take(3) {
+        lines.push(format!(
+            "- {}: {}",
+            normalize_citation_source(workspace_root, &item.source),
+            trim_for_context(&item.snippet, 180)
+        ));
+    }
+
+    lines.join("\n")
+}
+
+fn normalize_citation_source(workspace_root: &Path, source: &str) -> String {
+    let source_path = Path::new(source);
+    if source_path.is_absolute() {
+        return relative_path(workspace_root, source_path);
+    }
+
+    source.to_string()
 }
 
 fn format_context_digest(context: &ContextAssemblyResponse) -> String {
@@ -1510,6 +1798,18 @@ fn format_recent_turns(local_context: &[LocalContextSource]) -> String {
     turns.into_iter().rev().collect::<Vec<_>>().join("\n")
 }
 
+fn legacy_turn_intent(prompt: &str, gathered_evidence: Option<&EvidenceBundle>) -> TurnIntent {
+    if is_casual_prompt(prompt) {
+        TurnIntent::Casual
+    } else if should_prefer_tools(prompt) {
+        TurnIntent::DeterministicAction
+    } else if gathered_evidence.is_some() {
+        TurnIntent::RepositoryQuestion
+    } else {
+        TurnIntent::GeneralQuestion
+    }
+}
+
 fn is_casual_prompt(prompt: &str) -> bool {
     let normalized = normalize_prompt(prompt);
 
@@ -1635,6 +1935,28 @@ fn is_follow_up_execution_request(prompt: &str) -> bool {
             | "execute that"
             | "do that"
     )
+}
+
+fn describe_tool_call(tool_call: &ToolCall) -> String {
+    match tool_call {
+        ToolCall::Search { query, intent } => match intent {
+            Some(intent) => format!("search workspace for `{query}` ({intent})"),
+            None => format!("search workspace for `{query}`"),
+        },
+        ToolCall::ListFiles { pattern } => match pattern {
+            Some(pattern) => format!("list files matching `{pattern}`"),
+            None => "list workspace files".to_string(),
+        },
+        ToolCall::ReadFile { path } => format!("read `{path}`"),
+        ToolCall::WriteFile { path, .. } => format!("write `{path}`"),
+        ToolCall::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
+        ToolCall::Shell { command } => command.clone(),
+        ToolCall::Diff { path } => match path {
+            Some(path) => format!("git diff --no-ext-diff -- {path}"),
+            None => "git diff --no-ext-diff".to_string(),
+        },
+        ToolCall::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+    }
 }
 
 fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
@@ -1886,6 +2208,7 @@ mod tests {
         is_follow_up_execution_request, normalize_relative_path, preferred_qwen_weight_dtype,
         should_prefer_tools, should_retry_qwen_on_cpu_message, trim_for_context,
     };
+    use crate::domain::model::{NullTurnEventSink, TurnIntent};
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, PlannerDecision, PlannerStrategyKind, PlannerTraceMetadata,
         PlannerTraceStep, RetainedEvidence,
@@ -2182,7 +2505,9 @@ mod tests {
                 Some(&evidence),
             )
             .expect("response");
-        assert_eq!(reply, "Here is the answer.");
+        assert!(reply.contains("Gathered repository evidence for runtime lanes."));
+        assert!(reply.contains("PreparedRuntimeLanes keeps synthesizer and gatherer lanes."));
+        assert!(reply.contains("Sources: src/application/mod.rs"));
 
         let prompt = recorded_messages
             .lock()
@@ -2194,6 +2519,66 @@ mod tests {
         assert!(prompt.contains("Planner: strategy=heuristic"));
         assert!(prompt.contains("planner step step-1#1"));
         assert!(prompt.contains("src/application/mod.rs"));
+    }
+
+    #[test]
+    fn repository_turns_fall_back_to_grounded_evidence_when_model_is_confused() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                "I'm sorry, I didn't understand the request.".to_string(),
+                "I'm sorry, I didn't understand the request.".to_string(),
+            ])),
+        );
+
+        let evidence = EvidenceBundle::new(
+            "Gathered repository evidence for AGENTS.md memory loading.",
+            vec![EvidenceItem {
+                source: "src/infrastructure/adapters/agent_memory.rs".to_string(),
+                snippet:
+                    "AgentMemory::load reads /etc/paddles/AGENTS.md, ~/.config/paddles/AGENTS.md, then ancestor AGENTS.md files."
+                        .to_string(),
+                rationale: "Relevant to memory loading.".to_string(),
+                rank: 1,
+            }],
+        );
+
+        let reply = adapter
+            .respond_for_turn(
+                "How does memory work in paddles?",
+                TurnIntent::RepositoryQuestion,
+                Some(&evidence),
+                Arc::new(NullTurnEventSink),
+            )
+            .expect("response");
+
+        assert!(reply.contains("agent_memory.rs"));
+        assert!(reply.contains("Sources: src/infrastructure/adapters/agent_memory.rs"));
+        assert!(!reply.contains("didn't understand"));
+    }
+
+    #[test]
+    fn repository_turns_without_evidence_report_insufficient_evidence() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(Vec::new())),
+        );
+
+        let reply = adapter
+            .respond_for_turn(
+                "How does memory work in paddles?",
+                TurnIntent::RepositoryQuestion,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
+            .expect("response");
+
+        assert!(reply.contains("couldn't gather enough repository evidence"));
+        assert!(reply.contains("Sources: none"));
     }
 
     #[test]
@@ -2286,6 +2671,7 @@ mod tests {
                 "tool-1",
                 &adapter.combined_local_context(&[]),
                 &[],
+                &NullTurnEventSink,
             )
             .expect("search tool");
 
@@ -2316,6 +2702,7 @@ mod tests {
                 "tool-1",
                 &adapter.combined_local_context(&[]),
                 &[],
+                &NullTurnEventSink,
             )
             .expect_err("symlink escape should fail");
 
@@ -2344,6 +2731,7 @@ mod tests {
                 "tool-1",
                 &adapter.combined_local_context(&[]),
                 &[],
+                &NullTurnEventSink,
             )
             .expect("list files");
 
@@ -2609,6 +2997,7 @@ mod tests {
                 "tool-1",
                 &adapter.combined_local_context(&[]),
                 &[],
+                &NullTurnEventSink,
             )
             .expect_err("shell failure should propagate");
 
@@ -2633,6 +3022,7 @@ mod tests {
                 "tool-1",
                 &adapter.combined_local_context(&[]),
                 &[],
+                &NullTurnEventSink,
             )
             .expect_err("apply_patch failure should propagate");
 

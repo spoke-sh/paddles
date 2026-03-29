@@ -9,17 +9,21 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Core Principles
 1. **Maintain Calibration**: The boot sequence (credits, weights, biases) is foundational. Ensure changes to `src/main.rs` never weaken Constitution or Dogma validation.
 2. **Local First**: Prioritize local inference capacity via `candle`. Avoid introducing network dependencies into the core execution loop.
-3. **Intent Before Size**: Treat runtime selection as controller-owned routing. Default to the smallest capable local path, keep direct answer/tool turns on the synthesizer lane, and use a gatherer lane only when the request is retrieval-heavy or multi-hop.
-4. **Evidence Before Prose**: Gatherers return evidence bundles and capability state for a downstream synthesizer. They do not pretend to be the final answer model.
-5. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
-6. **Pacemaker Hygiene**: Monitor system stability with `keel health --scene`, `keel flow --scene`, `keel doctor`, and dirty-worktree state. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
-7. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
+3. **Intent Before Size**: Treat runtime selection as controller-owned routing. Default to the smallest capable local path, keep direct answer/tool turns on the synthesizer lane, and use a gatherer lane for repository questions or other retrieval-heavy work when it is available.
+4. **Evidence Before Prose**: Repository questions should gather evidence first when a gatherer is available. Gatherers return evidence bundles and capability state for a downstream synthesizer. They do not pretend to be the final answer model.
+5. **Visible Turns**: The interactive REPL should render a default Codex-style action stream so classification, routing, retrieval, tools, fallbacks, and synthesis are observable without extra flags.
+6. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
+7. **Grounded Answers**: Repository answers should cite source files by default and admit insufficient evidence instead of improvising unsupported claims.
+8. **Pacemaker Hygiene**: Monitor system stability with `keel health --scene`, `keel flow --scene`, `keel doctor`, and dirty-worktree state. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
+9. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
 
 ### Runtime Routing Contract
 
 - Model/tool choice is a controller decision, not something delegated blindly to prompt text.
 - The **synthesizer lane** is the default path for casual chat, direct answers, and deterministic workspace/tool turns.
-- The **gatherer lane** is optional and exists for retrieval-heavy or multi-hop context acquisition. It must return typed evidence for synthesis.
+- The **gatherer lane** is the default path for repository questions when it is available. It must return typed evidence for synthesis.
+- Repository-question answers should include file citations by default.
+- The REPL should expose a default turn event stream rather than hiding runtime behavior behind verbose-only diagnostics.
 - Chroma `context-1` is an experimental **gatherer provider only**. It is never the default answer runtime and must fail closed when its harness/runtime is unavailable.
 - When runtime routing behavior changes, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same slice.
 

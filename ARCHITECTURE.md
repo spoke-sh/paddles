@@ -51,10 +51,15 @@ support instead of a cross-cutting rewrite.
 
 ### 4. Session Controller (`src/infrastructure/adapters/sift_agent.rs`)
 - Interprets user intent for each turn.
-- Distinguishes casual chat from action-oriented workspace requests.
-- Assembles workspace context through Sift when retrieval is needed.
+- Distinguishes casual chat, deterministic actions, repository questions, decomposition/research turns, and general questions.
+- Routes repository questions through the explicit gatherer boundary by default instead of treating synthesizer-private retrieval as the normal path.
 - Routes obvious workspace actions directly to tools when the controller can infer the correct call.
 - Preserves short-turn session state such as recent turns, retained artifacts, and tool outputs.
+
+### 4a. Turn Event Stream (`src/domain/model/turns.rs`, `src/application/mod.rs`)
+- Emits typed turn events for intent classification, route selection, gatherer capability, gatherer summaries, planner summaries, tool execution, fallbacks, context assembly, and synthesis readiness.
+- Renders those events as the default interactive REPL UX in a Codex-style action stream.
+- Exists to make runtime behavior inspectable without requiring debug-only backend logs.
 
 ### 5. Operator Memory Layer (`src/infrastructure/adapters/agent_memory.rs`)
 - Reloads `AGENTS.md` memory on every prompt so the REPL can absorb operator guidance without restarting.
@@ -81,15 +86,18 @@ The controller is responsible for deciding when tools are necessary and when a d
 2. **Calibrate**: `BootContext` validates the clean-boot invariants.
 3. **Resolve Runtime**: The registry maps the requested model ID to local assets.
 4. **Load Operator Memory**: The REPL reloads hierarchical `AGENTS.md` files and prepares a merged instruction block for the turn.
-5. **Route Turn**: The Sift session controller classifies the turn:
+5. **Route Turn**: The application controller classifies the turn:
    - Casual direct answer
-   - Tool-backed workspace action
-   - Context-assembled retrieval plus answer
+   - Deterministic workspace action
+   - Repository question
+   - Decomposition/research turn
+   - General question
 6. **Execute**:
    - The local model replies directly, or
    - The controller executes tools and feeds the results back through the turn loop.
-   - A retrieval-heavy request can gather evidence first, then hand that evidence to the synthesizer lane.
-7. **Return**: The terminal prints the final response.
+   - A repository or decomposition request gathers evidence first, then hands that evidence to the synthesizer lane.
+7. **Render**: The terminal prints the Codex-style turn event stream as execution proceeds.
+8. **Return**: The terminal prints the final response with source citations for repository-question turns.
 
 ## Model Routing Strategy
 
@@ -114,6 +122,7 @@ Model routing should be driven by two inputs:
 - Prefer `qwen-1.5b` as the default local response lane for general interactive use, keep `qwen-coder-0.5b` and `qwen-coder-1.5b` available for coding-biased turns, expose `qwen-coder-3b` and `qwen3.5-2b` as explicit heavier options, and fail over to CPU when the Qwen3.5 CUDA runtime cannot load or generate safely.
 - Prefer deterministic controller routing over asking a weak model to infer obvious shell or file actions.
 - Keep retrieval and answer generation separate when the task is genuinely retrieval-heavy.
+- Treat repository questions as evidence-first by default: gather, synthesize, and cite.
 - Introduce a larger or specialized model only when the user's request actually needs it.
 - Avoid paying a frontier-model tax for one-hop workspace lookups.
 
@@ -180,10 +189,15 @@ downstream synthesizer. It does not return the final user-facing answer.
 - It defaults to Sift's heuristic planner strategy.
 - It returns ranked evidence plus planner trace metadata, stop reason, and
   retained artifact summaries.
-- It is intended for decomposition-worthy repository investigation, not for
-  casual chat or deterministic workspace actions.
+- It is intended for repository investigation and decomposition-heavy retrieval,
+  not for casual chat or deterministic workspace actions.
 - It still feeds the normal synthesizer lane rather than bypassing the final
   answer model.
+
+Repository questions now prefer this explicit gatherer path by default. If the
+gatherer is unavailable or reports failure, the controller emits a labeled
+fallback event and degrades honestly instead of implying that gatherer-backed
+evidence was used.
 
 ## Hierarchical Operator Memory
 
@@ -201,6 +215,18 @@ This memory layer is guidance for prompt construction, not a replacement for
 controller-side routing, typed evidence contracts, or deterministic tool
 execution. The controller still owns routing, and memory must not be used as an
 excuse to hide runtime behavior in prompt text.
+
+## Grounded Synthesis Contract
+
+Repository-question synthesis is constrained by an evidence-first contract:
+
+- The synthesizer should consume explicit evidence bundles, not improvise from
+  private context assembly.
+- Final repository answers should include file citations by default.
+- If the model reply is empty, ungrounded, or cannot be tied to gathered
+  evidence, the runtime should fall back to an extractive evidence summary.
+- If no usable evidence exists, `paddles` should say so explicitly instead of
+  inventing repository facts.
 
 ### Experimental Context-1 Boundary
 

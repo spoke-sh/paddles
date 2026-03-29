@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.253979503-07:00
+mode: manual
+---
+Coverage is present in cargo test / cargo nextest run, especially application::tests::repository_questions_use_gatherer_lane_when_available and infrastructure::adapters::sift_agent::tests::repository_turns_without_evidence_report_insufficient_evidence, plus live CLI transcripts summarized in .keel/epics/VFDMnu8k9/voyages/VFDMp3Zn3/EVIDENCE_FIRST_TURNS.md.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.462027616-07:00
+mode: manual
+---
+Both grounded cited behavior and insufficient-evidence behavior are proven by the two repository_turns_* regressions plus the live repository-question and context1 fallback transcripts summarized in .keel/epics/VFDMnu8k9/voyages/VFDMp3Zn3/EVIDENCE_FIRST_TURNS.md.

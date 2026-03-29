@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.285778175-07:00
+mode: manual
+---
+The controller now classifies casual, deterministic-action, repository-question, decomposition-research, and general-question intents via TurnIntent and classify_turn/select_execution_plan in src/application/mod.rs. Regression coverage includes action_or_casual_prompts_stay_on_synthesizer_lane, repository_questions_use_gatherer_lane_when_available, and decomposition_worthy_prompts_use_gatherer_lane_when_available.

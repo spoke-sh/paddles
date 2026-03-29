@@ -62,10 +62,14 @@ flowchart TD
 Key architectural rules reflected in that flow:
 
 *   The controller owns routing. It decides when a turn stays on the synthesizer lane and when it must gather context first.
+*   Repository questions now use the gatherer lane by default. The synthesizer consumes typed evidence from that lane instead of relying on hidden private retrieval as the primary path.
 *   The gatherer lane returns typed evidence for synthesis. It does not replace the final answer path.
-*   `sift-autonomous` is an explicit local gatherer provider for decomposition-worthy repo investigation. It returns planner trace metadata with the evidence bundle, then hands that bundle to the normal synthesizer lane.
+*   `sift-autonomous` is the default local gatherer provider for repository investigation. It returns planner trace metadata with the evidence bundle, then hands that bundle to the normal synthesizer lane.
+*   The REPL renders a Codex-style action stream by default so routing, gathering, tool calls, fallbacks, and synthesis are visible without `-v`.
 *   The REPL reloads hierarchical `AGENTS.md` memory on every turn, so operator guidance can change without restarting the process.
 *   The local Qwen runtime stays loaded, while turn-local prompt state is rebuilt per send.
+
+Repository-question answers are now evidence-first by default. When the controller can gather repository evidence, the final answer includes file citations. When evidence is missing or weak, `paddles` says so explicitly instead of improvising unsupported claims.
 
 Current local model defaults are tuned for responsiveness first. The synthesizer lane now defaults to `qwen-1.5b`, which keeps `paddles` on the Qwen2 runtime path and behaves better as a general interactive assistant than the coding-tuned checkpoints. `qwen-coder-0.5b` remains available as the smaller fast coding fallback, `qwen-coder-1.5b` remains available as the coding-tuned Qwen2 option, and `qwen3.5-2b` stays available as an opt-in heavier lane when you explicitly want that tradeoff. If the Qwen3.5 CUDA load or first generation step hits an out-of-memory or reduced-precision runtime failure, `paddles` logs a warning and retries that lane on CPU instead of crashing the REPL.
 
@@ -138,7 +142,7 @@ Every session follows a deterministic cycle:
     just quality  # Formatting and linting
     ```
 
-### 4. REPL Memory Files
+### 4. REPL Memory Files And Turn Visibility
 
 The `paddles` REPL reloads `AGENTS.md` memory on every prompt. It searches in this order:
 
@@ -147,6 +151,24 @@ The `paddles` REPL reloads `AGENTS.md` memory on every prompt. It searches in th
 *   Every `AGENTS.md` from the filesystem root down to the current working directory
 
 Later files are treated as more specific and override earlier guidance. That means edits to a local project `AGENTS.md` take effect on the next turn without restarting the REPL, and those instructions are injected into both the direct-answer path and the tool-oriented prompt path.
+
+The REPL also renders a default turn event stream. Expect concise lines for intent classification, route selection, gatherer capability, gathered evidence, planner summaries, tool execution, fallback reasons, and synthesis readiness before the final `Chord Response`.
+
+Example shape:
+
+```text
+• Classified turn
+  └ repository-question
+• Routed turn
+  └ repository question will use gatherer lane 'sift-autonomous' before synthesizer lane 'qwen-1.5b'
+• Gathered context with sift-autonomous
+  └ ... Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+• Synthesized grounded answer
+  └ Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+Chord Response: ...
+
+Sources: src/infrastructure/adapters/agent_memory.rs, README.md
+```
 
 ## 🛠️ Key Tools & Components
 

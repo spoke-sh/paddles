@@ -40,8 +40,8 @@ struct Cli {
     #[arg(long)]
     gatherer_model: Option<String>,
 
-    /// Provider to use for the optional gatherer lane.
-    #[arg(long, value_enum, default_value = "local")]
+    /// Provider to use for the default gatherer lane.
+    #[arg(long, value_enum, default_value = "sift-autonomous")]
     gatherer_provider: GathererProvider,
 
     /// Acknowledge that the external Context-1 harness is actually available.

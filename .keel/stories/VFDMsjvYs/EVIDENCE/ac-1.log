@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.396891991-07:00
+mode: manual
+---
+Repository-question synthesis now consumes explicit evidence bundles in SiftAgentAdapter::respond_for_turn/respond_internal and finalizes responses with default source citations. Regression coverage: infrastructure::adapters::sift_agent::tests::repository_turns_fall_back_to_grounded_evidence_when_model_is_confused.

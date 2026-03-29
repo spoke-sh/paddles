@@ -8,6 +8,7 @@ use sift::{
     ContextAssemblyBudget, ContextAssemblyRequest, ContextAssemblyResponse, EnvironmentFactInput,
     LocalContextSource, SearchPlan, Sift,
 };
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -78,19 +79,21 @@ impl ContextGatherer for SiftContextGathererAdapter {
             );
         }
 
-        let items = assembly
-            .response
-            .hits
-            .iter()
-            .take(request.budget.max_items)
-            .enumerate()
-            .map(|(index, hit)| EvidenceItem {
-                source: hit.path.clone(),
-                snippet: trim_for_budget(&hit.snippet, request.budget.max_snippet_chars),
-                rationale: format!("retrieved for `{}`", request.user_query),
-                rank: index + 1,
-            })
-            .collect::<Vec<_>>();
+        let items = prioritize_evidence_items(
+            assembly
+                .response
+                .hits
+                .iter()
+                .take(request.budget.max_items)
+                .enumerate()
+                .map(|(index, hit)| EvidenceItem {
+                    source: hit.path.clone(),
+                    snippet: trim_for_budget(&hit.snippet, request.budget.max_snippet_chars),
+                    rationale: format!("retrieved for `{}`", request.user_query),
+                    rank: index + 1,
+                })
+                .collect::<Vec<_>>(),
+        );
 
         let summary = if items.is_empty() {
             format!(
@@ -113,10 +116,97 @@ impl ContextGatherer for SiftContextGathererAdapter {
 }
 
 fn trim_for_budget(input: &str, limit: usize) -> String {
+    let cleaned = strip_ansi_sequences(input);
+    let input = cleaned.as_str();
     if input.chars().count() <= limit {
         return input.to_string();
     }
 
     let kept = input.chars().take(limit).collect::<String>();
     format!("{kept}...[truncated]")
+}
+
+fn strip_ansi_sequences(input: &str) -> String {
+    let mut cleaned = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && matches!(chars.peek(), Some('[')) {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        cleaned.push(ch);
+    }
+    cleaned
+}
+
+fn prioritize_evidence_items(items: Vec<EvidenceItem>) -> Vec<EvidenceItem> {
+    let has_non_keel = items.iter().any(|item| !is_keel_path(&item.source));
+    let has_non_test_snippet = items.iter().any(|item| !is_test_snippet(&item.snippet));
+    let mut prioritized = items
+        .into_iter()
+        .filter(|item| !has_non_keel || !is_keel_path(&item.source))
+        .filter(|item| !has_non_test_snippet || !is_test_snippet(&item.snippet))
+        .collect::<Vec<_>>();
+    prioritized.sort_by_key(|item| {
+        (
+            evidence_priority(&item.source),
+            snippet_noise_priority(&item.snippet),
+            item.rank,
+        )
+    });
+    for (index, item) in prioritized.iter_mut().enumerate() {
+        item.rank = index + 1;
+    }
+    prioritized
+}
+
+fn evidence_priority(source: &str) -> usize {
+    if is_src_path(source) {
+        0
+    } else if is_top_level_doc(source) {
+        1
+    } else if is_keel_path(source) {
+        3
+    } else {
+        2
+    }
+}
+
+fn is_src_path(source: &str) -> bool {
+    source.starts_with("src/") || source.contains("/src/")
+}
+
+fn is_top_level_doc(source: &str) -> bool {
+    Path::new(source)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| {
+            matches!(
+                name,
+                "README.md"
+                    | "ARCHITECTURE.md"
+                    | "CONFIGURATION.md"
+                    | "POLICY.md"
+                    | "AGENTS.md"
+                    | "INSTRUCTIONS.md"
+                    | "PROTOCOL.md"
+            )
+        })
+}
+
+fn is_keel_path(source: &str) -> bool {
+    source.starts_with(".keel/") || source.contains("/.keel/")
+}
+
+fn snippet_noise_priority(snippet: &str) -> usize {
+    if is_test_snippet(snippet) { 1 } else { 0 }
+}
+
+fn is_test_snippet(snippet: &str) -> bool {
+    snippet.contains("#[cfg(test)]") || snippet.contains("mod tests")
 }

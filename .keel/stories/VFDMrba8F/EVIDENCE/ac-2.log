@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.317673973-07:00
+mode: manual
+---
+Classification is emitted before route/gatherer/tool work via TurnEvent::IntentClassified and the default ConsoleTurnEventSink renderer in src/application/mod.rs. Live transcripts in EVIDENCE_FIRST_TURNS.md show 'Classified turn' as the first visible step.

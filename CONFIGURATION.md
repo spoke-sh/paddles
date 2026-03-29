@@ -128,10 +128,12 @@ single-model-only:
 
 - The **synthesizer lane** is the default response path and must always be
   configured.
-- The **gatherer lane** is optional and exists to support retrieval-heavy
-  requests with a dedicated context-gathering model.
-- If no gatherer lane is configured, `paddles` stays on the local synthesizer
-  path for normal prompt handling.
+- The **gatherer lane** is optional at configuration time but is the default
+  execution path for repository-question and decomposition/research turns when
+  it is available.
+- If no gatherer lane is configured, or if it reports failure/unsupported
+  capability, `paddles` emits a labeled fallback event and degrades honestly to
+  the synthesizer path.
 
 Today the lane wiring is exposed through CLI/runtime configuration:
 
@@ -139,8 +141,8 @@ Today the lane wiring is exposed through CLI/runtime configuration:
 paddles --model qwen-1.5b --gatherer-model qwen-coder-1.5b
 ```
 
-This does not make the gatherer lane mandatory. It simply prepares a distinct
-lane so routing can opt into it later without changing the default response
+This prepares a distinct gatherer lane that the controller can use as the
+default path for repository questions without changing the default response
 model.
 
 For local autonomous retrieval planning, select the explicit provider:
@@ -154,8 +156,9 @@ That provider stays local-first and uses Sift's bounded autonomous planner.
 - It defaults to the heuristic planner strategy.
 - It returns planner trace metadata, stop reason, and retained artifact
   summaries inside the evidence bundle consumed by the synthesizer lane.
-- Verbose mode surfaces the planner summary so operators can inspect why the
-  autonomous gatherer stopped and what evidence it carried forward.
+- The default REPL event stream surfaces the planner summary so operators can
+  inspect why the autonomous gatherer stopped and what evidence it carried
+  forward.
 
 Current local model guidance on an 8 GB CUDA card:
 
@@ -165,6 +168,21 @@ Current local model guidance on an 8 GB CUDA card:
 - `qwen-coder-3b` remains available as the larger Qwen2 coding lane when you want more coding headroom.
 - `qwen3.5-2b` remains available as an opt-in heavier lane, not the default.
 - If `qwen3.5-2b` cannot complete its CUDA load or first generation step because of GPU OOM or a reduced-precision runtime mismatch, the runtime warns and retries on CPU instead of aborting the REPL.
+
+### Default Turn Observability
+
+The REPL now renders a default Codex-style action stream. Expect visible steps
+for:
+
+- turn classification
+- route selection
+- gatherer capability and gathered evidence
+- planner summaries for autonomous gatherers
+- tool calls and results
+- fallback reasons
+- synthesis readiness
+
+Repository-question answers also include source/file citations by default.
 
 ### Experimental Context-1 Boundary
 
@@ -182,9 +200,9 @@ That provider fails closed by design.
 - With `--context1-harness-ready`, the adapter boundary is still honest about
   the current state and reports `unsupported` until a real harness-backed
   implementation exists.
-- Verbose mode surfaces the selected gatherer provider, capability state, and
-  evidence summary so missing-context and misrouting cases can be diagnosed from
-  terminal output.
+- The default REPL event stream surfaces the selected gatherer provider,
+  capability state, fallback reason, and evidence summary so missing-context and
+  misrouting cases can be diagnosed from terminal output.
 
 ## Subsystem Health (The Med-Bay)
 

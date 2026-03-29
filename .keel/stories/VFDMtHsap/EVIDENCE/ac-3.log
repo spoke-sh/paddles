@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.566121352-07:00
+mode: manual
+---
+No quiet flag was introduced. The default just paddles --prompt invocations in EVIDENCE_FIRST_TURNS.md show the action stream as the normal interactive UX.

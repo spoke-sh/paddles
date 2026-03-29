@@ -1,0 +1,101 @@
+use std::fmt;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnIntent {
+    Casual,
+    DeterministicAction,
+    RepositoryQuestion,
+    DecompositionResearch,
+    GeneralQuestion,
+}
+
+impl TurnIntent {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Casual => "casual",
+            Self::DeterministicAction => "deterministic-action",
+            Self::RepositoryQuestion => "repository-question",
+            Self::DecompositionResearch => "decomposition-research",
+            Self::GeneralQuestion => "general-question",
+        }
+    }
+
+    pub fn requires_gathered_evidence(&self) -> bool {
+        matches!(self, Self::RepositoryQuestion | Self::DecompositionResearch)
+    }
+
+    pub fn prefers_tools(&self) -> bool {
+        matches!(self, Self::DeterministicAction)
+    }
+
+    pub fn is_casual(&self) -> bool {
+        matches!(self, Self::Casual)
+    }
+}
+
+impl fmt::Display for TurnIntent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnEvent {
+    IntentClassified {
+        intent: TurnIntent,
+    },
+    RouteSelected {
+        summary: String,
+    },
+    GathererCapability {
+        provider: String,
+        capability: String,
+    },
+    GathererSummary {
+        provider: String,
+        summary: String,
+        sources: Vec<String>,
+    },
+    PlannerSummary {
+        strategy: String,
+        turns: usize,
+        steps: usize,
+        stop_reason: Option<String>,
+    },
+    ContextAssembly {
+        label: String,
+        hits: usize,
+        retained_artifacts: usize,
+        pruned_artifacts: usize,
+    },
+    ToolCalled {
+        call_id: String,
+        tool_name: String,
+        invocation: String,
+    },
+    ToolFinished {
+        call_id: String,
+        tool_name: String,
+        summary: String,
+    },
+    Fallback {
+        stage: String,
+        reason: String,
+    },
+    SynthesisReady {
+        grounded: bool,
+        citations: Vec<String>,
+        insufficient_evidence: bool,
+    },
+}
+
+pub trait TurnEventSink: Send + Sync {
+    fn emit(&self, event: TurnEvent);
+}
+
+#[derive(Default)]
+pub struct NullTurnEventSink;
+
+impl TurnEventSink for NullTurnEventSink {
+    fn emit(&self, _event: TurnEvent) {}
+}

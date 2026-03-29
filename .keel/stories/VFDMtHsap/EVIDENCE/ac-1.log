@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.498309031-07:00
+mode: manual
+---
+The default REPL now renders a Codex-style turn stream from typed TurnEvent values in src/domain/model/turns.rs and src/application/mod.rs. Live proofs in EVIDENCE_FIRST_TURNS.md show action lines without enabling verbose mode.

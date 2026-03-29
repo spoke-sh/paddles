@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.192386320-07:00
+mode: manual
+---
+Default repository-question turns now route through the explicit gatherer boundary via select_execution_plan/process_prompt and application::tests::repository_questions_use_gatherer_lane_when_available. Live proof: just paddles --prompt 'How does memory work in paddles?' shows the repository-question route selecting sift-autonomous before synthesis.

@@ -45,9 +45,11 @@ Paddles treats inference as a routing problem, not a single-model problem.
 1. **Controller Owns Routing**: Do not rely on the model to decide whether tools or context gathering are needed. The controller should route the turn.
 2. **Smallest Capable Path First**: Prefer the cheapest local runtime that can satisfy the request without degrading behavior.
 3. **Synthesizer Lane Default**: Casual chat, direct answers, and deterministic workspace/tool turns stay on the synthesizer lane.
-4. **Gatherer Lane for Retrieval**: Retrieval-heavy or multi-hop turns may use the gatherer lane, but that lane must return typed evidence and capability state for a downstream synthesizer.
-5. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
-6. **Docs Move With Behavior**: Whenever routing heuristics, lane contracts, or provider boundaries change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
+4. **Gatherer Lane for Repository Questions**: Repository-question and decomposition/research turns should use the gatherer lane by default when it is available, and that lane must return typed evidence and capability state for a downstream synthesizer.
+5. **Grounded Repository Answers**: Repository-question answers should cite source files by default and degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
+6. **Visible Turn Stream**: The interactive REPL should render a default Codex-style action stream for classification, route selection, gatherer work, tool calls, fallback reasons, and synthesis readiness.
+7. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
+8. **Docs Move With Behavior**: Whenever routing heuristics, lane contracts, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
 
 ## Human Interaction & Pokes
 
@@ -102,6 +104,7 @@ Apply these checks to **every change** before finalizing work:
 10. **Knowledge Quality Bar**: Prefer no new knowledge over low-signal knowledge. A new knowledge entry should be novel, reusable across stories, and materially reduce future drift; otherwise link existing knowledge or omit capture entirely.
 11. **Config Completeness**: Whenever introducing a new property to the configuration struct (`keel::infrastructure::config::Config`), you MUST immediately update `keel config show` expectations and any local configuration documentation so the new setting is visible to operators.
 12. **Routing Completeness**: Whenever you change model selection, gatherer capability states, or synthesizer/gatherer contracts, update the foundational runtime docs in the same slice so operators are not forced to reverse-engineer the behavior from code.
+13. **Evidence Visibility Completeness**: Whenever you change turn events, repository-answer citation behavior, or grounded synthesis fallback rules, update operator docs and example transcripts in the same slice.
 
 ## Upgrading Keel
 

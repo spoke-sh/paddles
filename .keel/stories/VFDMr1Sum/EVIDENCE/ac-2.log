@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T18:47:15.223742980-07:00
+mode: manual
+---
+Gatherer-unavailable behavior is labeled explicitly. Live proof: just paddles --gatherer-provider context1 --prompt 'How does memory work in paddles?' emits gatherer and grounded-synthesis fallback events, then reports insufficient evidence instead of implying gatherer-backed context ran.
