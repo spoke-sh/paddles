@@ -2,9 +2,6 @@
 
 Shared guidance for AI agents operating the `paddles` mech suit.
 
-> Foundational stack position: `1/8`
-> Read this document first. Then move to [INSTRUCTIONS.md](INSTRUCTIONS.md).
-
 ## Operational Guidance
 
 You are an operator within the `paddles` harness. Keel is an engine with strict constraints (see [POLICY.md](POLICY.md)). Your primary responsibility is to execute tactical moves that advance the board state while maintaining mech-suit integrity and local-first runtime constraints.
