@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VFEDDrcF7
-status: backlog
+status: done
 created_at: 2026-03-28T21:41:55
-updated_at: 2026-03-28T21:48:08
+updated_at: 2026-03-29T08:38:20
 # authored
 title: Define Model-Directed Next-Action Contract
 type: feat
 operator-signal:
 scope: VFECyWLL6/VFED2RjSu
 index: 1
+started_at: 2026-03-29T08:31:58
+submitted_at: 2026-03-29T08:38:15
+completed_at: 2026-03-29T08:38:20
 ---
 
 # Define Model-Directed Next-Action Contract
@@ -23,6 +26,6 @@ selection.
 
 ## Acceptance Criteria
 
-- [ ] A top-level action contract exists for first action selection and can express direct answer or synthesize, search, read, inspect, refine, branch, and stop. [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end -->
-- [ ] The contract defines the validation envelope the controller must enforce, including safe inspect/tool boundaries and fail-closed behavior, without yet owning the runtime refactor. [SRS-02/AC-02] <!-- verify: manual, SRS-02:start:end -->
-- [ ] The contract is positioned as a general-purpose harness boundary rather than a Keel-specific routing feature. [SRS-NFR-03/AC-03] <!-- verify: manual, SRS-NFR-03:start:end -->
+- [x] A top-level action contract exists for first action selection and can express direct answer or synthesize, search, read, inspect, refine, branch, and stop. [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end, proof: ac-1.log-->
+- [x] The contract defines the validation envelope the controller must enforce, including safe inspect/tool boundaries and fail-closed behavior, without yet owning the runtime refactor. [SRS-02/AC-02] <!-- verify: manual, SRS-02:start:end, proof: ac-2.log-->
+- [x] The contract is positioned as a general-purpose harness boundary rather than a Keel-specific routing feature. [SRS-NFR-03/AC-03] <!-- verify: manual, SRS-NFR-03:start:end, proof: ac-3.log-->

@@ -1,7 +1,8 @@
 use super::agent_memory::AgentMemory;
 use crate::domain::model::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 use crate::domain::ports::{
-    EvidenceBundle, InterpretationContext, PlannerAction, PlannerRequest, RecursivePlannerDecision,
+    EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext, PlannerAction,
+    PlannerRequest, RecursivePlannerDecision,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -108,6 +109,46 @@ struct ToolResult {
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum PlannerActionEnvelope {
+    Search {
+        query: String,
+        #[serde(default)]
+        intent: Option<String>,
+        rationale: String,
+    },
+    Read {
+        path: String,
+        rationale: String,
+    },
+    Inspect {
+        command: String,
+        rationale: String,
+    },
+    Refine {
+        query: String,
+        #[serde(default)]
+        rationale: Option<String>,
+    },
+    Branch {
+        branches: Vec<String>,
+        #[serde(default)]
+        rationale: Option<String>,
+    },
+    Stop {
+        reason: String,
+        #[serde(default)]
+        rationale: Option<String>,
+    },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum InitialActionEnvelope {
+    Answer {
+        rationale: String,
+    },
+    Tool {
+        rationale: String,
+    },
     Search {
         query: String,
         #[serde(default)]
@@ -770,7 +811,7 @@ impl SiftAgentAdapter {
     }
 
     #[cfg(test)]
-    fn new_for_test(
+    pub(crate) fn new_for_test(
         workspace_root: impl Into<PathBuf>,
         model_id: &str,
         conversation: Box<dyn Conversation>,
@@ -783,7 +824,7 @@ impl SiftAgentAdapter {
     }
 
     #[cfg(test)]
-    fn new_for_test_with_conversations(
+    pub(crate) fn new_for_test_with_conversations(
         workspace_root: impl Into<PathBuf>,
         model_id: &str,
         conversations: Vec<Box<dyn Conversation>>,
@@ -821,6 +862,42 @@ impl SiftAgentAdapter {
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
         self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
+    }
+
+    pub fn select_initial_action(&self, request: &PlannerRequest) -> Result<InitialActionDecision> {
+        let mut conversation = self.conversation_factory.start_conversation()?;
+        let mut reply = self.send_to_model(
+            conversation.as_mut(),
+            &build_initial_action_prompt(&PlannerPrompt {
+                workspace_root: &request.workspace_root,
+                user_prompt: &request.user_prompt,
+                interpretation: &request.interpretation,
+                request,
+            }),
+        )?;
+
+        if is_blank_model_reply(&reply) || parse_initial_action(&reply)?.is_none() {
+            self.log_retry_reason(
+                "initial-action-retry",
+                &reply,
+                "missing or invalid initial action response",
+            );
+            reply = self.send_to_model(
+                conversation.as_mut(),
+                &build_initial_action_retry_prompt(request),
+            )?;
+        }
+
+        if let Some(decision) = parse_initial_action(&reply)? {
+            return Ok(decision);
+        }
+
+        self.log_retry_reason(
+            "initial-action-fallback",
+            &reply,
+            "falling back to bounded initial action selection",
+        );
+        Ok(fallback_initial_action(request))
     }
 
     pub fn select_planner_action(
@@ -1589,6 +1666,80 @@ Current user request:\n\
     )
 }
 
+fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
+    format!(
+        "You are the top-level routing planner for Paddles.\n\
+Choose the NEXT bounded action for this turn after reading the interpretation context.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Allowed actions:\n\
+- {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"tool\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+\n\
+Rules:\n\
+- Read the interpretation context before choosing.\n\
+- Answer when the synthesizer can reply directly without more workspace resources.\n\
+- Tool means deterministic workspace/tool execution should happen next.\n\
+- Search, read, inspect, refine, or branch when more workspace evidence is needed.\n\
+- Stop when the turn should not recurse further before synthesis.\n\
+- Never answer the user directly here.\n\
+- Inspect commands must stay read-only.\n\
+\n\
+Workspace root:\n\
+{}\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Recent turns:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n",
+        prompt.workspace_root.display(),
+        format_interpretation_context_digest(prompt.interpretation),
+        format_recent_turn_list(&prompt.request.recent_turns),
+        prompt.user_prompt,
+    )
+}
+
+fn build_initial_action_retry_prompt(request: &PlannerRequest) -> String {
+    format!(
+        "Your last top-level routing reply was empty or invalid.\n\
+Return ONLY one valid JSON initial action.\n\
+\n\
+Allowed actions:\n\
+- {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"tool\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+\n\
+Do not answer the user directly.\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Recent turns:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n",
+        format_interpretation_context_digest(&request.interpretation),
+        format_recent_turn_list(&request.recent_turns),
+        request.user_prompt,
+    )
+}
+
 fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
     format!(
         "You are the recursive planner lane for Paddles.\n\
@@ -2279,6 +2430,18 @@ fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
     Ok(serde_json::from_str(json).ok())
 }
 
+fn parse_initial_action(response: &str) -> Result<Option<InitialActionDecision>> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(None);
+    };
+    let Ok(action) = serde_json::from_str::<InitialActionEnvelope>(json) else {
+        return Ok(None);
+    };
+
+    Ok(Some(initial_action_from_envelope(action)?))
+}
+
 fn parse_planner_action(response: &str) -> Result<Option<RecursivePlannerDecision>> {
     let trimmed = response.trim();
     let Some(json) = extract_json_payload(trimmed) else {
@@ -2289,6 +2452,87 @@ fn parse_planner_action(response: &str) -> Result<Option<RecursivePlannerDecisio
     };
 
     Ok(Some(planner_action_from_envelope(action)?))
+}
+
+fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
+    let decision = match envelope {
+        InitialActionEnvelope::Answer { rationale } => InitialActionDecision {
+            action: InitialAction::Answer,
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Tool { rationale } => InitialActionDecision {
+            action: InitialAction::Tool,
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Search {
+            query,
+            intent,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Search {
+                query: required_planner_field("query", query)?,
+                intent: intent.and_then(|value| {
+                    let trimmed = value.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                }),
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Read { path, rationale } => InitialActionDecision {
+            action: InitialAction::Read {
+                path: required_planner_field("path", path)?,
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Inspect { command, rationale } => InitialActionDecision {
+            action: InitialAction::Inspect {
+                command: required_planner_field("command", command)?,
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+        },
+        InitialActionEnvelope::Refine { query, rationale } => {
+            let rationale_text = rationale
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            InitialActionDecision {
+                action: InitialAction::Refine {
+                    query: required_planner_field("query", query)?,
+                    rationale: rationale_text.clone(),
+                },
+                rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
+            }
+        }
+        InitialActionEnvelope::Branch {
+            branches,
+            rationale,
+        } => {
+            let branches = branches
+                .into_iter()
+                .map(|branch| branch.trim().to_string())
+                .filter(|branch| !branch.is_empty())
+                .collect::<Vec<_>>();
+            if branches.is_empty() {
+                bail!("initial action branch must include at least one branch");
+            }
+            InitialActionDecision {
+                action: InitialAction::Branch {
+                    branches,
+                    rationale: rationale.clone(),
+                },
+                rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
+            }
+        }
+        InitialActionEnvelope::Stop { reason, rationale } => InitialActionDecision {
+            action: InitialAction::Stop {
+                reason: required_planner_field("reason", reason)?,
+            },
+            rationale: rationale.unwrap_or_else(|| "stop routing".to_string()),
+        },
+    };
+
+    Ok(decision)
 }
 
 fn planner_action_from_envelope(
@@ -2372,6 +2616,36 @@ fn required_planner_field(name: &str, value: String) -> Result<String> {
         bail!("planner field `{name}` must not be empty");
     }
     Ok(trimmed.to_string())
+}
+
+fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
+    if infer_shell_command(&request.user_prompt).is_some()
+        || is_follow_up_execution_request(&request.user_prompt)
+        || should_prefer_tools(&request.user_prompt)
+    {
+        return InitialActionDecision {
+            action: InitialAction::Tool,
+            rationale: "prefer deterministic tool execution for an explicit workspace action when the initial action reply is invalid"
+                .to_string(),
+        };
+    }
+
+    if request.user_prompt.split_whitespace().count() <= 6 && request.loop_state.steps.is_empty() {
+        return InitialActionDecision {
+            action: InitialAction::Answer,
+            rationale: "answer directly when the initial action reply is invalid and the turn looks lightweight"
+                .to_string(),
+        };
+    }
+
+    InitialActionDecision {
+        action: InitialAction::Search {
+            query: fallback_planner_query(&request.user_prompt),
+            intent: Some("initial action fallback".to_string()),
+        },
+        rationale: "start with a bounded workspace search when the initial action reply is invalid"
+            .to_string(),
+    }
 }
 
 fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision {
@@ -2680,8 +2954,9 @@ mod tests {
     };
     use crate::domain::model::{NullTurnEventSink, TurnIntent};
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, PlannerDecision, PlannerStrategyKind, PlannerTraceMetadata,
-        PlannerTraceStep, RetainedEvidence,
+        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, PlannerDecision,
+        PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+        RetainedEvidence,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -3119,6 +3394,61 @@ mod tests {
         assert!(prompt.contains("Persistent operator memory"));
         assert!(prompt.contains("Prefer concrete repository answers over generic advice."));
         assert!(prompt.contains("Planner evidence handoff"));
+    }
+
+    #[test]
+    fn initial_action_prompts_include_interpretation_context() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                r#"{"action":"answer","rationale":"no workspace resources needed"}"#,
+                Arc::clone(&recorded_messages),
+            )),
+        );
+
+        let interpretation = InterpretationContext {
+            summary: "Operator interpretation context assembled from AGENTS and linked docs."
+                .to_string(),
+            documents: vec![
+                crate::domain::ports::InterpretationDocument {
+                    source: "AGENTS.md".to_string(),
+                    excerpt: "Use AGENTS guidance before choosing the next action.".to_string(),
+                },
+                crate::domain::ports::InterpretationDocument {
+                    source: "POLICY.md".to_string(),
+                    excerpt: "Controller validates actions after the model selects them."
+                        .to_string(),
+                },
+            ],
+        };
+        let request = PlannerRequest::new(
+            "What's next on the board?",
+            workspace.path(),
+            interpretation,
+            crate::domain::ports::PlannerBudget::default(),
+        )
+        .with_recent_turns(vec!["user: previous turn".to_string()]);
+
+        let decision = adapter
+            .select_initial_action(&request)
+            .expect("initial action");
+        assert_eq!(decision.action, InitialAction::Answer);
+
+        let prompt = recorded_messages
+            .lock()
+            .expect("history lock")
+            .first()
+            .cloned()
+            .expect("recorded prompt");
+        assert!(prompt.contains("Interpretation context"));
+        assert!(prompt.contains("AGENTS.md"));
+        assert!(prompt.contains("POLICY.md"));
+        assert!(prompt.contains("Use AGENTS guidance before choosing the next action."));
+        assert!(prompt.contains("Recent turns"));
+        assert!(prompt.contains("user: previous turn"));
     }
 
     #[test]

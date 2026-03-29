@@ -1,0 +1,2669 @@
+LLM Judge Transcript
+Story: VFEDDrcF7
+Criterion: A top-level action contract exists for first action selection and can express direct answer or synthesize, search, read, inspect, refine, branch, and stop.
+
+Diff:
+.keel/README.md --- Text
+106                                     106 
+107 | Voyage | Status |                 107 | Voyage | Status |
+108 |--------|--------|                 108 |--------|--------|
+109 | [Model-Directed Routing Backbone] 109 | [Model-Directed Routing Backbone]
+... (epics/VFECyWLL6/voyages/VFED2RjSu/ ... (epics/VFECyWLL6/voyages/VFED2RjSu/
+... ) | planned |                       ... ) | in-progress |
+110                                     110 
+
+.keel/epics/VFECyWLL6/README.md --- Text
+25 **Progress:** 0/1 voyages complete,  25 **Progress:** 0/1 voyages complete, 
+.. 0/4 stories done                     .. 0/4 stories done
+26 | Voyage | Status | Stories |        26 | Voyage | Status | Stories |
+27 |--------|--------|---------|        27 |--------|--------|---------|
+28 | [Model-Directed Routing Backbone]( 28 | [Model-Directed Routing Backbone](
+.. voyages/VFED2RjSu/) | planned | 0/4  .. voyages/VFED2RjSu/) | in-progress | 
+.. |                                    .. 0/4 |
+29 <!-- END GENERATED -->               29 <!-- END GENERATED -->
+
+.keel/epics/VFECyWLL6/voyages/VFED2RjSu/MODEL_DIRECTED_ROUTING_PROOF.md --- Text
+ 1 # Model-Directed Routing Proof
+ 2 
+ 3 ## Summary
+ 4 
+ 5 This voyage replaced the primary top-level controller classifier in the
+ 6 `MechSuitService` runtime with model-directed first action selection.
+ 7 
+ 8 ## Before
+ 9 
+10 The application runtime used a controller-side shortcut before the planner lane:
+11 
+12 - `casual` turns stayed on the synthesizer lane immediately
+13 - other turns were heuristically mapped into direct response, deterministic
+14   action, or planner work before the planner model saw interpretation context
+15 
+16 That meant `AGENTS.md` and linked foundational docs could influence later
+17 planning and synthesis prompts, but not the first route decision.
+18 
+19 ## After
+20 
+21 The primary runtime path now behaves as:
+22 
+23 1. load `AGENTS.md` and linked foundational guidance
+24 2. assemble interpretation context
+25 3. ask the planner lane for the first bounded action
+26 4. validate and execute the selected route
+27 5. recurse or synthesize from the resulting evidence
+28 
+29 Implemented in:
+30 
+31 - `src/application/mod.rs`
+32 - `src/domain/ports/planning.rs`
+33 - `src/infrastructure/adapters/sift_agent.rs`
+34 - `src/infrastructure/adapters/sift_planner.rs`
+35 
+36 ## Concrete Turn Proof
+37 
+38 The regression test `application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action`
+39 proves the runtime no longer commits the route before planner selection.
+40 
+41 It exercises a turn that previously would have been trapped behind the cheap
+42 `casual` shortcut:
+43 
+44 - prompt: `Howdy`
+45 - interpretation context: loaded from workspace `AGENTS.md`
+46 - planner-selected first action: `answer`
+47 - resulting classified intent: `direct-response`
+48 
+49 The test asserts:
+50 
+51 - interpretation context is assembled before `PlannerActionSelected`
+52 - `PlannerActionSelected` occurs before `IntentClassified`
+53 - the planner request contains `AGENTS.md`-derived interpretation sources
+54 - the final route is a model-selected direct response, not a pre-planner
+55   controller shortcut
+56 
+57 ## Supporting Regression Coverage
+58 
+59 - `application::tests::answer_initial_actions_route_to_direct_responses`
+60 - `application::tests::tool_initial_actions_route_to_deterministic_execution`
+61 - `application::tests::resource_initial_actions_route_to_the_planner_loop`
+62 - `application::tests::stop_initial_actions_fall_back_to_direct_responses`
+63 - `infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context`
+64 
+65 ## Remaining Transitional Debt
+66 
+67 The backbone contract is delivered for the main `MechSuitService` runtime.
+68 Remaining debt is narrower:
+69 
+70 - the `tool` first action is still a bridge into the older deterministic tool
+71   runtime
+72 - legacy direct adapter helper methods outside the main service path still carry
+73   heuristic intent inference
+74 
+
+.keel/epics/VFECyWLL6/voyages/VFED2RjSu/README.md --- 1/2 --- Text
+ 1 ---                                   1 ---
+ 2 # system-managed                      2 # system-managed
+ 3 id: VFED2RjSu                         3 id: VFED2RjSu
+ 4 status: planned                       4 status: in-progress
+ 5 epic: VFECyWLL6                       5 epic: VFECyWLL6
+ 6 created_at: 2026-03-28T21:41:11       6 created_at: 2026-03-28T21:41:11
+ 7 # authored                            7 # authored
+ 8 title: Model-Directed Routing Backbo  8 title: Model-Directed Routing Backbo
+ . ne                                    . ne
+ 9 index: 1                              9 index: 1
+10 updated_at: 2026-03-28T21:48:08      10 updated_at: 2026-03-28T21:48:08
+..                                      11 started_at: 2026-03-29T08:17:57
+11 ---                                  12 ---
+12                                      13 
+13 # Model-Directed Routing Backbone    14 # Model-Directed Routing Backbone
+
+.keel/epics/VFECyWLL6/voyages/VFED2RjSu/README.md --- 2/2 --- Text
+30                                      31 
+31 | Title | Type | Status |            32 | Title | Type | Status |
+32 |-------|------|--------|            33 |-------|------|--------|
+33 | [Define Model-Directed Next-Action 34 | [Define Model-Directed Next-Action
+..  Contract](../../../../stories/VFEDD ..  Contract](../../../../stories/VFEDD
+.. rcF7/README.md) | feat | backlog |   .. rcF7/README.md) | feat | in-progress
+..                                      ..  |
+34 | [Feed Interpretation Context Into  35 | [Feed Interpretation Context Into 
+.. First Action Selection](../../../../ .. First Action Selection](../../../../
+.. stories/VFEDDsIF6/README.md) | feat  .. stories/VFEDDsIF6/README.md) | feat 
+.. | backlog |                          .. | in-progress |
+35 | [Replace Heuristic Top-Level Routi 36 | [Replace Heuristic Top-Level Routi
+.. ng With Planner Decisions](../../../ .. ng With Planner Decisions](../../../
+.. ../stories/VFEDDsfF9/README.md) | fe .. ../stories/VFEDDsfF9/README.md) | fe
+.. at | backlog |                       .. at | in-progress |
+36 | [Document And Prove Model-Directed 37 | [Document And Prove Model-Directed
+..  Routing](../../../../stories/VFEDDt ..  Routing](../../../../stories/VFEDDt
+.. AFz/README.md) | docs | backlog |    .. AFz/README.md) | docs | in-progress 
+..                                      .. |
+37 <!-- END GENERATED -->               38 <!-- END GENERATED -->
+
+.keel/stories/VFEDDrcF7/EVIDENCE/ac-1.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:31.982195753-07:00
+3 mode: manual
+4 ---
+5 Added the top-level InitialAction/InitialActionDecision contract in src/domain/ports/planning.rs, exported it through src/domain/ports/mod.rs, and routed it through execution_plan_from_initial_action in src/application/mod.rs. The contract now expresses answer, tool, search, read, inspect, refine, branch, and stop decisions.
+6 
+
+.keel/stories/VFEDDrcF7/EVIDENCE/ac-2.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:32.014408509-07:00
+3 mode: manual
+4 ---
+5 Controller validation remains authoritative: planning.rs documents the controller-owned validation envelope, src/application/mod.rs validates inspect commands via run_planner_inspect_command/validate_inspect_command, and src/infrastructure/adapters/sift_agent.rs retries invalid initial-action output before bounded fail-closed fallback in select_initial_action/fallback_initial_action.
+6 
+
+.keel/stories/VFEDDrcF7/EVIDENCE/ac-3.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:32.047391561-07:00
+3 mode: manual
+4 ---
+5 The first-action contract is repository-agnostic: src/domain/ports/planning.rs only models generic workspace actions and interpretation context, with no Keel-specific intent or board-only action types.
+6 
+
+.keel/stories/VFEDDrcF7/README.md --- 1/2 --- Text
+ 1 ---                                   1 ---
+ 2 # system-managed                      2 # system-managed
+ 3 id: VFEDDrcF7                         3 id: VFEDDrcF7
+ 4 status: backlog                       4 status: in-progress
+ 5 created_at: 2026-03-28T21:41:55       5 created_at: 2026-03-28T21:41:55
+ 6 updated_at: 2026-03-28T21:48:08       6 updated_at: 2026-03-29T08:31:58
+ 7 # authored                            7 # authored
+ 8 title: Define Model-Directed Next-Ac  8 title: Define Model-Directed Next-Ac
+ . tion Contract                         . tion Contract
+ 9 type: feat                            9 type: feat
+10 operator-signal:                     10 operator-signal:
+11 scope: VFECyWLL6/VFED2RjSu           11 scope: VFECyWLL6/VFED2RjSu
+12 index: 1                             12 index: 1
+..                                      13 started_at: 2026-03-29T08:31:58
+13 ---                                  14 ---
+14                                      15 
+15 # Define Model-Directed Next-Action  16 # Define Model-Directed Next-Action 
+.. Contract                             .. Contract
+
+.keel/stories/VFEDDrcF7/README.md --- 2/2 --- Text
+23                                      24 
+24 ## Acceptance Criteria               25 ## Acceptance Criteria
+25                                      26 
+26 - [ ] A top-level action contract ex 27 - [ ] A top-level action contract ex
+.. ists for first action selection and  .. ists for first action selection and 
+.. can express direct answer or synthes .. can express direct answer or synthes
+.. ize, search, read, inspect, refine,  .. ize, search, read, inspect, refine, 
+.. branch, and stop. [SRS-02/AC-01] <!- .. branch, and stop. [SRS-02/AC-01] <!-
+.. - verify: manual, SRS-02:start:end - .. - verify: manual, SRS-02:start:end, 
+.. ->                                   .. proof: ac-1.log-->
+27 - [ ] The contract defines the valid 28 - [ ] The contract defines the valid
+.. ation envelope the controller must e .. ation envelope the controller must e
+.. nforce, including safe inspect/tool  .. nforce, including safe inspect/tool 
+.. boundaries and fail-closed behavior, .. boundaries and fail-closed behavior,
+..  without yet owning the runtime refa ..  without yet owning the runtime refa
+.. ctor. [SRS-02/AC-02] <!-- verify: ma .. ctor. [SRS-02/AC-02] <!-- verify: ma
+.. nual, SRS-02:start:end -->           .. nual, SRS-02:start:end, proof: ac-2.
+..                                      .. log-->
+28 - [ ] The contract is positioned as  29 - [ ] The contract is positioned as 
+.. a general-purpose harness boundary r .. a general-purpose harness boundary r
+.. ather than a Keel-specific routing f .. ather than a Keel-specific routing f
+.. eature. [SRS-NFR-03/AC-03] <!-- veri .. eature. [SRS-NFR-03/AC-03] <!-- veri
+.. fy: manual, SRS-NFR-03:start:end --> .. fy: manual, SRS-NFR-03:start:end, pr
+..                                      .. oof: ac-3.log-->
+
+.keel/stories/VFEDDrcF7/manifest.yaml --- YAML
+1 id: VFEDDrcF7
+2 git_sha: 6bed06f267efa816e5c82a75e18b2f98f142ec4d
+3 evidence:
+4   EVIDENCE/ac-1.log: 88406414b9d8f36e5234079268be6631598c732349284ad182529057767442e7
+5   EVIDENCE/ac-2.log: c87208fb5a4bfceaf001262c5b110c484dc4324760e865de3292a0c63ec17717
+6   EVIDENCE/ac-3.log: e31c142cc272ad2dfb30371052554e71175fee7fb85b6df2779651d868326a44
+7 
+
+.keel/stories/VFEDDsIF6/EVIDENCE/ac-1.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:32.077946519-07:00
+3 mode: manual
+4 ---
+5 src/application/mod.rs now assembles interpretation context before planner_engine.select_initial_action is called. The regression test application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action proves interpretation is emitted before the first planner action is selected.
+6 
+
+.keel/stories/VFEDDsIF6/EVIDENCE/ac-2.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:39.555750298-07:00
+3 mode: manual
+4 ---
+5 src/infrastructure/adapters/sift_agent.rs now builds the first-action prompt from interpretation context and recent turns before any route is chosen. The regression test infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context proves AGENTS-derived guidance is injected into that first action-selection prompt.
+6 
+
+.keel/stories/VFEDDsIF6/EVIDENCE/ac-3.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:39.587773588-07:00
+3 mode: manual
+4 ---
+5 src/application/mod.rs emits TurnEvent::InterpretationContext in the primary runtime path before TurnEvent::PlannerActionSelected, so interpretation remains visible in the default action stream. The application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action regression covers that ordering.
+6 
+
+.keel/stories/VFEDDsIF6/README.md --- 1/2 --- Text
+ 1 ---                                   1 ---
+ 2 # system-managed                      2 # system-managed
+ 3 id: VFEDDsIF6                         3 id: VFEDDsIF6
+ 4 status: backlog                       4 status: in-progress
+ 5 created_at: 2026-03-28T21:41:55       5 created_at: 2026-03-28T21:41:55
+ 6 updated_at: 2026-03-28T21:48:08       6 updated_at: 2026-03-29T08:17:57
+ 7 # authored                            7 # authored
+ 8 title: Feed Interpretation Context I  8 title: Feed Interpretation Context I
+ . nto First Action Selection            . nto First Action Selection
+ 9 type: feat                            9 type: feat
+10 operator-signal:                     10 operator-signal:
+11 scope: VFECyWLL6/VFED2RjSu           11 scope: VFECyWLL6/VFED2RjSu
+12 index: 2                             12 index: 2
+..                                      13 started_at: 2026-03-29T08:17:57
+13 ---                                  14 ---
+14                                      15 
+15 # Feed Interpretation Context Into F 16 # Feed Interpretation Context Into F
+.. irst Action Selection                .. irst Action Selection
+
+.keel/stories/VFEDDsIF6/README.md --- 2/2 --- Text
+23                                      24 
+24 ## Acceptance Criteria               25 ## Acceptance Criteria
+25                                      26 
+26 - [ ] Non-trivial turns assemble int 27 - [ ] Non-trivial turns assemble int
+.. erpretation context before first bou .. erpretation context before first bou
+.. nded action selection. [SRS-01/AC-01 .. nded action selection. [SRS-01/AC-01
+.. ] <!-- verify: manual, SRS-01:start: .. ] <!-- verify: manual, SRS-01:start:
+.. end -->                              .. end, proof: ac-1.log-->
+27 - [ ] The first action-selection pro 28 - [ ] The first action-selection pro
+.. mpt or contract demonstrably include .. mpt or contract demonstrably include
+.. s operator memory and linked foundat .. s operator memory and linked foundat
+.. ional guidance. [SRS-01/AC-02] <!--  .. ional guidance. [SRS-01/AC-02] <!-- 
+.. verify: manual, SRS-01:start:end --> .. verify: manual, SRS-01:start:end, pr
+..                                      .. oof: ac-2.log-->
+28 - [ ] Interpretation-context assembl 29 - [ ] Interpretation-context assembl
+.. y remains observable in the default  .. y remains observable in the default 
+.. user surface. [SRS-NFR-02/AC-03] <!- .. user surface. [SRS-NFR-02/AC-03] <!-
+.. - verify: manual, SRS-NFR-02:start:e .. - verify: manual, SRS-NFR-02:start:e
+.. nd -->                               .. nd, proof: ac-3.log-->
+
+.keel/stories/VFEDDsIF6/manifest.yaml --- YAML
+1 id: VFEDDsIF6
+2 git_sha: 6bed06f267efa816e5c82a75e18b2f98f142ec4d
+3 evidence:
+4   EVIDENCE/ac-1.log: 20ee264a85e821999e3252a87a7c7792ed0c8b5d5115065a25c5d0bd08141056
+5   EVIDENCE/ac-2.log: dfb89fe30b1b6a14b47ec7e90e5df3ea3cc2b8e1d6b2d74afc0ababe19eed6d8
+6   EVIDENCE/ac-3.log: ac0f8ca617c627c3e4d0d9359ddd78f9d460007b33f3928bc1f583707c8b3f71
+7 
+
+.keel/stories/VFEDDsfF9/EVIDENCE/ac-1.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:39.621459954-07:00
+3 mode: manual
+4 ---
+5 src/application/mod.rs no longer uses a separate top-level heuristic classifier to choose the first route. process_prompt_with_sink now always assembles interpretation context, calls planner_engine.select_initial_action, and derives the route from execution_plan_from_initial_action, with only planner-unavailable fallback remaining.
+6 
+
+.keel/stories/VFEDDsfF9/EVIDENCE/ac-2.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:39.669762288-07:00
+3 mode: manual
+4 ---
+5 Safe inspect/tool execution remains controller-bounded after the refactor. src/application/mod.rs validates inspect commands through validate_inspect_command before execution, and deterministic tool execution still flows through controller-owned tool execution in src/infrastructure/adapters/sift_agent.rs rather than raw model autonomy.
+6 
+
+.keel/stories/VFEDDsfF9/EVIDENCE/ac-3.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:47.036255850-07:00
+3 mode: manual
+4 ---
+5 The recursive planner loop now consumes the first model-selected action directly. src/application/mod.rs seeds execute_recursive_planner_loop with execution_plan.initial_planner_decision and still hands the resulting evidence bundle to the synthesizer; the routing/unit tests plus application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action cover that path.
+6 
+
+.keel/stories/VFEDDsfF9/EVIDENCE/ac-4.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:47.119051253-07:00
+3 mode: manual
+4 ---
+5 Model-directed routing remains local-first and fails closed: the planner and synthesizer lanes still default to the local Sift/Qwen runtime, planner-unavailable cases fall back through fallback_execution_plan in src/application/mod.rs, and invalid planner output retries then degrades through bounded fallback_initial_action in src/infrastructure/adapters/sift_agent.rs.
+6 
+
+.keel/stories/VFEDDsfF9/README.md --- 1/2 --- Text
+ 1 ---                                   1 ---
+ 2 # system-managed                      2 # system-managed
+ 3 id: VFEDDsfF9                         3 id: VFEDDsfF9
+ 4 status: backlog                       4 status: in-progress
+ 5 created_at: 2026-03-28T21:41:55       5 created_at: 2026-03-28T21:41:55
+ 6 updated_at: 2026-03-28T21:48:08       6 updated_at: 2026-03-29T08:31:58
+ 7 # authored                            7 # authored
+ 8 title: Replace Heuristic Top-Level R  8 title: Replace Heuristic Top-Level R
+ . outing With Planner Decisions         . outing With Planner Decisions
+ 9 type: feat                            9 type: feat
+10 operator-signal:                     10 operator-signal:
+11 scope: VFECyWLL6/VFED2RjSu           11 scope: VFECyWLL6/VFED2RjSu
+12 index: 3                             12 index: 3
+..                                      13 started_at: 2026-03-29T08:31:58
+13 ---                                  14 ---
+14                                      15 
+15 # Replace Heuristic Top-Level Routin 16 # Replace Heuristic Top-Level Routin
+.. g With Planner Decisions             .. g With Planner Decisions
+
+.keel/stories/VFEDDsfF9/README.md --- 2/2 --- Text
+23                                      24 
+24 ## Acceptance Criteria               25 ## Acceptance Criteria
+25                                      26 
+26 - [ ] Non-trivial turns no longer de 27 - [ ] Non-trivial turns no longer de
+.. pend on a separate heuristic classif .. pend on a separate heuristic classif
+.. ier to choose their first resource a .. ier to choose their first resource a
+.. ction. [SRS-03/AC-01] <!-- verify: m .. ction. [SRS-03/AC-01] <!-- verify: m
+.. anual, SRS-03:start:end -->          .. anual, SRS-03:start:end, proof: ac-1
+..                                      .. .log-->
+27 - [ ] Safe inspect/tool execution re 28 - [ ] Safe inspect/tool execution re
+.. mains controller-validated and bound .. mains controller-validated and bound
+.. ed after the refactor. [SRS-04/AC-02 .. ed after the refactor. [SRS-04/AC-02
+.. ] <!-- verify: manual, SRS-04:start: .. ] <!-- verify: manual, SRS-04:start:
+.. end -->                              .. end, proof: ac-2.log-->
+28 - [ ] Recursive planner execution an 29 - [ ] Recursive planner execution an
+.. d synthesizer handoff operate throug .. d synthesizer handoff operate throug
+.. h the new top-level action contract  .. h the new top-level action contract 
+.. without regressing grounded answers. .. without regressing grounded answers.
+..  [SRS-05/AC-03] <!-- verify: manual, ..  [SRS-05/AC-03] <!-- verify: manual,
+..  SRS-05:start:end -->                ..  SRS-05:start:end, proof: ac-3.log--
+..                                      .. >
+29 - [ ] Model-directed routing remains 30 - [ ] Model-directed routing remains
+..  local-first and fails closed when p ..  local-first and fails closed when p
+.. lanner output is invalid or a heavie .. lanner output is invalid or a heavie
+.. r planner provider is unavailable. [ .. r planner provider is unavailable. [
+.. SRS-NFR-01/AC-04] <!-- verify: manua .. SRS-NFR-01/AC-04] <!-- verify: manua
+.. l, SRS-NFR-01:start:end -->          .. l, SRS-NFR-01:start:end, proof: ac-4
+..                                      .. .log-->
+
+.keel/stories/VFEDDsfF9/manifest.yaml --- YAML
+1 id: VFEDDsfF9
+2 git_sha: 6bed06f267efa816e5c82a75e18b2f98f142ec4d
+3 evidence:
+4   EVIDENCE/ac-1.log: 443a4382ca803138c1cbcd103c4bbd424d216dbfecf230679c53c427ff6b7552
+5   EVIDENCE/ac-2.log: da93ef1dad031a50dc7ed36a3a1408b162dbc6866be771a97b5cb9e3d50eb43d
+6   EVIDENCE/ac-3.log: 0538a3da62670b1492d85548e1d37695f108f310abf62d1c91381d70e2356001
+7   EVIDENCE/ac-4.log: 8ff9f65618ab9cde825db86967f02b247931d6d3d2f6eab36a32586f934afd5d
+8 
+
+.keel/stories/VFEDDtAFz/EVIDENCE/ac-1.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:47.072991646-07:00
+3 mode: manual
+4 ---
+5 README.md and ARCHITECTURE.md now describe model-directed first action selection as the backbone architecture, including updated routing diagrams and the narrower remaining transitional debt around the tool bridge and legacy helper paths.
+6 
+
+.keel/stories/VFEDDtAFz/EVIDENCE/ac-2.log --- Text
+1 ---
+2 recorded_at: 2026-03-29T08:36:47.092236300-07:00
+3 mode: manual
+4 ---
+5 POLICY.md, AGENTS.md, INSTRUCTIONS.md, and CONFIGURATION.md now explain the current contract explicitly: the model owns bounded first-action selection while the controller owns validation, budgets, allowlists, deterministic execution, and fail-closed behavior.
+6 
+
+.keel/stories/VFEDDtAFz/EVIDENCE/ac-3.log --- Text
+ 1 ---
+ 2 recorded_at: 2026-03-29T08:36:50.482258557-07:00
+ 3 mode: manual
+ 4 files: [".keel/epics/VFECyWLL6/voyages/VFED2RjSu/MODEL_DIRECTED_ROUTING_PROOF.md"]
+ 5 ---
+ 6 
+ 7 --- File: MODEL_DIRECTED_ROUTING_PROOF.md ---
+ 8 # Model-Directed Routing Proof
+ 9 
+10 ## Summary
+11 
+12 This voyage replaced the primary top-level controller classifier in the
+13 `MechSuitService` runtime with model-directed first action selection.
+14 
+15 ## Before
+16 
+17 The application runtime used a controller-side shortcut before the planner lane:
+18 
+19 - `casual` turns stayed on the synthesizer lane immediately
+20 - other turns were heuristically mapped into direct response, deterministic
+21   action, or planner work before the planner model saw interpretation context
+22 
+23 That meant `AGENTS.md` and linked foundational docs could influence later
+24 planning and synthesis prompts, but not the first route decision.
+25 
+26 ## After
+27 
+28 The primary runtime path now behaves as:
+29 
+30 1. load `AGENTS.md` and linked foundational guidance
+31 2. assemble interpretation context
+32 3. ask the planner lane for the first bounded action
+33 4. validate and execute the selected route
+34 5. recurse or synthesize from the resulting evidence
+35 
+36 Implemented in:
+37 
+38 - `src/application/mod.rs`
+39 - `src/domain/ports/planning.rs`
+40 - `src/infrastructure/adapters/sift_agent.rs`
+41 - `src/infrastructure/adapters/sift_planner.rs`
+42 
+43 ## Concrete Turn Proof
+44 
+45 The regression test `application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action`
+46 proves the runtime no longer commits the route before planner selection.
+47 
+48 It exercises a turn that previously would have been trapped behind the cheap
+49 `casual` shortcut:
+50 
+51 - prompt: `Howdy`
+52 - interpretation context: loaded from workspace `AGENTS.md`
+53 - planner-selected first action: `answer`
+54 - resulting classified intent: `direct-response`
+55 
+56 The test asserts:
+57 
+58 - interpretation context is assembled before `PlannerActionSelected`
+59 - `PlannerActionSelected` occurs before `IntentClassified`
+60 - the planner request contains `AGENTS.md`-derived interpretation sources
+61 - the final route is a model-selected direct response, not a pre-planner
+62   controller shortcut
+63 
+64 ## Supporting Regression Coverage
+65 
+66 - `application::tests::answer_initial_actions_route_to_direct_responses`
+67 - `application::tests::tool_initial_actions_route_to_deterministic_execution`
+68 - `application::tests::resource_initial_actions_route_to_the_planner_loop`
+69 - `application::tests::stop_initial_actions_fall_back_to_direct_responses`
+70 - `infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context`
+71 
+72 ## Remaining Transitional Debt
+73 
+74 The backbone contract is delivered for the main `MechSuitService` runtime.
+75 Remaining debt is narrower:
+76 
+77 - the `tool` first action is still a bridge into the older deterministic tool
+78   runtime
+79 - legacy direct adapter helper methods outside the main service path still carry
+80   heuristic intent inference
+81 
+82 
+
+.keel/stories/VFEDDtAFz/README.md --- 1/2 --- Text
+ 1 ---                                   1 ---
+ 2 # system-managed                      2 # system-managed
+ 3 id: VFEDDtAFz                         3 id: VFEDDtAFz
+ 4 status: backlog                       4 status: in-progress
+ 5 created_at: 2026-03-28T21:41:55       5 created_at: 2026-03-28T21:41:55
+ 6 updated_at: 2026-03-28T21:48:08       6 updated_at: 2026-03-29T08:36:20
+ 7 # authored                            7 # authored
+ 8 title: Document And Prove Model-Dire  8 title: Document And Prove Model-Dire
+ . cted Routing                          . cted Routing
+ 9 type: docs                            9 type: docs
+10 operator-signal:                     10 operator-signal:
+11 scope: VFECyWLL6/VFED2RjSu           11 scope: VFECyWLL6/VFED2RjSu
+12 index: 4                             12 index: 4
+..                                      13 started_at: 2026-03-29T08:36:20
+13 ---                                  14 ---
+14                                      15 
+15 # Document And Prove Model-Directed  16 # Document And Prove Model-Directed 
+.. Routing                              .. Routing
+
+.keel/stories/VFEDDtAFz/README.md --- 2/2 --- Text
+22                                      23 
+23 ## Acceptance Criteria               24 ## Acceptance Criteria
+24                                      25 
+25 - [ ] README and companion architect 26 - [ ] README and companion architect
+.. ure docs describe model-directed top .. ure docs describe model-directed top
+.. -level action selection and how it f .. -level action selection and how it f
+.. its into the recursive harness. [SRS .. its into the recursive harness. [SRS
+.. -06/AC-01] <!-- verify: manual, SRS- .. -06/AC-01] <!-- verify: manual, SRS-
+.. 06:start:end -->                     .. 06:start:end, proof: ac-1.log-->
+26 - [ ] Operator guidance documents ex 27 - [ ] Operator guidance documents ex
+.. plain that the model owns bounded ac .. plain that the model owns bounded ac
+.. tion selection while the controller  .. tion selection while the controller 
+.. owns validation and budgets. [SRS-06 .. owns validation and budgets. [SRS-06
+.. /AC-02] <!-- verify: manual, SRS-06: .. /AC-02] <!-- verify: manual, SRS-06:
+.. start:end -->                        .. start:end, proof: ac-2.log-->
+27 - [ ] Execution proofs show before/a 28 - [ ] Execution proofs show before/a
+.. fter routing behavior for at least o .. fter routing behavior for at least o
+.. ne turn that previously depended on  .. ne turn that previously depended on 
+.. heuristic top-level classification.  .. heuristic top-level classification. 
+.. [SRS-NFR-02/AC-03] <!-- verify: manu .. [SRS-NFR-02/AC-03] <!-- verify: manu
+.. al, SRS-NFR-02:start:end -->         .. al, SRS-NFR-02:start:end, proof: ac-
+..                                      .. 3.log-->
+
+.keel/stories/VFEDDtAFz/manifest.yaml --- YAML
+1 id: VFEDDtAFz
+2 git_sha: 6bed06f267efa816e5c82a75e18b2f98f142ec4d
+3 evidence:
+4   EVIDENCE/ac-1.log: 4938f9f3649243bcaa024508e1744ebfefa9296d1c05a53cbf475bd694e1a477
+5   EVIDENCE/ac-2.log: 03fa0e0709cb2a01b7c2b21bcfe4bb8d02e9f0ab92a9253fd9b956bd3c1b5608
+6   EVIDENCE/ac-3.log: 7bf4378ffd3df88ff429fbef5502bc017fe90b17ed68603fedba213da7c24667
+7 
+
+AGENTS.md --- 1/3 --- Text
+ 9 ### Core Principles                   9 ### Core Principles
+10 1. **Maintain Calibration**: The boo 10 1. **Maintain Calibration**: The boo
+.. t sequence (credits, weights, biases .. t sequence (credits, weights, biases
+.. ) is foundational. Ensure changes to .. ) is foundational. Ensure changes to
+..  `src/main.rs` never weaken Constitu ..  `src/main.rs` never weaken Constitu
+.. tion or Dogma validation.            .. tion or Dogma validation.
+11 2. **Local First**: Prioritize local 11 2. **Local First**: Prioritize local
+..  inference capacity via `candle`. Av ..  inference capacity via `candle`. Av
+.. oid introducing network dependencies .. oid introducing network dependencies
+..  into the core execution loop.       ..  into the core execution loop.
+12 3. **Interpret Before Routing**: Ope 12 3. **Interpret Before Routing**: Ope
+.. rator memory should influence first- .. rator memory should influence first-
+.. pass interpretation of non-trivial t .. pass interpretation before the harne
+.. urns. Do not commit to a route befor .. ss commits to a route. Do not commit
+.. e the harness has assembled the rele ..  to a path before the relevant `AGEN
+.. vant `AGENTS.md` and foundational co .. TS.md` and foundational context are 
+.. ntext.                               .. assembled.
+13 4. **Model-Directed Next Action**: A 13 4. **Model-Directed Next Action**: A
+.. fter interpretation context is assem .. fter interpretation context is assem
+.. bled, the model should choose the ne .. bled, the model should choose the ne
+.. xt bounded action from a constrained .. xt bounded action from a constrained
+..  schema. The controller should valid ..  schema. The controller should valid
+.. ate and execute that action safely i .. ate and execute that action safely i
+.. nstead of heuristically guessing the .. nstead of heuristically guessing the
+..  route.                              ..  route.
+14 5. **Recursive Planning Before Final 14 5. **Recursive Planning Before Final
+..  Answer**: Difficult workspace quest ..  Answer**: Difficult workspace quest
+.. ions should improve through bounded  .. ions should improve through bounded 
+.. recursive resource use. Planner work .. recursive resource use. Planner work
+..  and final synthesis are different r ..  and final synthesis are different r
+.. oles and should not be collapsed int .. oles and should not be collapsed int
+.. o one brittle one-shot path.         .. o one brittle one-shot path.
+15 6. **Visible Turns**: The interactiv 15 6. **Visible Turns**: The interactiv
+.. e REPL should render a default Codex .. e REPL should render a default Codex
+.. -style action stream so interpretati .. -style action stream so interpretati
+.. on, recursive actions, routing, retr .. on, recursive actions, routing, retr
+.. ieval, tools, fallbacks, and synthes .. ieval, tools, fallbacks, and synthes
+.. is are observable without extra flag .. is are observable without extra flag
+.. s.                                   .. s.
+
+AGENTS.md --- 2/3 --- Text
+21 ### Runtime Routing Contract         21 ### Runtime Routing Contract
+22                                      22 
+23 - The model should choose the next b 23 - The model should choose the next b
+.. ounded action from a controller-defi .. ounded action from a controller-defi
+.. ned schema; the controller validates .. ned schema; the controller validates
+..  and executes it safely.             ..  and executes it safely.
+24 - The harness uses a **planner lane* 24 - The primary mech-suit path now ass
+.. * that owns bounded search/refine lo .. embles interpretation context and as
+.. ops for non-trivial workspace questi .. ks the **planner lane** to choose th
+.. ons.                                 .. e first bounded action before route 
+..                                      .. selection.
+25 - The **synthesizer lane** remains t 25 - The **synthesizer lane** remains t
+.. he final answer path for casual chat .. he final answer path for direct resp
+.. , explicit deterministic actions, an .. onses, grounded responses after plan
+.. d grounded responses after planner w .. ner work, and the temporary determin
+.. ork.                                 .. istic `tool` bridge.
+26 - Non-trivial turns should improve t 26 - Turns should improve through recur
+.. hrough recursive context work instea .. sive context work instead of project
+.. d of project-specific hardcoded inte .. -specific hardcoded intents or top-l
+.. nts or top-level heuristic routing.  .. evel heuristic routing.
+27 - Repository-question answers should 27 - Repository-question answers should
+..  include file citations by default.  ..  include file citations by default.
+28 - TTY interactive sessions should ex 28 - TTY interactive sessions should ex
+.. pose a default transcript TUI with v .. pose a default transcript TUI with v
+.. isible turn events rather than hidin .. isible turn events rather than hidin
+.. g runtime behavior behind verbose-on .. g runtime behavior behind verbose-on
+.. ly diagnostics.                      .. ly diagnostics.
+29 - One-shot `--prompt` usage and non- 29 - One-shot `--prompt` usage and non-
+.. TTY stdin/stdout flows must remain p .. TTY stdin/stdout flows must remain p
+.. lain output paths.                   .. lain output paths.
+
+AGENTS.md --- 3/3 --- Text
+55                                      55 
+56 ### Transitional Note                56 ### Transitional Note
+57                                      57 
+58 The current implementation still has 58 The primary runtime now uses model-d
+..  a narrow heuristic shortcut for som .. irected first action selection. The
+.. e                                    .. 
+..                                      59 remaining transitional debt is narro
+..                                      .. wer: a temporary `tool` bridge still
+..                                      ..  hands
+..                                      60 off to the older deterministic tool 
+..                                      .. runtime, and some legacy direct adap
+..                                      .. ter
+59 trivial turns before full model-dire 61 helpers still contain heuristic inte
+.. cted top-level action selection land .. nt inference outside the main
+.. s.                                   .. 
+60 Treat that as transitional debt, not 62 `MechSuitService` path. Treat those 
+..  the target architecture.            .. compatibility surfaces as debt, not 
+..                                      .. the
+..                                      63 target architecture.
+61                                      64 
+62 ### Procedural Instructions          65 ### Procedural Instructions
+63 Follow the formal procedural loops a 66 Follow the formal procedural loops a
+.. nd checklists defined in:            .. nd checklists defined in:
+
+ARCHITECTURE.md --- 1/3 --- Text
+ 13    turns, retained evidence, and pr  13    turns, retained evidence, and pr
+ .. ior tool outputs.                    .. ior tool outputs.
+ 14                                      14 
+ 15 2. `PlannerLane`                     15 2. `PlannerLane`
+ 16    A planner-capable model chooses   16    A planner-capable model chooses 
+ .. the next bounded action for non-tri  .. the next bounded action before rout
+ .. vial                                 .. e
+ 17    turns: search, read, inspect, re  17    selection: answer, tool, search,
+ .. fine, branch, or stop.               ..  read, inspect, refine, branch, or 
+ ..                                      .. stop.
+ 18                                      18 
+ 19 3. `RecursiveExecutionLoop`          19 3. `RecursiveExecutionLoop`
+ 20    Validates and executes planner a  20    Validates and executes planner a
+ .. ctions, appends outputs back into c  .. ctions, appends outputs back into c
+ .. ontext,                              .. ontext,
+
+ARCHITECTURE.md --- 2/3 --- Text
+ 69  69 The planner boundary should be able to express actions like:
+ 70  70 
+ 71  71 - answer or synthesize now
+ ..  72 - bridge into deterministic tool execution when the controller/tool runtime is the best next step
+ 72  73 - search the workspace
+ 73  74 - read a file or artifact
+ 74  75 - inspect prior tool output
+
+ARCHITECTURE.md --- 3/3 --- Text
+119 - interpretation-time operator memo 120 - interpretation-time operator memo
+... ry in [src/infrastructure/adapters/ ... ry in [src/infrastructure/adapters/
+... agent_memory.rs](/home/alex/workspa ... agent_memory.rs](/home/alex/workspa
+... ce/spoke-sh/paddles/src/infrastruct ... ce/spoke-sh/paddles/src/infrastruct
+... ure/adapters/agent_memory.rs)       ... ure/adapters/agent_memory.rs)
+120 - a default transcript TUI in [src/ 121 - a default transcript TUI in [src/
+... infrastructure/cli/interactive_tui. ... infrastructure/cli/interactive_tui.
+... rs](/home/alex/workspace/spoke-sh/p ... rs](/home/alex/workspace/spoke-sh/p
+... addles/src/infrastructure/cli/inter ... addles/src/infrastructure/cli/inter
+... active_tui.rs)                      ... active_tui.rs)
+121                                     122 
+122 The remaining transitional pieces a 123 The remaining transitional pieces a
+... re narrower:                        ... re now smaller:
+123                                     124 
+124 - a heuristic top-level gate still  125 - the main mech-suit service select
+... exists before first non-trivial act ... s the first bounded action through 
+... ion selection; removing it is the n ... the planner lane, but a temporary `
+... ext backbone mission                ... tool` action still bridges into the
+...                                     ...  older deterministic tool runtime
+125 - trivial `casual` and explicit det 126 - legacy direct adapter helpers sti
+... erministic-action turns still use a ... ll carry heuristic intent inference
+...  cheap controller shortcut before t ...  outside the normal `MechSuitServic
+... he planner loop                     ... e` path
+126 - planner `search` / `refine` actio 127 - planner `search` / `refine` actio
+... ns currently delegate to the config ... ns currently delegate to the config
+... ured gatherer backend rather than a ... ured gatherer backend rather than a
+...  richer unified resource graph      ...  richer unified resource graph
+127 - `context-1` remains an explicit e 128 - `context-1` remains an explicit e
+... xperimental boundary                ... xperimental boundary
+128                                     129 
+129 ## Transitional Gap: Heuristic Top- 130 ## Transitional Gap: Tool Bridge An
+... Level Gate                          ... d Legacy Helpers
+130                                     131 
+131 The main remaining mismatch is that 132 The main runtime path now follows t
+...  `paddles` still decides too much b ... he target backbone shape:
+... efore the                           ... 
+132 model chooses its first bounded act ... 
+... ion.                                ... 
+133                                     133 
+134 Current transitional behavior:      ... 
+135                                     ... 
+136 1. controller heuristics classify t ... 
+... he turn                             ... 
+137 2. non-trivial turns then enter the ... 
+...  recursive planner loop             ... 
+138 3. the model chooses later planner  ... 
+... actions                             ... 
+139 4. synthesis happens from resulting ... 
+...  evidence                           ... 
+140                                     ... 
+141 Target backbone behavior:           ... 
+142                                     ... 
+143 1. assemble interpretation context  134 1. assemble interpretation context
+144 2. ask the model for the first boun 135 2. ask the model for the first boun
+... ded action                          ... ded action
+145 3. validate and execute it          136 3. validate and execute it
+146 4. recurse until synthesis is appro 137 4. recurse until synthesis is appro
+... priate                              ... priate
+...                                     138 
+...                                     139 The remaining mismatch is narrower:
+...                                     140 
+...                                     141 1. a selected `tool` action still h
+...                                     ... ands off to the existing determinis
+...                                     ... tic tool runtime instead of a unifi
+...                                     ... ed planner resource graph
+...                                     142 2. some legacy direct adapter helpe
+...                                     ... r methods still infer intent heuris
+...                                     ... tically when called outside `MechSu
+...                                     ... itService`
+147                                     143 
+148 That shift matters because `AGENTS. 144 That means the backbone contract is
+... md` and linked foundational docs sh ...  delivered for the primary interact
+... ould shape                          ... ive and
+149 the very first resource decision, n 145 `process_prompt` runtime, while a f
+... ot merely later search/refine steps ... ew compatibility surfaces still nee
+... .                                   ... d to be
+...                                     146 folded into the same model-directed
+...                                     ...  action system.
+150                                     147 
+151 ## Current Model Routing            148 ## Current Model Routing
+152                                     149 
+
+CONFIGURATION.md --- 1/2 --- Text
+127 selection rather than single-model- 127 selection rather than single-model-
+... only routing:                       ... only routing:
+128                                     128 
+129 - The **synthesizer lane** is the d 129 - The **synthesizer lane** is the d
+... efault response path and must alway ... efault response path and must alway
+... s be configured.                    ... s be configured.
+130 - The **planner lane** owns bounded 130 - The **planner lane** owns first b
+...  `search` / `read` / `inspect` / `r ... ounded action selection for the pri
+... efine` / `branch` / `stop` action s ... mary mech-suit path: `answer` / `to
+... election for non-trivial turns.     ... ol` / `search` / `read` / `inspect`
+...                                     ...  / `refine` / `branch` / `stop`.
+131 - The **gatherer backend** services 131 - The **gatherer backend** services
+...  planner search/refine actions when ...  planner search/refine actions when
+...  workspace retrieval is needed.     ...  workspace retrieval is needed.
+132 - If the planner or gatherer backen 132 - If the planner or gatherer backen
+... d is unavailable, `paddles` emits l ... d is unavailable, `paddles` emits l
+... abeled fallback events and degrades ... abeled fallback events and degrades
+...  honestly to the remaining local-fi ...  honestly to the remaining local-fi
+... rst path.                           ... rst path.
+133                                     133 
+
+CONFIGURATION.md --- 2/2 --- Text
+173 The REPL now renders a default Code 173 The REPL now renders a default Code
+... x-style action stream. Expect visib ... x-style action stream. Expect visib
+... le steps                            ... le steps
+174 for:                                174 for:
+175                                     175 
+176 - turn classification               ... 
+177 - interpretation context assembly   176 - interpretation context assembly
+...                                     177 - model-selected first action
+...                                     178 - resulting route classification
+178 - route selection                   179 - route selection
+179 - planner action selection          180 - planner action selection
+180 - gatherer capability and gathered  181 - gatherer capability and gathered 
+... evidence                            ... evidence
+
+INSTRUCTIONS.md --- 1/2 --- Text
+42                                      42 
+43 Paddles treats inference as a routin 43 Paddles treats inference as a routin
+.. g problem, not a single-model proble .. g problem, not a single-model proble
+.. m.                                   .. m.
+44                                      44 
+45 1. **Interpretation Context First**: 45 1. **Interpretation Context First**:
+..  Assemble `AGENTS.md`, linked founda ..  Assemble `AGENTS.md`, linked founda
+.. tional guidance, recent turns, and r .. tional guidance, recent turns, and r
+.. elevant local state before choosing  .. elevant local state before choosing 
+.. the next bounded action for non-triv .. the next bounded action.
+.. ial turns.                           .. 
+46 2. **Model Selects The Next Bounded  46 2. **Model Selects The Next Bounded 
+.. Action**: Do not rely on controller  .. Action**: Do not rely on controller 
+.. string heuristics as the primary rea .. string heuristics as the primary rea
+.. soning engine. Present the model wit .. soning engine. Present the model wit
+.. h the allowed action options and req .. h the allowed action options and req
+.. uire it to return one of them.       .. uire it to return one of them.
+47 3. **Controller Owns Validation And  47 3. **Controller Owns Validation And 
+.. Budgets**: The controller remains au .. Budgets**: The controller remains au
+.. thoritative for schema validation, s .. thoritative for schema validation, s
+.. afe-command allowlists, deterministi .. afe-command allowlists, deterministi
+.. c execution, loop budgets, and fail- .. c execution, loop budgets, and fail-
+.. closed behavior.                     .. closed behavior.
+48 4. **Planner Before Synthesizer**: R 48 4. **Planner Before Synthesizer**: R
+.. esource-intensive turns should recur .. esource-intensive turns should recur
+.. se through bounded planner actions a .. se through bounded planner actions a
+.. nd only then hand typed evidence to  .. nd only then hand typed evidence to 
+.. the synthesizer lane.                .. the synthesizer lane.
+
+INSTRUCTIONS.md --- 2/2 --- Text
+53 9. **Docs Move With Behavior**: When 53 9. **Docs Move With Behavior**: When
+.. ever routing contracts, model-select .. ever routing contracts, model-select
+.. ed action schemas, provider boundari .. ed action schemas, provider boundari
+.. es, or turn-stream behavior change,  .. es, or turn-stream behavior change, 
+.. update [ARCHITECTURE.md](ARCHITECTUR .. update [ARCHITECTURE.md](ARCHITECTUR
+.. E.md), [CONFIGURATION.md](CONFIGURAT .. E.md), [CONFIGURATION.md](CONFIGURAT
+.. ION.md), [AGENTS.md](AGENTS.md), and .. ION.md), [AGENTS.md](AGENTS.md), and
+..  [INSTRUCTIONS.md](INSTRUCTIONS.md)  ..  [INSTRUCTIONS.md](INSTRUCTIONS.md) 
+.. in the same change slice.            .. in the same change slice.
+54                                      54 
+55 Current transitional note:           55 Current transitional note:
+56 - The implementation still retains a 56 - The main mech-suit runtime now use
+..  narrow heuristic shortcut for some  .. s model-directed first action select
+.. trivial turns. That is transitional  .. ion. Remaining transitional debt is 
+.. debt; the backbone contract is model .. limited to the temporary `tool` brid
+.. -directed bounded action selection.  .. ge and legacy direct adapter helpers
+..                                      ..  that still contain heuristic intent
+..                                      ..  inference outside the main service 
+..                                      .. path.
+57                                      57 
+58 ## Human Interaction & Pokes         58 ## Human Interaction & Pokes
+59                                      59 
+
+POLICY.md --- Text
+21 Model selection is an architectural  21 Model selection is an architectural 
+.. decision, not an incidental prompt t .. decision, not an incidental prompt t
+.. weak.                                .. weak.
+22 - **Smallest Capable Model**: Route  22 - **Smallest Capable Model**: Route 
+.. each request to the smallest model t .. each request to the smallest model t
+.. hat can satisfy the user's intent wi .. hat can satisfy the user's intent wi
+.. thin the active runtime constraints. .. thin the active runtime constraints.
+23 - **Intent Before Size**: Choose mod 23 - **Intent Before Size**: Choose mod
+.. els based on workload shape first: d .. els based on workload shape first: d
+.. irect answer, tool orchestration, re .. irect answer, tool orchestration, re
+.. trieval, context gathering, or final .. trieval, context gathering, or final
+..  synthesis.                          ..  synthesis.
+24 - **Interpretation Before Routing**: 24 - **Interpretation Before Routing**:
+..  Operator memory and foundational gu ..  Operator memory and foundational gu
+.. idance should be available to first- .. idance should be available to first-
+.. pass planner interpretation before t .. pass planner interpretation before t
+.. he runtime commits to a route for no .. he runtime commits to a route.
+.. n-trivial turns.                     .. 
+25 - **Model-Directed Top-Level Action  25 - **Model-Directed Top-Level Action 
+.. Selection**: After interpretation co .. Selection**: After interpretation co
+.. ntext is assembled, non-trivial turn .. ntext is assembled, the primary mech
+.. s should choose their next bounded a .. -suit path should choose its next bo
+.. ction through a constrained model re .. unded action through a constrained m
+.. sponse rather than controller string .. odel response rather than controller
+..  heuristics.                         ..  string heuristics.
+26 - **Controller Owns Validation, Not  26 - **Controller Owns Validation, Not 
+.. Heuristic Intent**: The controller r .. Heuristic Intent**: The controller r
+.. emains authoritative for schema vali .. emains authoritative for schema vali
+.. dation, budgets, safe command allowl .. dation, budgets, safe command allowl
+.. ists, deterministic execution, and f .. ists, deterministic execution, and f
+.. ail-closed behavior, but not for gue .. ail-closed behavior, but not for gue
+.. ssing the user's next resource actio .. ssing the user's next resource actio
+.. n through ad hoc string rules.       .. n through ad hoc string rules.
+27 - **Recursive Planning Before Final  27 - **Recursive Planning Before Final 
+.. Synthesis**: Difficult workspace que .. Synthesis**: Difficult workspace que
+.. stions should be improved through bo .. stions should be improved through bo
+.. unded recursive resource use rather  .. unded recursive resource use rather 
+.. than relying solely on one-shot cont .. than relying solely on one-shot cont
+.. roller heuristics.                   .. roller heuristics.
+28 - **Planner Action Contract**: Non-t 28 - **Planner Action Contract**: Turns
+.. rivial turns should flow through a c ..  should flow through a constrained p
+.. onstrained planner contract that can .. lanner contract that can express dir
+..  express direct answer or synthesize .. ect answer or synthesize, search, re
+.. , search, read, inspect, refine, bra .. ad, inspect, refine, branch, and sto
+.. nch, and stop decisions.             .. p decisions. A temporary `tool` brid
+..                                      .. ge action is allowed while determini
+..                                      .. stic tool execution remains a separa
+..                                      .. te runtime.
+29 - **Separate Catalog From Runtime Fr 29 - **Separate Catalog From Runtime Fr
+.. om Prompting**: Model integration mu .. om Prompting**: Model integration mu
+.. st isolate alias/asset resolution, f .. st isolate alias/asset resolution, f
+.. amily-specific inference runtime, an .. amily-specific inference runtime, an
+.. d prompt/protocol behavior so new fa .. d prompt/protocol behavior so new fa
+.. milies can be added without cross-cu .. milies can be added without cross-cu
+.. tting regressions.                   .. tting regressions.
+30 - **Separate Planner From Synthesize 30 - **Separate Planner From Synthesize
+.. r**: Recursive planning or context g .. r**: Recursive planning or context g
+.. athering may use a dedicated planner .. athering may use a dedicated planner
+.. -capable model, but final answer gen .. -capable model, but final answer gen
+.. eration should remain a distinct ste .. eration should remain a distinct ste
+.. p.                                   .. p.
+31 - **Evidence-First Gatherers**: Cont 31 - **Evidence-First Gatherers**: Cont
+.. ext-gathering adapters must return t .. ext-gathering adapters must return t
+.. yped evidence bundles and capability .. yped evidence bundles and capability
+..  state for a downstream synthesizer, ..  state for a downstream synthesizer,
+..  not prose pretending to be the fina ..  not prose pretending to be the fina
+.. l answer.                            .. l answer.
+32 - **Non-Trivial Turns Plan First**:  32 - **Turns Plan First**: The primary 
+.. Non-trivial turns should use the con .. mech-suit runtime should ask the con
+.. figured planner lane by default. Hid .. figured planner lane for the first b
+.. den synthesizer-private retrieval is .. ounded action before route selection
+..  a fallback/debug path, not the norm .. . Hidden synthesizer-private retriev
+.. al repository-answer path.           .. al is a fallback/debug path, not the
+..                                      ..  normal repository-answer path.
+33 - **Grounded Answers Cite Sources**: 33 - **Grounded Answers Cite Sources**:
+..  Repository-question answers must in ..  Repository-question answers must in
+.. clude file citations by default and  .. clude file citations by default and 
+.. should degrade to extractive evidenc .. should degrade to extractive evidenc
+.. e or explicit insufficiency rather t .. e or explicit insufficiency rather t
+.. han unsupported prose.               .. han unsupported prose.
+34 - **Planner Metadata Must Stay Obser 34 - **Planner Metadata Must Stay Obser
+.. vable**: When a gatherer uses autono .. vable**: When a gatherer uses autono
+.. mous planning, planner strategy, sto .. mous planning, planner strategy, sto
+.. p reason, and retained-evidence summ .. p reason, and retained-evidence summ
+.. aries must remain observable in verb .. aries must remain observable in verb
+.. ose output or evidence digests.      .. ose output or evidence digests.
+35 - **Turn Events Stay Visible**: The  35 - **Turn Events Stay Visible**: The 
+.. interactive REPL must render a defau .. interactive REPL must render a defau
+.. lt action stream for classification, .. lt action stream for classification,
+..  route selection, gatherer work, too ..  route selection, gatherer work, too
+.. l calls, fallbacks, and synthesis. T .. l calls, fallbacks, and synthesis. T
+.. his is not reserved for a quiet debu .. his is not reserved for a quiet debu
+.. g mode.                              .. g mode.
+
+README.md --- 1/5 --- Text
+ 26     P["Planner Lane<br/>planner-cap  26     P["Planner Lane<br/>planner-cap
+ .. able model"]                         .. able model"]
+ 27     D{"Next bounded action?"}        27     D{"Next bounded action?"}
+ 28     A["Validated resource action<br  28     A["Validated resource action<br
+ .. />search / read / inspect / refine   .. />search / read / inspect / refine 
+ .. / branch"]                           .. / branch"]
+ ..                                      29     X["Deterministic tool bridge<br
+ ..                                      .. />legacy tool runtime"]
+ 29     S["Planner Trace + Evidence Sta  30     S["Planner Trace + Evidence Sta
+ .. te"]                                 .. te"]
+ 30     T["Stop condition<br/>enough ev  31     T["Stop condition<br/>enough ev
+ .. idence / budget exhausted / explici  .. idence / budget exhausted / explici
+ .. t stop"]                             .. t stop"]
+ 31     Y["Synthesizer Lane<br/>final a  32     Y["Synthesizer Lane<br/>final a
+ .. nswer model"]                        .. nswer model"]
+ 32     R["TUI / Plain Output"]          33     R["TUI / Plain Output"]
+ 33                                      34 
+ 34     U --> I --> P --> D              35     U --> I --> P --> D
+ ..                                      36     D -->|answer| Y
+ ..                                      37     D -->|tool| X --> Y
+ 35     D -->|search/read/refine| A -->  38     D -->|search/read/refine| A -->
+ ..  S --> I                             ..  S --> I
+ 36     D -->|stop| T --> Y --> R        39     D -->|stop| T --> Y
+ 37     S --> T                          40     S --> T
+ ..                                      41     Y --> R
+ 38 ```                                  42 ```
+ 39                                      43 
+ 40 ### Model Routing                    44 ### Model Routing
+
+README.md --- 2/5 --- Text
+ 47  51     Interpret["Interpretation context<br/>AGENTS.md + linked docs + recent turns + local state"]
+ 48  52     Decide["Model-selected next action<br/>bounded schema"]
+ 49  53     Direct["Answer/synthesize now"]
+ ..  54     Tool["Deterministic tool bridge"]
+ 50  55     Resource["Validated resource action<br/>search / read / inspect / refine / branch"]
+ 51  56     LocalPlanner["Local planner path<br/>Sift autonomous / local Qwen planner"]
+ 52  57     HeavyPlanner["Specialized planner path<br/>Context-1 boundary or future planner model"]
+
+README.md --- 3/5 --- Text
+ 55                                      60 
+ 56     Turn --> Interpret --> Decide    61     Turn --> Interpret --> Decide
+ 57     Decide --> Direct --> Synth      62     Decide --> Direct --> Synth
+ ..                                      63     Decide --> Tool --> Synth
+ 58     Decide --> Resource              64     Decide --> Resource
+ 59     Resource --> LocalPlanner --> E  65     Resource --> LocalPlanner --> E
+ .. vidence                              .. vidence
+ 60     Resource --> HeavyPlanner --> E  66     Resource --> HeavyPlanner --> E
+ .. vidence                              .. vidence
+ 61     Evidence --> Decide              67     Evidence --> Decide
+ 62     Evidence --> Synth               68     Evidence --> Synth
+ 63 ```                                  69 ```
+ 64                                      70 
+ 65 ### Next Backbone Step               71 ### Delivered Backbone Step
+ 66                                      72 
+ 67 The remaining major gap is the top-  73 The primary mech-suit path now asse
+ .. level heuristic gate. Today `paddle  .. mbles interpretation context first 
+ .. s`                                   .. and asks
+ 68 already has a recursive planner loo  74 the planner model to choose the fir
+ .. p, but it still uses a controller s  .. st bounded action before the contro
+ .. hortcut                              .. ller
+ 69 before the model owns first action   75 commits to a route. The controller 
+ .. selection. The next backbone step i  .. still owns schema validation, allow
+ .. s to                                 .. lists,
+ 70 remove that heuristic pre-classific  76 budgets, and fail-closed behavior, 
+ .. ation for non-trivial turns and let  .. but it no longer heuristically deci
+ ..  the model                           .. des the
+ 71 choose one bounded next action from  77 initial path for normal turns.
+ ..  interpretation context.             .. 
+ 72                                      78 
+ 73 ```mermaid                           79 ```mermaid
+ 74 flowchart TD                         80 flowchart TD
+
+README.md --- 4/5 --- Text
+ 77  83     M["Action-selection model"]
+ 78  84     C{"Choose one"}
+ 79  85     A["answer / synthesize"]
+ ..  86     T["tool bridge"]
+ 80  87     R["search / read / inspect / refine / branch"]
+ 81  88     L["validated recursive loop"]
+ 82  89     S["grounded synthesizer answer"]
+ 83  90 
+ 84  91     U --> I --> M --> C
+ 85  92     C --> A --> S
+ ..  93     C --> T --> S
+ 86  94     C --> R --> L --> M
+ 87  95     L --> S
+ 88  96 ```
+
+README.md --- 5/5 --- Text
+ 99                                     107 
+100 Today, the runtime has:             108 Today, the runtime has:
+101                                     109 
+102 - a planner lane that sees interpre 110 - a planner lane that sees interpre
+... tation context before choosing the  ... tation context before choosing the 
+... next action                         ... first bounded action
+103 - hierarchical `AGENTS.md` reload p 111 - hierarchical `AGENTS.md` reload p
+... lus linked foundational guidance ex ... lus linked foundational guidance ex
+... cerpts at interpretation time       ... cerpts at interpretation time
+...                                     112 - a model-directed first action sch
+...                                     ... ema that can choose `answer`, `tool
+...                                     ... `, `search`, `read`, `inspect`, `re
+...                                     ... fine`, `branch`, or `stop`
+104 - a bounded recursive loop for `sea 113 - a bounded recursive loop for `sea
+... rch`, `read`, `inspect`, `refine`,  ... rch`, `read`, `inspect`, `refine`, 
+... `branch`, and `stop`                ... `branch`, and `stop`
+105 - a distinct synthesizer lane that  114 - a distinct synthesizer lane that 
+... answers from the resulting evidence ... answers from the resulting evidence
+...  bundle                             ...  bundle
+106 - a default TUI/event stream that s 115 - a default TUI/event stream that s
+... hows interpretation, planner action ... hows interpretation, planner action
+... s, retrieval, fallbacks, and synthe ... s, retrieval, fallbacks, and synthe
+... sis                                 ... sis
+107                                     116 
+108 The remaining gaps are narrower now 117 The remaining gaps are narrower now
+... :                                   ... :
+109                                     118 
+110 - non-trivial turns still cross a t 119 - the `tool` initial action is stil
+... ransitional heuristic top-level gat ... l a transitional bridge into the ol
+... e before first action selection is  ... der deterministic tool runtime inst
+... fully model-directed                ... ead of a fully unified planner reso
+...                                     ... urce graph
+111 - trivial turns still use a cheap c 120 - legacy direct adapter helpers out
+... ontroller shortcut for `casual` and ... side the main mech-suit service sti
+...  explicit deterministic-action requ ... ll contain heuristic intent inferen
+... ests                                ... ce and should not be treated as the
+...                                     ...  backbone contract
+112 - the recursive loop currently reli 121 - the recursive loop currently reli
+... es on the configured gatherer backe ... es on the configured gatherer backe
+... nd for workspace search rather than ... nd for workspace search rather than
+...  a richer unified resource graph    ...  a richer unified resource graph
+113 - `context-1` is still an explicit  122 - `context-1` is still an explicit 
+... experimental boundary, not the defa ... experimental boundary, not the defa
+... ult planner lane                    ... ult planner lane
+114                                     123 
+
+src/application/mod.rs --- 1/10 --- Rust
+   1 use crate::domain::model::{BootContext, TurnEvent, TurnEventSink, TurnIntent};
+   2 use crate::domain::ports::{
+   3     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
+   4     GathererCapability, InitialAction, InitialActionDecision, InterpretationContext, ModelPaths,
+   5     ModelRegistry, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
+   6     PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
+   7     PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
+   8 };
+   9 use crate::infrastructure::adapters::agent_memory::AgentMemory;
+  10 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
+
+src/application/mod.rs --- 2/10 --- Rust
+ 475         let gatherer = runtime.gat  475         let gatherer = runtime.gat
+ ... herer.clone();                      ... herer.clone();
+ 476         drop(runtime_guard);        476         drop(runtime_guard);
+ 477                                     477 
+ ...                                     478         let memory = AgentMemory::
+ ...                                     ... load(&self.workspace_root);
+ 478         let execution_plan = selec  479         let interpretation = memor
+ ... t_execution_plan(prompt, true);     ... y.build_interpretation_context(pro
+ ...                                     ... mpt, &self.workspace_root);
+ 479         event_sink.emit(TurnEvent:  480         event_sink.emit(TurnEvent:
+ ... :IntentClassified {                 ... :InterpretationContext {
+ 480             intent: execution_plan  481             summary: interpretatio
+ ... .intent.clone(),                    ... n.summary.clone(),
+ ...                                     482             sources: interpretatio
+ ...                                     ... n.sources(),
+ 481         });                         483         });
+ ...                                     484 
+ ...                                     485         let planner_capability = p
+ ...                                     ... lanner_engine.capability();
+ ...                                     486         event_sink.emit(TurnEvent:
+ ...                                     ... :PlannerCapability {
+ ...                                     487             provider: prepared.pla
+ ...                                     ... nner.model_id.clone(),
+ ...                                     488             capability: format_pla
+ ...                                     ... nner_capability(&planner_capabilit
+ ...                                     ... y),
+ ...                                     489         });
+ 482                                     490 
+ 483         if let Some(gatherer_lane)  491         let recent_turns = synthes
+ ...  = &prepared.gatherer {             ... izer_engine.recent_turn_summaries(
+ ...                                     ... )?;
+ ...                                     492         let request = PlannerReque
+ ...                                     ... st::new(
+ ...                                     493             prompt,
+ ...                                     494             self.workspace_root.cl
+ ...                                     ... one(),
+ ...                                     495             interpretation.clone()
+ ...                                     ... ,
+ ...                                     496             PlannerBudget::default
+ ...                                     ... (),
+ ...                                     497         )
+ ...                                     498         .with_recent_turns(recent_
+ ...                                     ... turns.clone());
+ ...                                     499 
+ 484             match execution_plan.p  500         let execution_plan = match
+ ... ath {                               ...  planner_capability {
+ 485                 PromptExecutionPat  501             PlannerCapability::Ava
+ ... h::PlannerThenSynthesize => event_  ... ilable => {
+ ... sink.emit(                          ... 
+ ...                                     502                 let decision = pla
+ ...                                     ... nner_engine.select_initial_action(
+ ...                                     ... &request).await?;
+ 486                     TurnEvent::Rou  503                 event_sink.emit(Tu
+ ... teSelected {                        ... rnEvent::PlannerActionSelected {
+ ...                                     504                     sequence: 1,
+ 487                         summary: f  505                     action: decisi
+ ... ormat!(                             ... on.action.summary(),
+ 488                             "turn   506                     rationale: dec
+ ... will use planner lane '{}' with ga  ... ision.rationale.clone(),
+ ... therer backend '{}' ({:?}) before   ... 
+ ... synthesizer lane '{}'",             ... 
+ 489                             prepar  ... 
+ ... ed.planner.model_id,                ... 
+ 490                             gather  ... 
+ ... er_lane.label,                      ... 
+ 491                             gather  ... 
+ ... er_lane.provider,                   ... 
+ 492                             prepar  ... 
+ ... ed.synthesizer.model_id             ... 
+ 493                         ),          ... 
+ 494                     },              507                 });
+ 495                 ),                  508                 execution_plan_fro
+ ...                                     ... m_initial_action(&prepared, decisi
+ ...                                     ... on)
+ ...                                     509             }
+ 496                 PromptExecutionPat  510             PlannerCapability::Uns
+ ... h::SynthesizerOnly => event_sink.e  ... upported { reason } => {
+ ... mit(TurnEvent::RouteSelected {      ... 
+ ...                                     511                 event_sink.emit(Tu
+ ...                                     ... rnEvent::Fallback {
+ ...                                     512                     stage: "planne
+ ...                                     ... r".to_string(),
+ 497                     summary: forma  513                     reason: format
+ ... t!(                                 ... !("planner unavailable before firs
+ ...                                     ... t action selection: {reason}"),
+ 498                         "turn will  ... 
+ ...  stay on synthesizer lane '{}' whi  ... 
+ ... le planner lane '{}' and gatherer   ... 
+ ... backend '{}' remain available",     ... 
+ 499                         prepared.s  ... 
+ ... ynthesizer.model_id,                ... 
+ 500                         prepared.p  ... 
+ ... lanner.model_id,                    ... 
+ 501                         gatherer_l  ... 
+ ... ane.label,                          ... 
+ 502                     ),              ... 
+ 503                 }),                 514                 });
+ ...                                     515                 fallback_execution
+ ...                                     ... _plan(&prepared)
+ ...                                     516             }
+ 504             }                       517         };
+ 505         } else {                    518 
+ ...                                     519         event_sink.emit(TurnEvent:
+ ...                                     ... :IntentClassified {
+ ...                                     520             intent: execution_plan
+ ...                                     ... .intent.clone(),
+ ...                                     521         });
+ 506             event_sink.emit(TurnEv  522         event_sink.emit(TurnEvent:
+ ... ent::RouteSelected {                ... :RouteSelected {
+ 507                 summary: format!(   523             summary: execution_pla
+ ...                                     ... n.route_summary.clone(),
+ 508                     "turn will use  ... 
+ ...  planner lane '{}' and synthesizer  ... 
+ ...  lane '{}' with no dedicated gathe  ... 
+ ... rer backend configured",            ... 
+ 509                     prepared.plann  ... 
+ ... er.model_id,                        ... 
+ 510                     prepared.synth  ... 
+ ... esizer.model_id                     ... 
+ 511                 ),                  ... 
+ 512             });                     524         });
+ 513         }                           ... 
+ 514                                     525 
+ 515         let gathered_evidence = ma  526         let gathered_evidence = ma
+ ... tch execution_plan.path {           ... tch execution_plan.path {
+ 516             PromptExecutionPath::P  527             PromptExecutionPath::P
+ ... lannerThenSynthesize => {           ... lannerThenSynthesize => {
+ 517                 let memory = Agent  528                 let memory = Agent
+ ... Memory::load(&self.workspace_root)  ... Memory::load(&self.workspace_root)
+ ... ;                                   ... ;
+ 518                 let interpretation  529                 let interpretation
+ ...  =                                  ...  =
+ 519                     memory.build_i  530                     memory.build_i
+ ... nterpretation_context(prompt, &sel  ... nterpretation_context(prompt, &sel
+ ... f.workspace_root);                  ... f.workspace_root);
+ 520                 event_sink.emit(Tu  ... 
+ ... rnEvent::InterpretationContext {    ... 
+ 521                     summary: inter  ... 
+ ... pretation.summary.clone(),          ... 
+ 522                     sources: inter  ... 
+ ... pretation.sources(),                ... 
+ 523                 });                 ... 
+ 524                                     ... 
+ 525                 let planner_capabi  ... 
+ ... lity = planner_engine.capability()  ... 
+ ... ;                                   ... 
+ 526                 event_sink.emit(Tu  ... 
+ ... rnEvent::PlannerCapability {        ... 
+ 527                     provider: prep  ... 
+ ... ared.planner.model_id.clone(),      ... 
+ 528                     capability: fo  ... 
+ ... rmat_planner_capability(&planner_c  ... 
+ ... apability),                         ... 
+ 529                 });                 ... 
+ 530                                     ... 
+ 531                 match planner_capa  ... 
+ ... bility {                            ... 
+ 532                     PlannerCapabil  ... 
+ ... ity::Available => {                 ... 
+ 533                         let recent  531                 let recent_turns =
+ ... _turns = synthesizer_engine.recent  ...  synthesizer_engine.recent_turn_su
+ ... _turn_summaries()?;                 ... mmaries()?;
+ 534                         self.execu  532                 self.execute_recur
+ ... te_recursive_planner_loop(          ... sive_planner_loop(
+ 535                             prompt  533                     prompt,
+ ... ,                                   ... 
+
+src/application/mod.rs --- 3/10 --- Rust
+ 540                                 in  538                         interpreta
+ ... terpretation,                       ... tion,
+ 541                                 re  539                         recent_tur
+ ... cent_turns,                         ... ns,
+ 542                             },      540                     },
+ ...                                     541                     execution_plan
+ ...                                     ... .initial_planner_decision.clone(),
+ 543                             Arc::c  542                     Arc::clone(&ev
+ ... lone(&event_sink),                  ... ent_sink),
+ 544                         )           543                 )
+ 545                         .await?     544                 .await?
+ 546                     }               ... 
+ 547                     PlannerCapabil  ... 
+ ... ity::Unsupported { reason } => {    ... 
+ 548                         event_sink  ... 
+ ... .emit(TurnEvent::Fallback {         ... 
+ 549                             stage:  ... 
+ ...  "planner".to_string(),             ... 
+ 550                             reason  ... 
+ ... : format!("planner unavailable: {r  ... 
+ ... eason}"),                           ... 
+ 551                         });         ... 
+ 552                         None        ... 
+ 553                     }               ... 
+ 554                 }                   ... 
+ 555             }                       545             }
+ 556             PromptExecutionPath::S  546             PromptExecutionPath::S
+ ... ynthesizerOnly => None,             ... ynthesizerOnly => None,
+ 557         };                          547         };
+
+src/application/mod.rs --- 4/10 --- Rust
+ 571  561         &self,
+ 572  562         prompt: &str,
+ 573  563         context: PlannerLoopContext,
+ ...  564         initial_decision: Option<RecursivePlannerDecision>,
+ 574  565         event_sink: Arc<dyn TurnEventSink>,
+ 575  566     ) -> Result<Option<EvidenceBundle>> {
+ 576  567         let budget = PlannerBudget::default();
+ 577  568         let mut loop_state = PlannerLoopState::default();
+ 578  569         let mut used_workspace_resources = false;
+ 579  570         let mut stop_reason = None;
+ ...  571         let mut pending_initial_decision = initial_decision;
+ 580  572         let gatherer_provider = context
+ 581  573             .prepared
+ 582  574             .gatherer
+
+src/application/mod.rs --- 5/10 --- Rust
+ 585  577             .unwrap_or_else(|| "workspace".to_string());
+ 586  578 
+ 587  579         for sequence in 1..=budget.max_steps {
+ ...  580             let decision = if let Some(decision) = pending_initial_decision.take() {
+ ...  581                 decision
+ ...  582             } else {
+ 588  583                 let request = PlannerRequest::new(
+ 589  584                     prompt,
+ 590  585                     self.workspace_root.clone(),
+
+src/application/mod.rs --- 6/10 --- Rust
+ 599  594                     action: decision.action.summary(),
+ 600  595                     rationale: decision.rationale.clone(),
+ 601  596                 });
+ ...  597                 decision
+ ...  598             };
+ 602  599 
+ 603  600             let outcome = match &decision.action {
+ 604  601                 PlannerAction::Search { query, intent } => {
+
+src/application/mod.rs --- 7/10 --- Rust
+ 829  826 struct PromptExecutionPlan {
+ 830  827     intent: TurnIntent,
+ 831  828     path: PromptExecutionPath,
+ ...  829     route_summary: String,
+ ...  830     initial_planner_decision: Option<RecursivePlannerDecision>,
+ 832  831 }
+ 833  832 
+ 834  833 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+
+src/application/mod.rs --- 8/10 --- Rust
+ 837     PlannerThenSynthesize,          836     PlannerThenSynthesize,
+ 838 }                                   837 }
+ 839                                     838 
+ 840 fn select_execution_plan(prompt: &  839 fn fallback_execution_plan(prepare
+ ... str, planner_available: bool) -> P  ... d: &PreparedRuntimeLanes) -> Promp
+ ... romptExecutionPlan {                ... tExecutionPlan {
+ ...                                     840     PromptExecutionPlan {
+ 841     let intent = classify_turn(pro  841         intent: TurnIntent::Direct
+ ... mpt);                               ... Response,
+ 842     let path = if planner_availabl  842         path: PromptExecutionPath:
+ ... e && intent.uses_planner() {        ... :SynthesizerOnly,
+ 843         PromptExecutionPath::Plann  843         route_summary: format!(
+ ... erThenSynthesize                    ... 
+ 844     } else {                        ... 
+ 845         PromptExecutionPath::Synth  ... 
+ ... esizerOnly                          ... 
+ 846     };                              ... 
+ 847                                     ... 
+ 848     PromptExecutionPlan { intent,   844             "planner lane '{}' is 
+ ... path }                              ... unavailable, so the turn will fall
+ ...                                     ...  back to synthesizer lane '{}' for
+ ...                                     ...  a direct response",
+ ...                                     845             prepared.planner.model
+ ...                                     ... _id, prepared.synthesizer.model_id
+ ...                                     846         ),
+ ...                                     847         initial_planner_decision: 
+ ...                                     ... None,
+ ...                                     848     }
+ 849 }                                   849 }
+ 850                                     ... 
+ 851 fn classify_turn(prompt: &str) ->   ... 
+ ... TurnIntent {                        ... 
+ 852     let normalized = normalize_tur  ... 
+ ... n_prompt(prompt);                   ... 
+ 853                                     ... 
+ 854     if is_casual_turn(&normalized)  ... 
+ ...  {                                  ... 
+ 855         return TurnIntent::Casual;  ... 
+ 856     }                               ... 
+ 857     if is_deterministic_action_tur  ... 
+ ... n(&normalized) {                    ... 
+ 858         return TurnIntent::Determi  ... 
+ ... nisticAction;                       ... 
+ 859     }                               ... 
+ 860                                     ... 
+ 861     TurnIntent::Planned             ... 
+ 862 }                                   ... 
+ 863                                     ... 
+ 864 fn is_casual_turn(normalized: &str  ... 
+ ... ) -> bool {                         ... 
+ 865     matches!(                       ... 
+ 866         normalized,                 ... 
+ 867         "hi" | "hello"              ... 
+ 868             | "hey"                 ... 
+ 869             | "howdy"               ... 
+ 870             | "yo"                  ... 
+ 871             | "sup"                 ... 
+ 872             | "whats up"            ... 
+ 873             | "what's up"           ... 
+ 874             | "how are you"         ... 
+ 875             | "who are you"         ... 
+ 876             | "thanks"              ... 
+ 877             | "thank you"           ... 
+ 878             | "good morning"        ... 
+ 879             | "good afternoon"      ... 
+ 880             | "good evening"        ... 
+ 881             | "bye"                 ... 
+ 882             | "goodbye"             ... 
+ 883     ) || normalized.starts_with("h  ... 
+ ... ello ")                             ... 
+ 884         || normalized.starts_with(  ... 
+ ... "hi ")                              ... 
+ 885         || normalized.starts_with(  ... 
+ ... "hey ")                             ... 
+ 886         || normalized.starts_with(  ... 
+ ... "howdy ")                           ... 
+ 887         || normalized.starts_with(  ... 
+ ... "thanks ")                          ... 
+ 888         || normalized.starts_with(  ... 
+ ... "thank you ")                       ... 
+ 889 }                                   ... 
+ 890                                     850 
+ 891 fn is_deterministic_action_turn(no  851 fn execution_plan_from_initial_act
+ ... rmalized: &str) -> bool {           ... ion(
+ ...                                     852     prepared: &PreparedRuntimeLane
+ ...                                     ... s,
+ ...                                     853     decision: InitialActionDecisio
+ ...                                     ... n,
+ ...                                     854 ) -> PromptExecutionPlan {
+ 892     let direct_action = [           855     let InitialActionDecision { ac
+ ...                                     ... tion, rationale } = decision;
+ ...                                     856     match action {
+ ...                                     857         InitialAction::Answer => P
+ ...                                     ... romptExecutionPlan {
+ 893         "git status",               858             intent: TurnIntent::Di
+ ...                                     ... rectResponse,
+ 894         "git diff",                 859             path: PromptExecutionP
+ ...                                     ... ath::SynthesizerOnly,
+ ...                                     860             route_summary: format!
+ ...                                     ... (
+ 895         "run ",                     861                 "model selected a 
+ ...                                     ... direct response on synthesizer lan
+ ...                                     ... e '{}'",
+ ...                                     862                 prepared.synthesiz
+ ...                                     ... er.model_id
+ 896         "show ",                    863             ),
+ 897         "check ",                   864             initial_planner_decisi
+ ...                                     ... on: None,
+ 898         "inspect ",                 865         },
+ ...                                     866         InitialAction::Tool => Pro
+ ...                                     ... mptExecutionPlan {
+ 899         "open ",                    867             intent: TurnIntent::De
+ ...                                     ... terministicAction,
+ 900         "read ",                    868             path: PromptExecutionP
+ ...                                     ... ath::SynthesizerOnly,
+ ...                                     869             route_summary: format!
+ ...                                     ... (
+ 901         "edit ",                    870                 "model selected de
+ ...                                     ... terministic tool execution on synt
+ ...                                     ... hesizer lane '{}'",
+ ...                                     871                 prepared.synthesiz
+ ...                                     ... er.model_id
+ 902         "replace ",                 872             ),
+ 903         "write ",                   873             initial_planner_decisi
+ ...                                     ... on: None,
+ 904         "apply ",                   874         },
+ 905     ];                              875         InitialAction::Stop { reas
+ ...                                     ... on } => PromptExecutionPlan {
+ 906     direct_action                   876             intent: TurnIntent::Di
+ ...                                     ... rectResponse,
+ 907         .iter()                     877             path: PromptExecutionP
+ ...                                     ... ath::SynthesizerOnly,
+ 908         .any(|needle| normalized.c  878             route_summary: format!
+ ... ontains(needle))                    ... (
+ 909         || normalized.starts_with(  879                 "model selected st
+ ... "list ")                            ... op before recursive resource use (
+ ...                                     ... {reason}); synthesizer lane '{}' w
+ ...                                     ... ill answer directly",
+ 910         || normalized.starts_with(  ... 
+ ... "open ")                            ... 
+ 911         || normalized.starts_with(  880                 prepared.synthesiz
+ ... "read ")                            ... er.model_id
+ 912         || normalized.starts_with(  881             ),
+ ... "edit ")                            ... 
+ ...                                     882             initial_planner_decisi
+ ...                                     ... on: None,
+ ...                                     883         },
+ ...                                     884         resource_action => {
+ ...                                     885             let planner_action = r
+ ...                                     ... esource_action
+ 913         || normalized.starts_with(  886                 .as_planner_action
+ ... "replace ")                         ... ()
+ ...                                     887                 .expect("resource 
+ ...                                     ... action must map to planner action"
+ ...                                     ... );
+ 914         || normalized.starts_with(  888             let route_summary = if
+ ... "write ")                           ...  let Some(gatherer_lane) = &prepar
+ ...                                     ... ed.gatherer {
+ ...                                     889                 format!(
+ ...                                     890                     "model selecte
+ ...                                     ... d initial planner action {}; turn 
+ ...                                     ... will use planner lane '{}' with ga
+ ...                                     ... therer backend '{}' ({:?}) before 
+ ...                                     ... synthesizer lane '{}'",
+ ...                                     891                     planner_action
+ ...                                     ... .summary(),
+ ...                                     892                     prepared.plann
+ ...                                     ... er.model_id,
+ ...                                     893                     gatherer_lane.
+ ...                                     ... label,
+ ...                                     894                     gatherer_lane.
+ ...                                     ... provider,
+ ...                                     895                     prepared.synth
+ ...                                     ... esizer.model_id
+ ...                                     896                 )
+ ...                                     897             } else {
+ ...                                     898                 format!(
+ ...                                     899                     "model selecte
+ ...                                     ... d initial planner action {}; turn 
+ ...                                     ... will use planner lane '{}' and syn
+ ...                                     ... thesizer lane '{}' with no dedicat
+ ...                                     ... ed gatherer backend configured",
+ ...                                     900                     planner_action
+ ...                                     ... .summary(),
+ ...                                     901                     prepared.plann
+ ...                                     ... er.model_id,
+ ...                                     902                     prepared.synth
+ ...                                     ... esizer.model_id
+ ...                                     903                 )
+ ...                                     904             };
+ ...                                     905 
+ ...                                     906             PromptExecutionPlan {
+ ...                                     907                 intent: TurnIntent
+ ...                                     ... ::Planned,
+ ...                                     908                 path: PromptExecut
+ ...                                     ... ionPath::PlannerThenSynthesize,
+ ...                                     909                 route_summary,
+ ...                                     910                 initial_planner_de
+ ...                                     ... cision: Some(RecursivePlannerDecis
+ ...                                     ... ion {
+ ...                                     911                     action: planne
+ ...                                     ... r_action,
+ ...                                     912                     rationale,
+ ...                                     913                 }),
+ ...                                     914             }
+ ...                                     915         }
+ ...                                     916     }
+ 915 }                                   917 }
+ 916                                     ... 
+ 917 fn normalize_turn_prompt(prompt: &  ... 
+ ... str) -> String {                    ... 
+ 918     prompt                          ... 
+ 919         .trim()                     ... 
+ 920         .trim_matches(|ch: char| c  ... 
+ ... h.is_ascii_punctuation() || ch.is_  ... 
+ ... whitespace())                       ... 
+ 921         .to_ascii_lowercase()       ... 
+ 922 }                                   ... 
+ 923                                     918 
+ 924 fn format_gatherer_capability(capa  919 fn format_gatherer_capability(capa
+ ... bility: &GathererCapability) -> St  ... bility: &GathererCapability) -> St
+ ... ring {                              ... ring {
+ 925     match capability {              920     match capability {
+
+src/application/mod.rs --- 9/10 --- Rust
+1216 1211 #[cfg(test)]
+1217 1212 mod tests {
+1218 1213     use super::{
+1219 1214         ActiveRuntimeState, GathererProvider, MechSuitService, PreparedModelLane,
+1220 1215         PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
+1221 1216     };
+.... 1217     use crate::domain::model::{TurnEvent, TurnEventSink};
+1222 1218     use crate::domain::ports::{
+.... 1219         InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerCapability,
+.... 1220         PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
+.... 1221     };
+.... 1222     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+.... 1223     use anyhow::{Result, anyhow};
+.... 1224     use async_trait::async_trait;
+.... 1225     use sift::Conversation;
+.... 1226     use std::collections::VecDeque;
+.... 1227     use std::fs;
+1223 1228     use std::path::PathBuf;
+.... 1229     use std::sync::{Arc, Mutex};
+.... 1230 
+.... 1231     #[derive(Default)]
+.... 1232     struct StaticRegistry;
+.... 1233 
+.... 1234     #[async_trait]
+.... 1235     impl ModelRegistry for StaticRegistry {
+.... 1236         async fn get_model_paths(&self, _model_id: &str) -> Result<ModelPaths> {
+.... 1237             Err(anyhow!("test registry is not used in this suite"))
+.... 1238         }
+.... 1239     }
+.... 1240 
+.... 1241     struct TestPlanner {
+.... 1242         initial_decision: InitialActionDecision,
+.... 1243         next_decisions: Mutex<VecDeque<RecursivePlannerDecision>>,
+.... 1244         recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+.... 1245     }
+.... 1246 
+.... 1247     impl TestPlanner {
+.... 1248         fn new(
+.... 1249             initial_decision: InitialActionDecision,
+.... 1250             next_decisions: Vec<RecursivePlannerDecision>,
+.... 1251             recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+.... 1252         ) -> Self {
+.... 1253             Self {
+.... 1254                 initial_decision,
+.... 1255                 next_decisions: Mutex::new(VecDeque::from(next_decisions)),
+.... 1256                 recorded_requests,
+.... 1257             }
+.... 1258         }
+.... 1259     }
+.... 1260 
+.... 1261     #[async_trait]
+.... 1262     impl RecursivePlanner for TestPlanner {
+.... 1263         fn capability(&self) -> PlannerCapability {
+.... 1264             PlannerCapability::Available
+.... 1265         }
+.... 1266 
+.... 1267         async fn select_initial_action(
+.... 1268             &self,
+.... 1269             request: &PlannerRequest,
+.... 1270         ) -> Result<InitialActionDecision> {
+.... 1271             self.recorded_requests
+.... 1272                 .lock()
+.... 1273                 .expect("recorded requests lock")
+.... 1274                 .push(request.clone());
+.... 1275             Ok(self.initial_decision.clone())
+.... 1276         }
+.... 1277 
+.... 1278         async fn select_next_action(
+.... 1279             &self,
+.... 1280             request: &PlannerRequest,
+.... 1281         ) -> Result<RecursivePlannerDecision> {
+.... 1282             self.recorded_requests
+.... 1283                 .lock()
+.... 1284                 .expect("recorded requests lock")
+.... 1285                 .push(request.clone());
+.... 1286             self.next_decisions
+.... 1287                 .lock()
+.... 1288                 .expect("planner decisions lock")
+.... 1289                 .pop_front()
+.... 1290                 .ok_or_else(|| anyhow!("test planner exhausted"))
+.... 1291         }
+.... 1292     }
+.... 1293 
+.... 1294     #[derive(Default)]
+.... 1295     struct RecordingTurnEventSink {
+.... 1296         events: Mutex<Vec<TurnEvent>>,
+.... 1297     }
+.... 1298 
+.... 1299     impl RecordingTurnEventSink {
+.... 1300         fn recorded(&self) -> Vec<TurnEvent> {
+.... 1301             self.events.lock().expect("event lock").clone()
+.... 1302         }
+.... 1303     }
+.... 1304 
+.... 1305     impl TurnEventSink for RecordingTurnEventSink {
+.... 1306         fn emit(&self, event: TurnEvent) {
+.... 1307             self.events.lock().expect("event lock").push(event);
+.... 1308         }
+.... 1309     }
+.... 1310 
+.... 1311     struct StaticConversation {
+.... 1312         responses: VecDeque<String>,
+.... 1313         history: Vec<String>,
+.... 1314     }
+.... 1315 
+.... 1316     impl StaticConversation {
+.... 1317         fn new(responses: Vec<String>) -> Self {
+.... 1318             Self {
+.... 1319                 responses: VecDeque::from(responses),
+.... 1320                 history: Vec::new(),
+.... 1321             }
+.... 1322         }
+.... 1323     }
+.... 1324 
+.... 1325     impl Conversation for StaticConversation {
+.... 1326         fn send(&mut self, message: &str, _max_tokens: usize) -> Result<String> {
+.... 1327             self.history.push(message.to_string());
+.... 1328             self.responses
+.... 1329                 .pop_front()
+.... 1330                 .ok_or_else(|| anyhow!("static conversation exhausted"))
+.... 1331         }
+.... 1332 
+.... 1333         fn history(&self) -> &[String] {
+.... 1334             &self.history
+.... 1335         }
+.... 1336     }
+1224 1337 
+1225 1338     #[test]
+1226 1339     fn runtime_lane_config_defaults_to_synthesizer_responses() {
+
+src/application/mod.rs --- 10/10 --- Rust
+1292     }                              1405     }
+1293                                    1406 
+1294     #[test]                        1407     #[test]
+1295     fn retrieval_heavy_prompts_use 1408     fn answer_initial_actions_rout
+.... _gatherer_lane_when_available() {  .... e_to_direct_responses() {
+....                                    1409         let prepared = PreparedRun
+....                                    .... timeLanes {
+....                                    1410             planner: PreparedModel
+....                                    .... Lane {
+....                                    1411                 role: RuntimeLaneR
+....                                    .... ole::Planner,
+....                                    1412                 model_id: "planner
+....                                    .... ".to_string(),
+....                                    1413                 paths: sample_mode
+....                                    .... l_paths("planner"),
+....                                    1414             },
+....                                    1415             synthesizer: PreparedM
+....                                    .... odelLane {
+....                                    1416                 role: RuntimeLaneR
+....                                    .... ole::Synthesizer,
+....                                    1417                 model_id: "synth".
+....                                    .... to_string(),
+....                                    1418                 paths: sample_mode
+....                                    .... l_paths("synth"),
+....                                    1419             },
+....                                    1420             gatherer: None,
+....                                    1421         };
+....                                    1422 
+1296         let plan = super::select_e 1423         let plan = super::executio
+.... xecution_plan(                     .... n_plan_from_initial_action(
+....                                    1424             &prepared,
+....                                    1425             InitialActionDecision 
+....                                    .... {
+....                                    1426                 action: InitialAct
+....                                    .... ion::Answer,
+1297             "Summarize the runtime 1427                 rationale: "no wor
+....  lane architecture across the repo .... kspace resources needed".to_string
+.... ",                                 .... (),
+1298             true,                  1428             },
+1299         );                         1429         );
+1300                                    1430 
+1301         assert_eq!(plan.intent, Tu 1431         assert_eq!(plan.intent, Tu
+.... rnIntent::Planned);                .... rnIntent::DirectResponse);
+1302         assert_eq!(plan.path, supe 1432         assert_eq!(plan.path, supe
+.... r::PromptExecutionPath::PlannerThe .... r::PromptExecutionPath::Synthesize
+.... nSynthesize);                      .... rOnly);
+1303     }                              1433     }
+1304                                    1434 
+1305     #[test]                        1435     #[test]
+1306     fn decomposition_worthy_prompt 1436     fn tool_initial_actions_route_
+.... s_use_gatherer_lane_when_available .... to_deterministic_execution() {
+.... () {                               .... 
+....                                    1437         let prepared = PreparedRun
+....                                    .... timeLanes {
+....                                    1438             planner: PreparedModel
+....                                    .... Lane {
+....                                    1439                 role: RuntimeLaneR
+....                                    .... ole::Planner,
+....                                    1440                 model_id: "planner
+....                                    .... ".to_string(),
+....                                    1441                 paths: sample_mode
+....                                    .... l_paths("planner"),
+....                                    1442             },
+....                                    1443             synthesizer: PreparedM
+....                                    .... odelLane {
+....                                    1444                 role: RuntimeLaneR
+....                                    .... ole::Synthesizer,
+....                                    1445                 model_id: "synth".
+....                                    .... to_string(),
+....                                    1446                 paths: sample_mode
+....                                    .... l_paths("synth"),
+....                                    1447             },
+....                                    1448             gatherer: None,
+....                                    1449         };
+....                                    1450 
+1307         let plan =                 1451         let plan = super::executio
+....                                    .... n_plan_from_initial_action(
+....                                    1452             &prepared,
+....                                    1453             InitialActionDecision 
+....                                    .... {
+....                                    1454                 action: InitialAct
+....                                    .... ion::Tool,
+....                                    1455                 rationale: "explic
+....                                    .... it workspace action".to_string(),
+1308             super::select_executio 1456             },
+.... n_plan("Trace the runtime lane arc .... 
+.... hitecture end-to-end", true);      .... 
+....                                    1457         );
+1309                                    1458 
+1310         assert_eq!(plan.intent, Tu 1459         assert_eq!(plan.intent, Tu
+.... rnIntent::Planned);                .... rnIntent::DeterministicAction);
+1311         assert_eq!(plan.path, supe 1460         assert_eq!(plan.path, supe
+.... r::PromptExecutionPath::PlannerThe .... r::PromptExecutionPath::Synthesize
+.... nSynthesize);                      .... rOnly);
+1312     }                              1461     }
+1313                                    1462 
+1314     #[test]                        1463     #[test]
+1315     fn repository_questions_use_ga 1464     fn resource_initial_actions_ro
+.... therer_lane_when_available() {     .... ute_to_the_planner_loop() {
+....                                    1465         let prepared = PreparedRun
+....                                    .... timeLanes {
+....                                    1466             planner: PreparedModel
+....                                    .... Lane {
+....                                    1467                 role: RuntimeLaneR
+....                                    .... ole::Planner,
+....                                    1468                 model_id: "planner
+....                                    .... ".to_string(),
+....                                    1469                 paths: sample_mode
+....                                    .... l_paths("planner"),
+....                                    1470             },
+....                                    1471             synthesizer: PreparedM
+....                                    .... odelLane {
+....                                    1472                 role: RuntimeLaneR
+....                                    .... ole::Synthesizer,
+....                                    1473                 model_id: "synth".
+....                                    .... to_string(),
+....                                    1474                 paths: sample_mode
+....                                    .... l_paths("synth"),
+....                                    1475             },
+....                                    1476             gatherer: Some(MechSui
+....                                    .... tService::build_gatherer_lane(
+....                                    1477                 GathererProvider::
+....                                    .... SiftAutonomous,
+....                                    1478                 "sift-autonomous",
+....                                    1479                 None,
+....                                    1480                 None,
+....                                    1481             )),
+....                                    1482         };
+....                                    1483 
+1316         let plan = super::select_e 1484         let plan = super::executio
+.... xecution_plan("How does memory wor .... n_plan_from_initial_action(
+.... k in paddles?", true);             .... 
+....                                    1485             &prepared,
+....                                    1486             InitialActionDecision 
+....                                    .... {
+....                                    1487                 action: InitialAct
+....                                    .... ion::Inspect {
+....                                    1488                     command: "git 
+....                                    .... status".to_string(),
+....                                    1489                 },
+....                                    1490                 rationale: "inspec
+....                                    .... t repo state first".to_string(),
+....                                    1491             },
+....                                    1492         );
+1317                                    1493 
+1318         assert_eq!(plan.intent, Tu 1494         assert_eq!(plan.intent, Tu
+.... rnIntent::Planned);                .... rnIntent::Planned);
+1319         assert_eq!(plan.path, supe 1495         assert_eq!(plan.path, supe
+.... r::PromptExecutionPath::PlannerThe .... r::PromptExecutionPath::PlannerThe
+.... nSynthesize);                      .... nSynthesize);
+....                                    1496         assert!(plan.route_summary
+....                                    .... .contains("git status"));
+....                                    1497         assert!(plan.initial_plann
+....                                    .... er_decision.is_some());
+1320     }                              1498     }
+1321                                    1499 
+1322     #[test]                        1500     #[test]
+1323     fn only_casual_and_explicit_ac 1501     fn stop_initial_actions_fall_b
+.... tions_skip_the_planner() {         .... ack_to_direct_responses() {
+1324         assert_eq!(                1502         let prepared = PreparedRun
+....                                    .... timeLanes {
+....                                    1503             planner: PreparedModel
+....                                    .... Lane {
+1325             super::select_executio 1504                 role: RuntimeLaneR
+.... n_plan("Show me the git status", t .... ole::Planner,
+.... rue).path,                         .... 
+....                                    1505                 model_id: "planner
+....                                    .... ".to_string(),
+....                                    1506                 paths: sample_mode
+....                                    .... l_paths("planner"),
+....                                    1507             },
+....                                    1508             synthesizer: PreparedM
+....                                    .... odelLane {
+1326             super::PromptExecution 1509                 role: RuntimeLaneR
+.... Path::SynthesizerOnly              .... ole::Synthesizer,
+....                                    1510                 model_id: "synth".
+....                                    .... to_string(),
+....                                    1511                 paths: sample_mode
+....                                    .... l_paths("synth"),
+....                                    1512             },
+....                                    1513             gatherer: None,
+1327         );                         1514         };
+1328         assert_eq!(                1515 
+1329             super::select_executio 1516         let plan = super::executio
+.... n_plan("Hello", true).path,        .... n_plan_from_initial_action(
+1330             super::PromptExecution 1517             &prepared,
+.... Path::SynthesizerOnly              .... 
+....                                    1518             InitialActionDecision 
+....                                    .... {
+....                                    1519                 action: InitialAct
+....                                    .... ion::Stop {
+....                                    1520                     reason: "no re
+....                                    .... cursive resource use needed".to_st
+....                                    .... ring(),
+....                                    1521                 },
+....                                    1522                 rationale: "answer
+....                                    ....  directly".to_string(),
+....                                    1523             },
+1331         );                         1524         );
+....                                    1525 
+1332         assert_eq!(                1526         assert_eq!(plan.intent, Tu
+....                                    .... rnIntent::DirectResponse);
+1333             super::select_executio .... 
+.... n_plan("Howdy", true).intent,      .... 
+1334             TurnIntent::Casual     .... 
+1335         );                         .... 
+1336         assert_eq!(                1527         assert_eq!(plan.path, supe
+....                                    .... r::PromptExecutionPath::Synthesize
+....                                    .... rOnly);
+1337             super::select_executio .... 
+.... n_plan("What is a monad?", true).p .... 
+.... ath,                               .... 
+1338             super::PromptExecution .... 
+.... Path::PlannerThenSynthesize        .... 
+1339         );                         .... 
+1340     }                              1528     }
+1341                                    1529 
+1342     #[test]                        1530     #[test]
+1343     fn planned_prompts_without_a_p 1531     fn process_prompt_assembles_in
+.... lanner_lane_stay_on_synthesizer()  .... terpretation_before_model_selected
+.... {                                  .... _initial_action() {
+....                                    1532         let workspace = tempfile::
+....                                    .... tempdir().expect("workspace");
+....                                    1533         fs::write(
+....                                    1534             workspace.path().join(
+....                                    .... "AGENTS.md"),
+....                                    1535             "# Operator Memory\nUs
+....                                    .... e AGENTS guidance before choosing 
+....                                    .... the next bounded action.\n",
+....                                    1536         )
+....                                    1537         .expect("write AGENTS.md")
+....                                    .... ;
+....                                    1538 
+....                                    1539         let prepared = PreparedRun
+....                                    .... timeLanes {
+....                                    1540             planner: PreparedModel
+....                                    .... Lane {
+....                                    1541                 role: RuntimeLaneR
+....                                    .... ole::Planner,
+....                                    1542                 model_id: "planner
+....                                    .... ".to_string(),
+....                                    1543                 paths: sample_mode
+....                                    .... l_paths("planner"),
+....                                    1544             },
+....                                    1545             synthesizer: PreparedM
+....                                    .... odelLane {
+....                                    1546                 role: RuntimeLaneR
+....                                    .... ole::Synthesizer,
+....                                    1547                 model_id: "synth".
+....                                    .... to_string(),
+....                                    1548                 paths: sample_mode
+....                                    .... l_paths("synth"),
+....                                    1549             },
+....                                    1550             gatherer: None,
+....                                    1551         };
+....                                    1552         let request_log = Arc::new
+....                                    .... (Mutex::new(Vec::new()));
+....                                    1553         let planner = Arc::new(Tes
+....                                    .... tPlanner::new(
+....                                    1554             InitialActionDecision 
+....                                    .... {
+....                                    1555                 action: InitialAct
+....                                    .... ion::Answer,
+....                                    1556                 rationale: "the tu
+....                                    .... rn can be answered directly after 
+....                                    .... interpretation".to_string(),
+....                                    1557             },
+....                                    1558             Vec::new(),
+....                                    1559             Arc::clone(&request_lo
+....                                    .... g),
+....                                    1560         ));
+1344         assert_eq!(                1561         let synthesizer = Arc::new
+....                                    .... (SiftAgentAdapter::new_for_test(
+1345             super::select_executio .... 
+.... n_plan("Trace the runtime lane arc .... 
+.... hitecture end-to-end", false)      .... 
+1346                 .path,             1562             workspace.path(),
+....                                    1563             "qwen-1.5b",
+1347             super::PromptExecution 1564             Box::new(StaticConvers
+.... Path::SynthesizerOnly              .... ation::new(vec![
+....                                    1565                 "Hello from the pl
+....                                    .... anner path.".to_string(),
+....                                    1566             ])),
+1348         );                         1567         ));
+....                                    1568         let service = MechSuitServ
+....                                    .... ice::new(workspace.path(), Arc::ne
+....                                    .... w(StaticRegistry));
+....                                    1569         let sink = Arc::new(Record
+....                                    .... ingTurnEventSink::default());
+....                                    1570 
+....                                    1571         let runtime = tokio::runti
+....                                    .... me::Runtime::new().expect("tokio r
+....                                    .... untime");
+....                                    1572         let response = runtime.blo
+....                                    .... ck_on(async {
+....                                    1573             *service.runtime.write
+....                                    .... ().await = Some(ActiveRuntimeState
+....                                    ....  {
+....                                    1574                 prepared,
+....                                    1575                 planner_engine: pl
+....                                    .... anner,
+....                                    1576                 synthesizer_engine
+....                                    .... : synthesizer,
+....                                    1577                 gatherer: None,
+....                                    1578             });
+....                                    1579             service
+....                                    1580                 .process_prompt_wi
+....                                    .... th_sink("Howdy", sink.clone())
+....                                    1581                 .await
+....                                    1582                 .expect("process p
+....                                    .... rompt")
+....                                    1583         });
+....                                    1584 
+....                                    1585         assert_eq!(response, "Hell
+....                                    .... o from the planner path.");
+....                                    1586 
+....                                    1587         let requests = request_log
+....                                    .... .lock().expect("request log");
+....                                    1588         assert_eq!(requests.len(),
+....                                    ....  1);
+....                                    1589         assert_eq!(requests[0].use
+....                                    .... r_prompt, "Howdy");
+....                                    1590         assert_eq!(
+....                                    1591             requests[0].interpreta
+....                                    .... tion.sources(),
+....                                    1592             vec!["AGENTS.md".to_st
+....                                    .... ring()]
+....                                    1593         );
+....                                    1594 
+....                                    1595         let events = sink.recorded
+....                                    .... ();
+....                                    1596         let interpretation_index =
+....                                    ....  events
+....                                    1597             .iter()
+....                                    1598             .position(|event| matc
+....                                    .... hes!(event, TurnEvent::Interpretat
+....                                    .... ionContext { .. }))
+....                                    1599             .expect("interpretatio
+....                                    .... n event");
+....                                    1600         let action_index = events
+....                                    1601             .iter()
+....                                    1602             .position(|event| matc
+....                                    .... hes!(event, TurnEvent::PlannerActi
+....                                    .... onSelected { .. }))
+....                                    1603             .expect("planner actio
+....                                    .... n event");
+....                                    1604         let classified_index = eve
+....                                    .... nts
+....                                    1605             .iter()
+....                                    1606             .position(|event| matc
+....                                    .... hes!(event, TurnEvent::IntentClass
+....                                    .... ified { .. }))
+....                                    1607             .expect("intent classi
+....                                    .... fied event");
+....                                    1608 
+....                                    1609         assert!(interpretation_ind
+....                                    .... ex < action_index);
+....                                    1610         assert!(action_index < cla
+....                                    .... ssified_index);
+....                                    1611         assert!(matches!(
+....                                    1612             &events[classified_ind
+....                                    .... ex],
+....                                    1613             TurnEvent::IntentClass
+....                                    .... ified {
+....                                    1614                 intent: TurnIntent
+....                                    .... ::DirectResponse
+....                                    1615             }
+....                                    1616         ));
+1349     }                              1617     }
+1350                                    1618 
+1351     fn sample_model_paths(prefix:  1619     fn sample_model_paths(prefix: 
+.... &str) -> ModelPaths {              .... &str) -> ModelPaths {
+
+src/domain/model/turns.rs --- 1/2 --- Rust
+ 3  3 #[derive(Clone, Debug, PartialEq, Eq)]
+ 4  4 pub enum TurnIntent {
+ 5  5     Casual,
+ .  6     DirectResponse,
+ 6  7     DeterministicAction,
+ 7  8     Planned,
+ 8  9 }
+
+src/domain/model/turns.rs --- 2/2 --- Rust
+11 12     pub fn label(&self) -> &'static str {
+12 13         match self {
+13 14             Self::Casual => "casual",
+.. 15             Self::DirectResponse => "direct-response",
+14 16             Self::DeterministicAction => "deterministic-action",
+15 17             Self::Planned => "planned",
+16 18         }
+
+src/domain/ports/mod.rs --- Rust
+10     PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+11 };
+12 pub use planning::{
+13     InitialAction, InitialActionDecision, InterpretationContext, InterpretationDocument,
+14     PlannerAction, PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
+15     PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner,
+16 };
+
+src/domain/ports/planning.rs --- 1/4 --- Rust
+  6   6 pub trait RecursivePlanner: Send + Sync {
+  7   7     fn capability(&self) -> PlannerCapability;
+  .   8 
+  .   9     async fn select_initial_action(
+  .  10         &self,
+  .  11         request: &PlannerRequest,
+  .  12     ) -> Result<InitialActionDecision, anyhow::Error>;
+  8  13 
+  9  14     async fn select_next_action(
+ 10  15         &self,
+
+src/domain/ports/planning.rs --- 2/4 --- Rust
+133 138     pub outcome: String,
+134 139 }
+... 140 
+... 141 /// The first bounded action the planner may choose for a turn.
+... 142 ///
+... 143 /// This contract is intentionally generic across repositories and evidence
+... 144 /// domains. The controller remains responsible for validating read-only
+... 145 /// inspect commands, enforcing budgets, and failing closed when the selected
+... 146 /// action cannot be executed safely.
+... 147 ///
+... 148 /// `Tool` exists as a transitional bridge into the existing deterministic tool
+... 149 /// runtime while the harness still separates top-level action selection from
+... 150 /// lower-level tool execution.
+... 151 #[derive(Clone, Debug, PartialEq, Eq)]
+... 152 pub enum InitialAction {
+... 153     Answer,
+... 154     Tool,
+... 155     Search {
+... 156         query: String,
+... 157         intent: Option<String>,
+... 158     },
+... 159     Read {
+... 160         path: String,
+... 161     },
+... 162     Inspect {
+... 163         command: String,
+... 164     },
+... 165     Refine {
+... 166         query: String,
+... 167         rationale: Option<String>,
+... 168     },
+... 169     Branch {
+... 170         branches: Vec<String>,
+... 171         rationale: Option<String>,
+... 172     },
+... 173     Stop {
+... 174         reason: String,
+... 175     },
+... 176 }
+... 177 
+... 178 impl InitialAction {
+... 179     pub fn label(&self) -> &'static str {
+... 180         match self {
+... 181             Self::Answer => "answer",
+... 182             Self::Tool => "tool",
+... 183             Self::Search { .. } => "search",
+... 184             Self::Read { .. } => "read",
+... 185             Self::Inspect { .. } => "inspect",
+... 186             Self::Refine { .. } => "refine",
+... 187             Self::Branch { .. } => "branch",
+... 188             Self::Stop { .. } => "stop",
+... 189         }
+... 190     }
+... 191 
+... 192     pub fn summary(&self) -> String {
+... 193         match self {
+... 194             Self::Answer => "answer directly".to_string(),
+... 195             Self::Tool => "use deterministic tool execution".to_string(),
+... 196             Self::Search { query, .. } => format!("search `{query}`"),
+... 197             Self::Read { path } => format!("read `{path}`"),
+... 198             Self::Inspect { command } => format!("inspect `{command}`"),
+... 199             Self::Refine { query, .. } => format!("refine toward `{query}`"),
+... 200             Self::Branch { branches, .. } => format!("branch into {}", branches.join(" | ")),
+... 201             Self::Stop { reason } => format!("stop ({reason})"),
+... 202         }
+... 203     }
+... 204 
+... 205     pub fn as_planner_action(&self) -> Option<PlannerAction> {
+... 206         match self {
+... 207             Self::Answer | Self::Tool => None,
+... 208             Self::Search { query, intent } => Some(PlannerAction::Search {
+... 209                 query: query.clone(),
+... 210                 intent: intent.clone(),
+... 211             }),
+... 212             Self::Read { path } => Some(PlannerAction::Read { path: path.clone() }),
+... 213             Self::Inspect { command } => Some(PlannerAction::Inspect {
+... 214                 command: command.clone(),
+... 215             }),
+... 216             Self::Refine { query, rationale } => Some(PlannerAction::Refine {
+... 217                 query: query.clone(),
+... 218                 rationale: rationale.clone(),
+... 219             }),
+... 220             Self::Branch {
+... 221                 branches,
+... 222                 rationale,
+... 223             } => Some(PlannerAction::Branch {
+... 224                 branches: branches.clone(),
+... 225                 rationale: rationale.clone(),
+... 226             }),
+... 227             Self::Stop { reason } => Some(PlannerAction::Stop {
+... 228                 reason: reason.clone(),
+... 229             }),
+... 230         }
+... 231     }
+... 232 }
+... 233 
+... 234 /// A planner-selected first action paired with the model's routing rationale.
+... 235 #[derive(Clone, Debug, PartialEq, Eq)]
+... 236 pub struct InitialActionDecision {
+... 237     pub action: InitialAction,
+... 238     pub rationale: String,
+... 239 }
+135 240 
+136 241 #[derive(Clone, Debug, PartialEq, Eq)]
+137 242 pub enum PlannerAction {
+
+src/domain/ports/planning.rs --- 3/4 --- Rust
+197 302 #[cfg(test)]
+198 303 mod tests {
+199 304     use super::{
+... 305         InitialAction, InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget,
+... 306     };
+200 307 
+201 308     #[test]
+
+src/domain/ports/planning.rs --- 4/4 --- Rust
+234 341         assert!(!action.is_terminal());
+235 342     }
+... 343 
+... 344     #[test]
+... 345     fn initial_action_reports_human_readable_summary() {
+... 346         let action = InitialAction::Inspect {
+... 347             command: "git status".to_string(),
+... 348         };
+... 349 
+... 350         assert_eq!(action.label(), "inspect");
+... 351         assert!(action.summary().contains("git status"));
+... 352         assert_eq!(
+... 353             action.as_planner_action(),
+... 354             Some(PlannerAction::Inspect {
+... 355                 command: "git status".to_string()
+... 356             })
+... 357         );
+... 358     }
+236 359 }
+
+src/infrastructure/adapters/sift_agent.rs --- 1/11 --- Rust
+   1    1 use super::agent_memory::AgentMemory;
+   2    2 use crate::domain::model::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
+   3    3 use crate::domain::ports::{
+   4    4     EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext, PlannerAction,
+   .    5     PlannerRequest, RecursivePlannerDecision,
+   5    6 };
+   6    7 use crate::infrastructure::adapters::sift_registry::{
+
+src/infrastructure/adapters/sift_agent.rs --- 2/11 --- Rust
+ 139  140     },
+ 140  141 }
+ ...  142 
+ ...  143 #[derive(Debug, Deserialize, PartialEq, Eq)]
+ ...  144 #[serde(tag = "action", rename_all = "snake_case")]
+ ...  145 enum InitialActionEnvelope {
+ ...  146     Answer {
+ ...  147         rationale: String,
+ ...  148     },
+ ...  149     Tool {
+ ...  150         rationale: String,
+ ...  151     },
+ ...  152     Search {
+ ...  153         query: String,
+ ...  154         #[serde(default)]
+ ...  155         intent: Option<String>,
+ ...  156         rationale: String,
+ ...  157     },
+ ...  158     Read {
+ ...  159         path: String,
+ ...  160         rationale: String,
+ ...  161     },
+ ...  162     Inspect {
+ ...  163         command: String,
+ ...  164         rationale: String,
+ ...  165     },
+ ...  166     Refine {
+ ...  167         query: String,
+ ...  168         #[serde(default)]
+ ...  169         rationale: Option<String>,
+ ...  170     },
+ ...  171     Branch {
+ ...  172         branches: Vec<String>,
+ ...  173         #[serde(default)]
+ ...  174         rationale: Option<String>,
+ ...  175     },
+ ...  176     Stop {
+ ...  177         reason: String,
+ ...  178         #[serde(default)]
+ ...  179         rationale: Option<String>,
+ ...  180     },
+ ...  181 }
+ 141  182 
+ 142  183 struct TurnPrompt<'a> {
+ 143  184     workspace_root: &'a Path,
+
+src/infrastructure/adapters/sift_agent.rs --- 3/11 --- Rust
+ 770  811     }
+ 771  812 
+ 772  813     #[cfg(test)]
+ 773  814     pub(crate) fn new_for_test(
+ 774  815         workspace_root: impl Into<PathBuf>,
+ 775  816         model_id: &str,
+ 776  817         conversation: Box<dyn Conversation>,
+
+src/infrastructure/adapters/sift_agent.rs --- 4/11 --- Rust
+ 783  824     }
+ 784  825 
+ 785  826     #[cfg(test)]
+ 786  827     pub(crate) fn new_for_test_with_conversations(
+ 787  828         workspace_root: impl Into<PathBuf>,
+ 788  829         model_id: &str,
+ 789  830         conversations: Vec<Box<dyn Conversation>>,
+
+src/infrastructure/adapters/sift_agent.rs --- 5/11 --- Rust
+ 823  864         self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
+ 824  865     }
+ ...  866 
+ ...  867     pub fn select_initial_action(&self, request: &PlannerRequest) -> Result<InitialActionDecision> {
+ ...  868         let mut conversation = self.conversation_factory.start_conversation()?;
+ ...  869         let mut reply = self.send_to_model(
+ ...  870             conversation.as_mut(),
+ ...  871             &build_initial_action_prompt(&PlannerPrompt {
+ ...  872                 workspace_root: &request.workspace_root,
+ ...  873                 user_prompt: &request.user_prompt,
+ ...  874                 interpretation: &request.interpretation,
+ ...  875                 request,
+ ...  876             }),
+ ...  877         )?;
+ ...  878 
+ ...  879         if is_blank_model_reply(&reply) || parse_initial_action(&reply)?.is_none() {
+ ...  880             self.log_retry_reason(
+ ...  881                 "initial-action-retry",
+ ...  882                 &reply,
+ ...  883                 "missing or invalid initial action response",
+ ...  884             );
+ ...  885             reply = self.send_to_model(
+ ...  886                 conversation.as_mut(),
+ ...  887                 &build_initial_action_retry_prompt(request),
+ ...  888             )?;
+ ...  889         }
+ ...  890 
+ ...  891         if let Some(decision) = parse_initial_action(&reply)? {
+ ...  892             return Ok(decision);
+ ...  893         }
+ ...  894 
+ ...  895         self.log_retry_reason(
+ ...  896             "initial-action-fallback",
+ ...  897             &reply,
+ ...  898             "falling back to bounded initial action selection",
+ ...  899         );
+ ...  900         Ok(fallback_initial_action(request))
+ ...  901     }
+ 825  902 
+ 826  903     pub fn select_planner_action(
+ 827  904         &self,
+
+src/infrastructure/adapters/sift_agent.rs --- 6/11 --- Rust
+1589 1666     )
+1590 1667 }
+.... 1668 
+.... 1669 fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
+.... 1670     format!(
+.... 1671         "You are the top-level routing planner for Paddles.\n\
+.... 1672 Choose the NEXT bounded action for this turn after reading the interpretation context.\n\
+.... 1673 Reply with ONLY one JSON object and no prose or markdown.\n\
+.... 1674 \n\
+.... 1675 Allowed actions:\n\
+.... 1676 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
+.... 1677 - {{\"action\":\"tool\",\"rationale\":\"...\"}}\n\
+.... 1678 - {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+.... 1679 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+.... 1680 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+.... 1681 - {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+.... 1682 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+.... 1683 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+.... 1684 \n\
+.... 1685 Rules:\n\
+.... 1686 - Read the interpretation context before choosing.\n\
+.... 1687 - Answer when the synthesizer can reply directly without more workspace resources.\n\
+.... 1688 - Tool means deterministic workspace/tool execution should happen next.\n\
+.... 1689 - Search, read, inspect, refine, or branch when more workspace evidence is needed.\n\
+.... 1690 - Stop when the turn should not recurse further before synthesis.\n\
+.... 1691 - Never answer the user directly here.\n\
+.... 1692 - Inspect commands must stay read-only.\n\
+.... 1693 \n\
+.... 1694 Workspace root:\n\
+.... 1695 {}\n\
+.... 1696 \n\
+.... 1697 Interpretation context:\n\
+.... 1698 {}\n\
+.... 1699 \n\
+.... 1700 Recent turns:\n\
+.... 1701 {}\n\
+.... 1702 \n\
+.... 1703 Current user request:\n\
+.... 1704 {}\n",
+.... 1705         prompt.workspace_root.display(),
+.... 1706         format_interpretation_context_digest(prompt.interpretation),
+.... 1707         format_recent_turn_list(&prompt.request.recent_turns),
+.... 1708         prompt.user_prompt,
+.... 1709     )
+.... 1710 }
+.... 1711 
+.... 1712 fn build_initial_action_retry_prompt(request: &PlannerRequest) -> String {
+.... 1713     format!(
+.... 1714         "Your last top-level routing reply was empty or invalid.\n\
+.... 1715 Return ONLY one valid JSON initial action.\n\
+.... 1716 \n\
+.... 1717 Allowed actions:\n\
+.... 1718 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
+.... 1719 - {{\"action\":\"tool\",\"rationale\":\"...\"}}\n\
+.... 1720 - {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+.... 1721 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+.... 1722 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+.... 1723 - {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+.... 1724 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+.... 1725 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+.... 1726 \n\
+.... 1727 Do not answer the user directly.\n\
+.... 1728 \n\
+.... 1729 Interpretation context:\n\
+.... 1730 {}\n\
+.... 1731 \n\
+.... 1732 Recent turns:\n\
+.... 1733 {}\n\
+.... 1734 \n\
+.... 1735 Current user request:\n\
+.... 1736 {}\n",
+.... 1737         format_interpretation_context_digest(&request.interpretation),
+.... 1738         format_recent_turn_list(&request.recent_turns),
+.... 1739         request.user_prompt,
+.... 1740     )
+.... 1741 }
+1591 1742 
+1592 1743 fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
+1593 1744     format!(
+
+src/infrastructure/adapters/sift_agent.rs --- 7/11 --- Rust
+2279 2430     Ok(serde_json::from_str(json).ok())
+2280 2431 }
+.... 2432 
+.... 2433 fn parse_initial_action(response: &str) -> Result<Option<InitialActionDecision>> {
+.... 2434     let trimmed = response.trim();
+.... 2435     let Some(json) = extract_json_payload(trimmed) else {
+.... 2436         return Ok(None);
+.... 2437     };
+.... 2438     let Ok(action) = serde_json::from_str::<InitialActionEnvelope>(json) else {
+.... 2439         return Ok(None);
+.... 2440     };
+.... 2441 
+.... 2442     Ok(Some(initial_action_from_envelope(action)?))
+.... 2443 }
+2281 2444 
+2282 2445 fn parse_planner_action(response: &str) -> Result<Option<RecursivePlannerDecision>> {
+2283 2446     let trimmed = response.trim();
+
+src/infrastructure/adapters/sift_agent.rs --- 8/11 --- Rust
+2291 2454     Ok(Some(planner_action_from_envelope(action)?))
+2292 2455 }
+.... 2456 
+.... 2457 fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
+.... 2458     let decision = match envelope {
+.... 2459         InitialActionEnvelope::Answer { rationale } => InitialActionDecision {
+.... 2460             action: InitialAction::Answer,
+.... 2461             rationale: required_planner_field("rationale", rationale)?,
+.... 2462         },
+.... 2463         InitialActionEnvelope::Tool { rationale } => InitialActionDecision {
+.... 2464             action: InitialAction::Tool,
+.... 2465             rationale: required_planner_field("rationale", rationale)?,
+.... 2466         },
+.... 2467         InitialActionEnvelope::Search {
+.... 2468             query,
+.... 2469             intent,
+.... 2470             rationale,
+.... 2471         } => InitialActionDecision {
+.... 2472             action: InitialAction::Search {
+.... 2473                 query: required_planner_field("query", query)?,
+.... 2474                 intent: intent.and_then(|value| {
+.... 2475                     let trimmed = value.trim();
+.... 2476                     (!trimmed.is_empty()).then(|| trimmed.to_string())
+.... 2477                 }),
+.... 2478             },
+.... 2479             rationale: required_planner_field("rationale", rationale)?,
+.... 2480         },
+.... 2481         InitialActionEnvelope::Read { path, rationale } => InitialActionDecision {
+.... 2482             action: InitialAction::Read {
+.... 2483                 path: required_planner_field("path", path)?,
+.... 2484             },
+.... 2485             rationale: required_planner_field("rationale", rationale)?,
+.... 2486         },
+.... 2487         InitialActionEnvelope::Inspect { command, rationale } => InitialActionDecision {
+.... 2488             action: InitialAction::Inspect {
+.... 2489                 command: required_planner_field("command", command)?,
+.... 2490             },
+.... 2491             rationale: required_planner_field("rationale", rationale)?,
+.... 2492         },
+.... 2493         InitialActionEnvelope::Refine { query, rationale } => {
+.... 2494             let rationale_text = rationale
+.... 2495                 .as_deref()
+.... 2496                 .map(str::trim)
+.... 2497                 .filter(|value| !value.is_empty())
+.... 2498                 .map(str::to_string);
+.... 2499             InitialActionDecision {
+.... 2500                 action: InitialAction::Refine {
+.... 2501                     query: required_planner_field("query", query)?,
+.... 2502                     rationale: rationale_text.clone(),
+.... 2503                 },
+.... 2504                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
+.... 2505             }
+.... 2506         }
+.... 2507         InitialActionEnvelope::Branch {
+.... 2508             branches,
+.... 2509             rationale,
+.... 2510         } => {
+.... 2511             let branches = branches
+.... 2512                 .into_iter()
+.... 2513                 .map(|branch| branch.trim().to_string())
+.... 2514                 .filter(|branch| !branch.is_empty())
+.... 2515                 .collect::<Vec<_>>();
+.... 2516             if branches.is_empty() {
+.... 2517                 bail!("initial action branch must include at least one branch");
+.... 2518             }
+.... 2519             InitialActionDecision {
+.... 2520                 action: InitialAction::Branch {
+.... 2521                     branches,
+.... 2522                     rationale: rationale.clone(),
+.... 2523                 },
+.... 2524                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
+.... 2525             }
+.... 2526         }
+.... 2527         InitialActionEnvelope::Stop { reason, rationale } => InitialActionDecision {
+.... 2528             action: InitialAction::Stop {
+.... 2529                 reason: required_planner_field("reason", reason)?,
+.... 2530             },
+.... 2531             rationale: rationale.unwrap_or_else(|| "stop routing".to_string()),
+.... 2532         },
+.... 2533     };
+.... 2534 
+.... 2535     Ok(decision)
+.... 2536 }
+2293 2537 
+2294 2538 fn planner_action_from_envelope(
+2295 2539     envelope: PlannerActionEnvelope,
+
+src/infrastructure/adapters/sift_agent.rs --- 9/11 --- Rust
+2374 2618     Ok(trimmed.to_string())
+2375 2619 }
+.... 2620 
+.... 2621 fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
+.... 2622     if infer_shell_command(&request.user_prompt).is_some()
+.... 2623         || is_follow_up_execution_request(&request.user_prompt)
+.... 2624         || should_prefer_tools(&request.user_prompt)
+.... 2625     {
+.... 2626         return InitialActionDecision {
+.... 2627             action: InitialAction::Tool,
+.... 2628             rationale: "prefer deterministic tool execution for an explicit workspace action when the initial action reply is invalid"
+.... 2629                 .to_string(),
+.... 2630         };
+.... 2631     }
+.... 2632 
+.... 2633     if request.user_prompt.split_whitespace().count() <= 6 && request.loop_state.steps.is_empty() {
+.... 2634         return InitialActionDecision {
+.... 2635             action: InitialAction::Answer,
+.... 2636             rationale: "answer directly when the initial action reply is invalid and the turn looks lightweight"
+.... 2637                 .to_string(),
+.... 2638         };
+.... 2639     }
+.... 2640 
+.... 2641     InitialActionDecision {
+.... 2642         action: InitialAction::Search {
+.... 2643             query: fallback_planner_query(&request.user_prompt),
+.... 2644             intent: Some("initial action fallback".to_string()),
+.... 2645         },
+.... 2646         rationale: "start with a bounded workspace search when the initial action reply is invalid"
+.... 2647             .to_string(),
+.... 2648     }
+.... 2649 }
+2376 2650 
+2377 2651 fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision {
+2378 2652     if let Some(branch) = request.loop_state.pending_branches.first() {
+
+src/infrastructure/adapters/sift_agent.rs --- 10/11 --- Rust
+2680 2954     };
+2681 2955     use crate::domain::model::{NullTurnEventSink, TurnIntent};
+2682 2956     use crate::domain::ports::{
+2683 2957         EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, PlannerDecision,
+2684 2958         PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+.... 2959         RetainedEvidence,
+2685 2960     };
+2686 2961     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
+
+src/infrastructure/adapters/sift_agent.rs --- 11/11 --- Rust
+3121 3396         assert!(prompt.contains("Planner evidence handoff"));
+3122 3397     }
+.... 3398 
+.... 3399     #[test]
+.... 3400     fn initial_action_prompts_include_interpretation_context() {
+.... 3401         let workspace = tempfile::tempdir().expect("temp workspace");
+.... 3402         let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+.... 3403         let adapter = SiftAgentAdapter::new_for_test(
+.... 3404             workspace.path(),
+.... 3405             "qwen-1.5b",
+.... 3406             Box::new(RecordingConversation::new(
+.... 3407                 r#"{"action":"answer","rationale":"no workspace resources needed"}"#,
+.... 3408                 Arc::clone(&recorded_messages),
+.... 3409             )),
+.... 3410         );
+.... 3411 
+.... 3412         let interpretation = InterpretationContext {
+.... 3413             summary: "Operator interpretation context assembled from AGENTS and linked docs."
+.... 3414                 .to_string(),
+.... 3415             documents: vec![
+.... 3416                 crate::domain::ports::InterpretationDocument {
+.... 3417                     source: "AGENTS.md".to_string(),
+.... 3418                     excerpt: "Use AGENTS guidance before choosing the next action.".to_string(),
+.... 3419                 },
+.... 3420                 crate::domain::ports::InterpretationDocument {
+.... 3421                     source: "POLICY.md".to_string(),
+.... 3422                     excerpt: "Controller validates actions after the model selects them."
+.... 3423                         .to_string(),
+.... 3424                 },
+.... 3425             ],
+.... 3426         };
+.... 3427         let request = PlannerRequest::new(
+.... 3428             "What's next on the board?",
+.... 3429             workspace.path(),
+.... 3430             interpretation,
+.... 3431             crate::domain::ports::PlannerBudget::default(),
+.... 3432         )
+.... 3433         .with_recent_turns(vec!["user: previous turn".to_string()]);
+.... 3434 
+.... 3435         let decision = adapter
+.... 3436             .select_initial_action(&request)
+.... 3437             .expect("initial action");
+.... 3438         assert_eq!(decision.action, InitialAction::Answer);
+.... 3439 
+.... 3440         let prompt = recorded_messages
+.... 3441             .lock()
+.... 3442             .expect("history lock")
+.... 3443             .first()
+.... 3444             .cloned()
+.... 3445             .expect("recorded prompt");
+.... 3446         assert!(prompt.contains("Interpretation context"));
+.... 3447         assert!(prompt.contains("AGENTS.md"));
+.... 3448         assert!(prompt.contains("POLICY.md"));
+.... 3449         assert!(prompt.contains("Use AGENTS guidance before choosing the next action."));
+.... 3450         assert!(prompt.contains("Recent turns"));
+.... 3451         assert!(prompt.contains("user: previous turn"));
+.... 3452     }
+3123 3453 
+3124 3454     #[test]
+3125 3455     fn search_tool_uses_sift_context_assembly() {
+
+src/infrastructure/adapters/sift_planner.rs --- 1/2 --- Rust
+ 1  1 use crate::domain::ports::{
+ 2  2     InitialActionDecision, PlannerCapability, PlannerRequest, RecursivePlanner,
+ .  3     RecursivePlannerDecision,
+ 3  4 };
+ 4  5 use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+
+src/infrastructure/adapters/sift_planner.rs --- 2/2 --- Rust
+22 23         PlannerCapability::Available
+23 24     }
+.. 25 
+.. 26     async fn select_initial_action(
+.. 27         &self,
+.. 28         request: &PlannerRequest,
+.. 29     ) -> Result<InitialActionDecision, anyhow::Error> {
+.. 30         self.engine.select_initial_action(request)
+.. 31     }
+24 32 
+25 33     async fn select_next_action(
+26 34         &self,
+
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

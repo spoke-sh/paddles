@@ -42,7 +42,7 @@ Focus on **technical discovery and fog reduction**.
 
 Paddles treats inference as a routing problem, not a single-model problem.
 
-1. **Interpretation Context First**: Assemble `AGENTS.md`, linked foundational guidance, recent turns, and relevant local state before choosing the next bounded action for non-trivial turns.
+1. **Interpretation Context First**: Assemble `AGENTS.md`, linked foundational guidance, recent turns, and relevant local state before choosing the next bounded action.
 2. **Model Selects The Next Bounded Action**: Do not rely on controller string heuristics as the primary reasoning engine. Present the model with the allowed action options and require it to return one of them.
 3. **Controller Owns Validation And Budgets**: The controller remains authoritative for schema validation, safe-command allowlists, deterministic execution, loop budgets, and fail-closed behavior.
 4. **Planner Before Synthesizer**: Resource-intensive turns should recurse through bounded planner actions and only then hand typed evidence to the synthesizer lane.
@@ -53,7 +53,7 @@ Paddles treats inference as a routing problem, not a single-model problem.
 9. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
 
 Current transitional note:
-- The implementation still retains a narrow heuristic shortcut for some trivial turns. That is transitional debt; the backbone contract is model-directed bounded action selection.
+- The main mech-suit runtime now uses model-directed first action selection. Remaining transitional debt is limited to the temporary `tool` bridge and legacy direct adapter helpers that still contain heuristic intent inference outside the main service path.
 
 ## Human Interaction & Pokes
 

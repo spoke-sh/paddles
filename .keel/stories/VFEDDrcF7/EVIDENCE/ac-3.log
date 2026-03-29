@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T08:36:32.047391561-07:00
+mode: manual
+---
+The first-action contract is repository-agnostic: src/domain/ports/planning.rs only models generic workspace actions and interpretation context, with no Keel-specific intent or board-only action types.

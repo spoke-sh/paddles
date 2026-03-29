@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T08:36:39.555750298-07:00
+mode: manual
+---
+src/infrastructure/adapters/sift_agent.rs now builds the first-action prompt from interpretation context and recent turns before any route is chosen. The regression test infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context proves AGENTS-derived guidance is injected into that first action-selection prompt.

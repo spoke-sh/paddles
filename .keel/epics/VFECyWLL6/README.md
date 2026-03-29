@@ -22,8 +22,8 @@ index: 16
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Model-Directed Routing Backbone](voyages/VFED2RjSu/) | planned | 0/4 |
+| [Model-Directed Routing Backbone](voyages/VFED2RjSu/) | done | 4/4 |
 <!-- END GENERATED -->

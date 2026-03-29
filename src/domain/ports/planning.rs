@@ -6,6 +6,11 @@ use std::path::PathBuf;
 pub trait RecursivePlanner: Send + Sync {
     fn capability(&self) -> PlannerCapability;
 
+    async fn select_initial_action(
+        &self,
+        request: &PlannerRequest,
+    ) -> Result<InitialActionDecision, anyhow::Error>;
+
     async fn select_next_action(
         &self,
         request: &PlannerRequest,
@@ -133,6 +138,106 @@ pub struct PlannerStepRecord {
     pub outcome: String,
 }
 
+/// The first bounded action the planner may choose for a turn.
+///
+/// This contract is intentionally generic across repositories and evidence
+/// domains. The controller remains responsible for validating read-only
+/// inspect commands, enforcing budgets, and failing closed when the selected
+/// action cannot be executed safely.
+///
+/// `Tool` exists as a transitional bridge into the existing deterministic tool
+/// runtime while the harness still separates top-level action selection from
+/// lower-level tool execution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InitialAction {
+    Answer,
+    Tool,
+    Search {
+        query: String,
+        intent: Option<String>,
+    },
+    Read {
+        path: String,
+    },
+    Inspect {
+        command: String,
+    },
+    Refine {
+        query: String,
+        rationale: Option<String>,
+    },
+    Branch {
+        branches: Vec<String>,
+        rationale: Option<String>,
+    },
+    Stop {
+        reason: String,
+    },
+}
+
+impl InitialAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Answer => "answer",
+            Self::Tool => "tool",
+            Self::Search { .. } => "search",
+            Self::Read { .. } => "read",
+            Self::Inspect { .. } => "inspect",
+            Self::Refine { .. } => "refine",
+            Self::Branch { .. } => "branch",
+            Self::Stop { .. } => "stop",
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Answer => "answer directly".to_string(),
+            Self::Tool => "use deterministic tool execution".to_string(),
+            Self::Search { query, .. } => format!("search `{query}`"),
+            Self::Read { path } => format!("read `{path}`"),
+            Self::Inspect { command } => format!("inspect `{command}`"),
+            Self::Refine { query, .. } => format!("refine toward `{query}`"),
+            Self::Branch { branches, .. } => format!("branch into {}", branches.join(" | ")),
+            Self::Stop { reason } => format!("stop ({reason})"),
+        }
+    }
+
+    pub fn as_planner_action(&self) -> Option<PlannerAction> {
+        match self {
+            Self::Answer | Self::Tool => None,
+            Self::Search { query, intent } => Some(PlannerAction::Search {
+                query: query.clone(),
+                intent: intent.clone(),
+            }),
+            Self::Read { path } => Some(PlannerAction::Read { path: path.clone() }),
+            Self::Inspect { command } => Some(PlannerAction::Inspect {
+                command: command.clone(),
+            }),
+            Self::Refine { query, rationale } => Some(PlannerAction::Refine {
+                query: query.clone(),
+                rationale: rationale.clone(),
+            }),
+            Self::Branch {
+                branches,
+                rationale,
+            } => Some(PlannerAction::Branch {
+                branches: branches.clone(),
+                rationale: rationale.clone(),
+            }),
+            Self::Stop { reason } => Some(PlannerAction::Stop {
+                reason: reason.clone(),
+            }),
+        }
+    }
+}
+
+/// A planner-selected first action paired with the model's routing rationale.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InitialActionDecision {
+    pub action: InitialAction,
+    pub rationale: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlannerAction {
     Search {
@@ -196,7 +301,9 @@ pub struct PlannerDecision {
 
 #[cfg(test)]
 mod tests {
-    use super::{InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget};
+    use super::{
+        InitialAction, InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget,
+    };
 
     #[test]
     fn interpretation_context_renders_sources() {
@@ -232,5 +339,21 @@ mod tests {
         assert_eq!(action.label(), "search");
         assert!(action.summary().contains("memory reload"));
         assert!(!action.is_terminal());
+    }
+
+    #[test]
+    fn initial_action_reports_human_readable_summary() {
+        let action = InitialAction::Inspect {
+            command: "git status".to_string(),
+        };
+
+        assert_eq!(action.label(), "inspect");
+        assert!(action.summary().contains("git status"));
+        assert_eq!(
+            action.as_planner_action(),
+            Some(PlannerAction::Inspect {
+                command: "git status".to_string()
+            })
+        );
     }
 }

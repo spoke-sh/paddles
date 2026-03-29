@@ -9,7 +9,7 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Core Principles
 1. **Maintain Calibration**: The boot sequence (credits, weights, biases) is foundational. Ensure changes to `src/main.rs` never weaken Constitution or Dogma validation.
 2. **Local First**: Prioritize local inference capacity via `candle`. Avoid introducing network dependencies into the core execution loop.
-3. **Interpret Before Routing**: Operator memory should influence first-pass interpretation of non-trivial turns. Do not commit to a route before the harness has assembled the relevant `AGENTS.md` and foundational context.
+3. **Interpret Before Routing**: Operator memory should influence first-pass interpretation before the harness commits to a route. Do not commit to a path before the relevant `AGENTS.md` and foundational context are assembled.
 4. **Model-Directed Next Action**: After interpretation context is assembled, the model should choose the next bounded action from a constrained schema. The controller should validate and execute that action safely instead of heuristically guessing the route.
 5. **Recursive Planning Before Final Answer**: Difficult workspace questions should improve through bounded recursive resource use. Planner work and final synthesis are different roles and should not be collapsed into one brittle one-shot path.
 6. **Visible Turns**: The interactive REPL should render a default Codex-style action stream so interpretation, recursive actions, routing, retrieval, tools, fallbacks, and synthesis are observable without extra flags.
@@ -21,9 +21,9 @@ You are an operator within the `paddles` harness. Keel is an engine with strict 
 ### Runtime Routing Contract
 
 - The model should choose the next bounded action from a controller-defined schema; the controller validates and executes it safely.
-- The harness uses a **planner lane** that owns bounded search/refine loops for non-trivial workspace questions.
-- The **synthesizer lane** remains the final answer path for casual chat, explicit deterministic actions, and grounded responses after planner work.
-- Non-trivial turns should improve through recursive context work instead of project-specific hardcoded intents or top-level heuristic routing.
+- The primary mech-suit path now assembles interpretation context and asks the **planner lane** to choose the first bounded action before route selection.
+- The **synthesizer lane** remains the final answer path for direct responses, grounded responses after planner work, and the temporary deterministic `tool` bridge.
+- Turns should improve through recursive context work instead of project-specific hardcoded intents or top-level heuristic routing.
 - Repository-question answers should include file citations by default.
 - TTY interactive sessions should expose a default transcript TUI with visible turn events rather than hiding runtime behavior behind verbose-only diagnostics.
 - One-shot `--prompt` usage and non-TTY stdin/stdout flows must remain plain output paths.
@@ -55,9 +55,12 @@ When a human user opens the chat or "pokes" you (for example, "Wake up" or "I'm 
 
 ### Transitional Note
 
-The current implementation still has a narrow heuristic shortcut for some
-trivial turns before full model-directed top-level action selection lands.
-Treat that as transitional debt, not the target architecture.
+The primary runtime now uses model-directed first action selection. The
+remaining transitional debt is narrower: a temporary `tool` bridge still hands
+off to the older deterministic tool runtime, and some legacy direct adapter
+helpers still contain heuristic intent inference outside the main
+`MechSuitService` path. Treat those compatibility surfaces as debt, not the
+target architecture.
 
 ### Procedural Instructions
 Follow the formal procedural loops and checklists defined in:

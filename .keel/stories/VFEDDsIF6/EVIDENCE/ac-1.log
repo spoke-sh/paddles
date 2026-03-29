@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T08:36:32.077946519-07:00
+mode: manual
+---
+src/application/mod.rs now assembles interpretation context before planner_engine.select_initial_action is called. The regression test application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action proves interpretation is emitted before the first planner action is selected.

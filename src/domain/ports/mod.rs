@@ -10,9 +10,9 @@ pub use context_gathering::{
     PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
 };
 pub use planning::{
-    InterpretationContext, InterpretationDocument, PlannerAction, PlannerBudget, PlannerCapability,
-    PlannerDecision as RecursivePlannerDecision, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, RecursivePlanner,
+    InitialAction, InitialActionDecision, InterpretationContext, InterpretationDocument,
+    PlannerAction, PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner,
 };
 
 /// Port for model discovery and acquisition.

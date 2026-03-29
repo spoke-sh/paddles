@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFECvinGX
-status: active
+status: achieved
 created_at: 2026-03-28T21:40:46
-updated_at: 2026-03-28T21:48:12
+updated_at: 2026-03-29T08:38:42
 # authored
 title: Replace Heuristic Routing With Model-Directed Action Selection
 watch: ~
 activated_at: 2026-03-28T21:48:12
+achieved_at: 2026-03-29T08:38:42
 ---
 
 # Replace Heuristic Routing With Model-Directed Action Selection

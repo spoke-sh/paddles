@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T08:36:32.014408509-07:00
+mode: manual
+---
+Controller validation remains authoritative: planning.rs documents the controller-owned validation envelope, src/application/mod.rs validates inspect commands via run_planner_inspect_command/validate_inspect_command, and src/infrastructure/adapters/sift_agent.rs retries invalid initial-action output before bounded fail-closed fallback in select_initial_action/fallback_initial_action.

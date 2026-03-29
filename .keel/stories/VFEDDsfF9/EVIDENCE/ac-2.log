@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T08:36:39.669762288-07:00
+mode: manual
+---
+Safe inspect/tool execution remains controller-bounded after the refactor. src/application/mod.rs validates inspect commands through validate_inspect_command before execution, and deterministic tool execution still flows through controller-owned tool execution in src/infrastructure/adapters/sift_agent.rs rather than raw model autonomy.

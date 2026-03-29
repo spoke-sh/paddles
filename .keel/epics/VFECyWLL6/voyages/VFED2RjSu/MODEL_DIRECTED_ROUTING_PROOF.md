@@ -1,0 +1,73 @@
+# Model-Directed Routing Proof
+
+## Summary
+
+This voyage replaced the primary top-level controller classifier in the
+`MechSuitService` runtime with model-directed first action selection.
+
+## Before
+
+The application runtime used a controller-side shortcut before the planner lane:
+
+- `casual` turns stayed on the synthesizer lane immediately
+- other turns were heuristically mapped into direct response, deterministic
+  action, or planner work before the planner model saw interpretation context
+
+That meant `AGENTS.md` and linked foundational docs could influence later
+planning and synthesis prompts, but not the first route decision.
+
+## After
+
+The primary runtime path now behaves as:
+
+1. load `AGENTS.md` and linked foundational guidance
+2. assemble interpretation context
+3. ask the planner lane for the first bounded action
+4. validate and execute the selected route
+5. recurse or synthesize from the resulting evidence
+
+Implemented in:
+
+- `src/application/mod.rs`
+- `src/domain/ports/planning.rs`
+- `src/infrastructure/adapters/sift_agent.rs`
+- `src/infrastructure/adapters/sift_planner.rs`
+
+## Concrete Turn Proof
+
+The regression test `application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action`
+proves the runtime no longer commits the route before planner selection.
+
+It exercises a turn that previously would have been trapped behind the cheap
+`casual` shortcut:
+
+- prompt: `Howdy`
+- interpretation context: loaded from workspace `AGENTS.md`
+- planner-selected first action: `answer`
+- resulting classified intent: `direct-response`
+
+The test asserts:
+
+- interpretation context is assembled before `PlannerActionSelected`
+- `PlannerActionSelected` occurs before `IntentClassified`
+- the planner request contains `AGENTS.md`-derived interpretation sources
+- the final route is a model-selected direct response, not a pre-planner
+  controller shortcut
+
+## Supporting Regression Coverage
+
+- `application::tests::answer_initial_actions_route_to_direct_responses`
+- `application::tests::tool_initial_actions_route_to_deterministic_execution`
+- `application::tests::resource_initial_actions_route_to_the_planner_loop`
+- `application::tests::stop_initial_actions_fall_back_to_direct_responses`
+- `infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context`
+
+## Remaining Transitional Debt
+
+The backbone contract is delivered for the main `MechSuitService` runtime.
+Remaining debt is narrower:
+
+- the `tool` first action is still a bridge into the older deterministic tool
+  runtime
+- legacy direct adapter helper methods outside the main service path still carry
+  heuristic intent inference

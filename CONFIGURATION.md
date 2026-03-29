@@ -127,7 +127,7 @@ weight = 1.5
 selection rather than single-model-only routing:
 
 - The **synthesizer lane** is the default response path and must always be configured.
-- The **planner lane** owns bounded `search` / `read` / `inspect` / `refine` / `branch` / `stop` action selection for non-trivial turns.
+- The **planner lane** owns first bounded action selection for the primary mech-suit path: `answer` / `tool` / `search` / `read` / `inspect` / `refine` / `branch` / `stop`.
 - The **gatherer backend** services planner search/refine actions when workspace retrieval is needed.
 - If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
@@ -173,8 +173,9 @@ Current local model guidance on an 8 GB CUDA card:
 The REPL now renders a default Codex-style action stream. Expect visible steps
 for:
 
-- turn classification
 - interpretation context assembly
+- model-selected first action
+- resulting route classification
 - route selection
 - planner action selection
 - gatherer capability and gathered evidence

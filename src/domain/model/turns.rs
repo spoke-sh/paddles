@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TurnIntent {
     Casual,
+    DirectResponse,
     DeterministicAction,
     Planned,
 }
@@ -11,6 +12,7 @@ impl TurnIntent {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Casual => "casual",
+            Self::DirectResponse => "direct-response",
             Self::DeterministicAction => "deterministic-action",
             Self::Planned => "planned",
         }

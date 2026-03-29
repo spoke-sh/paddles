@@ -26,15 +26,19 @@ flowchart TD
     P["Planner Lane<br/>planner-capable model"]
     D{"Next bounded action?"}
     A["Validated resource action<br/>search / read / inspect / refine / branch"]
+    X["Deterministic tool bridge<br/>legacy tool runtime"]
     S["Planner Trace + Evidence State"]
     T["Stop condition<br/>enough evidence / budget exhausted / explicit stop"]
     Y["Synthesizer Lane<br/>final answer model"]
     R["TUI / Plain Output"]
 
     U --> I --> P --> D
+    D -->|answer| Y
+    D -->|tool| X --> Y
     D -->|search/read/refine| A --> S --> I
-    D -->|stop| T --> Y --> R
+    D -->|stop| T --> Y
     S --> T
+    Y --> R
 ```
 
 ### Model Routing
@@ -47,6 +51,7 @@ flowchart LR
     Interpret["Interpretation context<br/>AGENTS.md + linked docs + recent turns + local state"]
     Decide["Model-selected next action<br/>bounded schema"]
     Direct["Answer/synthesize now"]
+    Tool["Deterministic tool bridge"]
     Resource["Validated resource action<br/>search / read / inspect / refine / branch"]
     LocalPlanner["Local planner path<br/>Sift autonomous / local Qwen planner"]
     HeavyPlanner["Specialized planner path<br/>Context-1 boundary or future planner model"]
@@ -55,6 +60,7 @@ flowchart LR
 
     Turn --> Interpret --> Decide
     Decide --> Direct --> Synth
+    Decide --> Tool --> Synth
     Decide --> Resource
     Resource --> LocalPlanner --> Evidence
     Resource --> HeavyPlanner --> Evidence
@@ -62,13 +68,13 @@ flowchart LR
     Evidence --> Synth
 ```
 
-### Next Backbone Step
+### Delivered Backbone Step
 
-The remaining major gap is the top-level heuristic gate. Today `paddles`
-already has a recursive planner loop, but it still uses a controller shortcut
-before the model owns first action selection. The next backbone step is to
-remove that heuristic pre-classification for non-trivial turns and let the model
-choose one bounded next action from interpretation context.
+The primary mech-suit path now assembles interpretation context first and asks
+the planner model to choose the first bounded action before the controller
+commits to a route. The controller still owns schema validation, allowlists,
+budgets, and fail-closed behavior, but it no longer heuristically decides the
+initial path for normal turns.
 
 ```mermaid
 flowchart TD
@@ -77,12 +83,14 @@ flowchart TD
     M["Action-selection model"]
     C{"Choose one"}
     A["answer / synthesize"]
+    T["tool bridge"]
     R["search / read / inspect / refine / branch"]
     L["validated recursive loop"]
     S["grounded synthesizer answer"]
 
     U --> I --> M --> C
     C --> A --> S
+    C --> T --> S
     C --> R --> L --> M
     L --> S
 ```
@@ -99,16 +107,17 @@ The repository now implements the recursive harness in a bounded local-first for
 
 Today, the runtime has:
 
-- a planner lane that sees interpretation context before choosing the next action
+- a planner lane that sees interpretation context before choosing the first bounded action
 - hierarchical `AGENTS.md` reload plus linked foundational guidance excerpts at interpretation time
+- a model-directed first action schema that can choose `answer`, `tool`, `search`, `read`, `inspect`, `refine`, `branch`, or `stop`
 - a bounded recursive loop for `search`, `read`, `inspect`, `refine`, `branch`, and `stop`
 - a distinct synthesizer lane that answers from the resulting evidence bundle
 - a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
 
 The remaining gaps are narrower now:
 
-- non-trivial turns still cross a transitional heuristic top-level gate before first action selection is fully model-directed
-- trivial turns still use a cheap controller shortcut for `casual` and explicit deterministic-action requests
+- the `tool` initial action is still a transitional bridge into the older deterministic tool runtime instead of a fully unified planner resource graph
+- legacy direct adapter helpers outside the main mech-suit service still contain heuristic intent inference and should not be treated as the backbone contract
 - the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
 - `context-1` is still an explicit experimental boundary, not the default planner lane
 

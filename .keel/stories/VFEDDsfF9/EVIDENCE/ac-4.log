@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-29T08:36:47.119051253-07:00
+mode: manual
+---
+Model-directed routing remains local-first and fails closed: the planner and synthesizer lanes still default to the local Sift/Qwen runtime, planner-unavailable cases fall back through fallback_execution_plan in src/application/mod.rs, and invalid planner output retries then degrades through bounded fallback_initial_action in src/infrastructure/adapters/sift_agent.rs.

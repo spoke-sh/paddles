@@ -1,0 +1,8 @@
+id: VFEDDrcF7
+git_sha: 6bed06f267efa816e5c82a75e18b2f98f142ec4d
+evidence:
+  EVIDENCE/ac-1.log: f135ef9e7a34bc8db439e59391126345bdfa9a7862cb42915723cd8f1f0f0b2e
+  EVIDENCE/ac-2.log: c87208fb5a4bfceaf001262c5b110c484dc4324760e865de3292a0c63ec17717
+  EVIDENCE/ac-3.log: e31c142cc272ad2dfb30371052554e71175fee7fb85b6df2779651d868326a44
+  ? EVIDENCE/llm-judge-a-top-level-action-contract-exists-for-first-action-selection-and-can-express-direct-answer-or-synthesize-search-read-inspect-refine-branch-and-stop.txt
+  : 3407d0f54816caa4bd76bd1d74abcda62c71c8f828d2c21daa81f6a38fa4dcbb

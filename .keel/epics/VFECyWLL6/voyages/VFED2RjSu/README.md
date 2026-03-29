@@ -1,13 +1,15 @@
 ---
 # system-managed
 id: VFED2RjSu
-status: planned
+status: done
 epic: VFECyWLL6
 created_at: 2026-03-28T21:41:11
 # authored
 title: Model-Directed Routing Backbone
 index: 1
 updated_at: 2026-03-28T21:48:08
+started_at: 2026-03-29T08:17:57
+completed_at: 2026-03-29T08:38:20
 ---
 
 # Model-Directed Routing Backbone
@@ -21,17 +23,19 @@ updated_at: 2026-03-28T21:48:08
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Model-Directed Next-Action Contract](../../../../stories/VFEDDrcF7/README.md) | feat | backlog |
-| [Feed Interpretation Context Into First Action Selection](../../../../stories/VFEDDsIF6/README.md) | feat | backlog |
-| [Replace Heuristic Top-Level Routing With Planner Decisions](../../../../stories/VFEDDsfF9/README.md) | feat | backlog |
-| [Document And Prove Model-Directed Routing](../../../../stories/VFEDDtAFz/README.md) | docs | backlog |
+| [Define Model-Directed Next-Action Contract](../../../../stories/VFEDDrcF7/README.md) | feat | done |
+| [Feed Interpretation Context Into First Action Selection](../../../../stories/VFEDDsIF6/README.md) | feat | done |
+| [Replace Heuristic Top-Level Routing With Planner Decisions](../../../../stories/VFEDDsfF9/README.md) | feat | done |
+| [Document And Prove Model-Directed Routing](../../../../stories/VFEDDtAFz/README.md) | docs | done |
 <!-- END GENERATED -->

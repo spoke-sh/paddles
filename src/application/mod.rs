@@ -1,10 +1,10 @@
 use crate::domain::model::{BootContext, TurnEvent, TurnEventSink, TurnIntent};
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
-    GathererCapability, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
-    PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RetainedEvidence,
+    GathererCapability, InitialAction, InitialActionDecision, InterpretationContext, ModelPaths,
+    ModelRegistry, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
+    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
 };
 use crate::infrastructure::adapters::agent_memory::AgentMemory;
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
@@ -475,83 +475,73 @@ impl MechSuitService {
         let gatherer = runtime.gatherer.clone();
         drop(runtime_guard);
 
-        let execution_plan = select_execution_plan(prompt, true);
+        let memory = AgentMemory::load(&self.workspace_root);
+        let interpretation = memory.build_interpretation_context(prompt, &self.workspace_root);
+        event_sink.emit(TurnEvent::InterpretationContext {
+            summary: interpretation.summary.clone(),
+            sources: interpretation.sources(),
+        });
+
+        let planner_capability = planner_engine.capability();
+        event_sink.emit(TurnEvent::PlannerCapability {
+            provider: prepared.planner.model_id.clone(),
+            capability: format_planner_capability(&planner_capability),
+        });
+
+        let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+        let request = PlannerRequest::new(
+            prompt,
+            self.workspace_root.clone(),
+            interpretation.clone(),
+            PlannerBudget::default(),
+        )
+        .with_recent_turns(recent_turns.clone());
+
+        let execution_plan = match planner_capability {
+            PlannerCapability::Available => {
+                let decision = planner_engine.select_initial_action(&request).await?;
+                event_sink.emit(TurnEvent::PlannerActionSelected {
+                    sequence: 1,
+                    action: decision.action.summary(),
+                    rationale: decision.rationale.clone(),
+                });
+                execution_plan_from_initial_action(&prepared, decision)
+            }
+            PlannerCapability::Unsupported { reason } => {
+                event_sink.emit(TurnEvent::Fallback {
+                    stage: "planner".to_string(),
+                    reason: format!("planner unavailable before first action selection: {reason}"),
+                });
+                fallback_execution_plan(&prepared)
+            }
+        };
+
         event_sink.emit(TurnEvent::IntentClassified {
             intent: execution_plan.intent.clone(),
         });
-
-        if let Some(gatherer_lane) = &prepared.gatherer {
-            match execution_plan.path {
-                PromptExecutionPath::PlannerThenSynthesize => event_sink.emit(
-                    TurnEvent::RouteSelected {
-                        summary: format!(
-                            "turn will use planner lane '{}' with gatherer backend '{}' ({:?}) before synthesizer lane '{}'",
-                            prepared.planner.model_id,
-                            gatherer_lane.label,
-                            gatherer_lane.provider,
-                            prepared.synthesizer.model_id
-                        ),
-                    },
-                ),
-                PromptExecutionPath::SynthesizerOnly => event_sink.emit(TurnEvent::RouteSelected {
-                    summary: format!(
-                        "turn will stay on synthesizer lane '{}' while planner lane '{}' and gatherer backend '{}' remain available",
-                        prepared.synthesizer.model_id,
-                        prepared.planner.model_id,
-                        gatherer_lane.label,
-                    ),
-                }),
-            }
-        } else {
-            event_sink.emit(TurnEvent::RouteSelected {
-                summary: format!(
-                    "turn will use planner lane '{}' and synthesizer lane '{}' with no dedicated gatherer backend configured",
-                    prepared.planner.model_id,
-                    prepared.synthesizer.model_id
-                ),
-            });
-        }
+        event_sink.emit(TurnEvent::RouteSelected {
+            summary: execution_plan.route_summary.clone(),
+        });
 
         let gathered_evidence = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
                 let memory = AgentMemory::load(&self.workspace_root);
                 let interpretation =
                     memory.build_interpretation_context(prompt, &self.workspace_root);
-                event_sink.emit(TurnEvent::InterpretationContext {
-                    summary: interpretation.summary.clone(),
-                    sources: interpretation.sources(),
-                });
-
-                let planner_capability = planner_engine.capability();
-                event_sink.emit(TurnEvent::PlannerCapability {
-                    provider: prepared.planner.model_id.clone(),
-                    capability: format_planner_capability(&planner_capability),
-                });
-
-                match planner_capability {
-                    PlannerCapability::Available => {
-                        let recent_turns = synthesizer_engine.recent_turn_summaries()?;
-                        self.execute_recursive_planner_loop(
-                            prompt,
-                            PlannerLoopContext {
-                                prepared: prepared.clone(),
-                                planner_engine,
-                                gatherer,
-                                interpretation,
-                                recent_turns,
-                            },
-                            Arc::clone(&event_sink),
-                        )
-                        .await?
-                    }
-                    PlannerCapability::Unsupported { reason } => {
-                        event_sink.emit(TurnEvent::Fallback {
-                            stage: "planner".to_string(),
-                            reason: format!("planner unavailable: {reason}"),
-                        });
-                        None
-                    }
-                }
+                let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+                self.execute_recursive_planner_loop(
+                    prompt,
+                    PlannerLoopContext {
+                        prepared: prepared.clone(),
+                        planner_engine,
+                        gatherer,
+                        interpretation,
+                        recent_turns,
+                    },
+                    execution_plan.initial_planner_decision.clone(),
+                    Arc::clone(&event_sink),
+                )
+                .await?
             }
             PromptExecutionPath::SynthesizerOnly => None,
         };
@@ -571,12 +561,14 @@ impl MechSuitService {
         &self,
         prompt: &str,
         context: PlannerLoopContext,
+        initial_decision: Option<RecursivePlannerDecision>,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<Option<EvidenceBundle>> {
         let budget = PlannerBudget::default();
         let mut loop_state = PlannerLoopState::default();
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
+        let mut pending_initial_decision = initial_decision;
         let gatherer_provider = context
             .prepared
             .gatherer
@@ -585,20 +577,25 @@ impl MechSuitService {
             .unwrap_or_else(|| "workspace".to_string());
 
         for sequence in 1..=budget.max_steps {
-            let request = PlannerRequest::new(
-                prompt,
-                self.workspace_root.clone(),
-                context.interpretation.clone(),
-                budget.clone(),
-            )
-            .with_recent_turns(context.recent_turns.clone())
-            .with_loop_state(loop_state.clone());
-            let decision = context.planner_engine.select_next_action(&request).await?;
-            event_sink.emit(TurnEvent::PlannerActionSelected {
-                sequence,
-                action: decision.action.summary(),
-                rationale: decision.rationale.clone(),
-            });
+            let decision = if let Some(decision) = pending_initial_decision.take() {
+                decision
+            } else {
+                let request = PlannerRequest::new(
+                    prompt,
+                    self.workspace_root.clone(),
+                    context.interpretation.clone(),
+                    budget.clone(),
+                )
+                .with_recent_turns(context.recent_turns.clone())
+                .with_loop_state(loop_state.clone());
+                let decision = context.planner_engine.select_next_action(&request).await?;
+                event_sink.emit(TurnEvent::PlannerActionSelected {
+                    sequence,
+                    action: decision.action.summary(),
+                    rationale: decision.rationale.clone(),
+                });
+                decision
+            };
 
             let outcome = match &decision.action {
                 PlannerAction::Search { query, intent } => {
@@ -829,6 +826,8 @@ impl MechSuitService {
 struct PromptExecutionPlan {
     intent: TurnIntent,
     path: PromptExecutionPath,
+    route_summary: String,
+    initial_planner_decision: Option<RecursivePlannerDecision>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -837,88 +836,84 @@ enum PromptExecutionPath {
     PlannerThenSynthesize,
 }
 
-fn select_execution_plan(prompt: &str, planner_available: bool) -> PromptExecutionPlan {
-    let intent = classify_turn(prompt);
-    let path = if planner_available && intent.uses_planner() {
-        PromptExecutionPath::PlannerThenSynthesize
-    } else {
-        PromptExecutionPath::SynthesizerOnly
-    };
-
-    PromptExecutionPlan { intent, path }
-}
-
-fn classify_turn(prompt: &str) -> TurnIntent {
-    let normalized = normalize_turn_prompt(prompt);
-
-    if is_casual_turn(&normalized) {
-        return TurnIntent::Casual;
+fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
+    PromptExecutionPlan {
+        intent: TurnIntent::DirectResponse,
+        path: PromptExecutionPath::SynthesizerOnly,
+        route_summary: format!(
+            "planner lane '{}' is unavailable, so the turn will fall back to synthesizer lane '{}' for a direct response",
+            prepared.planner.model_id, prepared.synthesizer.model_id
+        ),
+        initial_planner_decision: None,
     }
-    if is_deterministic_action_turn(&normalized) {
-        return TurnIntent::DeterministicAction;
+}
+
+fn execution_plan_from_initial_action(
+    prepared: &PreparedRuntimeLanes,
+    decision: InitialActionDecision,
+) -> PromptExecutionPlan {
+    let InitialActionDecision { action, rationale } = decision;
+    match action {
+        InitialAction::Answer => PromptExecutionPlan {
+            intent: TurnIntent::DirectResponse,
+            path: PromptExecutionPath::SynthesizerOnly,
+            route_summary: format!(
+                "model selected a direct response on synthesizer lane '{}'",
+                prepared.synthesizer.model_id
+            ),
+            initial_planner_decision: None,
+        },
+        InitialAction::Tool => PromptExecutionPlan {
+            intent: TurnIntent::DeterministicAction,
+            path: PromptExecutionPath::SynthesizerOnly,
+            route_summary: format!(
+                "model selected deterministic tool execution on synthesizer lane '{}'",
+                prepared.synthesizer.model_id
+            ),
+            initial_planner_decision: None,
+        },
+        InitialAction::Stop { reason } => PromptExecutionPlan {
+            intent: TurnIntent::DirectResponse,
+            path: PromptExecutionPath::SynthesizerOnly,
+            route_summary: format!(
+                "model selected stop before recursive resource use ({reason}); synthesizer lane '{}' will answer directly",
+                prepared.synthesizer.model_id
+            ),
+            initial_planner_decision: None,
+        },
+        resource_action => {
+            let planner_action = resource_action
+                .as_planner_action()
+                .expect("resource action must map to planner action");
+            let route_summary = if let Some(gatherer_lane) = &prepared.gatherer {
+                format!(
+                    "model selected initial planner action {}; turn will use planner lane '{}' with gatherer backend '{}' ({:?}) before synthesizer lane '{}'",
+                    planner_action.summary(),
+                    prepared.planner.model_id,
+                    gatherer_lane.label,
+                    gatherer_lane.provider,
+                    prepared.synthesizer.model_id
+                )
+            } else {
+                format!(
+                    "model selected initial planner action {}; turn will use planner lane '{}' and synthesizer lane '{}' with no dedicated gatherer backend configured",
+                    planner_action.summary(),
+                    prepared.planner.model_id,
+                    prepared.synthesizer.model_id
+                )
+            };
+
+            PromptExecutionPlan {
+                intent: TurnIntent::Planned,
+                path: PromptExecutionPath::PlannerThenSynthesize,
+                route_summary,
+                initial_planner_decision: Some(RecursivePlannerDecision {
+                    action: planner_action,
+                    rationale,
+                }),
+            }
+        }
     }
-
-    TurnIntent::Planned
-}
-
-fn is_casual_turn(normalized: &str) -> bool {
-    matches!(
-        normalized,
-        "hi" | "hello"
-            | "hey"
-            | "howdy"
-            | "yo"
-            | "sup"
-            | "whats up"
-            | "what's up"
-            | "how are you"
-            | "who are you"
-            | "thanks"
-            | "thank you"
-            | "good morning"
-            | "good afternoon"
-            | "good evening"
-            | "bye"
-            | "goodbye"
-    ) || normalized.starts_with("hello ")
-        || normalized.starts_with("hi ")
-        || normalized.starts_with("hey ")
-        || normalized.starts_with("howdy ")
-        || normalized.starts_with("thanks ")
-        || normalized.starts_with("thank you ")
-}
-
-fn is_deterministic_action_turn(normalized: &str) -> bool {
-    let direct_action = [
-        "git status",
-        "git diff",
-        "run ",
-        "show ",
-        "check ",
-        "inspect ",
-        "open ",
-        "read ",
-        "edit ",
-        "replace ",
-        "write ",
-        "apply ",
-    ];
-    direct_action
-        .iter()
-        .any(|needle| normalized.contains(needle))
-        || normalized.starts_with("list ")
-        || normalized.starts_with("open ")
-        || normalized.starts_with("read ")
-        || normalized.starts_with("edit ")
-        || normalized.starts_with("replace ")
-        || normalized.starts_with("write ")
-}
-
-fn normalize_turn_prompt(prompt: &str) -> String {
-    prompt
-        .trim()
-        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
-        .to_ascii_lowercase()
 }
 
 fn format_gatherer_capability(capability: &GathererCapability) -> String {
@@ -1216,11 +1211,129 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 #[cfg(test)]
 mod tests {
     use super::{
-        GathererProvider, MechSuitService, PreparedRuntimeLanes, RuntimeLaneConfig,
-        RuntimeLaneRole, TurnIntent,
+        ActiveRuntimeState, GathererProvider, MechSuitService, PreparedModelLane,
+        PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
     };
-    use crate::domain::ports::ModelPaths;
+    use crate::domain::model::{TurnEvent, TurnEventSink};
+    use crate::domain::ports::{
+        InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerCapability,
+        PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
+    };
+    use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+    use anyhow::{Result, anyhow};
+    use async_trait::async_trait;
+    use sift::Conversation;
+    use std::collections::VecDeque;
+    use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct StaticRegistry;
+
+    #[async_trait]
+    impl ModelRegistry for StaticRegistry {
+        async fn get_model_paths(&self, _model_id: &str) -> Result<ModelPaths> {
+            Err(anyhow!("test registry is not used in this suite"))
+        }
+    }
+
+    struct TestPlanner {
+        initial_decision: InitialActionDecision,
+        next_decisions: Mutex<VecDeque<RecursivePlannerDecision>>,
+        recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+    }
+
+    impl TestPlanner {
+        fn new(
+            initial_decision: InitialActionDecision,
+            next_decisions: Vec<RecursivePlannerDecision>,
+            recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+        ) -> Self {
+            Self {
+                initial_decision,
+                next_decisions: Mutex::new(VecDeque::from(next_decisions)),
+                recorded_requests,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RecursivePlanner for TestPlanner {
+        fn capability(&self) -> PlannerCapability {
+            PlannerCapability::Available
+        }
+
+        async fn select_initial_action(
+            &self,
+            request: &PlannerRequest,
+        ) -> Result<InitialActionDecision> {
+            self.recorded_requests
+                .lock()
+                .expect("recorded requests lock")
+                .push(request.clone());
+            Ok(self.initial_decision.clone())
+        }
+
+        async fn select_next_action(
+            &self,
+            request: &PlannerRequest,
+        ) -> Result<RecursivePlannerDecision> {
+            self.recorded_requests
+                .lock()
+                .expect("recorded requests lock")
+                .push(request.clone());
+            self.next_decisions
+                .lock()
+                .expect("planner decisions lock")
+                .pop_front()
+                .ok_or_else(|| anyhow!("test planner exhausted"))
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingTurnEventSink {
+        events: Mutex<Vec<TurnEvent>>,
+    }
+
+    impl RecordingTurnEventSink {
+        fn recorded(&self) -> Vec<TurnEvent> {
+            self.events.lock().expect("event lock").clone()
+        }
+    }
+
+    impl TurnEventSink for RecordingTurnEventSink {
+        fn emit(&self, event: TurnEvent) {
+            self.events.lock().expect("event lock").push(event);
+        }
+    }
+
+    struct StaticConversation {
+        responses: VecDeque<String>,
+        history: Vec<String>,
+    }
+
+    impl StaticConversation {
+        fn new(responses: Vec<String>) -> Self {
+            Self {
+                responses: VecDeque::from(responses),
+                history: Vec::new(),
+            }
+        }
+    }
+
+    impl Conversation for StaticConversation {
+        fn send(&mut self, message: &str, _max_tokens: usize) -> Result<String> {
+            self.history.push(message.to_string());
+            self.responses
+                .pop_front()
+                .ok_or_else(|| anyhow!("static conversation exhausted"))
+        }
+
+        fn history(&self) -> &[String] {
+            &self.history
+        }
+    }
 
     #[test]
     fn runtime_lane_config_defaults_to_synthesizer_responses() {
@@ -1292,60 +1405,215 @@ mod tests {
     }
 
     #[test]
-    fn retrieval_heavy_prompts_use_gatherer_lane_when_available() {
-        let plan = super::select_execution_plan(
-            "Summarize the runtime lane architecture across the repo",
-            true,
+    fn answer_initial_actions_route_to_direct_responses() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: None,
+        };
+
+        let plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "no workspace resources needed".to_string(),
+            },
+        );
+
+        assert_eq!(plan.intent, TurnIntent::DirectResponse);
+        assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
+    }
+
+    #[test]
+    fn tool_initial_actions_route_to_deterministic_execution() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: None,
+        };
+
+        let plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Tool,
+                rationale: "explicit workspace action".to_string(),
+            },
+        );
+
+        assert_eq!(plan.intent, TurnIntent::DeterministicAction);
+        assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
+    }
+
+    #[test]
+    fn resource_initial_actions_route_to_the_planner_loop() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: Some(MechSuitService::build_gatherer_lane(
+                GathererProvider::SiftAutonomous,
+                "sift-autonomous",
+                None,
+                None,
+            )),
+        };
+
+        let plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Inspect {
+                    command: "git status".to_string(),
+                },
+                rationale: "inspect repo state first".to_string(),
+            },
         );
 
         assert_eq!(plan.intent, TurnIntent::Planned);
         assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert!(plan.route_summary.contains("git status"));
+        assert!(plan.initial_planner_decision.is_some());
     }
 
     #[test]
-    fn decomposition_worthy_prompts_use_gatherer_lane_when_available() {
-        let plan =
-            super::select_execution_plan("Trace the runtime lane architecture end-to-end", true);
+    fn stop_initial_actions_fall_back_to_direct_responses() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: None,
+        };
 
-        assert_eq!(plan.intent, TurnIntent::Planned);
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        let plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Stop {
+                    reason: "no recursive resource use needed".to_string(),
+                },
+                rationale: "answer directly".to_string(),
+            },
+        );
+
+        assert_eq!(plan.intent, TurnIntent::DirectResponse);
+        assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
     }
 
     #[test]
-    fn repository_questions_use_gatherer_lane_when_available() {
-        let plan = super::select_execution_plan("How does memory work in paddles?", true);
+    fn process_prompt_assembles_interpretation_before_model_selected_initial_action() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse AGENTS guidance before choosing the next bounded action.\n",
+        )
+        .expect("write AGENTS.md");
 
-        assert_eq!(plan.intent, TurnIntent::Planned);
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
-    }
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: None,
+        };
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "the turn can be answered directly after interpretation".to_string(),
+            },
+            Vec::new(),
+            Arc::clone(&request_log),
+        ));
+        let synthesizer = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Hello from the planner path.".to_string(),
+            ])),
+        ));
+        let service = MechSuitService::new(workspace.path(), Arc::new(StaticRegistry));
+        let sink = Arc::new(RecordingTurnEventSink::default());
 
-    #[test]
-    fn only_casual_and_explicit_actions_skip_the_planner() {
-        assert_eq!(
-            super::select_execution_plan("Show me the git status", true).path,
-            super::PromptExecutionPath::SynthesizerOnly
-        );
-        assert_eq!(
-            super::select_execution_plan("Hello", true).path,
-            super::PromptExecutionPath::SynthesizerOnly
-        );
-        assert_eq!(
-            super::select_execution_plan("Howdy", true).intent,
-            TurnIntent::Casual
-        );
-        assert_eq!(
-            super::select_execution_plan("What is a monad?", true).path,
-            super::PromptExecutionPath::PlannerThenSynthesize
-        );
-    }
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let response = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Howdy", sink.clone())
+                .await
+                .expect("process prompt")
+        });
 
-    #[test]
-    fn planned_prompts_without_a_planner_lane_stay_on_synthesizer() {
+        assert_eq!(response, "Hello from the planner path.");
+
+        let requests = request_log.lock().expect("request log");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].user_prompt, "Howdy");
         assert_eq!(
-            super::select_execution_plan("Trace the runtime lane architecture end-to-end", false)
-                .path,
-            super::PromptExecutionPath::SynthesizerOnly
+            requests[0].interpretation.sources(),
+            vec!["AGENTS.md".to_string()]
         );
+
+        let events = sink.recorded();
+        let interpretation_index = events
+            .iter()
+            .position(|event| matches!(event, TurnEvent::InterpretationContext { .. }))
+            .expect("interpretation event");
+        let action_index = events
+            .iter()
+            .position(|event| matches!(event, TurnEvent::PlannerActionSelected { .. }))
+            .expect("planner action event");
+        let classified_index = events
+            .iter()
+            .position(|event| matches!(event, TurnEvent::IntentClassified { .. }))
+            .expect("intent classified event");
+
+        assert!(interpretation_index < action_index);
+        assert!(action_index < classified_index);
+        assert!(matches!(
+            &events[classified_index],
+            TurnEvent::IntentClassified {
+                intent: TurnIntent::DirectResponse
+            }
+        ));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

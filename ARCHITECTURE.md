@@ -13,8 +13,8 @@ The backbone has five layers:
    turns, retained evidence, and prior tool outputs.
 
 2. `PlannerLane`
-   A planner-capable model chooses the next bounded action for non-trivial
-   turns: search, read, inspect, refine, branch, or stop.
+   A planner-capable model chooses the next bounded action before route
+   selection: answer, tool, search, read, inspect, refine, branch, or stop.
 
 3. `RecursiveExecutionLoop`
    Validates and executes planner actions, appends outputs back into context,
@@ -69,6 +69,7 @@ inside bounded action and budget contracts.
 The planner boundary should be able to express actions like:
 
 - answer or synthesize now
+- bridge into deterministic tool execution when the controller/tool runtime is the best next step
 - search the workspace
 - read a file or artifact
 - inspect prior tool output
@@ -119,34 +120,30 @@ The repo now contains the main pieces of the target architecture:
 - interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
 
-The remaining transitional pieces are narrower:
+The remaining transitional pieces are now smaller:
 
-- a heuristic top-level gate still exists before first non-trivial action selection; removing it is the next backbone mission
-- trivial `casual` and explicit deterministic-action turns still use a cheap controller shortcut before the planner loop
+- the main mech-suit service selects the first bounded action through the planner lane, but a temporary `tool` action still bridges into the older deterministic tool runtime
+- legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
 - `context-1` remains an explicit experimental boundary
 
-## Transitional Gap: Heuristic Top-Level Gate
+## Transitional Gap: Tool Bridge And Legacy Helpers
 
-The main remaining mismatch is that `paddles` still decides too much before the
-model chooses its first bounded action.
-
-Current transitional behavior:
-
-1. controller heuristics classify the turn
-2. non-trivial turns then enter the recursive planner loop
-3. the model chooses later planner actions
-4. synthesis happens from resulting evidence
-
-Target backbone behavior:
+The main runtime path now follows the target backbone shape:
 
 1. assemble interpretation context
 2. ask the model for the first bounded action
 3. validate and execute it
 4. recurse until synthesis is appropriate
 
-That shift matters because `AGENTS.md` and linked foundational docs should shape
-the very first resource decision, not merely later search/refine steps.
+The remaining mismatch is narrower:
+
+1. a selected `tool` action still hands off to the existing deterministic tool runtime instead of a unified planner resource graph
+2. some legacy direct adapter helper methods still infer intent heuristically when called outside `MechSuitService`
+
+That means the backbone contract is delivered for the primary interactive and
+`process_prompt` runtime, while a few compatibility surfaces still need to be
+folded into the same model-directed action system.
 
 ## Current Model Routing
 
