@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VFGy8zKU8
-status: backlog
+status: done
 created_at: 2026-03-29T09:00:51
-updated_at: 2026-03-29T09:05:52
+updated_at: 2026-03-29T09:40:49
 # authored
 title: Preserve Graph Episode State In Evidence And Turn Events
 type: feat
 operator-signal:
 scope: VFGy53NJt/VFGy6j0OE
 index: 2
+started_at: 2026-03-29T09:39:59
+submitted_at: 2026-03-29T09:40:45
+completed_at: 2026-03-29T09:40:49
 ---
 
 # Preserve Graph Episode State In Evidence And Turn Events
@@ -24,5 +27,5 @@ through the domain boundary.
 
 ## Acceptance Criteria
 
-- [ ] Graph-mode gatherer results preserve typed graph episode/frontier/branch metadata, stable step/turn identifiers, and graph stop reasons in the gathered evidence bundle. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
-- [ ] The metadata boundary remains `paddles`-owned rather than exposing raw upstream `sift` graph DTOs across the domain. [SRS-NFR-02/AC-03] <!-- verify: manual, SRS-NFR-02:start:end -->
+- [x] Graph-mode gatherer results preserve typed graph episode/frontier/branch metadata, stable step/turn identifiers, and graph stop reasons in the gathered evidence bundle. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
+- [x] The metadata boundary remains `paddles`-owned rather than exposing raw upstream `sift` graph DTOs across the domain. [SRS-NFR-02/AC-03] <!-- verify: manual, SRS-NFR-02:start:end -->

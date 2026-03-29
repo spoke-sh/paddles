@@ -108,11 +108,11 @@
 |--------|--------|
 | [Model-Directed Routing Backbone](epics/VFECyWLL6/voyages/VFED2RjSu/) | done |
 
-### [Graph-Mode Gatherer Integration](epics/VFGy53NJt/) (active)
+### [Graph-Mode Gatherer Integration](epics/VFGy53NJt/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Graph Retrieval Through The Gatherer Boundary](epics/VFGy53NJt/voyages/VFGy6j0OE/) | planned |
+| [Graph Retrieval Through The Gatherer Boundary](epics/VFGy53NJt/voyages/VFGy6j0OE/) | done |
 
 ### [Transit-Aligned Turn Recording](epics/VFH4BXH4F/) (draft)
 

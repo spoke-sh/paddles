@@ -69,9 +69,13 @@ pub enum TurnEvent {
     },
     PlannerSummary {
         strategy: String,
+        mode: String,
         turns: usize,
         steps: usize,
         stop_reason: Option<String>,
+        active_branch_id: Option<String>,
+        branch_count: Option<usize>,
+        frontier_count: Option<usize>,
     },
     ContextAssembly {
         label: String,

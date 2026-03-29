@@ -74,6 +74,7 @@ impl Default for EvidenceBudget {
 /// Planner controls attached to a gather request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannerConfig {
+    pub mode: RetrievalMode,
     pub strategy: PlannerStrategyKind,
     pub profile: Option<String>,
     pub step_limit: usize,
@@ -83,6 +84,7 @@ pub struct PlannerConfig {
 impl Default for PlannerConfig {
     fn default() -> Self {
         Self {
+            mode: RetrievalMode::default(),
             strategy: PlannerStrategyKind::Heuristic,
             profile: None,
             step_limit: 3,
@@ -92,6 +94,11 @@ impl Default for PlannerConfig {
 }
 
 impl PlannerConfig {
+    pub fn with_mode(mut self, mode: RetrievalMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     pub fn with_strategy(mut self, strategy: PlannerStrategyKind) -> Self {
         self.strategy = strategy;
         self
@@ -110,6 +117,23 @@ impl PlannerConfig {
     pub fn with_retained_artifact_limit(mut self, retained_artifact_limit: usize) -> Self {
         self.retained_artifact_limit = retained_artifact_limit;
         self
+    }
+}
+
+/// Retrieval mode used by a gatherer-backed autonomous planner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RetrievalMode {
+    #[default]
+    Linear,
+    Graph,
+}
+
+impl RetrievalMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Graph => "graph",
+        }
     }
 }
 
@@ -145,6 +169,13 @@ pub struct PlannerDecision {
     pub rationale: Option<String>,
     pub next_step_id: Option<String>,
     pub turn_id: Option<String>,
+    pub branch_id: Option<String>,
+    pub node_id: Option<String>,
+    pub target_branch_id: Option<String>,
+    pub target_node_id: Option<String>,
+    pub edge_id: Option<String>,
+    pub edge_kind: Option<PlannerGraphEdgeKind>,
+    pub frontier_id: Option<String>,
     pub stop_reason: Option<String>,
 }
 
@@ -165,16 +196,114 @@ pub struct RetainedEvidence {
     pub rationale: Option<String>,
 }
 
+/// Stable branch status surfaced through graph-mode gatherer traces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlannerGraphBranchStatus {
+    Pending,
+    Active,
+    Completed,
+    Merged,
+    Pruned,
+}
+
+impl PlannerGraphBranchStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Active => "active",
+            Self::Completed => "completed",
+            Self::Merged => "merged",
+            Self::Pruned => "pruned",
+        }
+    }
+}
+
+/// Stable edge kind surfaced through graph-mode gatherer traces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlannerGraphEdgeKind {
+    Root,
+    Child,
+    Sibling,
+    Merge,
+}
+
+impl PlannerGraphEdgeKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Child => "child",
+            Self::Sibling => "sibling",
+            Self::Merge => "merge",
+        }
+    }
+}
+
+/// Stable graph node metadata preserved from a graph-mode gatherer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerGraphNode {
+    pub node_id: String,
+    pub branch_id: String,
+    pub step_id: String,
+    pub parent_step_id: Option<String>,
+    pub sequence: usize,
+    pub query: Option<String>,
+    pub turn_id: Option<String>,
+}
+
+/// Stable graph edge metadata preserved from a graph-mode gatherer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerGraphEdge {
+    pub edge_id: String,
+    pub from_node_id: String,
+    pub to_node_id: String,
+    pub kind: PlannerGraphEdgeKind,
+}
+
+/// Stable frontier metadata preserved from a graph-mode gatherer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerGraphFrontierEntry {
+    pub frontier_id: String,
+    pub branch_id: String,
+    pub node_id: String,
+    pub priority: usize,
+}
+
+/// Stable branch metadata preserved from a graph-mode gatherer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerGraphBranch {
+    pub branch_id: String,
+    pub status: PlannerGraphBranchStatus,
+    pub head_node_id: String,
+    pub retained_artifacts: Vec<RetainedEvidence>,
+}
+
+/// Stable graph episode state preserved from a graph-mode gatherer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerGraphEpisode {
+    pub root_node_id: Option<String>,
+    pub active_branch_id: Option<String>,
+    pub frontier: Vec<PlannerGraphFrontierEntry>,
+    pub branches: Vec<PlannerGraphBranch>,
+    pub nodes: Vec<PlannerGraphNode>,
+    pub edges: Vec<PlannerGraphEdge>,
+    pub completed: bool,
+    pub artifact_ref: Option<String>,
+}
+
 /// Planner metadata returned alongside synthesis-ready evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannerTraceMetadata {
+    pub mode: RetrievalMode,
     pub strategy: PlannerStrategyKind,
     pub profile: Option<String>,
+    pub session_id: Option<String>,
     pub completed: bool,
     pub stop_reason: Option<String>,
     pub turn_count: usize,
     pub steps: Vec<PlannerTraceStep>,
     pub retained_artifacts: Vec<RetainedEvidence>,
+    pub graph_episode: Option<PlannerGraphEpisode>,
+    pub trace_artifact_ref: Option<String>,
 }
 
 /// Evidence prepared for a synthesizer lane.
@@ -254,7 +383,7 @@ mod tests {
     use super::{
         ContextGatherRequest, ContextGatherResult, EvidenceBudget, EvidenceBundle, EvidenceItem,
         GathererCapability, PlannerConfig, PlannerDecision, PlannerStrategyKind,
-        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode,
     };
     use std::path::PathBuf;
 
@@ -269,6 +398,14 @@ mod tests {
 
         assert_eq!(request.planning, PlannerConfig::default());
         assert!(request.prior_context.is_empty());
+    }
+
+    #[test]
+    fn planner_config_can_switch_to_graph_mode_without_changing_strategy() {
+        let config = PlannerConfig::default().with_mode(RetrievalMode::Graph);
+
+        assert_eq!(config.mode, RetrievalMode::Graph);
+        assert_eq!(config.strategy, PlannerStrategyKind::Heuristic);
     }
 
     #[test]
@@ -292,8 +429,10 @@ mod tests {
                 ],
             )
             .with_planner(PlannerTraceMetadata {
+                mode: RetrievalMode::Linear,
                 strategy: PlannerStrategyKind::Heuristic,
                 profile: None,
+                session_id: Some("session-1".into()),
                 completed: true,
                 stop_reason: Some("goal-satisfied".into()),
                 turn_count: 2,
@@ -307,6 +446,13 @@ mod tests {
                         rationale: Some("start with the subsystem name".into()),
                         next_step_id: Some("step-2".into()),
                         turn_id: Some("turn-1".into()),
+                        branch_id: None,
+                        node_id: None,
+                        target_branch_id: None,
+                        target_node_id: None,
+                        edge_id: None,
+                        edge_kind: None,
+                        frontier_id: None,
                         stop_reason: None,
                     }],
                 }],
@@ -317,6 +463,8 @@ mod tests {
                     ),
                     rationale: Some("Carry the runtime lane wiring into the next step.".into()),
                 }],
+                graph_episode: None,
+                trace_artifact_ref: None,
             }),
         );
 
@@ -325,6 +473,7 @@ mod tests {
         assert_eq!(bundle.items[0].rank, 1);
         assert_eq!(bundle.items[1].rank, 2);
         let planner = bundle.planner.expect("planner");
+        assert_eq!(planner.mode, RetrievalMode::Linear);
         assert_eq!(planner.strategy, PlannerStrategyKind::Heuristic);
         assert_eq!(planner.turn_count, 2);
         assert_eq!(planner.steps[0].step_id, "step-1");

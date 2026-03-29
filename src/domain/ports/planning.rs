@@ -1,4 +1,4 @@
-use super::context_gathering::EvidenceItem;
+use super::context_gathering::{EvidenceItem, PlannerTraceMetadata};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -129,6 +129,7 @@ pub struct PlannerLoopState {
     pub evidence_items: Vec<EvidenceItem>,
     pub notes: Vec<String>,
     pub pending_branches: Vec<String>,
+    pub latest_gatherer_trace: Option<PlannerTraceMetadata>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

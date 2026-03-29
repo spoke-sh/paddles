@@ -1,14 +1,17 @@
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-    GathererCapability, PlannerDecision, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RetainedEvidence,
+    GathererCapability, PlannerDecision, PlannerGraphBranch, PlannerGraphBranchStatus,
+    PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode, PlannerGraphFrontierEntry,
+    PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RetainedEvidence, RetrievalMode,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
-    AutonomousPlannerAction, AutonomousPlannerStopReason, AutonomousPlannerStrategy,
-    AutonomousPlannerStrategyKind, AutonomousSearchRequest, AutonomousSearchResponse,
-    EnvironmentFactInput, LocalContextSource, SearchEmission, SearchPlan, Sift,
+    AutonomousGraphBranchStatus, AutonomousGraphEdgeKind, AutonomousPlannerAction,
+    AutonomousPlannerStopReason, AutonomousPlannerStrategy, AutonomousPlannerStrategyKind,
+    AutonomousSearchMode, AutonomousSearchRequest, AutonomousSearchResponse, EnvironmentFactInput,
+    LocalContextSource, SearchEmission, SearchPlan, Sift,
 };
 use std::collections::HashSet;
 use std::path::Path;
@@ -75,6 +78,7 @@ impl SiftAutonomousGathererAdapter {
         self.sift.search_autonomous(
             AutonomousSearchRequest::new(&self.workspace_root, &request.user_query)
                 .with_plan(SearchPlan::default_lexical())
+                .with_mode(map_retrieval_mode(request.planning.mode))
                 .with_intent(request.intent_reason.clone())
                 .with_planner_strategy(self.planner_strategy(request))
                 .with_step_limit(request.planning.step_limit)
@@ -107,6 +111,12 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         }
 
         let (items, mut warnings) = collect_evidence_items(&response, request);
+        let planner = planner_metadata_from_response(&response);
+        if matches!(planner.mode, RetrievalMode::Graph) && planner.graph_episode.is_none() {
+            warnings.push(
+                "Graph-mode autonomous retrieval returned no graph episode state.".to_string(),
+            );
+        }
         if items.is_empty() {
             warnings.push(format!(
                 "Autonomous gatherer returned no retained evidence for `{}`.",
@@ -114,7 +124,6 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
             ));
         }
 
-        let planner = planner_metadata_from_response(&response);
         let summary = format_autonomous_summary(request, &planner, items.len());
         let mut bundle = EvidenceBundle::new(summary, items).with_planner(planner);
         if !warnings.is_empty() {
@@ -129,9 +138,7 @@ fn collect_evidence_items(
     response: &AutonomousSearchResponse,
     request: &ContextGatherRequest,
 ) -> (Vec<EvidenceItem>, Vec<String>) {
-    let retained = response
-        .state
-        .retained_artifacts
+    let retained = preferred_retained_artifacts(response)
         .iter()
         .take(request.budget.max_items)
         .enumerate()
@@ -196,8 +203,10 @@ fn collect_evidence_items(
 
 fn planner_metadata_from_response(response: &AutonomousSearchResponse) -> PlannerTraceMetadata {
     PlannerTraceMetadata {
+        mode: map_response_mode(response.mode),
         strategy: map_planner_strategy_kind(response.planner_strategy.kind),
         profile: response.planner_strategy.profile.clone(),
+        session_id: response.planner_trace.session_id.clone(),
         completed: response.state.completed,
         stop_reason: response.planner_trace.stop_reason.map(format_stop_reason),
         turn_count: response.turns.len(),
@@ -218,21 +227,21 @@ fn planner_metadata_from_response(response: &AutonomousSearchResponse) -> Planne
                         rationale: decision.rationale.clone(),
                         next_step_id: decision.next_step.as_ref().map(|step| step.step_id.clone()),
                         turn_id: decision.turn_id.clone(),
+                        branch_id: decision.branch_id.clone(),
+                        node_id: decision.node_id.clone(),
+                        target_branch_id: decision.target_branch_id.clone(),
+                        target_node_id: decision.target_node_id.clone(),
+                        edge_id: decision.edge_id.clone(),
+                        edge_kind: decision.edge_kind.map(map_edge_kind),
+                        frontier_id: decision.frontier_id.clone(),
                         stop_reason: decision.stop_reason.map(format_stop_reason),
                     })
                     .collect(),
             })
             .collect(),
-        retained_artifacts: response
-            .state
-            .retained_artifacts
-            .iter()
-            .map(|artifact| RetainedEvidence {
-                source: artifact.path.clone(),
-                snippet: artifact.snippet.clone(),
-                rationale: artifact.rationale.clone(),
-            })
-            .collect(),
+        retained_artifacts: retained_evidence_from_response(response),
+        graph_episode: response.state.graph_episode.as_ref().map(map_graph_episode),
+        trace_artifact_ref: None,
     }
 }
 
@@ -249,10 +258,23 @@ fn format_autonomous_summary(
         .stop_reason
         .as_deref()
         .unwrap_or("planner still in progress");
-    format!(
-        "Autonomous `{strategy}` gatherer collected {item_count} evidence item(s) for `{}` across {} turn(s); stop reason: {stop_reason}.",
-        request.user_query, planner.turn_count,
-    )
+    let mut summary = format!(
+        "Autonomous `{strategy}` {} gatherer collected {item_count} evidence item(s) for `{}` across {} turn(s); stop reason: {stop_reason}.",
+        planner.mode.label(),
+        request.user_query,
+        planner.turn_count,
+    );
+    if let Some(graph) = planner.graph_episode.as_ref() {
+        use std::fmt::Write as _;
+        let _ = write!(
+            summary,
+            " branches: {}, frontier: {}, active branch: {}.",
+            graph.branches.len(),
+            graph.frontier.len(),
+            graph.active_branch_id.as_deref().unwrap_or("none")
+        );
+    }
+    summary
 }
 
 fn map_planner_strategy_kind(kind: AutonomousPlannerStrategyKind) -> PlannerStrategyKind {
@@ -260,6 +282,125 @@ fn map_planner_strategy_kind(kind: AutonomousPlannerStrategyKind) -> PlannerStra
         AutonomousPlannerStrategyKind::Heuristic => PlannerStrategyKind::Heuristic,
         AutonomousPlannerStrategyKind::ModelDriven => PlannerStrategyKind::ModelDriven,
     }
+}
+
+fn map_retrieval_mode(mode: RetrievalMode) -> AutonomousSearchMode {
+    match mode {
+        RetrievalMode::Linear => AutonomousSearchMode::Linear,
+        RetrievalMode::Graph => AutonomousSearchMode::Graph,
+    }
+}
+
+fn map_response_mode(mode: AutonomousSearchMode) -> RetrievalMode {
+    match mode {
+        AutonomousSearchMode::Linear => RetrievalMode::Linear,
+        AutonomousSearchMode::Graph => RetrievalMode::Graph,
+    }
+}
+
+fn map_branch_status(status: AutonomousGraphBranchStatus) -> PlannerGraphBranchStatus {
+    match status {
+        AutonomousGraphBranchStatus::Pending => PlannerGraphBranchStatus::Pending,
+        AutonomousGraphBranchStatus::Active => PlannerGraphBranchStatus::Active,
+        AutonomousGraphBranchStatus::Completed => PlannerGraphBranchStatus::Completed,
+        AutonomousGraphBranchStatus::Merged => PlannerGraphBranchStatus::Merged,
+        AutonomousGraphBranchStatus::Pruned => PlannerGraphBranchStatus::Pruned,
+    }
+}
+
+fn map_edge_kind(kind: AutonomousGraphEdgeKind) -> PlannerGraphEdgeKind {
+    match kind {
+        AutonomousGraphEdgeKind::Root => PlannerGraphEdgeKind::Root,
+        AutonomousGraphEdgeKind::Child => PlannerGraphEdgeKind::Child,
+        AutonomousGraphEdgeKind::Sibling => PlannerGraphEdgeKind::Sibling,
+        AutonomousGraphEdgeKind::Merge => PlannerGraphEdgeKind::Merge,
+    }
+}
+
+fn map_graph_episode(episode: &sift::AutonomousGraphEpisodeState) -> PlannerGraphEpisode {
+    PlannerGraphEpisode {
+        root_node_id: episode.root_node_id.clone(),
+        active_branch_id: episode.active_branch_id.clone(),
+        frontier: episode
+            .frontier
+            .iter()
+            .map(|entry| PlannerGraphFrontierEntry {
+                frontier_id: entry.frontier_id.clone(),
+                branch_id: entry.branch_id.clone(),
+                node_id: entry.node_id.clone(),
+                priority: entry.priority,
+            })
+            .collect(),
+        branches: episode
+            .branches
+            .iter()
+            .map(|branch| PlannerGraphBranch {
+                branch_id: branch.branch_id.clone(),
+                status: map_branch_status(branch.status),
+                head_node_id: branch.head_node_id.clone(),
+                retained_artifacts: branch
+                    .retained_artifacts
+                    .iter()
+                    .map(|artifact| RetainedEvidence {
+                        source: artifact.path.clone(),
+                        snippet: artifact.snippet.clone(),
+                        rationale: artifact.rationale.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        nodes: episode
+            .nodes
+            .iter()
+            .map(|node| PlannerGraphNode {
+                node_id: node.node_id.clone(),
+                branch_id: node.branch_id.clone(),
+                step_id: node.step.step_id.clone(),
+                parent_step_id: node.step.parent_step_id.clone(),
+                sequence: node.step.sequence,
+                query: node.query.clone(),
+                turn_id: node.turn_id.clone(),
+            })
+            .collect(),
+        edges: episode
+            .edges
+            .iter()
+            .map(|edge| PlannerGraphEdge {
+                edge_id: edge.edge_id.clone(),
+                from_node_id: edge.from_node_id.clone(),
+                to_node_id: edge.to_node_id.clone(),
+                kind: map_edge_kind(edge.kind),
+            })
+            .collect(),
+        completed: episode.completed,
+        artifact_ref: None,
+    }
+}
+
+fn preferred_retained_artifacts(response: &AutonomousSearchResponse) -> &[sift::RetainedArtifact] {
+    if let Some(graph_episode) = response.state.graph_episode.as_ref()
+        && let Some(active_branch_id) = graph_episode.active_branch_id.as_deref()
+        && let Some(branch) = graph_episode
+            .branches
+            .iter()
+            .find(|branch| branch.branch_id == active_branch_id)
+        && !branch.retained_artifacts.is_empty()
+    {
+        return &branch.retained_artifacts;
+    }
+
+    &response.state.retained_artifacts
+}
+
+fn retained_evidence_from_response(response: &AutonomousSearchResponse) -> Vec<RetainedEvidence> {
+    preferred_retained_artifacts(response)
+        .iter()
+        .map(|artifact| RetainedEvidence {
+            source: artifact.path.clone(),
+            snippet: artifact.snippet.clone(),
+            rationale: artifact.rationale.clone(),
+        })
+        .collect()
 }
 
 fn prioritize_evidence_items(items: Vec<EvidenceItem>) -> Vec<EvidenceItem> {
@@ -332,6 +473,10 @@ fn is_test_snippet(snippet: &str) -> bool {
 fn format_action(action: AutonomousPlannerAction) -> String {
     match action {
         AutonomousPlannerAction::Search => "search".to_string(),
+        AutonomousPlannerAction::Fork => "fork".to_string(),
+        AutonomousPlannerAction::Select => "select".to_string(),
+        AutonomousPlannerAction::Merge => "merge".to_string(),
+        AutonomousPlannerAction::Prune => "prune".to_string(),
         AutonomousPlannerAction::Continue => "continue".to_string(),
         AutonomousPlannerAction::Terminate => "terminate".to_string(),
     }
@@ -380,7 +525,7 @@ mod tests {
     use super::SiftAutonomousGathererAdapter;
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability,
-        PlannerStrategyKind,
+        PlannerGraphBranchStatus, PlannerGraphEdgeKind, PlannerStrategyKind, RetrievalMode,
     };
     use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
     use tempfile::tempdir;
@@ -428,6 +573,101 @@ mod tests {
         );
     }
 
+    #[test]
+    fn autonomous_gatherer_maps_graph_metadata_into_paddles_types() {
+        let response = sift::AutonomousSearchResponse {
+            root_task: "find graph evidence".to_string(),
+            mode: sift::AutonomousSearchMode::Graph,
+            planner_strategy: sift::AutonomousPlannerStrategy::heuristic(),
+            plan: sift::SearchPlan::default_lexical(),
+            state: sift::AutonomousPlannerState::new(2).with_graph_episode(
+                sift::AutonomousGraphEpisodeState::new()
+                    .with_root_node_id("node-root")
+                    .with_active_branch_id("branch-root")
+                    .with_frontier(vec![
+                        sift::AutonomousGraphFrontierEntry::new(
+                            "frontier-root",
+                            "branch-root",
+                            "node-root",
+                        )
+                        .with_priority(1),
+                    ])
+                    .with_branches(vec![
+                        sift::AutonomousGraphBranchState::new("branch-root", "node-root")
+                            .with_status(sift::AutonomousGraphBranchStatus::Active)
+                            .with_retained_artifacts(Vec::new()),
+                    ])
+                    .with_nodes(vec![
+                        sift::AutonomousGraphNode::new(
+                            "node-root",
+                            "branch-root",
+                            sift::AutonomousPlannerStepCursor::first(),
+                        )
+                        .with_query("find graph evidence")
+                        .with_turn_id("turn-1"),
+                    ])
+                    .with_edges(vec![sift::AutonomousGraphEdge::new(
+                        "edge-root",
+                        "node-root",
+                        "node-root",
+                        sift::AutonomousGraphEdgeKind::Root,
+                    )]),
+            ),
+            turns: Vec::new(),
+            planner_trace: sift::AutonomousPlannerTrace::new(
+                sift::AutonomousPlannerStrategy::heuristic(),
+            )
+            .with_session_id("session-graph")
+            .with_completed(true)
+            .with_stop_reason(sift::AutonomousPlannerStopReason::GoalSatisfied)
+            .with_steps(vec![
+                sift::AutonomousPlannerTraceStep::new(sift::AutonomousPlannerStepCursor::first())
+                    .with_decisions(vec![
+                        sift::AutonomousPlannerDecision::new(sift::AutonomousPlannerAction::Fork)
+                            .with_query("explore graph branch")
+                            .with_turn_id("turn-1")
+                            .with_branch_id("branch-root")
+                            .with_node_id("node-root")
+                            .with_target_branch_id("branch-a")
+                            .with_target_node_id("node-a")
+                            .with_edge_id("edge-a")
+                            .with_edge_kind(sift::AutonomousGraphEdgeKind::Child)
+                            .with_frontier_id("frontier-a"),
+                    ]),
+            ]),
+            trace: sift::SearchTrace {
+                session_id: Some("session-graph".to_string()),
+                turns: Vec::new(),
+                completed: true,
+                termination_reason: Some("goal-satisfied".to_string()),
+            },
+        };
+
+        let planner = super::planner_metadata_from_response(&response);
+
+        assert_eq!(planner.mode, RetrievalMode::Graph);
+        assert_eq!(planner.session_id.as_deref(), Some("session-graph"));
+        assert_eq!(planner.steps.len(), 1);
+        assert_eq!(
+            planner.steps[0].decisions[0].branch_id.as_deref(),
+            Some("branch-root")
+        );
+        assert_eq!(
+            planner.steps[0].decisions[0].target_branch_id.as_deref(),
+            Some("branch-a")
+        );
+        assert_eq!(
+            planner.steps[0].decisions[0].edge_kind,
+            Some(PlannerGraphEdgeKind::Child)
+        );
+        let graph = planner.graph_episode.expect("graph episode");
+        assert_eq!(graph.active_branch_id.as_deref(), Some("branch-root"));
+        assert_eq!(graph.frontier.len(), 1);
+        assert_eq!(graph.branches.len(), 1);
+        assert_eq!(graph.branches[0].status, PlannerGraphBranchStatus::Active);
+        assert_eq!(graph.nodes[0].turn_id.as_deref(), Some("turn-1"));
+    }
+
     #[tokio::test]
     async fn autonomous_gatherer_returns_planner_metadata_and_evidence() {
         let workspace = tempdir().expect("workspace");
@@ -451,9 +691,14 @@ mod tests {
         let bundle = result.evidence_bundle.expect("bundle");
         let planner = bundle.planner.expect("planner metadata");
         assert_eq!(planner.strategy, PlannerStrategyKind::Heuristic);
+        assert_eq!(planner.mode, RetrievalMode::Linear);
         assert!(planner.completed);
         assert!(!bundle.items.is_empty());
-        assert!(bundle.summary.contains("Autonomous `heuristic` gatherer"));
+        assert!(
+            bundle
+                .summary
+                .contains("Autonomous `heuristic` linear gatherer")
+        );
     }
 
     #[tokio::test]

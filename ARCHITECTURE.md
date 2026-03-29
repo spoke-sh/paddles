@@ -125,6 +125,7 @@ The remaining transitional pieces are now smaller:
 - the main mech-suit service selects the first bounded action through the planner lane, but a temporary `tool` action still bridges into the older deterministic tool runtime
 - legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
+- the default `sift-autonomous` gatherer path now runs bounded graph-mode retrieval for recursive planner `search` / `refine` work and preserves graph episode/frontier/branch state as typed `paddles` metadata
 - `context-1` remains an explicit experimental boundary
 
 ## Transitional Gap: Tool Bridge And Legacy Helpers
@@ -155,6 +156,7 @@ Current routing now uses explicit planner/synth roles:
   `qwen-coder-1.5b`, `qwen-coder-3b`
 - heavier opt-in planner/synth lane: `qwen3.5-2b`
 - local gatherer backend: `sift-autonomous`
+- current recursive gatherer mode: bounded `graph` for planner-driven `search` / `refine` requests
 - experimental planner/gatherer boundary: `context-1`
 
 ## Context-1 Fit

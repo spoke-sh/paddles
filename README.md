@@ -119,6 +119,7 @@ The remaining gaps are narrower now:
 - the `tool` initial action is still a transitional bridge into the older deterministic tool runtime instead of a fully unified planner resource graph
 - legacy direct adapter helpers outside the main mech-suit service still contain heuristic intent inference and should not be treated as the backbone contract
 - the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
+- graph-mode gatherer traces remain inline today; the domain contract leaves room for future external artifact references, but no embedded recorder is wired yet
 - `context-1` is still an explicit experimental boundary, not the default planner lane
 
 ## Design Principles
@@ -137,6 +138,8 @@ The remaining gaps are narrower now:
 - The planner lane defaults to the synthesizer model unless `--planner-model <id>` selects a different planner-capable model.
 - `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in planner or synthesizer variants.
 - `sift-autonomous` is the current local gatherer/search backend used by planner `search` and `refine` actions.
+- Recursive planner `search` and `refine` actions now request bounded `graph` mode through that gatherer path instead of stopping at linear autonomous search.
+- Graph-mode gatherer results preserve typed branch/frontier/node/edge metadata with stable ids in the evidence bundle and default event stream.
 - `context-1` remains an explicit experimental planner/gatherer boundary and stays fail-closed until its harness is real.
 
 ## Foundational Documents

@@ -6,8 +6,10 @@ use std::path::PathBuf;
 
 pub use context_gathering::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBudget, EvidenceBundle,
-    EvidenceItem, GathererCapability, PlannerConfig, PlannerDecision, PlannerStrategyKind,
-    PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+    EvidenceItem, GathererCapability, PlannerConfig, PlannerDecision, PlannerGraphBranch,
+    PlannerGraphBranchStatus, PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode,
+    PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata,
+    PlannerTraceStep, RetainedEvidence, RetrievalMode,
 };
 pub use planning::{
     InitialAction, InitialActionDecision, InterpretationContext, InterpretationDocument,

@@ -1964,6 +1964,16 @@ fn citation_sources(workspace_root: &Path, evidence: &EvidenceBundle) -> Vec<Str
                 sources.push(source);
             }
         }
+        if let Some(graph) = planner.graph_episode.as_ref() {
+            for branch in &graph.branches {
+                for artifact in &branch.retained_artifacts {
+                    let source = normalize_citation_source(workspace_root, &artifact.source);
+                    if !sources.contains(&source) {
+                        sources.push(source);
+                    }
+                }
+            }
+        }
     }
     let has_non_keel = sources.iter().any(|source| !is_keel_source(source));
     if has_non_keel {
@@ -2070,12 +2080,22 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
     let mut lines = vec![evidence.summary.clone()];
     if let Some(planner) = evidence.planner.as_ref() {
         lines.push(format!(
-            "Planner: strategy={}, turns={}, steps={}, stop={}",
+            "Planner: strategy={}, mode={}, turns={}, steps={}, stop={}",
             format_planner_strategy(&planner.strategy),
+            planner.mode.label(),
             planner.turn_count,
             planner.steps.len(),
             planner.stop_reason.as_deref().unwrap_or("none"),
         ));
+        if let Some(graph) = planner.graph_episode.as_ref() {
+            lines.push(format!(
+                "Graph: active_branch={}, branches={}, frontier={}, completed={}",
+                graph.active_branch_id.as_deref().unwrap_or("none"),
+                graph.branches.len(),
+                graph.frontier.len(),
+                graph.completed
+            ));
+        }
         for step in planner.steps.iter().take(3) {
             let actions = step
                 .decisions
@@ -3217,8 +3237,10 @@ mod tests {
             }],
         )
         .with_planner(PlannerTraceMetadata {
+            mode: crate::domain::ports::RetrievalMode::Linear,
             strategy: PlannerStrategyKind::Heuristic,
             profile: None,
+            session_id: Some("session-1".to_string()),
             completed: true,
             stop_reason: Some("goal-satisfied".to_string()),
             turn_count: 2,
@@ -3232,6 +3254,13 @@ mod tests {
                     rationale: Some("start with the lane wiring".to_string()),
                     next_step_id: None,
                     turn_id: Some("turn-1".to_string()),
+                    branch_id: None,
+                    node_id: None,
+                    target_branch_id: None,
+                    target_node_id: None,
+                    edge_id: None,
+                    edge_kind: None,
+                    frontier_id: None,
                     stop_reason: None,
                 }],
             }],
@@ -3242,6 +3271,8 @@ mod tests {
                 ),
                 rationale: Some("keep the runtime contract handy".to_string()),
             }],
+            graph_episode: None,
+            trace_artifact_ref: None,
         });
 
         let reply = adapter

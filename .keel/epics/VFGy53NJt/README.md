@@ -22,8 +22,8 @@ index: 17
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Graph Retrieval Through The Gatherer Boundary](voyages/VFGy6j0OE/) | planned | 0/4 |
+| [Graph Retrieval Through The Gatherer Boundary](voyages/VFGy6j0OE/) | done | 4/4 |
 <!-- END GENERATED -->

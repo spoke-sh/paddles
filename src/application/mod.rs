@@ -4,7 +4,7 @@ use crate::domain::ports::{
     GathererCapability, InitialAction, InitialActionDecision, InterpretationContext, ModelPaths,
     ModelRegistry, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
     PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
+    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
 };
 use crate::infrastructure::adapters::agent_memory::AgentMemory;
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
@@ -220,12 +220,25 @@ fn render_turn_event(event: &TurnEvent) -> String {
         }
         TurnEvent::PlannerSummary {
             strategy,
+            mode,
             turns,
             steps,
             stop_reason,
+            active_branch_id,
+            branch_count,
+            frontier_count,
         } => format!(
-            "• Reviewed planner trace\n  └ strategy={strategy}, turns={turns}, steps={steps}, stop={}",
-            stop_reason.as_deref().unwrap_or("none")
+            "• Reviewed planner trace\n  └ strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}, active={}, branches={}, frontier={}",
+            stop_reason.as_deref().unwrap_or("none"),
+            active_branch_id.as_deref().unwrap_or("none"),
+            branch_count
+                .map(|value| value.to_string())
+                .as_deref()
+                .unwrap_or("n/a"),
+            frontier_count
+                .map(|value| value.to_string())
+                .as_deref()
+                .unwrap_or("n/a"),
         ),
         TurnEvent::ContextAssembly {
             label,
@@ -614,7 +627,11 @@ impl MechSuitService {
                                         .unwrap_or_else(|| "planner-search".to_string()),
                                     EvidenceBudget::default(),
                                 )
-                                .with_planning(PlannerConfig::default().with_step_limit(1))
+                                .with_planning(
+                                    PlannerConfig::default()
+                                        .with_mode(RetrievalMode::Graph)
+                                        .with_step_limit(1),
+                                )
                                 .with_prior_context(
                                     build_planner_prior_context(
                                         &context.interpretation,
@@ -635,15 +652,9 @@ impl MechSuitService {
                                                 ),
                                             });
                                             if let Some(planner) = bundle.planner.as_ref() {
-                                                event_sink.emit(TurnEvent::PlannerSummary {
-                                                    strategy: format_planner_strategy(
-                                                        &planner.strategy,
-                                                    )
-                                                    .to_string(),
-                                                    turns: planner.turn_count,
-                                                    steps: planner.steps.len(),
-                                                    stop_reason: planner.stop_reason.clone(),
-                                                });
+                                                event_sink.emit(planner_summary_event(planner));
+                                                loop_state.latest_gatherer_trace =
+                                                    Some(planner.clone());
                                             }
                                             merge_evidence_items(
                                                 &mut loop_state.evidence_items,
@@ -723,7 +734,11 @@ impl MechSuitService {
                                     "planner-refine",
                                     EvidenceBudget::default(),
                                 )
-                                .with_planning(PlannerConfig::default().with_step_limit(1))
+                                .with_planning(
+                                    PlannerConfig::default()
+                                        .with_mode(RetrievalMode::Graph)
+                                        .with_step_limit(1),
+                                )
                                 .with_prior_context(
                                     build_planner_prior_context(
                                         &context.interpretation,
@@ -743,6 +758,11 @@ impl MechSuitService {
                                                     bundle,
                                                 ),
                                             });
+                                            if let Some(planner) = bundle.planner.as_ref() {
+                                                event_sink.emit(planner_summary_event(planner));
+                                                loop_state.latest_gatherer_trace =
+                                                    Some(planner.clone());
+                                            }
                                             merge_evidence_items(
                                                 &mut loop_state.evidence_items,
                                                 bundle.items.clone(),
@@ -803,9 +823,29 @@ impl MechSuitService {
         let stop_reason = stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string());
         event_sink.emit(TurnEvent::PlannerSummary {
             strategy: "model-driven".to_string(),
+            mode: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .map(|planner| planner.mode.label().to_string())
+                .unwrap_or_else(|| RetrievalMode::Linear.label().to_string()),
             turns: loop_state.steps.len(),
             steps: loop_state.steps.len(),
             stop_reason: Some(stop_reason.clone()),
+            active_branch_id: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .and_then(|planner| planner.graph_episode.as_ref())
+                .and_then(|graph| graph.active_branch_id.clone()),
+            branch_count: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .and_then(|planner| planner.graph_episode.as_ref())
+                .map(|graph| graph.branches.len()),
+            frontier_count: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .and_then(|planner| planner.graph_episode.as_ref())
+                .map(|graph| graph.frontier.len()),
         });
 
         if !used_workspace_resources && planner_stopped_without_resource_use(&loop_state) {
@@ -937,6 +977,28 @@ fn format_planner_strategy(strategy: &PlannerStrategyKind) -> &'static str {
     match strategy {
         PlannerStrategyKind::Heuristic => "heuristic",
         PlannerStrategyKind::ModelDriven => "model-driven",
+    }
+}
+
+fn planner_summary_event(planner: &PlannerTraceMetadata) -> TurnEvent {
+    TurnEvent::PlannerSummary {
+        strategy: format_planner_strategy(&planner.strategy).to_string(),
+        mode: planner.mode.label().to_string(),
+        turns: planner.turn_count,
+        steps: planner.steps.len(),
+        stop_reason: planner.stop_reason.clone(),
+        active_branch_id: planner
+            .graph_episode
+            .as_ref()
+            .and_then(|graph| graph.active_branch_id.clone()),
+        branch_count: planner
+            .graph_episode
+            .as_ref()
+            .map(|graph| graph.branches.len()),
+        frontier_count: planner
+            .graph_episode
+            .as_ref()
+            .map(|graph| graph.frontier.len()),
     }
 }
 
@@ -1117,6 +1179,7 @@ fn build_planner_evidence_bundle(
     completed: bool,
     stop_reason: &str,
 ) -> EvidenceBundle {
+    let latest_gatherer_trace = loop_state.latest_gatherer_trace.clone();
     let summary = format!(
         "Planner lane `{}` executed {} step(s) for `{}` and collected {} evidence item(s); stop reason: {}.",
         prepared.planner.model_id,
@@ -1126,8 +1189,15 @@ fn build_planner_evidence_bundle(
         stop_reason
     );
     let planner = PlannerTraceMetadata {
+        mode: latest_gatherer_trace
+            .as_ref()
+            .map(|planner| planner.mode)
+            .unwrap_or_default(),
         strategy: PlannerStrategyKind::ModelDriven,
         profile: Some(prepared.planner.model_id.clone()),
+        session_id: latest_gatherer_trace
+            .as_ref()
+            .and_then(|planner| planner.session_id.clone()),
         completed,
         stop_reason: Some(stop_reason.to_string()),
         turn_count: loop_state.steps.len(),
@@ -1144,6 +1214,13 @@ fn build_planner_evidence_bundle(
                     rationale: Some(step.outcome.clone()),
                     next_step_id: None,
                     turn_id: None,
+                    branch_id: None,
+                    node_id: None,
+                    target_branch_id: None,
+                    target_node_id: None,
+                    edge_id: None,
+                    edge_kind: None,
+                    frontier_id: None,
                     stop_reason: matches!(step.action, PlannerAction::Stop { .. })
                         .then(|| stop_reason.to_string()),
                 }],
@@ -1159,6 +1236,8 @@ fn build_planner_evidence_bundle(
                 rationale: Some(item.rationale.clone()),
             })
             .collect(),
+        graph_episode: latest_gatherer_trace.and_then(|planner| planner.graph_episode),
+        trace_artifact_ref: None,
     };
     let mut bundle =
         EvidenceBundle::new(summary, loop_state.evidence_items.clone()).with_planner(planner);
@@ -1216,8 +1295,11 @@ mod tests {
     };
     use crate::domain::model::{TurnEvent, TurnEventSink};
     use crate::domain::ports::{
-        InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerCapability,
-        PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
+        ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
+        InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerAction,
+        PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode,
+        PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
+        RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
     };
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use anyhow::{Result, anyhow};
@@ -1305,6 +1387,29 @@ mod tests {
     impl TurnEventSink for RecordingTurnEventSink {
         fn emit(&self, event: TurnEvent) {
             self.events.lock().expect("event lock").push(event);
+        }
+    }
+
+    struct RecordingGatherer {
+        recorded_requests: Arc<Mutex<Vec<ContextGatherRequest>>>,
+        bundle: EvidenceBundle,
+    }
+
+    #[async_trait]
+    impl ContextGatherer for RecordingGatherer {
+        fn capability(&self) -> crate::domain::ports::GathererCapability {
+            crate::domain::ports::GathererCapability::Available
+        }
+
+        async fn gather_context(
+            &self,
+            request: &ContextGatherRequest,
+        ) -> Result<ContextGatherResult> {
+            self.recorded_requests
+                .lock()
+                .expect("gatherer requests lock")
+                .push(request.clone());
+            Ok(ContextGatherResult::available(self.bundle.clone()))
         }
     }
 
@@ -1614,6 +1719,160 @@ mod tests {
                 intent: TurnIntent::DirectResponse
             }
         ));
+    }
+
+    #[test]
+    fn recursive_search_requests_graph_mode_and_surfaces_graph_trace_summary() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse recursive search when workspace evidence is required.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: sample_model_paths("planner"),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: sample_model_paths("synth"),
+            },
+            gatherer: Some(MechSuitService::build_gatherer_lane(
+                GathererProvider::SiftAutonomous,
+                "sift-autonomous",
+                None,
+                None,
+            )),
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Search {
+                    query: "what should the recursive gatherer inspect".to_string(),
+                    intent: Some("repo-question".to_string()),
+                },
+                rationale: "start with bounded recursive retrieval".to_string(),
+            },
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "enough graph evidence".to_string(),
+                },
+                rationale: "synthesize after the graph gather".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Graph-backed answer.".to_string(),
+            ])),
+        ));
+        let gatherer_requests = Arc::new(Mutex::new(Vec::new()));
+        let gatherer_bundle = EvidenceBundle::new(
+            "Autonomous `heuristic` graph gatherer collected 2 evidence item(s) for `what should the recursive gatherer inspect` across 1 turn(s); stop reason: goal-satisfied. branches: 2, frontier: 1, active branch: branch-root.".to_string(),
+            vec![EvidenceItem {
+                source: "src/application/mod.rs".to_string(),
+                snippet: "Graph-mode gatherers feed the recursive harness.".to_string(),
+                rationale: "Relevant recursive routing contract.".to_string(),
+                rank: 1,
+            }],
+        )
+        .with_planner(PlannerTraceMetadata {
+            mode: RetrievalMode::Graph,
+            strategy: PlannerStrategyKind::Heuristic,
+            profile: None,
+            session_id: Some("graph-session".to_string()),
+            completed: true,
+            stop_reason: Some("goal-satisfied".to_string()),
+            turn_count: 1,
+            steps: Vec::new(),
+            retained_artifacts: vec![RetainedEvidence {
+                source: "src/application/mod.rs".to_string(),
+                snippet: Some("Graph-mode gatherers feed the recursive harness.".to_string()),
+                rationale: Some("Retain the routing contract.".to_string()),
+            }],
+            graph_episode: Some(PlannerGraphEpisode {
+                root_node_id: Some("node-root".to_string()),
+                active_branch_id: Some("branch-root".to_string()),
+                frontier: vec![crate::domain::ports::PlannerGraphFrontierEntry {
+                    frontier_id: "frontier-a".to_string(),
+                    branch_id: "branch-root".to_string(),
+                    node_id: "node-root".to_string(),
+                    priority: 1,
+                }],
+                branches: vec![
+                    PlannerGraphBranch {
+                        branch_id: "branch-root".to_string(),
+                        status: PlannerGraphBranchStatus::Active,
+                        head_node_id: "node-root".to_string(),
+                        retained_artifacts: vec![RetainedEvidence {
+                            source: "src/application/mod.rs".to_string(),
+                            snippet: Some(
+                                "Graph-mode gatherers feed the recursive harness.".to_string(),
+                            ),
+                            rationale: Some("active branch evidence".to_string()),
+                        }],
+                    },
+                    PlannerGraphBranch {
+                        branch_id: "branch-b".to_string(),
+                        status: PlannerGraphBranchStatus::Pending,
+                        head_node_id: "node-b".to_string(),
+                        retained_artifacts: Vec::new(),
+                    },
+                ],
+                nodes: Vec::new(),
+                edges: Vec::new(),
+                completed: true,
+                artifact_ref: None,
+            }),
+            trace_artifact_ref: None,
+        });
+        let gatherer = Arc::new(RecordingGatherer {
+            recorded_requests: Arc::clone(&gatherer_requests),
+            bundle: gatherer_bundle,
+        });
+        let service = MechSuitService::new(workspace.path(), Arc::new(StaticRegistry));
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let response = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: Some(gatherer),
+            });
+            service
+                .process_prompt_with_sink("What's next in the recursive graph?", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(!response.trim().is_empty());
+        assert!(response.contains("src/application/mod.rs"));
+        let recorded_requests = gatherer_requests.lock().expect("gatherer requests");
+        assert_eq!(recorded_requests.len(), 1);
+        assert_eq!(recorded_requests[0].planning.mode, RetrievalMode::Graph);
+        assert_eq!(recorded_requests[0].planning.step_limit, 1);
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerSummary {
+                mode,
+                active_branch_id,
+                branch_count,
+                frontier_count,
+                ..
+            } if mode == "graph"
+                && active_branch_id.as_deref() == Some("branch-root")
+                && *branch_count == Some(2)
+                && *frontier_count == Some(1)
+        )));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

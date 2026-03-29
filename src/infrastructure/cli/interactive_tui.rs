@@ -627,15 +627,28 @@ fn format_turn_event_row(event: TurnEvent) -> TranscriptRow {
         }
         TurnEvent::PlannerSummary {
             strategy,
+            mode,
             turns,
             steps,
             stop_reason,
+            active_branch_id,
+            branch_count,
+            frontier_count,
         } => TranscriptRow::new(
             TranscriptRowKind::Event,
             "• Reviewed planner trace",
             format!(
-                "strategy={strategy}, turns={turns}, steps={steps}, stop={}",
-                stop_reason.as_deref().unwrap_or("none")
+                "strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}, active={}, branches={}, frontier={}",
+                stop_reason.as_deref().unwrap_or("none"),
+                active_branch_id.as_deref().unwrap_or("none"),
+                branch_count
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or("n/a"),
+                frontier_count
+                    .map(|value| value.to_string())
+                    .as_deref()
+                    .unwrap_or("n/a"),
             ),
         ),
         TurnEvent::ContextAssembly {

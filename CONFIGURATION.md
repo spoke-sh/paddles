@@ -154,6 +154,9 @@ paddles --model qwen-1.5b --gatherer-provider sift-autonomous
 That backend stays local-first and services bounded planner search.
 
 - It defaults to the heuristic planner strategy.
+- Recursive planner `search` / `refine` actions currently request bounded `graph` mode through the internal gatherer planning contract.
+- The graph-mode trace is preserved as typed branch/frontier/node/edge metadata in the evidence bundle and default event stream.
+- The internal contract still leaves room for future external artifact references, but large graph traces remain inline today.
 - It returns planner trace metadata, stop reason, and retained artifact
   summaries inside the evidence bundle consumed by the synthesizer lane.
 - The default REPL event stream surfaces planner action selection, gatherer
