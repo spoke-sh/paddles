@@ -35,7 +35,7 @@ policy, defer to the documents listed below.
 Keel's operator rhythm in this repo is:
 
 - **Orient**: Run `keel health --scene`, `keel flow --scene`, and
-  `keel doctor --status`.
+  `keel doctor`.
 - **Inspect**: Run `keel mission next`, `keel pulse`, and
   `keel workshop`. Use `keel screen --static` or `keel topology --static` when
   board geometry is unclear.
@@ -49,7 +49,7 @@ Keel's operator rhythm in this repo is:
     and append `keel doctor --status` output to the commit message.
   - If the commit fails, fix the reported issue and retry instead of leaving the
     loop partially open.
-- **Re-orient**: After the commit lands, run `keel doctor --status` and
+- **Re-orient**: After the commit lands, run `keel doctor` and
   `keel flow --scene` to see what the board needs next.
 
 ## Session Start
@@ -59,14 +59,14 @@ the orient/inspect half of the loop:
 
 1. Run `keel poke "Human interaction in chat"`.
 2. Run `keel health --scene`.
-3. Run `keel mission next --status`, `keel pulse`, and `keel workshop`.
+3. Run `keel mission next`, `keel pulse`, and `keel workshop`.
 4. Run `keel flow --scene`.
-5. Run `keel doctor --status`.
+5. Run `keel doctor`.
 
 ## Working Rules
 
 - Use the raw `keel` CLI directly.
-- Treat `keel doctor --status` as the source of truth for board integrity.
+- Treat `keel doctor` as the source of truth for board integrity.
 - If board-mutating lifecycle commands produce `.keel` churn, include that churn
   in the same sealing commit.
 - Re-run orientation after each sealing commit instead of stopping at “done.”

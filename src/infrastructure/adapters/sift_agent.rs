@@ -4575,7 +4575,7 @@ mod tests {
             tool_hints: vec![InterpretationToolHint {
                 source: "INSTRUCTIONS.md".to_string(),
                 action: WorkspaceAction::Inspect {
-                    command: "keel mission next --status".to_string(),
+                    command: "keel mission next".to_string(),
                 },
                 note: "Inspect current demand on the board.".to_string(),
             }],
@@ -4587,7 +4587,7 @@ mod tests {
                     steps: vec![InterpretationProcedureStep {
                         index: 0,
                         action: WorkspaceAction::Inspect {
-                            command: "keel mission next --status".to_string(),
+                            command: "keel mission next".to_string(),
                         },
                         note: "Read current demand on the board.".to_string(),
                     }],
@@ -4618,7 +4618,7 @@ mod tests {
         assert!(prompt.contains("POLICY.md"));
         assert!(prompt.contains("Use AGENTS guidance before choosing the next action."));
         assert!(prompt.contains("Interpretation tool hints"));
-        assert!(prompt.contains("keel mission next --status"));
+        assert!(prompt.contains("keel mission next"));
         assert!(prompt.contains("Derived decision framework"));
         assert!(prompt.contains("Inspect (INSTRUCTIONS.md)"));
         assert!(prompt.contains("Recent turns"));
@@ -4635,7 +4635,7 @@ mod tests {
         .expect("write AGENTS");
         fs::write(
             workspace.path().join("INSTRUCTIONS.md"),
-            "Inspect with `keel mission next --status` and `keel pulse`.",
+            "Inspect with `keel mission next` and `keel pulse`.",
         )
         .expect("write INSTRUCTIONS");
 
@@ -4677,7 +4677,7 @@ mod tests {
             interpretation
                 .tool_hints
                 .iter()
-                .any(|hint| hint.action.summary().contains("keel mission next --status"))
+                .any(|hint| hint.action.summary().contains("keel mission next"))
         );
 
         let history = recorded_messages.lock().expect("history lock");
@@ -4746,7 +4746,7 @@ mod tests {
                 tool_hints: vec![InterpretationToolHint {
                     source: "INSTRUCTIONS.md".to_string(),
                     action: WorkspaceAction::Inspect {
-                        command: "keel mission next --status".to_string(),
+                        command: "keel mission next".to_string(),
                     },
                     note: "Inspect current demand on the board.".to_string(),
                 }],
@@ -4758,7 +4758,7 @@ mod tests {
                         steps: vec![InterpretationProcedureStep {
                             index: 0,
                             action: WorkspaceAction::Inspect {
-                                command: "keel mission next --status".to_string(),
+                                command: "keel mission next".to_string(),
                             },
                             note: "Read current demand on the board.".to_string(),
                         }],
@@ -4775,7 +4775,7 @@ mod tests {
             decision.action,
             InitialAction::Workspace {
                 action: WorkspaceAction::Inspect {
-                    command: "keel mission next --status".to_string()
+                    command: "keel mission next".to_string()
                 }
             }
         );
@@ -4802,7 +4802,7 @@ mod tests {
                 tool_hints: vec![InterpretationToolHint {
                     source: "INSTRUCTIONS.md".to_string(),
                     action: WorkspaceAction::Inspect {
-                        command: "keel mission next --status".to_string(),
+                        command: "keel mission next".to_string(),
                     },
                     note: "Inspect current demand on the board.".to_string(),
                 }],
@@ -4814,7 +4814,7 @@ mod tests {
                         steps: vec![InterpretationProcedureStep {
                             index: 0,
                             action: WorkspaceAction::Inspect {
-                                command: "keel mission next --status".to_string(),
+                                command: "keel mission next".to_string(),
                             },
                             note: "Read current demand on the board.".to_string(),
                         }],
@@ -4838,7 +4838,7 @@ mod tests {
             }],
             evidence_items: vec![EvidenceItem {
                 source: "AGENTS.md".to_string(),
-                snippet: "Inspect current demand with `keel mission next --status`.".to_string(),
+                snippet: "Inspect current demand with `keel mission next`.".to_string(),
                 rationale: "board navigation guidance".to_string(),
                 rank: 1,
             }],
@@ -4854,7 +4854,7 @@ mod tests {
             decision.action,
             PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
-                    command: "keel mission next --status".to_string()
+                    command: "keel mission next".to_string()
                 }
             }
         );
@@ -4887,7 +4887,7 @@ mod tests {
                         steps: vec![InterpretationProcedureStep {
                             index: 0,
                             action: WorkspaceAction::Inspect {
-                                command: "keel mission next --status".to_string(),
+                                command: "keel mission next".to_string(),
                             },
                             note: "Read current demand on the board.".to_string(),
                         }],
@@ -4903,13 +4903,13 @@ mod tests {
                 branch_id: None,
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Inspect {
-                        command: "keel mission next --status".to_string(),
+                        command: "keel mission next".to_string(),
                     },
                 },
-                outcome: "inspected keel mission next --status".to_string(),
+                outcome: "inspected keel mission next".to_string(),
             }],
             evidence_items: vec![EvidenceItem {
-                source: "command: keel mission next --status".to_string(),
+                source: "command: keel mission next".to_string(),
                 snippet: "No actionable missions found.".to_string(),
                 rationale: "live board state".to_string(),
                 rank: 0,
@@ -4925,9 +4925,8 @@ mod tests {
         assert_eq!(
             decision.action,
             PlannerAction::Stop {
-                reason:
-                    "decision-framework step satisfied by `command: keel mission next --status`"
-                        .to_string()
+                reason: "decision-framework step satisfied by `command: keel mission next`"
+                    .to_string()
             }
         );
     }
@@ -4939,13 +4938,12 @@ mod tests {
             vec![
                 EvidenceItem {
                     source: "AGENTS.md".to_string(),
-                    snippet: "Inspect current demand with `keel mission next --status`."
-                        .to_string(),
+                    snippet: "Inspect current demand with `keel mission next`.".to_string(),
                     rationale: "operator guidance".to_string(),
                     rank: 1,
                 },
                 EvidenceItem {
-                    source: "command: keel mission next --status".to_string(),
+                    source: "command: keel mission next".to_string(),
                     snippet: "No actionable missions found.".to_string(),
                     rationale: "live board state".to_string(),
                     rank: 0,
@@ -4955,7 +4953,7 @@ mod tests {
 
         let reply = grounded_answer_fallback(Path::new("."), &evidence);
         let command_index = reply
-            .find("command: keel mission next --status")
+            .find("command: keel mission next")
             .expect("command evidence");
         let agents_index = reply.find("AGENTS.md").expect("doc evidence");
         assert!(command_index < agents_index);

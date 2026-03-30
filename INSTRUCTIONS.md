@@ -12,14 +12,14 @@ Keel is an engine with strict constraints. Your job is to move the board through
 The `keel` CLI is the canonical reference surface for this rhythm. Every session follows this deterministic cycle:
 
 1. **Orient**: Run `keel health --scene`, `keel flow --scene`, and `keel doctor`. This tells you whether the board is healthy, structurally coherent, and ready for work.
-2. **Inspect**: Run `keel mission next --status`, `keel pulse`, and `keel workshop`. If routing or board geometry is unclear, inspect `keel screen --static` or `keel topology --static`.
+2. **Inspect**: Run `keel mission next`, `keel pulse`, and `keel workshop`. If routing or board geometry is unclear, inspect `keel screen --static` or `keel topology --static`.
 3. **Pull**: Choose the correct lane and role (`manager`, `operator`, or a configured role family) and pull exactly ONE slice of work.
 4. **Ship**: Execute the move, record proof while the work is fresh, and land the relevant lifecycle transition (`story submit`, `voyage plan`, `bearing assess`, and so on).
 5. **Close**:
    - Record your move in the mission `LOG.md` when operating under an active mission.
    - **Open-Loop Check**: Use `git status` if you need to inspect current worktree energy before the commit boundary.
    - **Commit**: Execute `git commit`. The installed hooks automatically run repo checks and append `doctor --status` to the commit message. Resolve any issues if the commit is rejected.
-6. **Re-orient**: After the commit lands, run `keel doctor --status` and `keel flow --scene` to see what the board needs next. This is the "plug the cord back in" moment. If the delivery lane has ready work, start the next turn immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification) or when the user has explicitly redirected you.
+6. **Re-orient**: After the commit lands, run `keel doctor` and `keel flow --scene` to see what the board needs next. This is the "plug the cord back in" moment. If the delivery lane has ready work, start the next turn immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification) or when the user has explicitly redirected you.
 
 ## Primary Workflows
 
@@ -68,7 +68,7 @@ Keel's autonomous flow is governed by a physical battery metaphor, but the charg
 If a human user pokes you (for example, "I'm poking you" or "Wake up"), you MUST:
 1. **Energize**: Execute `keel poke "Human interaction in chat"` to spark or re-evaluate the system.
 2. **Orient**: Run `keel health --scene`, `keel flow --scene`, and `keel doctor`.
-3. **Inspect**: Run `keel mission next --status`, `keel pulse`, and `keel workshop` to identify any new work that has become ready or materialized.
+3. **Inspect**: Run `keel mission next`, `keel pulse`, and `keel workshop` to identify any new work that has become ready or materialized.
 4. **Route if Needed**: Use `keel screen --static` or `keel topology --static` when lane selection or board geometry needs clarification.
 5. **Proceed**: If the board is idle but the human gave an explicit task, proceed with that task instead of blocking on the lack of queued work.
 
@@ -76,7 +76,7 @@ If a human user pokes you (for example, "I'm poking you" or "Wake up"), you MUST
 
 As long as the system is **AUTONOMOUS (LIGHT ON)** and the circuit is healthy (no blown capacitors), you are responsible for discharging the delivery backlog during the `Pull` and `Ship` phases of the turn loop.
 
-1. **Identify Ready Work**: Scan the delivery lane for stories in `backlog` that are not blocked by dependencies using `keel mission next --status`, `keel next --role operator`, and `keel flow --scene`.
+1. **Identify Ready Work**: Scan the delivery lane for stories in `backlog` that are not blocked by dependencies using `keel mission next`, `keel next --role operator`, and `keel flow --scene`.
 2. **Autonomous Start**: For each ready story, execute `keel story start <id>`.
 3. **Rube Goldberg Loop**: Transitioning a story to `in-progress` mutates the repository, which refreshes the derived heartbeat and keeps the circuit closed while you continue moving work.
 4. **Priority**: Discharging the backlog is your primary tactical objective once energized. You must continue until the backlog is empty or the circuit trips.
@@ -98,7 +98,7 @@ Apply these checks to **every change** before finalizing work:
    - **CIRCULATORY**: Workflow (Graph integrity, topology)
    - **PACEMAKER**: Heartbeat (derived repository activity and open-loop warning state)
    - **KINETIC**: Delivery (Backlog liquidity, execution capacity)
-3. **Pacemaker Protocol**: The system's heartbeat is derived from Git/worktree activity. Inspect the worktree directly with `git status`, use `keel flow --scene` and `keel doctor --status` to understand board pressure, and clear open-loop energy by landing the sealing commit. The installed pre-commit hook keeps quality checks and tests tied to the commit boundary, and the commit-msg hook appends `doctor --status` to the message body.
+3. **Pacemaker Protocol**: The system's heartbeat is derived from Git/worktree activity. Inspect the worktree directly with `git status`, use `keel flow --scene` and `keel doctor` to understand board pressure, and clear open-loop energy by landing the sealing commit. The installed pre-commit hook keeps quality checks and tests tied to the commit boundary, and the commit-msg hook appends `doctor --status` to the message body.
 4. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
 5. **Notification Threshold**: Only request human intervention when you reach a "Manual Lane" that requires design direction or a decision on application behavior (for example, assessing a Bearing, planning a Voyage, or human verification of a complex Story).
 6. **Automated Guardrails**: You no longer need to run `just quality` or `just test` manually before every commit. The git hooks installed via `keel hooks install` automatically enforce these checks. If a commit fails, resolve the reported lints or test failures and try again.
@@ -166,7 +166,7 @@ Run `keel --help` for the full command tree. The core commands you should rely o
 | Category | Commands |
 |----------|----------|
 | Orientation | `keel health --scene` `keel flow --scene` `keel doctor` `keel screen --static` |
-| Inspection | `keel mission next [<id>] --status` `keel pulse` `keel workshop` `keel topology --static` |
+| Inspection | `keel mission next [<id>]` `keel pulse` `keel workshop` `keel topology --static` |
 | Communication | `keel poke ...` `keel ping ...` `keel inbox` `keel outbox` |
 | Discovery | `keel bearing new <name>` `keel bearing research <id>` `keel bearing assess <id>` `keel bearing list` |
 | Planning | `keel mission new "<title>"` `keel epic new <name> --problem <problem>` `keel voyage new <name> --epic <epic-id> --goal <goal>` |

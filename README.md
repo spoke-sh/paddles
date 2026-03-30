@@ -220,8 +220,8 @@ Use the raw `keel` CLI directly.
 
 The normal operator rhythm is:
 
-1. Orient with `keel health --scene`, `keel flow --scene`, and `keel doctor --status`.
-2. Inspect with `keel mission next --status`, `keel pulse`, and `keel workshop`.
+1. Orient with `keel health --scene`, `keel flow --scene`, and `keel doctor`.
+2. Inspect with `keel mission next`, `keel pulse`, and `keel workshop`.
 3. Pull one slice with `keel next --role <role>` or by following the active mission/story explicitly.
 4. Ship the slice and land a sealing commit.
 5. Re-orient immediately after the commit.
@@ -245,7 +245,7 @@ just quality
 Check board health:
 
 ```bash
-keel doctor --status
+keel doctor
 keel flow --scene
 ```
 

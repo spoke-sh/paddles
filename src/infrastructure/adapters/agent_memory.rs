@@ -847,7 +847,7 @@ mod tests {
         fs::create_dir_all(&session_root).expect("session root");
         fs::write(
             session_root.join("AGENTS.md"),
-            "Inspect current demand with `keel mission next --status`, `keel pulse`, and `keel workshop`.\nDo not use `keel story submit <id>` as a read-only probe.",
+            "Inspect current demand with `keel mission next`, `keel pulse`, and `keel workshop`.\nDo not use `keel story submit <id>` as a read-only probe.",
         )
         .expect("agents");
 
@@ -866,7 +866,7 @@ mod tests {
             interpretation
                 .tool_hints
                 .iter()
-                .any(|hint| hint.action.summary().contains("keel mission next --status"))
+                .any(|hint| hint.action.summary().contains("keel mission next"))
         );
         assert!(
             interpretation
@@ -881,9 +881,10 @@ mod tests {
                 .iter()
                 .any(|procedure| {
                     procedure.label.contains("Inspect")
-                        && procedure.steps.iter().any(|step| {
-                            step.action.summary().contains("keel mission next --status")
-                        })
+                        && procedure
+                            .steps
+                            .iter()
+                            .any(|step| step.action.summary().contains("keel mission next"))
                 })
         );
     }

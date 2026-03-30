@@ -513,7 +513,7 @@ mod tests {
             tool_hints: vec![InterpretationToolHint {
                 source: "INSTRUCTIONS.md".to_string(),
                 action: WorkspaceAction::Inspect {
-                    command: "keel mission next --status".to_string(),
+                    command: "keel mission next".to_string(),
                 },
                 note: "Inspect current demand on the board.".to_string(),
             }],
@@ -525,7 +525,7 @@ mod tests {
                     steps: vec![InterpretationProcedureStep {
                         index: 0,
                         action: WorkspaceAction::Inspect {
-                            command: "keel mission next --status".to_string(),
+                            command: "keel mission next".to_string(),
                         },
                         note: "Read current demand.".to_string(),
                     }],
@@ -537,7 +537,7 @@ mod tests {
         assert!(rendered.contains("operator memory"));
         assert!(rendered.contains("AGENTS.md"));
         assert!(rendered.contains("Tool Hints"));
-        assert!(rendered.contains("keel mission next --status"));
+        assert!(rendered.contains("keel mission next"));
         assert!(rendered.contains("Decision Framework"));
         assert!(rendered.contains("Inspect"));
         assert_eq!(context.sources(), vec!["AGENTS.md".to_string()]);
