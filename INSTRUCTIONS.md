@@ -45,7 +45,7 @@ Focus on **technical discovery and fog reduction**.
 
 Paddles treats inference as a routing problem, not a single-model problem.
 
-1. **Interpretation Context First**: Assemble `AGENTS.md`, linked foundational guidance, extracted read-only tool hints, recent turns, and relevant local state before choosing the next bounded action.
+1. **Interpretation Context First**: Assemble `AGENTS.md`, linked foundational guidance, extracted read-only tool hints, derived decision procedures, recent turns, and relevant local state before choosing the next bounded action.
 2. **Model Selects The Next Bounded Action**: Do not rely on controller string heuristics as the primary reasoning engine. Present the model with the allowed action options and require it to return one of them.
 3. **Controller Owns Validation And Budgets**: The controller remains authoritative for schema validation, safe-command allowlists, deterministic execution, loop budgets, and fail-closed behavior.
 4. **Planner Before Synthesizer**: Resource-intensive turns should recurse through bounded planner actions and only then hand typed evidence to the synthesizer lane.

@@ -13,7 +13,8 @@ pub use context_gathering::{
     PlannerTraceStep, RetainedEvidence, RetrievalMode,
 };
 pub use planning::{
-    InitialAction, InitialActionDecision, InterpretationContext, InterpretationDocument,
+    InitialAction, InitialActionDecision, InterpretationContext, InterpretationDecisionFramework,
+    InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
     InterpretationToolHint, PlannerAction, PlannerBudget, PlannerCapability,
     PlannerDecision as RecursivePlannerDecision, PlannerLoopState, PlannerRequest,
     PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest, WorkspaceAction,

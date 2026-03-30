@@ -1849,6 +1849,9 @@ Interpretation context:\n\
 Interpretation tool hints:\n\
 {}\n\
 \n\
+Derived decision framework:\n\
+{}\n\
+\n\
 Recent turns:\n\
 {}\n\
 \n\
@@ -1857,6 +1860,7 @@ Current user request:\n\
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
         format_interpretation_tool_hints(prompt.interpretation),
+        format_decision_framework(prompt.interpretation),
         format_recent_turn_list(&prompt.request.recent_turns),
         prompt.user_prompt,
     )
@@ -1890,6 +1894,9 @@ Interpretation context:\n\
 Interpretation tool hints:\n\
 {}\n\
 \n\
+Derived decision framework:\n\
+{}\n\
+\n\
 Recent turns:\n\
 {}\n\
 \n\
@@ -1897,6 +1904,7 @@ Current user request:\n\
 {}\n",
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
+        format_decision_framework(&request.interpretation),
         format_recent_turn_list(&request.recent_turns),
         request.user_prompt,
     )
@@ -1944,6 +1952,9 @@ Interpretation context:\n\
 Interpretation tool hints:\n\
 {}\n\
 \n\
+Derived decision framework:\n\
+{}\n\
+\n\
 Recent turns:\n\
 {}\n\
 \n\
@@ -1955,6 +1966,7 @@ Current user request:\n\
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
         format_interpretation_tool_hints(prompt.interpretation),
+        format_decision_framework(prompt.interpretation),
         format_recent_turn_list(&prompt.request.recent_turns),
         format_planner_loop_state_digest(prompt.request),
         prompt.user_prompt,
@@ -1988,6 +2000,9 @@ Interpretation context:\n\
 Interpretation tool hints:\n\
 {}\n\
 \n\
+Derived decision framework:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -1995,6 +2010,7 @@ Current user request:\n\
 {}\n",
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
+        format_decision_framework(&request.interpretation),
         format_planner_loop_state_digest(request),
         request.user_prompt,
     )
@@ -2462,6 +2478,34 @@ fn format_interpretation_tool_hints(context: &InterpretationContext) -> String {
                 hint.action.summary(),
                 hint.source,
                 trim_for_context(&hint.note, 160)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_decision_framework(context: &InterpretationContext) -> String {
+    if context.decision_framework.procedures.is_empty() {
+        return "No decision procedures were derived.".to_string();
+    }
+
+    context
+        .decision_framework
+        .procedures
+        .iter()
+        .map(|procedure| {
+            let steps = procedure
+                .steps
+                .iter()
+                .map(|step| step.action.summary())
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            format!(
+                "- {} ({}) — {}\n  steps: {}",
+                procedure.label,
+                procedure.source,
+                trim_for_context(&procedure.purpose, 160),
+                trim_for_context(&steps, 200)
             )
         })
         .collect::<Vec<_>>()
@@ -3247,6 +3291,14 @@ fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
         };
     }
 
+    if let Some(action) = next_decision_framework_action(request) {
+        return InitialActionDecision {
+            action: InitialAction::Workspace { action },
+            rationale: "prefer the next step from the interpretation-derived decision framework when the initial action reply is invalid"
+                .to_string(),
+        };
+    }
+
     if let Some(action) = best_interpretation_workspace_hint(request, true) {
         return InitialActionDecision {
             action: InitialAction::Workspace { action },
@@ -3285,6 +3337,22 @@ fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision
                 },
             },
             rationale: "continue with the oldest queued branch".to_string(),
+        };
+    }
+
+    if let Some(reason) = decision_framework_stop_reason(request) {
+        return RecursivePlannerDecision {
+            action: PlannerAction::Stop { reason },
+            rationale: "stop because interpretation-derived procedure evidence appears sufficient"
+                .to_string(),
+        };
+    }
+
+    if let Some(action) = next_decision_framework_action(request) {
+        return RecursivePlannerDecision {
+            action: PlannerAction::Workspace { action },
+            rationale: "continue with the next interpretation-derived procedure step when the planner reply is invalid"
+                .to_string(),
         };
     }
 
@@ -3330,6 +3398,63 @@ fn best_interpretation_workspace_hint(
         .map(|hint| hint.action.clone())
 }
 
+fn next_decision_framework_action(request: &PlannerRequest) -> Option<WorkspaceAction> {
+    let procedure = best_interpretation_procedure(request)?;
+    procedure
+        .steps
+        .iter()
+        .find(|step| !planner_loop_used_action(&request.loop_state, &step.action))
+        .map(|step| step.action.clone())
+}
+
+fn decision_framework_stop_reason(request: &PlannerRequest) -> Option<String> {
+    let procedure = best_interpretation_procedure(request)?;
+    let relevant_step = procedure
+        .steps
+        .iter()
+        .filter_map(|step| {
+            let score = action_match_score(&step.action, &request.user_prompt)
+                + text_match_score(&step.note, &request.user_prompt);
+            (score > 0).then_some((score, step))
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, step)| step)?;
+    let source = workspace_action_evidence_source(&relevant_step.action);
+    let has_relevant_evidence = request.loop_state.evidence_items.iter().any(|item| {
+        item.source == source
+            && !item.snippet.trim().is_empty()
+            && !item.snippet.contains("budget exhausted")
+            && !item.snippet.contains("failed")
+    });
+    has_relevant_evidence.then(|| format!("decision-framework step satisfied by `{source}`"))
+}
+
+fn best_interpretation_procedure(
+    request: &PlannerRequest,
+) -> Option<&crate::domain::ports::InterpretationProcedure> {
+    request
+        .interpretation
+        .decision_framework
+        .procedures
+        .iter()
+        .filter_map(|procedure| {
+            let step_score = procedure
+                .steps
+                .iter()
+                .map(|step| {
+                    action_match_score(&step.action, &request.user_prompt)
+                        + text_match_score(&step.note, &request.user_prompt)
+                })
+                .sum::<usize>();
+            let score = text_match_score(&procedure.label, &request.user_prompt)
+                + text_match_score(&procedure.purpose, &request.user_prompt)
+                + step_score;
+            (score > 0).then_some((score, procedure))
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, procedure)| procedure)
+}
+
 fn planner_loop_used_action(
     loop_state: &crate::domain::ports::PlannerLoopState,
     action: &WorkspaceAction,
@@ -3338,6 +3463,71 @@ fn planner_loop_used_action(
         PlannerAction::Workspace { action: existing } => existing == action,
         _ => false,
     })
+}
+
+fn workspace_action_evidence_source(action: &WorkspaceAction) -> String {
+    match action {
+        WorkspaceAction::Search { query, .. } => format!("search: {query}"),
+        WorkspaceAction::ListFiles { pattern } => match pattern {
+            Some(pattern) => format!("list_files: {pattern}"),
+            None => "list_files".to_string(),
+        },
+        WorkspaceAction::Read { path } => path.clone(),
+        WorkspaceAction::Inspect { command } => format!("command: {command}"),
+        WorkspaceAction::Shell { command } => format!("command: {command}"),
+        WorkspaceAction::Diff { path } => match path {
+            Some(path) => format!("diff: {path}"),
+            None => "git diff --no-ext-diff".to_string(),
+        },
+        WorkspaceAction::WriteFile { path, .. } => path.clone(),
+        WorkspaceAction::ReplaceInFile { path, .. } => path.clone(),
+        WorkspaceAction::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+    }
+}
+
+fn action_match_score(action: &WorkspaceAction, user_prompt: &str) -> usize {
+    text_match_score(&action.summary(), user_prompt)
+}
+
+fn text_match_score(text: &str, user_prompt: &str) -> usize {
+    let normalized = text.to_ascii_lowercase();
+    planner_query_terms(user_prompt)
+        .iter()
+        .filter(|term| normalized.contains(term.as_str()))
+        .count()
+}
+
+fn planner_query_terms(prompt: &str) -> Vec<String> {
+    let mut terms = prompt
+        .to_ascii_lowercase()
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.')
+        .filter(|term| term.len() >= 3)
+        .filter(|term| {
+            !matches!(
+                *term,
+                "the"
+                    | "and"
+                    | "with"
+                    | "from"
+                    | "into"
+                    | "that"
+                    | "this"
+                    | "what"
+                    | "when"
+                    | "where"
+                    | "which"
+                    | "would"
+                    | "could"
+                    | "should"
+                    | "about"
+                    | "your"
+            )
+        })
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    terms.sort();
+    terms.dedup();
+    terms
 }
 
 fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
@@ -3693,10 +3883,11 @@ mod tests {
     };
     use crate::domain::model::{NullTurnEventSink, TurnIntent};
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, InterpretationToolHint,
-        PlannerAction, PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord,
-        PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
-        WorkspaceAction,
+        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext,
+        InterpretationDecisionFramework, InterpretationProcedure, InterpretationProcedureStep,
+        InterpretationToolHint, PlannerAction, PlannerDecision, PlannerLoopState, PlannerRequest,
+        PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+        RetainedEvidence, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -4181,6 +4372,20 @@ mod tests {
                 },
                 note: "Inspect current demand on the board.".to_string(),
             }],
+            decision_framework: InterpretationDecisionFramework {
+                procedures: vec![InterpretationProcedure {
+                    source: "INSTRUCTIONS.md".to_string(),
+                    label: "Inspect".to_string(),
+                    purpose: "Read current demand on the board.".to_string(),
+                    steps: vec![InterpretationProcedureStep {
+                        index: 0,
+                        action: WorkspaceAction::Inspect {
+                            command: "keel mission next --status".to_string(),
+                        },
+                        note: "Read current demand on the board.".to_string(),
+                    }],
+                }],
+            },
         };
         let request = PlannerRequest::new(
             "What's next on the board?",
@@ -4207,6 +4412,8 @@ mod tests {
         assert!(prompt.contains("Use AGENTS guidance before choosing the next action."));
         assert!(prompt.contains("Interpretation tool hints"));
         assert!(prompt.contains("keel mission next --status"));
+        assert!(prompt.contains("Derived decision framework"));
+        assert!(prompt.contains("Inspect (INSTRUCTIONS.md)"));
         assert!(prompt.contains("Recent turns"));
         assert!(prompt.contains("user: previous turn"));
     }
@@ -4268,6 +4475,20 @@ mod tests {
                     },
                     note: "Inspect current demand on the board.".to_string(),
                 }],
+                decision_framework: InterpretationDecisionFramework {
+                    procedures: vec![InterpretationProcedure {
+                        source: "INSTRUCTIONS.md".to_string(),
+                        label: "Inspect".to_string(),
+                        purpose: "Read current demand on the board.".to_string(),
+                        steps: vec![InterpretationProcedureStep {
+                            index: 0,
+                            action: WorkspaceAction::Inspect {
+                                command: "keel mission next --status".to_string(),
+                            },
+                            note: "Read current demand on the board.".to_string(),
+                        }],
+                    }],
+                },
             },
             crate::domain::ports::PlannerBudget::default(),
         );
@@ -4310,6 +4531,20 @@ mod tests {
                     },
                     note: "Inspect current demand on the board.".to_string(),
                 }],
+                decision_framework: InterpretationDecisionFramework {
+                    procedures: vec![InterpretationProcedure {
+                        source: "INSTRUCTIONS.md".to_string(),
+                        label: "Inspect".to_string(),
+                        purpose: "Read current demand on the board.".to_string(),
+                        steps: vec![InterpretationProcedureStep {
+                            index: 0,
+                            action: WorkspaceAction::Inspect {
+                                command: "keel mission next --status".to_string(),
+                            },
+                            note: "Read current demand on the board.".to_string(),
+                        }],
+                    }],
+                },
             },
             crate::domain::ports::PlannerBudget::default(),
         )
@@ -4346,6 +4581,78 @@ mod tests {
                 action: WorkspaceAction::Inspect {
                     command: "keel mission next --status".to_string()
                 }
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_planner_replies_stop_once_framework_step_has_answered_the_request() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                "not json",
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+        );
+
+        let request = PlannerRequest::new(
+            "What's next on the keel board?",
+            workspace.path(),
+            InterpretationContext {
+                summary: "Operator docs include a board inspect procedure.".to_string(),
+                documents: vec![],
+                tool_hints: vec![],
+                decision_framework: InterpretationDecisionFramework {
+                    procedures: vec![InterpretationProcedure {
+                        source: "INSTRUCTIONS.md".to_string(),
+                        label: "Inspect".to_string(),
+                        purpose: "Read current demand on the board.".to_string(),
+                        steps: vec![InterpretationProcedureStep {
+                            index: 0,
+                            action: WorkspaceAction::Inspect {
+                                command: "keel mission next --status".to_string(),
+                            },
+                            note: "Read current demand on the board.".to_string(),
+                        }],
+                    }],
+                },
+            },
+            crate::domain::ports::PlannerBudget::default(),
+        )
+        .with_loop_state(PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "keel mission next --status".to_string(),
+                    },
+                },
+                outcome: "inspected keel mission next --status".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "command: keel mission next --status".to_string(),
+                snippet: "No actionable missions found.".to_string(),
+                rationale: "live board state".to_string(),
+                rank: 0,
+            }],
+            notes: vec![],
+            pending_branches: vec![],
+            latest_gatherer_trace: None,
+        });
+
+        let decision = adapter
+            .select_planner_action(&request)
+            .expect("planner action fallback");
+        assert_eq!(
+            decision.action,
+            PlannerAction::Stop {
+                reason:
+                    "decision-framework step satisfied by `command: keel mission next --status`"
+                        .to_string()
             }
         );
     }

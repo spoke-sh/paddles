@@ -1,5 +1,6 @@
 use crate::domain::ports::{
-    InterpretationContext, InterpretationDocument, InterpretationToolHint, WorkspaceAction,
+    InterpretationContext, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
 };
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -12,6 +13,7 @@ const SYSTEM_MEMORY_PATH: &str = "/etc/paddles/AGENTS.md";
 const MAX_MEMORY_FILE_CHARS: usize = 12_000;
 const MAX_INTERPRETATION_DOCS: usize = 5;
 const MAX_INTERPRETATION_TOOL_HINTS: usize = 6;
+const MAX_INTERPRETATION_PROCEDURES: usize = 4;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AgentMemory {
@@ -120,15 +122,19 @@ impl AgentMemory {
             .collect::<Vec<_>>();
         let tool_hints =
             select_relevant_tool_hints(user_prompt, workspace_root, &selected_documents);
+        let decision_framework =
+            select_decision_framework(user_prompt, workspace_root, &selected_documents);
 
         InterpretationContext {
             summary: format!(
-                "Operator interpretation context assembled from {} memory and linked guidance document(s) and {} tool hint(s). Use it before choosing recursive workspace actions.",
+                "Operator interpretation context assembled from {} memory and linked guidance document(s), {} tool hint(s), and {} decision procedure(s). Use it before choosing recursive workspace actions.",
                 documents.len(),
-                tool_hints.len()
+                tool_hints.len(),
+                decision_framework.procedures.len()
             ),
             documents,
             tool_hints,
+            decision_framework,
         }
     }
 
@@ -528,6 +534,154 @@ fn select_relevant_tool_hints(
         .collect()
 }
 
+fn select_decision_framework(
+    user_prompt: &str,
+    workspace_root: &Path,
+    selected_documents: &[(usize, &MemoryDocument, InterpretationDocument)],
+) -> InterpretationDecisionFramework {
+    let query_terms = prompt_terms(user_prompt);
+    let mut procedures = Vec::<(usize, InterpretationProcedure)>::new();
+
+    for (document_score, memory_document, _) in selected_documents {
+        for procedure in extract_command_procedures(&memory_document.contents) {
+            let normalized = format!(
+                "{}\n{}\n{}",
+                procedure.label.to_ascii_lowercase(),
+                procedure.purpose.to_ascii_lowercase(),
+                procedure
+                    .steps
+                    .iter()
+                    .map(|step| format!(
+                        "{}\n{}",
+                        step.action.summary(),
+                        step.note.to_ascii_lowercase()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            let overlap = query_terms
+                .iter()
+                .filter(|term| normalized.contains(term.as_str()))
+                .count();
+            let score = document_score.saturating_mul(4) + overlap.saturating_mul(8);
+            if score == 0 {
+                continue;
+            }
+
+            procedures.push((
+                score,
+                InterpretationProcedure {
+                    source: display_path(workspace_root, &memory_document.path),
+                    label: procedure.label,
+                    purpose: procedure.purpose,
+                    steps: procedure.steps,
+                },
+            ));
+        }
+    }
+
+    procedures.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+
+    InterpretationDecisionFramework {
+        procedures: procedures
+            .into_iter()
+            .take(MAX_INTERPRETATION_PROCEDURES)
+            .map(|(_, procedure)| procedure)
+            .collect(),
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ExtractedProcedure {
+    label: String,
+    purpose: String,
+    steps: Vec<InterpretationProcedureStep>,
+}
+
+fn extract_command_procedures(contents: &str) -> Vec<ExtractedProcedure> {
+    let mut procedures = Vec::new();
+    let mut current_heading = String::new();
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(heading) = extract_heading_label(trimmed) {
+            current_heading = heading;
+            continue;
+        }
+
+        let steps = extract_command_hints(trimmed)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, (command, note))| {
+                tool_hint_action_for_command(&command).map(|action| InterpretationProcedureStep {
+                    index,
+                    action,
+                    note,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if steps.len() < 2 {
+            continue;
+        }
+
+        let label = line_label(trimmed)
+            .or_else(|| (!current_heading.is_empty()).then(|| current_heading.clone()))
+            .unwrap_or_else(|| "Derived procedure".to_string());
+        procedures.push(ExtractedProcedure {
+            label,
+            purpose: trimmed.to_string(),
+            steps,
+        });
+    }
+
+    procedures
+}
+
+fn extract_heading_label(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let trimmed = trimmed.trim_start_matches('#').trim();
+    if trimmed.is_empty() || trimmed == line {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn line_label(line: &str) -> Option<String> {
+    let trimmed = line
+        .trim_start_matches(|ch: char| matches!(ch, '-' | '*' | '+' | '0'..='9' | '.' | ' '))
+        .trim();
+    let Some((label, _)) = trimmed.split_once(':') else {
+        let fallback = trimmed
+            .split(" with ")
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())?;
+        return Some(
+            fallback
+                .trim_matches('*')
+                .trim_matches('_')
+                .trim()
+                .to_string(),
+        );
+    };
+    let label = label.trim().trim_matches('*').trim_matches('_').trim();
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.to_string())
+    }
+}
+
 fn extract_command_hints(contents: &str) -> Vec<(String, String)> {
     let mut hints = Vec::new();
     for line in contents.lines() {
@@ -728,6 +882,18 @@ mod tests {
                 .tool_hints
                 .iter()
                 .all(|hint| !hint.action.summary().contains("keel story submit"))
+        );
+        assert!(
+            interpretation
+                .decision_framework
+                .procedures
+                .iter()
+                .any(|procedure| {
+                    procedure.label.contains("Inspect")
+                        && procedure.steps.iter().any(|step| {
+                            step.action.summary().contains("keel mission next --status")
+                        })
+                })
         );
     }
 }

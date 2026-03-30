@@ -37,11 +37,15 @@ pub struct InterpretationContext {
     pub summary: String,
     pub documents: Vec<InterpretationDocument>,
     pub tool_hints: Vec<InterpretationToolHint>,
+    pub decision_framework: InterpretationDecisionFramework,
 }
 
 impl InterpretationContext {
     pub fn is_empty(&self) -> bool {
-        self.summary.trim().is_empty() && self.documents.is_empty() && self.tool_hints.is_empty()
+        self.summary.trim().is_empty()
+            && self.documents.is_empty()
+            && self.tool_hints.is_empty()
+            && self.decision_framework.procedures.is_empty()
     }
 
     pub fn sources(&self) -> Vec<String> {
@@ -75,6 +79,18 @@ impl InterpretationContext {
                 )
             }));
         }
+        if !self.decision_framework.procedures.is_empty() {
+            sections.push("--- Decision Framework ---".to_string());
+            sections.extend(self.decision_framework.procedures.iter().map(|procedure| {
+                format!(
+                    "- {} ({}) — {} [{} step(s)]",
+                    procedure.label,
+                    procedure.source,
+                    procedure.purpose,
+                    procedure.steps.len()
+                )
+            }));
+        }
         sections.join("\n\n")
     }
 }
@@ -88,6 +104,26 @@ pub struct InterpretationDocument {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InterpretationToolHint {
     pub source: String,
+    pub action: WorkspaceAction,
+    pub note: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct InterpretationDecisionFramework {
+    pub procedures: Vec<InterpretationProcedure>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterpretationProcedure {
+    pub source: String,
+    pub label: String,
+    pub purpose: String,
+    pub steps: Vec<InterpretationProcedureStep>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterpretationProcedureStep {
+    pub index: usize,
     pub action: WorkspaceAction,
     pub note: String,
 }
@@ -423,8 +459,10 @@ pub struct PlannerDecision {
 #[cfg(test)]
 mod tests {
     use super::{
-        InitialAction, InterpretationContext, InterpretationDocument, InterpretationToolHint,
-        PlannerAction, PlannerBudget, ThreadDecisionRequest, WorkspaceAction,
+        InitialAction, InterpretationContext, InterpretationDecisionFramework,
+        InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
+        InterpretationToolHint, PlannerAction, PlannerBudget, ThreadDecisionRequest,
+        WorkspaceAction,
     };
     use crate::domain::model::{
         ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadCandidate,
@@ -446,6 +484,20 @@ mod tests {
                 },
                 note: "Inspect current demand on the board.".to_string(),
             }],
+            decision_framework: InterpretationDecisionFramework {
+                procedures: vec![InterpretationProcedure {
+                    source: "INSTRUCTIONS.md".to_string(),
+                    label: "Inspect".to_string(),
+                    purpose: "Inspect current demand on the board.".to_string(),
+                    steps: vec![InterpretationProcedureStep {
+                        index: 0,
+                        action: WorkspaceAction::Inspect {
+                            command: "keel mission next --status".to_string(),
+                        },
+                        note: "Read current demand.".to_string(),
+                    }],
+                }],
+            },
         };
 
         let rendered = context.render();
@@ -453,6 +505,8 @@ mod tests {
         assert!(rendered.contains("AGENTS.md"));
         assert!(rendered.contains("Tool Hints"));
         assert!(rendered.contains("keel mission next --status"));
+        assert!(rendered.contains("Decision Framework"));
+        assert!(rendered.contains("Inspect"));
         assert_eq!(context.sources(), vec!["AGENTS.md".to_string()]);
     }
 
