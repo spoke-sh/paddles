@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFNvotYrG
-status: icebox
+status: backlog
 created_at: 2026-03-30T13:35:31
-updated_at: 2026-03-30T13:35:31
+updated_at: 2026-03-30T14:22:01
 # authored
 title: Wire Refinement Loop Into Application Layer
 type: feat
@@ -20,8 +20,8 @@ In application/mod.rs, after derive_interpretation_context, call the validation 
 
 ## Acceptance Criteria
 
-- [ ] Validation pass invoked after derive_interpretation_context in application/mod.rs [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end -->
-- [ ] Gaps detected triggers re-expansion and re-assembly [SRS-02/AC-02] <!-- verify: manual, SRS-02:start:end -->
-- [ ] Total refinement model calls capped at 2 [SRS-02/AC-03] <!-- verify: manual, SRS-02:start:end -->
-- [ ] TurnEvents emitted for each refinement stage [SRS-02/AC-04] <!-- verify: manual, SRS-02:start:end -->
-- [ ] Failure falls back to original single-pass context [SRS-02/AC-05] <!-- verify: manual, SRS-02:start:end -->
+- [ ] Validation pass invoked after derive_interpretation_context in application/mod.rs [SRS-04/AC-01] <!-- verify: manual, SRS-04:start:end -->
+- [ ] Gaps detected triggers re-expansion and re-assembly [SRS-04/AC-02] <!-- verify: manual, SRS-04:start:end -->
+- [ ] Total refinement model calls capped at 2 [SRS-05/AC-03] <!-- verify: manual, SRS-05:start:end -->
+- [ ] TurnEvents emitted for each refinement stage [SRS-06/AC-04] <!-- verify: manual, SRS-06:start:end -->
+- [ ] Failure falls back to original single-pass context [SRS-04/AC-05] <!-- verify: manual, SRS-04:start:end -->

@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFNvkwbgF
-status: icebox
+status: backlog
 created_at: 2026-03-30T13:35:16
-updated_at: 2026-03-30T13:35:16
+updated_at: 2026-03-30T14:19:09
 # authored
 title: Tiered TUI Rendering For Interpretation Context
 type: feat

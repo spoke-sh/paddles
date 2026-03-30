@@ -25,6 +25,6 @@ mission: VFNvCEalY
 **Progress:** 0/2 voyages complete, 0/7 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Refinement Loop Core](voyages/VFNvha5ZW/) | draft | 0/4 |
-| [Refinement Loop Integration](voyages/VFNvhauZg/) | draft | 0/3 |
+| [Refinement Loop Core](voyages/VFNvha5ZW/) | planned | 0/4 |
+| [Refinement Loop Integration](voyages/VFNvhauZg/) | planned | 0/3 |
 <!-- END GENERATED -->

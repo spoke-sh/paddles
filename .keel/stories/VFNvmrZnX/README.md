@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFNvmrZnX
-status: icebox
+status: backlog
 created_at: 2026-03-30T13:35:23
-updated_at: 2026-03-30T13:35:23
+updated_at: 2026-03-30T14:20:39
 # authored
 title: Validation Pass For Coverage Gap Detection
 type: feat
@@ -20,8 +20,8 @@ After initial interpretation assembly, run a second model call that receives the
 
 ## Acceptance Criteria
 
-- [ ] A standalone function accepts InterpretationContext and user prompt, returns Vec<{area, suggestion}> [SRS-04/AC-01] <!-- verify: manual, SRS-04:start:end -->
-- [ ] The function makes a model call asking the model to identify gaps [SRS-04/AC-02] <!-- verify: manual, SRS-04:start:end -->
-- [ ] Model response parsed into structured gap entries [SRS-04/AC-03] <!-- verify: manual, SRS-04:start:end -->
-- [ ] No gaps detected returns an empty Vec [SRS-04/AC-04] <!-- verify: manual, SRS-04:start:end -->
-- [ ] Function is callable independently; not wired into the application main loop [SRS-04/AC-05] <!-- verify: manual, SRS-04:start:end -->
+- [ ] A standalone function accepts InterpretationContext and user prompt, returns Vec<{area, suggestion}> [SRS-08/AC-01] <!-- verify: manual, SRS-08:start:end -->
+- [ ] The function makes a model call asking the model to identify gaps [SRS-09/AC-02] <!-- verify: manual, SRS-09:start:end -->
+- [ ] Model response parsed into structured gap entries [SRS-08/AC-03] <!-- verify: manual, SRS-08:start:end -->
+- [ ] No gaps detected returns an empty Vec [SRS-08/AC-04] <!-- verify: manual, SRS-08:start:end -->
+- [ ] Function is callable independently; not wired into the application main loop [SRS-08/AC-05] <!-- verify: manual, SRS-08:start:end -->

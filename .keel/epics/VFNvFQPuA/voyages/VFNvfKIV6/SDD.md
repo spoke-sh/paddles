@@ -6,55 +6,34 @@
 
 ## Overview
 
-<!-- How this voyage achieves its requirements; the big picture -->
+Enrich the TurnEvent payload emitted after interpretation context assembly so the TUI has the structured data for tiered rendering. Add a separate event for guidance graph expansion. Render at three verbosity tiers without additional model calls.
 
-## Context & Boundaries
+## Components
 
-<!-- What's in scope, what's out of scope, external actors/systems we interact with -->
+### Enriched TurnEvent::InterpretationContext
 
-```
-┌─────────────────────────────────────────┐
-│              This Voyage                │
-│                                         │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐ │
-│  │         │  │         │  │         │ │
-│  └─────────┘  └─────────┘  └─────────┘ │
-└─────────────────────────────────────────┘
-        ↑               ↑
-   [External]      [External]
-```
+Add fields: `doc_count: usize`, `hint_count: usize`, `procedure_count: usize`, `detail: String`. Populated from InterpretationContext at emission in application/mod.rs (~line 1031).
 
-## Dependencies
+### Tiered format_turn_event_row
 
-<!-- External systems, libraries, services this design relies on -->
+Pass verbose level to rendering. Produces:
+- v=0: `"2 docs, 3 hints, 1 procedure from AGENTS.md, INSTRUCTIONS.md"`
+- v=1: Above + source names with first-line excerpt previews, tool hint summaries
+- v=2: Full `InterpretationContext::render()` output
 
-| Dependency | Type | Purpose | Version/API |
-|------------|------|---------|-------------|
+### TurnEvent::GuidanceGraphExpanded
+
+New variant from `expand_interpretation_guidance_graph` in sift_agent.rs. Fields: `docs_discovered`, `depth_reached`, `root_sources`. min_verbosity = 1.
+
+## Data Flow
+
+1. `derive_interpretation_context` → application/mod.rs populates enriched event
+2. Event → TurnEventSink → UiMessage → handle_message → format_turn_event_row at verbose tier
+3. Graph expansion event emitted separately from sift_agent, same flow
 
 ## Key Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-
-## Architecture
-
-<!-- Component relationships, layers, modules -->
-
-## Components
-
-<!-- For each major component: purpose, interface, behavior -->
-
-## Interfaces
-
-<!-- API contracts, message formats, protocols (if this voyage exposes/consumes APIs) -->
-
-## Data Flow
-
-<!-- How data moves through the system; sequence diagrams if helpful -->
-
-## Error Handling
-
-<!-- What can go wrong, how we detect it, how we recover -->
-
-| Error Condition | Detection | Response | Recovery |
-|-----------------|-----------|----------|----------|
+| Pass verbose to format_turn_event_row | Yes | Keeps events data-only, rendering is TUI concern |
+| Full render at v=2 | InterpretationContext::render() | Reuses existing code |

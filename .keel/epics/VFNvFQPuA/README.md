@@ -25,5 +25,5 @@ mission: VFNvCEalY
 **Progress:** 0/1 voyages complete, 0/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Interpretation Visibility](voyages/VFNvfKIV6/) | draft | 0/3 |
+| [Interpretation Visibility](voyages/VFNvfKIV6/) | planned | 0/3 |
 <!-- END GENERATED -->

@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFNvmqkmD
-status: icebox
+status: backlog
 created_at: 2026-03-30T13:35:23
-updated_at: 2026-03-30T13:35:23
+updated_at: 2026-03-30T14:20:39
 # authored
 title: Conflict Detection Between Guidance Sources
 type: feat
@@ -20,7 +20,7 @@ Extend the interpretation prompt to ask the model to identify conflicts between 
 
 ## Acceptance Criteria
 
-- [ ] InterpretationContext has a conflicts field with sources, description, and resolution per entry [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
-- [ ] Interpretation prompt instructs model to identify conflicts and state resolutions [SRS-03/AC-02] <!-- verify: manual, SRS-03:start:end -->
-- [ ] No conflicts detected produces an empty Vec without error [SRS-03/AC-03] <!-- verify: manual, SRS-03:start:end -->
-- [ ] Each conflict entry references at least two sources [SRS-03/AC-04] <!-- verify: manual, SRS-03:start:end -->
+- [ ] InterpretationContext has a conflicts field with sources, description, and resolution per entry [SRS-06/AC-01] <!-- verify: manual, SRS-06:start:end -->
+- [ ] Interpretation prompt instructs model to identify conflicts and state resolutions [SRS-07/AC-02] <!-- verify: manual, SRS-07:start:end -->
+- [ ] No conflicts detected produces an empty Vec without error [SRS-06/AC-03] <!-- verify: manual, SRS-06:start:end -->
+- [ ] Each conflict entry references at least two sources [SRS-06/AC-04] <!-- verify: manual, SRS-06:start:end -->

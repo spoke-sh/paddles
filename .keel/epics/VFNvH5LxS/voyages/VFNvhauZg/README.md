@@ -1,12 +1,13 @@
 ---
 # system-managed
 id: VFNvhauZg
-status: draft
+status: planned
 epic: VFNvH5LxS
 created_at: 2026-03-30T13:35:03
 # authored
 title: Refinement Loop Integration
 index: 2
+updated_at: 2026-03-30T14:22:01
 ---
 
 # Refinement Loop Integration
@@ -29,7 +30,7 @@ index: 2
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Bounded Gap Filling Re-expansion Cycle](../../../../stories/VFNvosdqy/README.md) | feat | icebox |
-| [Wire Refinement Loop Into Application Layer](../../../../stories/VFNvotYrG/README.md) | feat | icebox |
-| [Coverage Confidence Field And Refinement Events](../../../../stories/VFNvouNsS/README.md) | feat | icebox |
+| [Bounded Gap Filling Re-expansion Cycle](../../../../stories/VFNvosdqy/README.md) | feat | backlog |
+| [Wire Refinement Loop Into Application Layer](../../../../stories/VFNvotYrG/README.md) | feat | backlog |
+| [Coverage Confidence Field And Refinement Events](../../../../stories/VFNvouNsS/README.md) | feat | backlog |
 <!-- END GENERATED -->
