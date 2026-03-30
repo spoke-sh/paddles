@@ -138,9 +138,21 @@
 |--------|--------|
 | [Model-Judged Interpretation And Retrieval](epics/VFJ5rdPZP/voyages/VFJ5t0Pbk/) | done |
 
-### [HTTP Server Foundation](epics/VFKBCVjpo/) (draft)
+### [HTTP Server Foundation](epics/VFKBCVjpo/) (active)
 
-### [Web Chat Interface](epics/VFKBDgewu/) (draft)
+| Voyage | Status |
+|--------|--------|
+| [Axum Server With SSE Turn Events](epics/VFKBCVjpo/voyages/VFKDkffWL/) | in-progress |
 
-### [Transit Trace Visualization](epics/VFKBFMq8J/) (draft)
+### [Web Chat Interface](epics/VFKBDgewu/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Browser Chat Page](epics/VFKBDgewu/voyages/VFKDlUda0/) | in-progress |
+
+### [Transit Trace Visualization](epics/VFKBFMq8J/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Trace DAG Visualization](epics/VFKBFMq8J/voyages/VFKDmXte3/) | in-progress |
 

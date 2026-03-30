@@ -17,7 +17,10 @@ sift = { git = "https://github.com/rupurt/sift", branch = "main" }
 candle-core = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-nn = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-transformers = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
+axum = "0.8"
 tokio = { version = "1.43", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.6", features = ["cors"] }
 async-trait = "0.1.86"
 anyhow = "1.0.95"
 directories = "6.0.0"

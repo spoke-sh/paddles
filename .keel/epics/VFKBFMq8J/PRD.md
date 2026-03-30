@@ -8,23 +8,30 @@ Transit trace streams capture rich lineage data (branches, merges, checkpoints) 
 
 | ID | Goal | Success Metric | Target |
 |----|------|----------------|--------|
-| GOAL-01 | Resolve the problem described above for the primary user. | A measurable outcome is defined for this problem | Target agreed during planning |
+| GOAL-01 | A trace graph endpoint returns the DAG structure for a session | GET /sessions/:id/trace/graph returns nodes, edges, and branches as JSON | First voyage |
+| GOAL-02 | A browser visualization renders the trace DAG with hexagonal nodes in real time | SVG railroad diagram updates as TurnEvents stream in | First voyage |
 
 ## Users
 
 | Persona | Description | Primary Need |
 |---------|-------------|--------------|
-| Primary User | The person or team most affected by the problem above. | A clearer path to the outcome this epic should improve. |
+| Operator | Developer running paddles locally | Visualize the recursive planning process as a branching railroad of decisions |
 
 ## Scope
 
 ### In Scope
 
-- [SCOPE-01] The smallest end-to-end change needed to address the problem statement.
+- [SCOPE-01] GET /sessions/:id/trace/graph endpoint returning nodes, edges, and branches
+- [SCOPE-02] Browser SVG visualization rendering the DAG as a railroad diagram
+- [SCOPE-03] Hexagonal node shapes with color/icon conveying TraceRecordKind
+- [SCOPE-04] Real-time updates as new TraceRecords arrive via SSE
+- [SCOPE-05] Branch swimlanes showing divergence and merge points
 
 ### Out of Scope
 
-- [SCOPE-02] Follow-on improvements or adjacent work that is not required for the first outcome.
+- [SCOPE-06] Historical trace browsing across sessions
+- [SCOPE-07] Interactive node editing or annotation
+- [SCOPE-08] 3D or physics-based graph layouts
 
 ## Requirements
 
@@ -33,7 +40,11 @@ Transit trace streams capture rich lineage data (branches, merges, checkpoints) 
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| FR-01 | Deliver the primary user workflow for this epic end-to-end. | GOAL-01 | must | Establishes the minimum functional capability needed to achieve the epic goal. |
+| FR-01 | Trace graph endpoint converts TraceReplay into a flat node/edge/branch JSON structure | GOAL-01 | must | API for visualization clients |
+| FR-02 | SVG visualization renders hexagonal nodes positioned in railroad-style vertical flow | GOAL-02 | must | Core visual metaphor |
+| FR-03 | Node color and label reflect TraceRecordKind (root, action, tool, checkpoint, merge) | GOAL-02 | must | Visual semantics |
+| FR-04 | Branch divergence renders as parallel swimlanes splitting from the mainline | GOAL-02 | must | Shows planner branching |
+| FR-05 | Merge records render as lanes converging back | GOAL-02 | must | Shows thread reconciliation |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
 ### Non-Functional Requirements
@@ -41,29 +52,31 @@ Transit trace streams capture rich lineage data (branches, merges, checkpoints) 
 <!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| NFR-01 | Maintain reliability and observability for all new workflow paths introduced by this epic. | GOAL-01 | must | Keeps operations stable and makes regressions detectable during rollout. |
+| NFR-01 | Visualization is part of the same HTML served by paddles, no separate build | GOAL-02 | must | Consistent with chat interface approach |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->
 
 ## Verification Strategy
 
 | Area | Method | Evidence |
 |------|--------|----------|
-| Problem outcome | Tests, CLI proofs, or manual review chosen during planning | Story-level verification artifacts linked during execution |
+| Graph endpoint | curl /sessions/:id/trace/graph returns valid JSON with nodes and edges | Response structure matches spec |
+| Visualization | Manual: run a multi-step turn, observe hexagonal nodes appearing in browser | Screenshot |
 
 ## Assumptions
 
 | Assumption | Impact if Wrong | Validation |
 |------------|-----------------|------------|
-| The problem statement reflects a real user or operator need. | The epic may optimize the wrong outcome. | Revisit with planners during decomposition. |
+| SVG rendering is performant for traces up to hundreds of nodes | Would need canvas or virtualization | Typical turns produce fewer than 20 trace records |
 
 ## Open Questions & Risks
 
 | Question/Risk | Owner | Status |
 |---------------|-------|--------|
-| Which metric best proves the problem above is resolved? | Epic owner | Open |
+| Should branch swimlanes use fixed or dynamic X-offsets | operator | Resolved: fixed offsets for simplicity |
 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] The team can state a measurable user outcome that resolves the problem above.
+- [ ] Trace graph endpoint returns structured DAG data for a completed turn
+- [ ] Browser renders hexagonal turnstep nodes with branch/merge visualization
 <!-- END SUCCESS_CRITERIA -->

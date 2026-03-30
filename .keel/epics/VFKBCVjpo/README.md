@@ -21,7 +21,8 @@ index: 21
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/0 voyages complete, 0/0 stories done
+**Progress:** 0/1 voyages complete, 0/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
+| [Axum Server With SSE Turn Events](voyages/VFKDkffWL/) | in-progress | 0/1 |
 <!-- END GENERATED -->

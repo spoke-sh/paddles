@@ -69,6 +69,10 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
 
+    /// Port for the HTTP API server.
+    #[arg(long, default_value = "3000")]
+    port: u16,
+
     /// Hugging Face API token for gated models.
     #[arg(long, env = "HF_TOKEN", hide_env_values = true)]
     hf_token: Option<String>,
@@ -231,6 +235,18 @@ async fn main() -> Result<()> {
     if cli.verbose >= 1 {
         println!("[BOOT] Runtime lanes ready.");
     }
+
+    // Start HTTP API server
+    let web_router = paddles::infrastructure::web::router(Arc::clone(&service));
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", cli.port)).await?;
+    if cli.verbose >= 1 {
+        println!("[BOOT] HTTP API server listening on port {}.", cli.port);
+    }
+    tokio::spawn(async move {
+        if let Err(err) = axum::serve(listener, web_router).await {
+            eprintln!("[ERROR] HTTP server failed: {err}");
+        }
+    });
 
     if let Some(prompt) = cli.prompt {
         let response = service.process_prompt(&prompt).await?;
