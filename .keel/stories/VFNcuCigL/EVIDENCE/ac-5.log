@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T12:38:16.965226775-07:00
+mode: manual
+---
+TurnEvent::event_type_key returns serde tag str for each variant, used as reservoir key in annotate_step_timing

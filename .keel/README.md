@@ -192,11 +192,11 @@
 |--------|--------|
 | [Mistral RS Local Inference Backend](epics/VFMC5HaQY/voyages/VFMCRb7SD/) | done |
 
-### [Step Timing Reservoir](epics/VFNccFj7d/) (active)
+### [Step Timing Reservoir](epics/VFNccFj7d/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Step Timing Implementation](epics/VFNccFj7d/voyages/VFNcoxjU3/) | planned |
+| [Step Timing Implementation](epics/VFNccFj7d/voyages/VFNcoxjU3/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

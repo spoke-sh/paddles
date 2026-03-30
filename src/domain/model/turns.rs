@@ -125,6 +125,29 @@ pub enum TurnEvent {
     },
 }
 
+impl TurnEvent {
+    pub fn event_type_key(&self) -> &'static str {
+        match self {
+            Self::IntentClassified { .. } => "intent_classified",
+            Self::InterpretationContext { .. } => "interpretation_context",
+            Self::RouteSelected { .. } => "route_selected",
+            Self::PlannerCapability { .. } => "planner_capability",
+            Self::GathererCapability { .. } => "gatherer_capability",
+            Self::PlannerActionSelected { .. } => "planner_action_selected",
+            Self::ThreadCandidateCaptured { .. } => "thread_candidate_captured",
+            Self::ThreadDecisionApplied { .. } => "thread_decision_applied",
+            Self::ThreadMerged { .. } => "thread_merged",
+            Self::GathererSummary { .. } => "gatherer_summary",
+            Self::PlannerSummary { .. } => "planner_summary",
+            Self::ContextAssembly { .. } => "context_assembly",
+            Self::ToolCalled { .. } => "tool_called",
+            Self::ToolFinished { .. } => "tool_finished",
+            Self::Fallback { .. } => "fallback",
+            Self::SynthesisReady { .. } => "synthesis_ready",
+        }
+    }
+}
+
 pub trait TurnEventSink: Send + Sync {
     fn emit(&self, event: TurnEvent);
 }

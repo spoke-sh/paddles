@@ -64,6 +64,19 @@ Turn event deltas are displayed uniformly in the transcript with no sense of whe
 | Classification accuracy | Unit test: known reservoir → expected pace for given delta | Test artifact |
 | Visual rendering | Manual: run 2+ interactive sessions and observe color differentiation | Session screenshot |
 
+## Assumptions
+
+| Assumption | Impact if Wrong | Validation |
+|------------|-----------------|------------|
+| 50 samples per event type is sufficient for stable percentiles | Classification may be noisy or slow to adapt | Monitor p50/p85 stability after 20+ turns across 2 sessions |
+| p50/p85 thresholds produce useful fast/normal/slow buckets | Users may not perceive the visual difference as meaningful | Manual review during first integration session |
+
+## Open Questions & Risks
+
+| Question/Risk | Owner | Status |
+|---------------|-------|--------|
+| Exact color values for pace styles may need tuning after first visual test | Operator | Open |
+
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->

@@ -1,6 +1,7 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
 use crate::domain::model::{ThreadCandidate, TurnEvent, TurnEventSink};
 use crate::infrastructure::credentials::CredentialStore;
+use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
 use anyhow::Result;
 use crossterm::cursor;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -14,6 +15,7 @@ use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use std::cmp;
 use std::collections::VecDeque;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -343,20 +345,27 @@ struct TranscriptTiming {
     elapsed: Duration,
     delta: Option<Duration>,
     kind: TranscriptTimingKind,
+    pace: Pace,
 }
 
 impl TranscriptTiming {
-    fn label(&self) -> String {
+    fn elapsed_label(&self) -> String {
         let elapsed = format_duration_compact(self.elapsed);
         let suffix = match self.kind {
-            TranscriptTimingKind::Step => None,
-            TranscriptTimingKind::TurnTotal => Some(" total"),
+            TranscriptTimingKind::Step => "",
+            TranscriptTimingKind::TurnTotal => " total",
         };
-        let delta = self
-            .delta
+        format!("{elapsed}{suffix}")
+    }
+
+    fn delta_label(&self) -> Option<String> {
+        self.delta
             .map(|delta| format!(" (+{})", format_duration_compact(delta)))
-            .unwrap_or_default();
-        format!("{elapsed}{}{}", suffix.unwrap_or(""), delta)
+    }
+
+    fn label(&self) -> String {
+        let delta = self.delta_label().unwrap_or_default();
+        format!("{}{delta}", self.elapsed_label())
     }
 }
 
@@ -382,13 +391,14 @@ impl ActiveTurnTiming {
         }
     }
 
-    fn mark_step(&mut self, occurred_at: Instant) -> TranscriptTiming {
+    fn mark_step(&mut self, occurred_at: Instant, pace: Pace) -> TranscriptTiming {
         let timing = TranscriptTiming {
             elapsed: occurred_at.duration_since(self.started_at),
             delta: self
                 .saw_step
                 .then(|| occurred_at.duration_since(self.last_step_at)),
             kind: TranscriptTimingKind::Step,
+            pace,
         };
         self.last_step_at = occurred_at;
         self.saw_step = true;
@@ -402,6 +412,7 @@ impl ActiveTurnTiming {
                 .saw_step
                 .then(|| occurred_at.duration_since(self.last_step_at)),
             kind: TranscriptTimingKind::TurnTotal,
+            pace: Pace::Normal,
         };
         self.last_step_at = occurred_at;
         timing
@@ -456,6 +467,8 @@ struct InteractiveApp {
     credential_provider: Option<String>,
     active_turn_timing: Option<ActiveTurnTiming>,
     flushed_row_count: usize,
+    step_timing: StepTimingReservoir,
+    step_timing_path: PathBuf,
     prompt_history: Vec<String>,
     history_cursor: Option<usize>,
     history_draft: String,
@@ -528,6 +541,8 @@ impl InteractiveApp {
             credential_provider,
             active_turn_timing: None,
             flushed_row_count: 0,
+            step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
+            step_timing_path: step_timing_cache_path(),
             prompt_history: Vec::new(),
             history_cursor: None,
             history_draft: String::new(),
@@ -671,7 +686,9 @@ impl InteractiveApp {
     fn handle_message(&mut self, message: UiMessage) {
         match message {
             UiMessage::TurnEvent { event, occurred_at } => {
-                let row = self.annotate_step_timing(format_turn_event_row(event), occurred_at);
+                let key = event.event_type_key();
+                let row = format_turn_event_row(event);
+                let row = self.annotate_step_timing(row, key, occurred_at);
                 self.rows.push(row);
             }
             UiMessage::TurnFinished {
@@ -700,6 +717,7 @@ impl InteractiveApp {
                 }
             },
         }
+        let _ = self.step_timing.flush(&self.step_timing_path);
     }
 
     fn tick(&mut self) {
@@ -944,11 +962,25 @@ impl InteractiveApp {
         }
     }
 
-    fn annotate_step_timing(&mut self, row: TranscriptRow, occurred_at: Instant) -> TranscriptRow {
-        match self.active_turn_timing.as_mut() {
-            Some(timing) => row.timed(timing.mark_step(occurred_at)),
-            None => row,
+    fn annotate_step_timing(
+        &mut self,
+        row: TranscriptRow,
+        event_type_key: &str,
+        occurred_at: Instant,
+    ) -> TranscriptRow {
+        let Some(timing) = self.active_turn_timing.as_mut() else {
+            return row;
+        };
+        let delta = timing
+            .saw_step
+            .then(|| occurred_at.duration_since(timing.last_step_at));
+        if let Some(d) = delta {
+            self.step_timing.record(event_type_key, d);
         }
+        let pace = delta
+            .map(|d| self.step_timing.classify(event_type_key, d))
+            .unwrap_or(Pace::Normal);
+        row.timed(timing.mark_step(occurred_at, pace))
     }
 
     fn annotate_turn_total(&mut self, row: TranscriptRow, occurred_at: Instant) -> TranscriptRow {
@@ -969,6 +1001,14 @@ fn inline_viewport_height_for_terminal(terminal_height: u16) -> u16 {
     terminal_height
         .saturating_sub(2)
         .clamp(INLINE_VIEWPORT_MIN_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT)
+}
+
+fn step_timing_cache_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home)
+        .join(".cache")
+        .join("paddles")
+        .join("step_timing.json")
 }
 
 fn flush_scrollback_rows<B: Backend>(
@@ -1022,7 +1062,18 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         header_style.add_modifier(Modifier::BOLD),
     )];
     if let Some(timing) = row.timing {
-        header_spans.push(Span::styled(format!(" · {}", timing.label()), body_style));
+        header_spans.push(Span::styled(
+            format!(" · {}", timing.elapsed_label()),
+            body_style,
+        ));
+        if let Some(delta_label) = timing.delta_label() {
+            let delta_style = match timing.pace {
+                Pace::Fast => palette.pace_fast,
+                Pace::Normal => body_style,
+                Pace::Slow => palette.pace_slow,
+            };
+            header_spans.push(Span::styled(delta_label, delta_style));
+        }
     }
 
     let mut lines = vec![Line::from(header_spans)];
@@ -1377,6 +1428,8 @@ struct Palette {
     input_bg: Color,
     code: Style,
     citation: Style,
+    pace_fast: Style,
+    pace_slow: Style,
 }
 
 fn detect_palette() -> Palette {
@@ -1401,6 +1454,8 @@ fn detect_palette() -> Palette {
             input_bg: prompt_bg,
             code: Style::default().fg(Color::Rgb(87, 56, 130)),
             citation: Style::default().fg(Color::Rgb(94, 66, 0)),
+            pace_fast: Style::default().fg(Color::Rgb(165, 171, 180)),
+            pace_slow: Style::default().fg(Color::Rgb(191, 105, 25)),
         }
     } else {
         let prompt_bg = Color::Rgb(30, 33, 39);
@@ -1423,6 +1478,8 @@ fn detect_palette() -> Palette {
             input_bg: prompt_bg,
             code: Style::default().fg(Color::Rgb(204, 171, 255)),
             citation: Style::default().fg(Color::Rgb(255, 216, 130)),
+            pace_fast: Style::default().fg(Color::Rgb(90, 98, 112)),
+            pace_slow: Style::default().fg(Color::Rgb(255, 180, 80)),
         }
     }
 }
@@ -1449,6 +1506,7 @@ mod tests {
     };
     use crate::application::ConversationSession;
     use crate::domain::model::{TaskTraceId, TurnEvent};
+    use crate::infrastructure::step_timing::Pace;
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
     use std::time::{Duration, Instant};
 
@@ -1577,17 +1635,15 @@ mod tests {
                 elapsed: Duration::from_millis(1530),
                 delta: Some(Duration::from_millis(430)),
                 kind: TranscriptTimingKind::TurnTotal,
+                pace: Pace::Normal,
             },
         );
 
         let lines = render_row_lines(&row, &palette);
 
-        assert!(
-            lines[0]
-                .spans
-                .iter()
-                .any(|span| span.content.contains("1.5s total (+430ms)"))
-        );
+        let header_text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(header_text.contains("1.5s total"));
+        assert!(header_text.contains("(+430ms)"));
     }
 
     #[test]
@@ -1884,6 +1940,7 @@ mod tests {
                 elapsed: Duration::from_millis(120),
                 delta: None,
                 kind: TranscriptTimingKind::Step,
+                pace: Pace::Normal,
             })
         );
 
@@ -1895,6 +1952,7 @@ mod tests {
                 elapsed: Duration::from_millis(350),
                 delta: Some(Duration::from_millis(230)),
                 kind: TranscriptTimingKind::TurnTotal,
+                pace: Pace::Normal,
             })
         );
     }

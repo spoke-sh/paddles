@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T12:38:16.891397781-07:00
+mode: manual
+---
+render_row_lines splits timing into elapsed + pace-colored delta span via timing.pace match

@@ -22,8 +22,8 @@ mission: VFNcT8prj
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Step Timing Implementation](voyages/VFNcoxjU3/) | planned | 0/5 |
+| [Step Timing Implementation](voyages/VFNcoxjU3/) | done | 5/5 |
 <!-- END GENERATED -->
