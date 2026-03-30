@@ -189,7 +189,7 @@ async fn main() -> Result<()> {
         ),
         ModelProvider::Moonshot => (
             Some(ApiFormat::OpenAi),
-            "https://api.moonshot.cn",
+            "https://api.moonshot.ai",
             "MOONSHOT_API_KEY",
         ),
         ModelProvider::Ollama => (
