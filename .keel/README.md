@@ -180,5 +180,17 @@
 |--------|--------|
 | [Gemini GenerateContent Adapter](epics/VFKMo6YJb/voyages/VFKN5eD1D/) | draft |
 
+### [Ollama Provider](epics/VFMC4fdIO/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Ollama Provider Variant](epics/VFMC4fdIO/voyages/VFMCQUMOd/) | draft |
+
+### [Mistral RS Native Inference](epics/VFMC5HaQY/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Mistral RS Local Inference Backend](epics/VFMC5HaQY/voyages/VFMCRb7SD/) | draft |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (draft)
 

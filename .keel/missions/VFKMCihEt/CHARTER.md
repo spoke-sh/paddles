@@ -12,6 +12,8 @@ Archetype: Strategic
 | MG-04 | Google Gemini provider works as both planner and synthesizer | board: epic delivering Google adapter with generateContent API |
 | MG-05 | Moonshot Kimi provider works as both planner and synthesizer | board: epic delivering Moonshot adapter (OpenAI-compatible) |
 | MG-06 | Local Qwen provider continues to work unchanged as the default | board: existing tests pass with no regression |
+| MG-07 | Ollama provider routes to OpenAI-compatible adapter with localhost:11434/v1 default | board: epic delivering Ollama provider variant |
+| MG-08 | mistral.rs replaces Qwen-specific Candle code for native multi-architecture local inference | board: epic delivering mistral.rs integration |
 
 ## Constraints
 
