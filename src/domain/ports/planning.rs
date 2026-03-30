@@ -369,6 +369,34 @@ impl WorkspaceAction {
             Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
         }
     }
+
+    /// Human-readable description of this action for event and trace output.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Search { query, intent, .. } => match intent {
+                Some(intent) => format!("search workspace for `{query}` ({intent})"),
+                None => format!("search workspace for `{query}`"),
+            },
+            Self::ListFiles { pattern } => match pattern {
+                Some(pattern) if !pattern.trim().is_empty() => {
+                    format!("list files matching `{pattern}`")
+                }
+                _ => "list workspace files".to_string(),
+            },
+            Self::Read { path } => format!("read `{path}`"),
+            Self::Inspect { command } => format!("inspect `{command}`"),
+            Self::Shell { command } => command.clone(),
+            Self::Diff { path } => match path {
+                Some(path) if !path.trim().is_empty() => {
+                    format!("git diff --no-ext-diff -- {path}")
+                }
+                _ => "git diff --no-ext-diff".to_string(),
+            },
+            Self::WriteFile { path, .. } => format!("write `{path}`"),
+            Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
+            Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+        }
+    }
 }
 
 /// The first bounded action the planner may choose for a turn.

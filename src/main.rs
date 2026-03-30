@@ -2,11 +2,20 @@ use anyhow::Result;
 use clap::Parser;
 use std::env;
 use std::io::IsTerminal;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
-// External Crate Modules
-use paddles::application::{GathererProvider, MechSuitService, RuntimeLaneConfig};
+use paddles::application::{
+    GathererProvider, MechSuitService, PreparedGathererLane, RuntimeLaneConfig,
+};
+use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
+use paddles::infrastructure::adapters::agent_memory::AgentMemory;
+use paddles::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
+use paddles::infrastructure::adapters::sift_agent::SiftAgentAdapter;
+use paddles::infrastructure::adapters::sift_autonomous_gatherer::SiftAutonomousGathererAdapter;
+use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
+use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, run_interactive_tui, select_interactive_frontend,
@@ -89,7 +98,72 @@ async fn main() -> Result<()> {
 
     let root_path = env::current_dir()?;
     let registry = Arc::new(SiftRegistryAdapter::new());
-    let service = Arc::new(MechSuitService::new(root_path, registry));
+    let operator_memory = Arc::new(AgentMemory::load(&root_path));
+    let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
+        Box::new(|workspace: &Path, model_id: &str| {
+            let engine = SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?;
+            Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
+        });
+    let planner_factory: Box<paddles::application::PlannerFactory> =
+        Box::new(|workspace: &Path, model_id: &str| {
+            let engine = Arc::new(SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?);
+            let adapter = SiftPlannerAdapter::new(engine);
+            Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
+        });
+    let gatherer_factory: Box<paddles::application::GathererFactory> = Box::new(
+        |config: &RuntimeLaneConfig,
+         workspace: &Path,
+         verbose: u8,
+         gatherer_model_paths: Option<paddles::domain::ports::ModelPaths>|
+         -> Result<Option<(PreparedGathererLane, Arc<dyn ContextGatherer>)>> {
+            match config.gatherer_provider() {
+                GathererProvider::Local => match config.gatherer_model_id() {
+                    Some(model_id) => {
+                        let lane = PreparedGathererLane {
+                            provider: GathererProvider::Local,
+                            label: model_id.to_string(),
+                            model_id: Some(model_id.to_string()),
+                            paths: gatherer_model_paths,
+                        };
+                        let adapter =
+                            SiftContextGathererAdapter::new(workspace.to_path_buf(), model_id);
+                        adapter.set_verbose(verbose);
+                        Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
+                    }
+                    None => Ok(None),
+                },
+                GathererProvider::SiftAutonomous => {
+                    let lane = PreparedGathererLane {
+                        provider: GathererProvider::SiftAutonomous,
+                        label: "sift-autonomous".to_string(),
+                        model_id: None,
+                        paths: None,
+                    };
+                    let adapter = SiftAutonomousGathererAdapter::new(workspace.to_path_buf());
+                    adapter.set_verbose(verbose);
+                    Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
+                }
+                GathererProvider::Context1 => {
+                    let lane = PreparedGathererLane {
+                        provider: GathererProvider::Context1,
+                        label: "context-1".to_string(),
+                        model_id: None,
+                        paths: None,
+                    };
+                    let adapter = Context1GathererAdapter::new(config.context1_harness_ready());
+                    Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
+                }
+            }
+        },
+    );
+    let service = Arc::new(MechSuitService::new(
+        root_path,
+        registry,
+        operator_memory,
+        synthesizer_factory,
+        planner_factory,
+        gatherer_factory,
+    ));
     let runtime_verbose = match frontend {
         InteractiveFrontend::Tui => 0,
         InteractiveFrontend::PlainLines => cli.verbose,

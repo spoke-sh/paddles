@@ -1,5 +1,7 @@
 mod context_gathering;
+mod operator_memory;
 mod planning;
+mod synthesis;
 mod trace_recording;
 
 use async_trait::async_trait;
@@ -12,6 +14,7 @@ pub use context_gathering::{
     PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata,
     PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
 };
+pub use operator_memory::OperatorMemory;
 pub use planning::{
     InitialAction, InitialActionDecision, InterpretationContext, InterpretationDecisionFramework,
     InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
@@ -20,6 +23,7 @@ pub use planning::{
     PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest,
     WorkspaceAction,
 };
+pub use synthesis::{SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
 
 /// Port for model discovery and acquisition.

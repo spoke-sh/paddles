@@ -1762,7 +1762,7 @@ impl SiftAgentAdapter {
         }
     }
 
-    pub(crate) fn execute_workspace_action(&self, action: &WorkspaceAction) -> Result<ToolResult> {
+    pub(crate) fn run_workspace_action(&self, action: &WorkspaceAction) -> Result<ToolResult> {
         let tool_call = tool_call_from_workspace_action(action).ok_or_else(|| {
             anyhow!(
                 "workspace action `{}` is not executable via the tool adapter",
@@ -1855,6 +1855,37 @@ impl SiftAgentAdapter {
         }
 
         Ok(all_documents)
+    }
+}
+
+impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
+    fn set_verbose(&self, level: u8) {
+        self.verbose.store(level, Ordering::Relaxed);
+    }
+
+    fn respond_for_turn(
+        &self,
+        prompt: &str,
+        turn_intent: TurnIntent,
+        gathered_evidence: Option<&EvidenceBundle>,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<String> {
+        self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
+    }
+
+    fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+        SiftAgentAdapter::recent_turn_summaries(self)
+    }
+
+    fn execute_workspace_action(
+        &self,
+        action: &WorkspaceAction,
+    ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+        let result = self.run_workspace_action(action)?;
+        Ok(crate::domain::ports::WorkspaceActionResult {
+            name: result.name.to_string(),
+            summary: result.summary,
+        })
     }
 }
 
@@ -3105,13 +3136,6 @@ fn describe_tool_call(tool_call: &ToolCall) -> String {
             None => "git diff --no-ext-diff".to_string(),
         },
         ToolCall::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
-    }
-}
-
-pub(crate) fn describe_workspace_action(action: &WorkspaceAction) -> String {
-    match tool_call_from_workspace_action(action) {
-        Some(tool_call) => describe_tool_call(&tool_call),
-        None => action.summary(),
     }
 }
 

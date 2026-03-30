@@ -11,18 +11,12 @@ use crate::domain::model::{
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
     GathererCapability, InitialAction, InitialActionDecision, InterpretationContext,
-    InterpretationRequest, ModelPaths, ModelRegistry, NoopTraceRecorder, PlannerAction,
-    PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+    InterpretationRequest, ModelPaths, ModelRegistry, NoopTraceRecorder, OperatorMemory,
+    PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
+    PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, SynthesizerEngine,
     ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
 };
-use crate::infrastructure::adapters::agent_memory::AgentMemory;
-use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
-use crate::infrastructure::adapters::sift_agent::{SiftAgentAdapter, describe_workspace_action};
-use crate::infrastructure::adapters::sift_autonomous_gatherer::SiftAutonomousGathererAdapter;
-use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
-use crate::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use anyhow::Result;
 use clap::ValueEnum;
 use std::collections::HashMap;
@@ -32,10 +26,34 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
+/// Factory that constructs a synthesizer engine for a given model ID.
+pub type SynthesizerFactory =
+    dyn Fn(&Path, &str) -> Result<Arc<dyn SynthesizerEngine>> + Send + Sync;
+
+/// Factory that constructs a recursive planner for a given model ID.
+pub type PlannerFactory = dyn Fn(&Path, &str) -> Result<Arc<dyn RecursivePlanner>> + Send + Sync;
+
+/// Factory that constructs an optional gatherer from runtime configuration.
+///
+/// Arguments: `(config, workspace_root, verbose, gatherer_model_paths)`.
+/// The application resolves model paths from the registry before calling.
+pub type GathererFactory = dyn Fn(
+        &RuntimeLaneConfig,
+        &Path,
+        u8,
+        Option<ModelPaths>,
+    ) -> Result<Option<(PreparedGathererLane, Arc<dyn ContextGatherer>)>>
+    + Send
+    + Sync;
+
 /// Application service for managing the mech suit lifecycle.
 pub struct MechSuitService {
     workspace_root: PathBuf,
     registry: Arc<dyn ModelRegistry>,
+    operator_memory: Arc<dyn OperatorMemory>,
+    synthesizer_factory: Box<SynthesizerFactory>,
+    planner_factory: Box<PlannerFactory>,
+    gatherer_factory: Box<GathererFactory>,
     runtime: RwLock<Option<ActiveRuntimeState>>,
     verbose: AtomicU8,
     event_sink: Arc<dyn TurnEventSink>,
@@ -148,14 +166,14 @@ impl PreparedRuntimeLanes {
 struct ActiveRuntimeState {
     prepared: PreparedRuntimeLanes,
     planner_engine: Arc<dyn RecursivePlanner>,
-    synthesizer_engine: Arc<SiftAgentAdapter>,
+    synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
 }
 
 struct PlannerLoopContext {
     prepared: PreparedRuntimeLanes,
     planner_engine: Arc<dyn RecursivePlanner>,
-    synthesizer_engine: Arc<SiftAgentAdapter>,
+    synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
@@ -779,18 +797,41 @@ fn trim_event_detail(input: &str, max_lines: usize) -> String {
 }
 
 impl MechSuitService {
-    pub fn new(workspace_root: impl Into<PathBuf>, registry: Arc<dyn ModelRegistry>) -> Self {
-        Self::with_trace_recorder(workspace_root, registry, Arc::new(NoopTraceRecorder))
+    pub fn new(
+        workspace_root: impl Into<PathBuf>,
+        registry: Arc<dyn ModelRegistry>,
+        operator_memory: Arc<dyn OperatorMemory>,
+        synthesizer_factory: Box<SynthesizerFactory>,
+        planner_factory: Box<PlannerFactory>,
+        gatherer_factory: Box<GathererFactory>,
+    ) -> Self {
+        Self::with_trace_recorder(
+            workspace_root,
+            registry,
+            operator_memory,
+            synthesizer_factory,
+            planner_factory,
+            gatherer_factory,
+            Arc::new(NoopTraceRecorder),
+        )
     }
 
     pub fn with_trace_recorder(
         workspace_root: impl Into<PathBuf>,
         registry: Arc<dyn ModelRegistry>,
+        operator_memory: Arc<dyn OperatorMemory>,
+        synthesizer_factory: Box<SynthesizerFactory>,
+        planner_factory: Box<PlannerFactory>,
+        gatherer_factory: Box<GathererFactory>,
         trace_recorder: Arc<dyn TraceRecorder>,
     ) -> Self {
         Self {
             workspace_root: workspace_root.into(),
             registry,
+            operator_memory,
+            synthesizer_factory,
+            planner_factory,
+            gatherer_factory,
             runtime: RwLock::new(None),
             verbose: AtomicU8::new(0),
             event_sink: Arc::new(ConsoleTurnEventSink::default()),
@@ -836,20 +877,6 @@ impl MechSuitService {
         }
     }
 
-    fn build_gatherer_lane(
-        provider: GathererProvider,
-        label: impl Into<String>,
-        model_id: Option<String>,
-        paths: Option<ModelPaths>,
-    ) -> PreparedGathererLane {
-        PreparedGathererLane {
-            provider,
-            label: label.into(),
-            model_id,
-            paths,
-        }
-    }
-
     /// Prepare the configured runtime lanes for inference.
     pub async fn prepare_runtime_lanes(
         &self,
@@ -875,49 +902,21 @@ impl MechSuitService {
             synthesizer_paths,
         );
 
-        let (prepared_gatherer, gatherer) = match config.gatherer_provider() {
+        let gatherer_model_paths = match config.gatherer_provider() {
             GathererProvider::Local => match config.gatherer_model_id() {
-                Some(model_id) => {
-                    let paths = self.registry.get_model_paths(model_id).await?;
-                    let lane = Self::build_gatherer_lane(
-                        GathererProvider::Local,
-                        model_id,
-                        Some(model_id.to_string()),
-                        Some(paths),
-                    );
-                    let adapter =
-                        SiftContextGathererAdapter::new(self.workspace_root.clone(), model_id);
-                    adapter.set_verbose(self.verbose.load(Ordering::Relaxed));
-                    (
-                        Some(lane),
-                        Some(Arc::new(adapter) as Arc<dyn ContextGatherer>),
-                    )
-                }
-                None => (None, None),
+                Some(model_id) => Some(self.registry.get_model_paths(model_id).await?),
+                None => None,
             },
-            GathererProvider::SiftAutonomous => {
-                let lane = Self::build_gatherer_lane(
-                    GathererProvider::SiftAutonomous,
-                    "sift-autonomous",
-                    None,
-                    None,
-                );
-                let adapter = SiftAutonomousGathererAdapter::new(self.workspace_root.clone());
-                adapter.set_verbose(self.verbose.load(Ordering::Relaxed));
-                (
-                    Some(lane),
-                    Some(Arc::new(adapter) as Arc<dyn ContextGatherer>),
-                )
-            }
-            GathererProvider::Context1 => {
-                let lane =
-                    Self::build_gatherer_lane(GathererProvider::Context1, "context-1", None, None);
-                let adapter = Context1GathererAdapter::new(config.context1_harness_ready());
-                (
-                    Some(lane),
-                    Some(Arc::new(adapter) as Arc<dyn ContextGatherer>),
-                )
-            }
+            _ => None,
+        };
+        let (prepared_gatherer, gatherer) = match (self.gatherer_factory)(
+            config,
+            &self.workspace_root,
+            self.verbose.load(Ordering::Relaxed),
+            gatherer_model_paths,
+        )? {
+            Some((lane, adapter)) => (Some(lane), Some(adapter)),
+            None => (None, None),
         };
 
         let prepared = PreparedRuntimeLanes {
@@ -926,22 +925,12 @@ impl MechSuitService {
             gatherer: prepared_gatherer,
         };
 
-        let engine = Arc::new(SiftAgentAdapter::new(
-            self.workspace_root.clone(),
-            &prepared.synthesizer.model_id,
-        )?);
-        engine.set_verbose(self.verbose.load(Ordering::Relaxed));
-        let planner_engine: Arc<dyn RecursivePlanner> =
-            if prepared.planner.model_id == prepared.synthesizer.model_id {
-                Arc::new(SiftPlannerAdapter::new(Arc::clone(&engine)))
-            } else {
-                let planner_model = Arc::new(SiftAgentAdapter::new(
-                    self.workspace_root.clone(),
-                    &prepared.planner.model_id,
-                )?);
-                planner_model.set_verbose(self.verbose.load(Ordering::Relaxed));
-                Arc::new(SiftPlannerAdapter::new(planner_model))
-            };
+        let verbose = self.verbose.load(Ordering::Relaxed);
+        let engine =
+            (self.synthesizer_factory)(&self.workspace_root, &prepared.synthesizer.model_id)?;
+        engine.set_verbose(verbose);
+        let planner_engine =
+            (self.planner_factory)(&self.workspace_root, &prepared.planner.model_id)?;
 
         *self.runtime.write().await = Some(ActiveRuntimeState {
             prepared: prepared.clone(),
@@ -1190,11 +1179,11 @@ impl MechSuitService {
         prompt: &str,
         planner: &dyn RecursivePlanner,
     ) -> InterpretationContext {
-        let memory = AgentMemory::load(&self.workspace_root);
         let request = InterpretationRequest::new(
             prompt,
             self.workspace_root.clone(),
-            memory.operator_memory_documents(&self.workspace_root),
+            self.operator_memory
+                .operator_memory_documents(&self.workspace_root),
         );
         match planner.derive_interpretation_context(&request).await {
             Ok(context) => context,
@@ -1204,7 +1193,8 @@ impl MechSuitService {
                         "[WARN] Falling back to AGENTS-only interpretation context after model-driven derivation failed: {err:#}"
                     );
                 }
-                memory.build_interpretation_context(prompt, &self.workspace_root)
+                self.operator_memory
+                    .build_interpretation_context(prompt, &self.workspace_root)
             }
         }
     }
@@ -1378,7 +1368,7 @@ impl MechSuitService {
                             trace.emit(TurnEvent::ToolCalled {
                                 call_id: call_id.clone(),
                                 tool_name: action.label().to_string(),
-                                invocation: describe_workspace_action(action),
+                                invocation: action.describe(),
                             });
                             match context.synthesizer_engine.execute_workspace_action(action) {
                                 Ok(result) => {
@@ -2093,8 +2083,8 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveRuntimeState, GathererProvider, MechSuitService, PreparedModelLane,
-        PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
+        ActiveRuntimeState, GathererProvider, MechSuitService, PreparedGathererLane,
+        PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
     };
     use crate::domain::model::{
         ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceRecordKind, TurnEvent,
@@ -2106,8 +2096,9 @@ mod tests {
         ModelPaths, ModelRegistry, PlannerAction, PlannerCapability, PlannerGraphBranch,
         PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerRequest, PlannerStrategyKind,
         PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
-        RetrievalMode, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+        RetrievalMode, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
+    use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use anyhow::{Result, anyhow};
@@ -2115,8 +2106,36 @@ mod tests {
     use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
+
+    fn test_service(workspace: &Path) -> MechSuitService {
+        let operator_memory = Arc::new(AgentMemory::load(workspace));
+        MechSuitService::new(
+            workspace,
+            Arc::new(StaticRegistry),
+            operator_memory,
+            Box::new(|_, _| Err(anyhow!("synthesizer factory not used in this test"))),
+            Box::new(|_, _| Err(anyhow!("planner factory not used in this test"))),
+            Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
+        )
+    }
+
+    fn test_service_with_recorder(
+        workspace: &Path,
+        recorder: Arc<dyn TraceRecorder>,
+    ) -> MechSuitService {
+        let operator_memory = Arc::new(AgentMemory::load(workspace));
+        MechSuitService::with_trace_recorder(
+            workspace,
+            Arc::new(StaticRegistry),
+            operator_memory,
+            Box::new(|_, _| Err(anyhow!("synthesizer factory not used in this test"))),
+            Box::new(|_, _| Err(anyhow!("planner factory not used in this test"))),
+            Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
+            recorder,
+        )
+    }
 
     #[derive(Default)]
     struct StaticRegistry;
@@ -2312,12 +2331,12 @@ mod tests {
             "qwen-1.5b",
             sample_model_paths("synth"),
         );
-        let gatherer = MechSuitService::build_gatherer_lane(
-            GathererProvider::Local,
-            "qwen-7b",
-            Some("qwen-7b".to_string()),
-            Some(sample_model_paths("gather")),
-        );
+        let gatherer = PreparedGathererLane {
+            provider: GathererProvider::Local,
+            label: "qwen-7b".to_string(),
+            model_id: Some("qwen-7b".to_string()),
+            paths: Some(sample_model_paths("gather")),
+        };
         let lanes = PreparedRuntimeLanes {
             planner,
             synthesizer: synthesizer.clone(),
@@ -2330,12 +2349,12 @@ mod tests {
 
     #[test]
     fn context1_boundary_can_be_prepared_without_local_model_paths() {
-        let gatherer = MechSuitService::build_gatherer_lane(
-            GathererProvider::Context1,
-            "context-1",
-            None,
-            None,
-        );
+        let gatherer = PreparedGathererLane {
+            provider: GathererProvider::Context1,
+            label: "context-1".to_string(),
+            model_id: None,
+            paths: None,
+        };
 
         assert_eq!(gatherer.provider, GathererProvider::Context1);
         assert_eq!(gatherer.label, "context-1");
@@ -2345,12 +2364,12 @@ mod tests {
 
     #[test]
     fn sift_autonomous_boundary_can_be_prepared_without_local_model_paths() {
-        let gatherer = MechSuitService::build_gatherer_lane(
-            GathererProvider::SiftAutonomous,
-            "sift-autonomous",
-            None,
-            None,
-        );
+        let gatherer = PreparedGathererLane {
+            provider: GathererProvider::SiftAutonomous,
+            label: "sift-autonomous".to_string(),
+            model_id: None,
+            paths: None,
+        };
 
         assert_eq!(gatherer.provider, GathererProvider::SiftAutonomous);
         assert_eq!(gatherer.label, "sift-autonomous");
@@ -2432,12 +2451,12 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: sample_model_paths("synth"),
             },
-            gatherer: Some(MechSuitService::build_gatherer_lane(
-                GathererProvider::SiftAutonomous,
-                "sift-autonomous",
-                None,
-                None,
-            )),
+            gatherer: Some(PreparedGathererLane {
+                provider: GathererProvider::SiftAutonomous,
+                label: "sift-autonomous".to_string(),
+                model_id: None,
+                paths: None,
+            }),
         };
 
         let plan = super::execution_plan_from_initial_action(
@@ -2519,14 +2538,14 @@ mod tests {
             Vec::new(),
             Arc::clone(&request_log),
         ));
-        let synthesizer = Arc::new(SiftAgentAdapter::new_for_test(
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(StaticConversation::new(vec![
                 "Hello from the planner path.".to_string(),
             ])),
         ));
-        let service = MechSuitService::new(workspace.path(), Arc::new(StaticRegistry));
+        let service = test_service(workspace.path());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -2607,7 +2626,7 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer = Arc::new(SiftAgentAdapter::new_for_test(
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(StaticConversation::new(vec![
@@ -2615,11 +2634,7 @@ mod tests {
             ])),
         ));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
-        let service = MechSuitService::with_trace_recorder(
-            workspace.path(),
-            Arc::new(StaticRegistry),
-            recorder.clone(),
-        );
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -2678,12 +2693,12 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: sample_model_paths("synth"),
             },
-            gatherer: Some(MechSuitService::build_gatherer_lane(
-                GathererProvider::SiftAutonomous,
-                "sift-autonomous",
-                None,
-                None,
-            )),
+            gatherer: Some(PreparedGathererLane {
+                provider: GathererProvider::SiftAutonomous,
+                label: "sift-autonomous".to_string(),
+                model_id: None,
+                paths: None,
+            }),
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -2705,7 +2720,7 @@ mod tests {
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer = Arc::new(SiftAgentAdapter::new_for_test(
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(StaticConversation::new(vec![
@@ -2776,7 +2791,7 @@ mod tests {
             recorded_requests: Arc::clone(&gatherer_requests),
             bundle: gatherer_bundle,
         });
-        let service = MechSuitService::new(workspace.path(), Arc::new(StaticRegistry));
+        let service = test_service(workspace.path());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");

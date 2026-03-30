@@ -14,7 +14,7 @@ const MAX_MEMORY_FILE_CHARS: usize = 12_000;
 const MAX_INTERPRETATION_DOCS: usize = 5;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct AgentMemory {
+pub struct AgentMemory {
     documents: Vec<MemoryDocument>,
     warnings: Vec<String>,
 }
@@ -48,7 +48,7 @@ impl MemorySearchPaths {
 }
 
 impl AgentMemory {
-    pub(crate) fn load(start_dir: &Path) -> Self {
+    pub fn load(start_dir: &Path) -> Self {
         Self::load_with_search_paths(start_dir, MemorySearchPaths::defaults())
     }
 
@@ -144,6 +144,20 @@ impl AgentMemory {
             .iter()
             .map(|document| document.path.clone())
             .collect()
+    }
+}
+
+impl crate::domain::ports::OperatorMemory for AgentMemory {
+    fn operator_memory_documents(&self, workspace_root: &Path) -> Vec<OperatorMemoryDocument> {
+        AgentMemory::operator_memory_documents(self, workspace_root)
+    }
+
+    fn build_interpretation_context(
+        &self,
+        user_prompt: &str,
+        workspace_root: &Path,
+    ) -> InterpretationContext {
+        AgentMemory::build_interpretation_context(self, user_prompt, workspace_root)
     }
 }
 

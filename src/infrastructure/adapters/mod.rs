@@ -1,4 +1,4 @@
-pub(crate) mod agent_memory;
+pub mod agent_memory;
 
 pub mod context1_gatherer;
 pub mod hf_hub;
