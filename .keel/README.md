@@ -3,6 +3,12 @@
 > [!NOTE]
 > Auto-generated from story frontmatter. Run `keel generate` to update.
 
+## Bearings
+
+| Bearing | Status | Evidence | Assessment | Readiness | EV | Laid |
+|---------|--------|----------|------------|-----------|----|------|
+| [HTTP API Design For Paddles](bearings/VFKApee25/) | exploring | ✓ | ✓ | repair citations | - | - |
+
 ## Epics
 
 ### [Foundational Chord Integration](epics/VE47wLZRk/) (done)
@@ -131,4 +137,10 @@
 | Voyage | Status |
 |--------|--------|
 | [Model-Judged Interpretation And Retrieval](epics/VFJ5rdPZP/voyages/VFJ5t0Pbk/) | done |
+
+### [HTTP Server Foundation](epics/VFKBCVjpo/) (draft)
+
+### [Web Chat Interface](epics/VFKBDgewu/) (draft)
+
+### [Transit Trace Visualization](epics/VFKBFMq8J/) (draft)
 
