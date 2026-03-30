@@ -6,10 +6,10 @@ Archetype: Strategic
 
 | ID | Description | Verification |
 |----|-------------|--------------|
-| MG-01 | HTTP server runs alongside paddles with SSE-streamed turn events | board: epic delivering axum server with session and turn endpoints |
-| MG-02 | Web chat interface reflects current conversation state from transit trace streams | board: epic delivering browser-based chat UI consuming SSE events |
-| MG-03 | Railroad/turnstep visualization renders trace DAG with hexagonal nodes in real time | board: epic delivering trace graph visualization with branch/merge rendering |
-| MG-04 | HTTP API design is captured as a keel research bearing | board: bearing VFKApee25 assessed |
+| MG-01 | HTTP server runs alongside paddles with SSE-streamed turn events | board: VFKBCVjpo |
+| MG-02 | Web chat interface reflects current conversation state from transit trace streams | board: VFKBDgewu |
+| MG-03 | Railroad/turnstep visualization renders trace DAG with hexagonal nodes in real time | board: VFKBFMq8J |
+| MG-04 | HTTP API design is captured as a keel research bearing | board: VFKApee25 |
 
 ## Constraints
 
@@ -20,6 +20,5 @@ Archetype: Strategic
 
 ## Halting Rules
 
-- DO NOT halt while any MG-* goal has unfinished board work
-- HALT when all MG-* goals with `board:` verification are satisfied
-- YIELD to human when only `metric:` or `manual:` goals remain
+- HALT when all epics (VFKBCVjpo, VFKBDgewu, VFKBFMq8J) are verified and bearing VFKApee25 is assessed
+- YIELD to human if any goal requires product direction input

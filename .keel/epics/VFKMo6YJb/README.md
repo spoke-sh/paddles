@@ -5,6 +5,7 @@ created_at: 2026-03-29T22:57:38
 # authored
 title: Google Gemini Provider
 index: 27
+mission: VFKMCihEt
 ---
 
 # Google Gemini Provider

@@ -8,6 +8,8 @@ title: HTTP API Design For Paddles
 index: 1
 laid_at: 2026-03-29T22:37:17
 epic: VFKApee25
+mission: VFKB6YlOS
+updated_at: 2026-03-30T06:41:04
 ---
 
 # HTTP API Design For Paddles

@@ -5,6 +5,7 @@ created_at: 2026-03-29T22:57:29
 # authored
 title: OpenAI Compatible Provider
 index: 25
+mission: VFKMCihEt
 ---
 
 # OpenAI Compatible Provider

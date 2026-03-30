@@ -4,6 +4,7 @@ id: VFKApee25
 created_at: 2026-03-29T22:37:17
 # authored
 title: HTTP API Design For Paddles
+mission: VFKB6YlOS
 ---
 
 # HTTP API Design For Paddles
