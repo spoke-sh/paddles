@@ -469,6 +469,7 @@ struct InteractiveApp {
     credential_provider: Option<String>,
     active_turn_timing: Option<ActiveTurnTiming>,
     flushed_row_count: usize,
+    search_progress_row: Option<usize>,
     step_timing: StepTimingReservoir,
     step_timing_path: PathBuf,
     verbose: u8,
@@ -545,6 +546,7 @@ impl InteractiveApp {
             credential_provider,
             active_turn_timing: None,
             flushed_row_count: 0,
+            search_progress_row: None,
             step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
             step_timing_path: step_timing_cache_path(),
             verbose,
@@ -721,6 +723,8 @@ impl InteractiveApp {
                     .map(|d| self.step_timing.classify(key, d))
                     .unwrap_or(Pace::Normal);
 
+                let is_search_progress = matches!(event, TurnEvent::GathererSearchProgress { .. });
+
                 if self.should_show_event(&event, pace, is_first_step) {
                     let row = format_turn_event_row(event, self.verbose);
                     let row = if let Some(timing) = self.active_turn_timing.as_mut() {
@@ -728,7 +732,25 @@ impl InteractiveApp {
                     } else {
                         row
                     };
-                    self.rows.push(row);
+
+                    if is_search_progress {
+                        // Replace existing progress row in-place instead of accumulating.
+                        if let Some(idx) = self.search_progress_row {
+                            if idx < self.rows.len() {
+                                self.rows[idx] = row;
+                            } else {
+                                self.search_progress_row = Some(self.rows.len());
+                                self.rows.push(row);
+                            }
+                        } else {
+                            self.search_progress_row = Some(self.rows.len());
+                            self.rows.push(row);
+                        }
+                    } else {
+                        // Any non-progress event supersedes the progress row.
+                        self.search_progress_row = None;
+                        self.rows.push(row);
+                    }
                 } else if let Some(timing) = self.active_turn_timing.as_mut() {
                     timing.mark_step(occurred_at, pace);
                 }
@@ -736,28 +758,31 @@ impl InteractiveApp {
             UiMessage::TurnFinished {
                 result,
                 occurred_at,
-            } => match result {
-                Ok(response) => {
-                    let row_index = self.rows.len();
-                    let row = self.annotate_turn_total(
-                        TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", ""),
-                        occurred_at,
-                    );
-                    self.rows.push(row);
-                    self.pending_reveal = Some(PendingReveal::new(row_index, response));
-                    self.busy = true;
-                    self.busy_phase = BusyPhase::Rendering;
+            } => {
+                self.search_progress_row = None;
+                match result {
+                    Ok(response) => {
+                        let row_index = self.rows.len();
+                        let row = self.annotate_turn_total(
+                            TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", ""),
+                            occurred_at,
+                        );
+                        self.rows.push(row);
+                        self.pending_reveal = Some(PendingReveal::new(row_index, response));
+                        self.busy = true;
+                        self.busy_phase = BusyPhase::Rendering;
+                    }
+                    Err(error) => {
+                        let row = self.annotate_turn_total(
+                            TranscriptRow::new(TranscriptRowKind::Error, "• Turn failed", error),
+                            occurred_at,
+                        );
+                        self.rows.push(row);
+                        self.busy = false;
+                        self.busy_phase = BusyPhase::Idle;
+                    }
                 }
-                Err(error) => {
-                    let row = self.annotate_turn_total(
-                        TranscriptRow::new(TranscriptRowKind::Error, "• Turn failed", error),
-                        occurred_at,
-                    );
-                    self.rows.push(row);
-                    self.busy = false;
-                    self.busy_phase = BusyPhase::Idle;
-                }
-            },
+            }
         }
         let _ = self.step_timing.flush(&self.step_timing_path);
     }
