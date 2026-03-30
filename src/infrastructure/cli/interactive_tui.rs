@@ -682,9 +682,8 @@ impl InteractiveApp {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),
-                Constraint::Length(transcript_height),
+                Constraint::Min(transcript_height),
                 Constraint::Length(input_height),
-                Constraint::Min(0),
             ])
             .split(area);
 
