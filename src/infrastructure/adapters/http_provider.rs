@@ -656,3 +656,482 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
+    use crate::application::{MechSuitService, RuntimeLaneConfig};
+    use crate::domain::model::{TurnEvent, TurnEventSink};
+    use crate::domain::ports::{ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine};
+    use crate::infrastructure::adapters::agent_memory::AgentMemory;
+    use anyhow::{Result, anyhow};
+    use async_trait::async_trait;
+    use axum::{
+        Router,
+        body::Bytes,
+        extract::State,
+        http::{HeaderMap, StatusCode, Uri},
+        response::{IntoResponse, Response},
+        routing::any,
+    };
+    use serde_json::{Value, json};
+    use std::collections::{BTreeMap, VecDeque};
+    use std::fs;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use tokio::task::JoinHandle;
+
+    #[derive(Default)]
+    struct StaticRegistry;
+
+    #[async_trait]
+    impl ModelRegistry for StaticRegistry {
+        async fn get_model_paths(&self, _model_id: &str) -> Result<ModelPaths> {
+            Err(anyhow!(
+                "static registry is not used by HTTP provider tests"
+            ))
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingTurnEventSink {
+        events: Mutex<Vec<TurnEvent>>,
+    }
+
+    impl RecordingTurnEventSink {
+        fn recorded(&self) -> Vec<TurnEvent> {
+            self.events.lock().expect("event lock").clone()
+        }
+    }
+
+    impl TurnEventSink for RecordingTurnEventSink {
+        fn emit(&self, event: TurnEvent) {
+            self.events.lock().expect("event lock").push(event);
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct MockResponse {
+        status: StatusCode,
+        body: String,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct RecordedRequest {
+        uri: String,
+        headers: BTreeMap<String, String>,
+        body: Value,
+    }
+
+    struct MockServerState {
+        responses: Mutex<VecDeque<MockResponse>>,
+        requests: Mutex<Vec<RecordedRequest>>,
+    }
+
+    struct MockServerHandle {
+        base_url: String,
+        state: Arc<MockServerState>,
+        task: JoinHandle<()>,
+    }
+
+    impl MockServerHandle {
+        fn recorded_requests(&self) -> Vec<RecordedRequest> {
+            self.state.requests.lock().expect("request lock").clone()
+        }
+    }
+
+    impl Drop for MockServerHandle {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn mock_handler(
+        State(state): State<Arc<MockServerState>>,
+        headers: HeaderMap,
+        uri: Uri,
+        body: Bytes,
+    ) -> Response {
+        let body_text = String::from_utf8(body.to_vec()).expect("utf8 body");
+        let body_json =
+            serde_json::from_str(&body_text).unwrap_or_else(|_| Value::String(body_text.clone()));
+        let recorded = RecordedRequest {
+            uri: uri.to_string(),
+            headers: headers_to_map(&headers),
+            body: body_json,
+        };
+        state.requests.lock().expect("request lock").push(recorded);
+
+        let response = state
+            .responses
+            .lock()
+            .expect("response lock")
+            .pop_front()
+            .expect("queued response");
+        (
+            response.status,
+            [("content-type", "application/json")],
+            response.body,
+        )
+            .into_response()
+    }
+
+    fn headers_to_map(headers: &HeaderMap) -> BTreeMap<String, String> {
+        headers
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap_or("<non-utf8>").to_string(),
+                )
+            })
+            .collect()
+    }
+
+    async fn start_mock_server(responses: Vec<MockResponse>) -> MockServerHandle {
+        let state = Arc::new(MockServerState {
+            responses: Mutex::new(VecDeque::from(responses)),
+            requests: Mutex::new(Vec::new()),
+        });
+        let app = Router::new()
+            .fallback(any(mock_handler))
+            .with_state(Arc::clone(&state));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock server");
+        let addr = listener.local_addr().expect("local addr");
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("run mock server");
+        });
+        MockServerHandle {
+            base_url: format!("http://{}", addr),
+            state,
+            task,
+        }
+    }
+
+    fn provider_response(format: ApiFormat, content: &str) -> String {
+        match format {
+            ApiFormat::OpenAi => json!({
+                "choices": [
+                    {
+                        "message": {
+                            "content": content
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+            ApiFormat::Anthropic => json!({
+                "content": [
+                    {
+                        "text": content
+                    }
+                ]
+            })
+            .to_string(),
+            ApiFormat::Gemini => json!({
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "text": content
+                                }
+                            ]
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+        }
+    }
+
+    fn planner_json_answer() -> String {
+        json!({
+            "action": "answer",
+            "rationale": "the mock planner can answer directly"
+        })
+        .to_string()
+    }
+
+    fn http_test_service(
+        workspace: &Path,
+        base_url: String,
+        api_key: String,
+        format: ApiFormat,
+    ) -> MechSuitService {
+        let operator_memory = Arc::new(AgentMemory::load(workspace));
+
+        let synth_base_url = base_url.clone();
+        let synth_api_key = api_key.clone();
+        let synthesizer_factory: Box<crate::application::SynthesizerFactory> =
+            Box::new(move |workspace: &Path, model_id: &str| {
+                Ok(Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    model_id.to_string(),
+                    synth_api_key.clone(),
+                    synth_base_url.clone(),
+                    format,
+                )) as Arc<dyn SynthesizerEngine>)
+            });
+
+        let planner_base_url = base_url;
+        let planner_api_key = api_key;
+        let planner_factory: Box<crate::application::PlannerFactory> =
+            Box::new(move |workspace: &Path, model_id: &str| {
+                let engine = Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    model_id.to_string(),
+                    planner_api_key.clone(),
+                    planner_base_url.clone(),
+                    format,
+                ));
+                Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
+            });
+
+        let gatherer_factory: Box<crate::application::GathererFactory> =
+            Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
+
+        MechSuitService::new(
+            workspace,
+            Arc::new(StaticRegistry),
+            operator_memory,
+            synthesizer_factory,
+            planner_factory,
+            gatherer_factory,
+        )
+    }
+
+    async fn run_mocked_turn(
+        format: ApiFormat,
+        model_id: &str,
+    ) -> (Vec<RecordedRequest>, Vec<TurnEvent>, String) {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the remote provider planner before answering.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(format, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(format, "Mocked final answer."),
+            },
+        ])
+        .await;
+
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            format,
+        );
+        let runtime_lanes =
+            RuntimeLaneConfig::new(model_id.to_string(), None).with_requires_local_models(false);
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let response = service
+            .process_prompt_with_sink("Sup dawg", sink.clone())
+            .await
+            .expect("process prompt");
+
+        (server.recorded_requests(), sink.recorded(), response)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_provider_executes_a_full_turn_against_a_mock_server() {
+        let model_id = "gpt-4o-mini";
+        let (requests, events, response) = run_mocked_turn(ApiFormat::OpenAi, model_id).await;
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].uri, "/v1/chat/completions");
+        assert_eq!(requests[1].uri, "/v1/chat/completions");
+        assert_eq!(
+            requests[0].headers.get("authorization").map(String::as_str),
+            Some("Bearer test-key")
+        );
+        assert_eq!(requests[0].body["model"].as_str(), Some(model_id));
+        assert!(
+            requests[0].body["messages"][0]["content"]
+                .as_str()
+                .expect("planner system prompt")
+                .contains("Action Schema")
+        );
+        assert!(
+            requests[0].body["messages"][1]["content"]
+                .as_str()
+                .expect("planner user prompt")
+                .contains("User prompt: Sup dawg")
+        );
+        assert_eq!(
+            requests[1].body["messages"][0]["content"].as_str(),
+            Some("You are Paddles, a helpful AI assistant. Provide concise, accurate answers.")
+        );
+        assert!(
+            requests[1].body["messages"][1]["content"]
+                .as_str()
+                .expect("synth user prompt")
+                .contains("Sup dawg")
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::InterpretationContext { summary, .. }
+                if summary.contains("HTTP provider interpretation")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerCapability { provider, .. } if provider == model_id
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::SynthesisReady {
+                grounded: false,
+                ..
+            }
+        )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn anthropic_provider_executes_a_full_turn_against_a_mock_server() {
+        let model_id = "claude-sonnet-4-20250514";
+        let (requests, events, response) = run_mocked_turn(ApiFormat::Anthropic, model_id).await;
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].uri, "/v1/messages");
+        assert_eq!(requests[1].uri, "/v1/messages");
+        assert_eq!(
+            requests[0].headers.get("x-api-key").map(String::as_str),
+            Some("test-key")
+        );
+        assert_eq!(
+            requests[0]
+                .headers
+                .get("anthropic-version")
+                .map(String::as_str),
+            Some("2023-06-01")
+        );
+        assert_eq!(requests[0].body["model"].as_str(), Some(model_id));
+        assert!(
+            requests[0].body["system"]
+                .as_str()
+                .expect("planner system prompt")
+                .contains("Action Schema")
+        );
+        assert!(
+            requests[0].body["messages"][0]["content"]
+                .as_str()
+                .expect("planner user prompt")
+                .contains("User prompt: Sup dawg")
+        );
+        assert_eq!(
+            requests[1].body["system"].as_str(),
+            Some("You are Paddles, a helpful AI assistant. Provide concise, accurate answers.")
+        );
+        assert!(
+            requests[1].body["messages"][0]["content"]
+                .as_str()
+                .expect("synth user prompt")
+                .contains("Sup dawg")
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerCapability { provider, .. } if provider == model_id
+        )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gemini_provider_executes_a_full_turn_against_a_mock_server() {
+        let model_id = "gemini-2.5-flash";
+        let (requests, events, response) = run_mocked_turn(ApiFormat::Gemini, model_id).await;
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0].uri,
+            format!("/v1beta/models/{model_id}:generateContent?key=test-key")
+        );
+        assert_eq!(
+            requests[1].uri,
+            format!("/v1beta/models/{model_id}:generateContent?key=test-key")
+        );
+        assert!(
+            requests[0].body["system_instruction"]["parts"][0]["text"]
+                .as_str()
+                .expect("planner system prompt")
+                .contains("Action Schema")
+        );
+        assert!(
+            requests[0].body["contents"][0]["parts"][0]["text"]
+                .as_str()
+                .expect("planner user prompt")
+                .contains("User prompt: Sup dawg")
+        );
+        assert_eq!(
+            requests[1].body["system_instruction"]["parts"][0]["text"].as_str(),
+            Some("You are Paddles, a helpful AI assistant. Provide concise, accurate answers.")
+        );
+        assert!(
+            requests[1].body["contents"][0]["parts"][0]["text"]
+                .as_str()
+                .expect("synth user prompt")
+                .contains("Sup dawg")
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::SynthesisReady {
+                grounded: false,
+                ..
+            }
+        )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_provider_surfaces_mock_server_errors_through_full_turns() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("AGENTS.md"), "# Operator Memory\n")
+            .expect("write AGENTS.md");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::NOT_FOUND,
+            body: json!({
+                "error": {
+                    "message": "Not found the model kimi-2.5 or Permission denied",
+                    "type": "resource_not_found_error"
+                }
+            })
+            .to_string(),
+        }])
+        .await;
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            ApiFormat::OpenAi,
+        );
+        let runtime_lanes =
+            RuntimeLaneConfig::new("kimi-k2.5".to_string(), None).with_requires_local_models(false);
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let err = service
+            .process_prompt("Sup dawg")
+            .await
+            .expect_err("planner request should fail");
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("OpenAI API error 404 Not Found"));
+        assert!(rendered.contains("Not found the model kimi-2.5 or Permission denied"));
+    }
+}
