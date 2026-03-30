@@ -1,6 +1,6 @@
 use crate::domain::ports::{
-    InterpretationContext, InterpretationDecisionFramework, InterpretationDocument,
-    OperatorMemoryDocument,
+    GuidanceCategory, InterpretationContext, InterpretationDecisionFramework,
+    InterpretationDocument, OperatorMemoryDocument,
 };
 use std::collections::HashSet;
 use std::env;
@@ -176,6 +176,7 @@ fn build_interpretation_context_from_documents(
         .map(|document| InterpretationDocument {
             source: display_path(workspace_root, &document.path),
             excerpt: fallback_excerpt(&document.contents),
+            category: GuidanceCategory::Rule,
         })
         .collect::<Vec<_>>();
 
@@ -187,6 +188,7 @@ fn build_interpretation_context_from_documents(
         documents: interpretation_documents,
         tool_hints: Vec::new(),
         decision_framework: InterpretationDecisionFramework::default(),
+        ..InterpretationContext::default()
     }
 }
 

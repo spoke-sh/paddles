@@ -625,19 +625,32 @@ fn render_turn_event(event: &TurnEvent) -> String {
         TurnEvent::IntentClassified { intent } => {
             format!("• Classified turn\n  └ {}", intent.label())
         }
-        TurnEvent::InterpretationContext { summary, sources } => {
-            let mut lines = vec![
-                "• Assembled interpretation context".to_string(),
-                format!("  └ {}", trim_event_detail(summary, 3)),
-            ];
-            if !sources.is_empty() {
+        TurnEvent::InterpretationContext { context } => {
+            let mut lines = vec![format!(
+                "• Assembled interpretation context [{} docs, {} hints, {} procedures]",
+                context.documents.len(),
+                context.tool_hints.len(),
+                context.decision_framework.procedures.len()
+            )];
+            lines.push(format!("  └ {}", trim_event_detail(&context.summary, 3)));
+            if !context.documents.is_empty() {
                 lines.push(format!(
                     "    Sources: {}",
-                    trim_event_detail(&sources.join(", "), 2)
+                    trim_event_detail(&context.sources().join(", "), 2)
                 ));
             }
             lines.join("\n")
         }
+        TurnEvent::GuidanceGraphExpanded {
+            depth,
+            document_count,
+            sources,
+        } => format!(
+            "• Expanded guidance graph (depth {})\n  └ Discovered {} docs: {}",
+            depth,
+            document_count,
+            trim_event_detail(&sources.join(", "), 2)
+        ),
         TurnEvent::RouteSelected { summary } => {
             format!("• Routed turn\n  └ {}", trim_event_detail(summary, 2))
         }
@@ -1016,7 +1029,7 @@ impl MechSuitService {
         drop(runtime_guard);
 
         let interpretation = self
-            .derive_interpretation_context(prompt, planner_engine.as_ref())
+            .derive_interpretation_context(prompt, planner_engine.as_ref(), event_sink.clone())
             .await;
         let turn_id = session.allocate_turn_id();
         let active_thread = session.active_thread().thread_ref;
@@ -1029,8 +1042,7 @@ impl MechSuitService {
         ));
         trace.record_turn_start(prompt, &interpretation, &prepared);
         trace.emit(TurnEvent::InterpretationContext {
-            summary: interpretation.summary.clone(),
-            sources: interpretation.sources(),
+            context: interpretation.clone(),
         });
 
         let planner_capability = planner_engine.capability();
@@ -1135,7 +1147,11 @@ impl MechSuitService {
         drop(runtime_guard);
 
         let interpretation = self
-            .derive_interpretation_context(&candidate.prompt, planner_engine.as_ref())
+            .derive_interpretation_context(
+                &candidate.prompt,
+                planner_engine.as_ref(),
+                event_sink.clone(),
+            )
             .await;
         let source_thread = candidate.active_thread.clone();
         let turn_id = session.allocate_turn_id();
@@ -1219,6 +1235,7 @@ impl MechSuitService {
         &self,
         prompt: &str,
         planner: &dyn RecursivePlanner,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> InterpretationContext {
         let request = InterpretationRequest::new(
             prompt,
@@ -1226,7 +1243,10 @@ impl MechSuitService {
             self.operator_memory
                 .operator_memory_documents(&self.workspace_root),
         );
-        match planner.derive_interpretation_context(&request).await {
+        match planner
+            .derive_interpretation_context(&request, event_sink)
+            .await
+        {
             Ok(context) => context,
             Err(err) => {
                 if self.verbose.load(Ordering::Relaxed) >= 1 {
@@ -2195,6 +2215,7 @@ mod tests {
         async fn derive_interpretation_context(
             &self,
             request: &InterpretationRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<InterpretationContext> {
             Ok(InterpretationContext {
                 summary: format!(
@@ -2207,10 +2228,12 @@ mod tests {
                     .map(|document| crate::domain::ports::InterpretationDocument {
                         source: document.source.clone(),
                         excerpt: document.contents.clone(),
+                        category: crate::domain::ports::GuidanceCategory::Rule,
                     })
                     .collect(),
                 tool_hints: Vec::new(),
                 decision_framework: Default::default(),
+                ..Default::default()
             })
         }
 

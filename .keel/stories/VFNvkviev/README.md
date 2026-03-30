@@ -1,9 +1,10 @@
 ---
 # system-managed
 id: VFNvkviev
-status: backlog
-created_at: 2026-03-30T13:35:16
-updated_at: 2026-03-30T14:19:09
+status: done
+updated_at: 2026-03-30T15:10:00
+started_at: 2026-03-30T14:30:00
+completed_at: 2026-03-30T15:10:00
 # authored
 title: Enrich Interpretation Context TurnEvent Payload
 type: feat
@@ -20,7 +21,7 @@ Enrich TurnEvent::InterpretationContext with structured category counts (doc_cou
 
 ## Acceptance Criteria
 
-- [ ] TurnEvent::InterpretationContext carries doc_count, hint_count, and procedure_count fields [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
-- [ ] TurnEvent::InterpretationContext carries a compact detail string summarizing the category breakdown [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end -->
-- [ ] Zero-count categories are represented as 0 and the detail string omits them gracefully [SRS-01/AC-03] <!-- verify: manual, SRS-01:start:end -->
-- [ ] Existing consumers of TurnEvent::InterpretationContext compile and function without changes [SRS-01/AC-04] <!-- verify: manual, SRS-01:start:end -->
+- [x] TurnEvent::InterpretationContext carries doc_count, hint_count, and procedure_count fields [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
+- [x] TurnEvent::InterpretationContext carries a compact detail string summarizing the category breakdown [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end -->
+- [x] Zero-count categories are represented as 0 and the detail string omits them gracefully [SRS-01/AC-03] <!-- verify: manual, SRS-01:start:end -->
+- [x] Existing consumers of TurnEvent::InterpretationContext compile and function without changes [SRS-01/AC-04] <!-- verify: manual, SRS-01:start:end -->

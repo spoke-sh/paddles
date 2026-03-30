@@ -1,3 +1,4 @@
+use super::interpretation::InterpretationContext;
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
@@ -47,7 +48,11 @@ pub enum TurnEvent {
         intent: TurnIntent,
     },
     InterpretationContext {
-        summary: String,
+        context: InterpretationContext,
+    },
+    GuidanceGraphExpanded {
+        depth: usize,
+        document_count: usize,
         sources: Vec<String>,
     },
     RouteSelected {
@@ -130,6 +135,7 @@ impl TurnEvent {
         match self {
             Self::IntentClassified { .. } => "intent_classified",
             Self::InterpretationContext { .. } => "interpretation_context",
+            Self::GuidanceGraphExpanded { .. } => "guidance_graph_expanded",
             Self::RouteSelected { .. } => "route_selected",
             Self::PlannerCapability { .. } => "planner_capability",
             Self::GathererCapability { .. } => "gatherer_capability",
@@ -161,6 +167,7 @@ impl TurnEvent {
             | Self::PlannerSummary { .. }
             | Self::ContextAssembly { .. }
             | Self::ThreadDecisionApplied { .. }
+            | Self::GuidanceGraphExpanded { .. }
             | Self::ThreadMerged { .. } => 1,
 
             Self::IntentClassified { .. }

@@ -27,8 +27,10 @@ impl RecursivePlanner for SiftPlannerAdapter {
     async fn derive_interpretation_context(
         &self,
         request: &InterpretationRequest,
+        event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
     ) -> Result<InterpretationContext, anyhow::Error> {
-        self.engine.derive_interpretation_context(request)
+        self.engine
+            .derive_interpretation_context(request, event_sink)
     }
 
     async fn select_initial_action(

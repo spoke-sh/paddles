@@ -57,10 +57,10 @@ The interpretation context is assembled in a single model pass with no self-vali
 <!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| NFR-01 | Refinement loop bounded to max 1 additional cycle (2 total assembly passes) | - | must | Prevents runaway cost |
-| NFR-02 | Total additional model calls for refinement capped at 2 (validate + re-assemble) | - | must | Predictable cost ceiling |
-| NFR-03 | Fallback to single-pass result if refinement fails or times out | - | must | Never worse than today |
-| NFR-04 | No new crate dependencies | - | must | Keep dependency surface minimal |
+| NFR-01 | Refinement loop bounded to max 1 additional cycle (2 total assembly passes) | GOAL-03 | must | Prevents runaway cost |
+| NFR-02 | Total additional model calls for refinement capped at 2 (validate + re-assemble) | GOAL-03 | must | Predictable cost ceiling |
+| NFR-03 | Fallback to single-pass result if refinement fails or times out | GOAL-03 | must | Never worse than today |
+| NFR-04 | No new crate dependencies | GOAL-01, GOAL-02, GOAL-03 | must | Keep dependency surface minimal |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->
 
 ## Verification Strategy

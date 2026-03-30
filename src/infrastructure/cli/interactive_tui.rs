@@ -722,7 +722,7 @@ impl InteractiveApp {
                     .unwrap_or(Pace::Normal);
 
                 if self.should_show_event(&event, pace, is_first_step) {
-                    let row = format_turn_event_row(event);
+                    let row = format_turn_event_row(event, self.verbose);
                     let row = if let Some(timing) = self.active_turn_timing.as_mut() {
                         row.timed(timing.mark_step(occurred_at, pace))
                     } else {
@@ -1168,26 +1168,78 @@ fn render_assistant_line(
     Line::from(spans)
 }
 
-fn format_turn_event_row(event: TurnEvent) -> TranscriptRow {
+fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
     match event {
         TurnEvent::IntentClassified { intent } => {
             TranscriptRow::new(TranscriptRowKind::Event, "• Classified", intent.label())
         }
-        TurnEvent::InterpretationContext { summary, sources } => {
-            let mut content = collapse_event_details(&summary, EVENT_DETAIL_LINE_LIMIT);
-            if !sources.is_empty() {
-                if !content.is_empty() {
-                    content.push('\n');
+        TurnEvent::InterpretationContext { context } => {
+            let content = if verbose >= 2 {
+                context.render()
+            } else if verbose == 1 {
+                let mut sections = vec![collapse_event_details(
+                    &context.summary,
+                    EVENT_DETAIL_LINE_LIMIT,
+                )];
+                if !context.documents.is_empty() {
+                    sections.push(format!("Sources: {}", context.sources().join(", ")));
+                    for doc in &context.documents {
+                        sections.push(format!(
+                            "--- {} [{:?}] ---\n{}",
+                            doc.source,
+                            doc.category,
+                            collapse_event_details(&doc.excerpt, 2)
+                        ));
+                    }
                 }
-                content.push_str("Sources: ");
-                content.push_str(&sources.join(", "));
-            }
+                if !context.tool_hints.is_empty() {
+                    sections.push("--- Tool Hints ---".to_string());
+                    sections.extend(context.tool_hints.iter().map(|hint| {
+                        format!(
+                            "- {} ({}) — {}",
+                            hint.action.summary(),
+                            hint.source,
+                            hint.note
+                        )
+                    }));
+                }
+                sections.join("\n\n")
+            } else {
+                let mut content = collapse_event_details(&context.summary, EVENT_DETAIL_LINE_LIMIT);
+                let sources = context.sources();
+                if !sources.is_empty() {
+                    if !content.is_empty() {
+                        content.push('\n');
+                    }
+                    content.push_str("Sources: ");
+                    content.push_str(&sources.join(", "));
+                }
+                content
+            };
+
             TranscriptRow::new(
                 TranscriptRowKind::Event,
-                "• Assembled interpretation context",
+                format!(
+                    "• Assembled interpretation context [{} docs, {} hints, {} procedures]",
+                    context.documents.len(),
+                    context.tool_hints.len(),
+                    context.decision_framework.procedures.len()
+                ),
                 content,
             )
         }
+        TurnEvent::GuidanceGraphExpanded {
+            depth,
+            document_count,
+            sources,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Expanded guidance graph",
+            format!(
+                "depth {depth}: found {document_count} docs ({})",
+                sources.join(", ")
+            ),
+        ),
         TurnEvent::RouteSelected { summary } => TranscriptRow::new(
             TranscriptRowKind::Event,
             "• Routed",
@@ -1603,11 +1655,14 @@ mod tests {
 
     #[test]
     fn turn_events_render_as_codex_like_action_rows() {
-        let row = format_turn_event_row(TurnEvent::ToolCalled {
-            call_id: "tool-1".to_string(),
-            tool_name: "shell".to_string(),
-            invocation: "git status --short".to_string(),
-        });
+        let row = format_turn_event_row(
+            TurnEvent::ToolCalled {
+                call_id: "tool-1".to_string(),
+                tool_name: "shell".to_string(),
+                invocation: "git status --short".to_string(),
+            },
+            0,
+        );
 
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Ran shell");

@@ -52,8 +52,8 @@ Turn event deltas are displayed uniformly in the transcript with no sense of whe
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
 | NFR-01 | Reservoir window capped at 50 entries per event type | GOAL-02 | must | Bounded storage, natural adaptation |
-| NFR-02 | No new crate dependencies | - | must | Keep the dependency surface minimal |
-| NFR-03 | File I/O must not block the UI thread | - | should | Flush happens after turn completion, not during render |
+| NFR-02 | No new crate dependencies | GOAL-01, GOAL-02 | must | Keep the dependency surface minimal |
+| NFR-03 | File I/O must not block the UI thread | GOAL-01 | should | Flush happens after turn completion, not during render |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->
 
 ## Verification Strategy

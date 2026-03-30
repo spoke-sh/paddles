@@ -16,7 +16,8 @@ pub use context_gathering::{
 };
 pub use operator_memory::OperatorMemory;
 pub use planning::{
-    InitialAction, InitialActionDecision, InterpretationContext, InterpretationDecisionFramework,
+    GuidanceCategory, InitialAction, InitialActionDecision, InterpretationConflict,
+    InterpretationContext, InterpretationCoverageConfidence, InterpretationDecisionFramework,
     InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
     InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
     PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,

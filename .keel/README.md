@@ -198,18 +198,18 @@
 |--------|--------|
 | [Step Timing Implementation](epics/VFNccFj7d/voyages/VFNcoxjU3/) | done |
 
-### [Interpretation Context TUI Visibility](epics/VFNvFQPuA/) (active)
+### [Interpretation Context TUI Visibility](epics/VFNvFQPuA/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Interpretation Visibility](epics/VFNvFQPuA/voyages/VFNvfKIV6/) | planned |
+| [Interpretation Visibility](epics/VFNvFQPuA/voyages/VFNvfKIV6/) | done |
 
-### [Recursive Interpretation Refinement](epics/VFNvH5LxS/) (active)
+### [Recursive Interpretation Refinement](epics/VFNvH5LxS/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Refinement Loop Core](epics/VFNvH5LxS/voyages/VFNvha5ZW/) | planned |
-| [Refinement Loop Integration](epics/VFNvH5LxS/voyages/VFNvhauZg/) | planned |
+| [Refinement Loop Core](epics/VFNvH5LxS/voyages/VFNvha5ZW/) | done |
+| [Refinement Loop Integration](epics/VFNvH5LxS/voyages/VFNvhauZg/) | done |
 
 ### [Sift Search Progress In Paddles TUI](epics/VFNyZ12IX/) (active)
 

@@ -669,6 +669,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
     async fn derive_interpretation_context(
         &self,
         request: &InterpretationRequest,
+        _event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InterpretationContext> {
         Ok(InterpretationContext {
             summary: format!(
@@ -681,10 +682,12 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 .map(|doc| crate::domain::ports::InterpretationDocument {
                     source: doc.source.clone(),
                     excerpt: truncate(&doc.contents, 500),
+                    category: crate::domain::ports::GuidanceCategory::Convention,
                 })
                 .collect(),
             tool_hints: Vec::new(),
             decision_framework: Default::default(),
+            ..InterpretationContext::default()
         })
     }
 
@@ -1271,8 +1274,8 @@ mod tests {
         );
         assert!(events.iter().any(|event| matches!(
             event,
-            TurnEvent::InterpretationContext { summary, .. }
-                if summary.contains("HTTP provider interpretation")
+            TurnEvent::InterpretationContext { context, .. }
+                if context.summary.contains("HTTP provider interpretation")
         )));
         assert!(events.iter().any(|event| matches!(
             event,

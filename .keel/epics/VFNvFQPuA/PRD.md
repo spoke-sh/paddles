@@ -49,8 +49,8 @@ The TUI shows only a generic summary and source list for the interpretation cont
 <!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| NFR-01 | Rendering must respect existing verbosity tier and pace promotion system | - | must | Consistent UX |
-| NFR-02 | No additional model calls for rendering — use what's already derived | - | must | No cost increase |
+| NFR-01 | Rendering must respect existing verbosity tier and pace promotion system | GOAL-01 | must | Consistent UX |
+| NFR-02 | No additional model calls for rendering — use what's already derived | GOAL-01 | must | No cost increase |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->
 
 ## Verification Strategy

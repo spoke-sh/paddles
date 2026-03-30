@@ -4,11 +4,12 @@ use crate::domain::model::{
     ThreadMergeMode, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
-    EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext,
-    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
-    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
-    OperatorMemoryDocument, PlannerAction, PlannerRequest, RecursivePlannerDecision, RetrievalMode,
-    RetrievalStrategy, ThreadDecisionRequest, WorkspaceAction,
+    EvidenceBundle, GuidanceCategory, InitialAction, InitialActionDecision, InterpretationConflict,
+    InterpretationContext, InterpretationCoverageConfidence, InterpretationDecisionFramework,
+    InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
+    InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
+    PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
+    ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -281,6 +282,20 @@ enum ThreadDecisionEnvelope {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationValidationEnvelope {
+    #[serde(default)]
+    gaps: Vec<InterpretationGapEnvelope>,
+    #[serde(default)]
+    needs_more_guidance: bool,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationGapEnvelope {
+    area: String,
+    rationale: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 struct InterpretationGraphEnvelope {
     #[serde(default)]
     edges: Vec<InterpretationGraphEdge>,
@@ -296,12 +311,27 @@ struct InterpretationContextEnvelope {
     tool_hints: Vec<InterpretationToolHintEnvelope>,
     #[serde(default)]
     procedures: Vec<InterpretationProcedureEnvelope>,
+    #[serde(default)]
+    precedence_chain: Vec<String>,
+    #[serde(default)]
+    conflicts: Vec<InterpretationConflictEnvelope>,
+    #[serde(default)]
+    coverage_confidence: InterpretationCoverageConfidence,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 struct InterpretationDocumentEnvelope {
     source: String,
     excerpt: String,
+    category: GuidanceCategory,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationConflictEnvelope {
+    source_a: String,
+    source_b: String,
+    description: String,
+    resolution: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -1175,17 +1205,60 @@ impl SiftAgentAdapter {
     pub fn derive_interpretation_context(
         &self,
         request: &InterpretationRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InterpretationContext> {
         if request.operator_memory.is_empty() {
             return Ok(InterpretationContext::default());
         }
 
-        let memory = AgentMemory::load(&request.workspace_root);
-        let documents = self.expand_interpretation_guidance_graph(request)?;
+        // --- Iteration 1: Initial Assembly ---
+        let mut documents =
+            self.expand_interpretation_guidance_graph(request, None, event_sink.clone())?;
+        let mut context = self.assemble_interpretation_pass(request, &documents)?;
+
+        // --- Validation Pass ---
+        let mut conversation = self.conversation_factory.start_conversation()?;
+        let validation_reply = self.send_to_model(
+            conversation.as_mut(),
+            &build_interpretation_validation_prompt(request, &context),
+        )?;
+
+        if let Some(validation) = parse_interpretation_validation(&validation_reply)?
+            .filter(|v| v.needs_more_guidance && !v.gaps.is_empty())
+        {
+            // --- Iteration 2: Refined Assembly (Bounded) ---
+            let new_documents = self.expand_interpretation_guidance_graph(
+                request,
+                Some(&validation.gaps),
+                event_sink.clone(),
+            )?;
+
+            // Only proceed if we actually found new documents or different ones
+            if !new_documents.is_empty() {
+                let initial_doc_count = documents.len();
+                documents.extend(new_documents);
+                // Deduplicate by path
+                let mut seen = std::collections::HashSet::new();
+                documents.retain(|d| seen.insert(canonical_document_path(&d.path)));
+
+                if documents.len() > initial_doc_count {
+                    context = self.assemble_interpretation_pass(request, &documents)?;
+                }
+            }
+        }
+
+        Ok(context)
+    }
+
+    fn assemble_interpretation_pass(
+        &self,
+        request: &InterpretationRequest,
+        documents: &[OperatorMemoryDocument],
+    ) -> Result<InterpretationContext> {
         let mut conversation = self.conversation_factory.start_conversation()?;
         let mut reply = self.send_to_model(
             conversation.as_mut(),
-            &build_interpretation_context_prompt(request, &documents),
+            &build_interpretation_context_prompt(request, documents),
         )?;
 
         if is_blank_model_reply(&reply) || parse_interpretation_context(&reply)?.is_none() {
@@ -1196,7 +1269,7 @@ impl SiftAgentAdapter {
             );
             reply = self.send_to_model(
                 conversation.as_mut(),
-                &build_interpretation_context_retry_prompt(request, &documents),
+                &build_interpretation_context_retry_prompt(request, documents),
             )?;
         }
 
@@ -1204,7 +1277,7 @@ impl SiftAgentAdapter {
             return Ok(interpretation_context_from_envelope(
                 envelope,
                 &request.workspace_root,
-                &documents,
+                documents,
             ));
         }
 
@@ -1213,11 +1286,7 @@ impl SiftAgentAdapter {
             &reply,
             "falling back to AGENTS-rooted interpretation context only",
         );
-        Ok(memory.build_interpretation_context_from_documents(
-            &request.user_prompt,
-            &request.workspace_root,
-            &documents,
-        ))
+        Ok(InterpretationContext::default())
     }
 
     pub fn recent_turn_summaries(&self) -> Result<Vec<String>> {
@@ -1806,6 +1875,8 @@ impl SiftAgentAdapter {
     fn expand_interpretation_guidance_graph(
         &self,
         request: &InterpretationRequest,
+        gaps: Option<&[InterpretationGapEnvelope]>,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<Vec<OperatorMemoryDocument>> {
         let mut seen = request
             .operator_memory
@@ -1815,16 +1886,30 @@ impl SiftAgentAdapter {
         let mut all_documents = request.operator_memory.clone();
         let mut frontier = request.operator_memory.clone();
 
-        for _depth in 0..MAX_INTERPRETATION_GRAPH_DEPTH {
+        let depth_limit = if gaps.is_some() {
+            1
+        } else {
+            MAX_INTERPRETATION_GRAPH_DEPTH
+        };
+
+        for depth in 0..depth_limit {
             if frontier.is_empty() || all_documents.len() >= MAX_INTERPRETATION_GRAPH_DOCS {
                 break;
             }
 
             let mut conversation = self.conversation_factory.start_conversation()?;
-            let mut reply = self.send_to_model(
-                conversation.as_mut(),
-                &build_interpretation_graph_prompt(request, &frontier, &all_documents),
-            )?;
+            let prompt = if let Some(gaps) = gaps {
+                build_interpretation_graph_refinement_prompt(
+                    request,
+                    &frontier,
+                    &all_documents,
+                    gaps,
+                )
+            } else {
+                build_interpretation_graph_prompt(request, &frontier, &all_documents)
+            };
+
+            let mut reply = self.send_to_model(conversation.as_mut(), &prompt)?;
 
             if is_blank_model_reply(&reply) || parse_interpretation_graph(&reply)?.is_none() {
                 self.log_retry_reason(
@@ -1832,10 +1917,17 @@ impl SiftAgentAdapter {
                     &reply,
                     "missing or invalid guidance graph response",
                 );
-                reply = self.send_to_model(
-                    conversation.as_mut(),
-                    &build_interpretation_graph_retry_prompt(request, &frontier, &all_documents),
-                )?;
+                let retry_prompt = if let Some(gaps) = gaps {
+                    build_interpretation_graph_refinement_prompt(
+                        request,
+                        &frontier,
+                        &all_documents,
+                        gaps,
+                    )
+                } else {
+                    build_interpretation_graph_retry_prompt(request, &frontier, &all_documents)
+                };
+                reply = self.send_to_model(conversation.as_mut(), &retry_prompt)?;
             }
 
             let Some(graph) = parse_interpretation_graph(&reply)? else {
@@ -1847,6 +1939,7 @@ impl SiftAgentAdapter {
                 break;
             };
 
+            let initial_doc_count = all_documents.len();
             let source_index = frontier
                 .iter()
                 .chain(all_documents.iter())
@@ -1874,6 +1967,14 @@ impl SiftAgentAdapter {
                     next_frontier.push(document.clone());
                     all_documents.push(document);
                 }
+            }
+
+            if all_documents.len() > initial_doc_count {
+                event_sink.emit(TurnEvent::GuidanceGraphExpanded {
+                    depth: depth + 1,
+                    document_count: all_documents.len(),
+                    sources: all_documents.iter().map(|d| d.source.clone()).collect(),
+                });
             }
 
             frontier = next_frontier;
@@ -2077,6 +2178,74 @@ Current user request:\n\
     )
 }
 
+fn build_interpretation_validation_prompt(
+    request: &InterpretationRequest,
+    context: &InterpretationContext,
+) -> String {
+    format!(
+        "You are the interpretation validator for Paddles.\n\
+Review the current interpretation context against the user prompt and identify any missing guidance areas.\n\
+Identify if there are rules, procedures, or conventions mentioned in the prompt that are not represented in the interpretation.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Return this schema:\n\
+{{\n\
+  \"gaps\":[{{\"area\":\"...\",\"rationale\":\"...\"}}],\n\
+  \"needs_more_guidance\":true|false\n\
+}}\n\
+\n\
+User prompt:\n\
+{}\n\
+\n\
+Current interpretation summary:\n\
+{}\n\
+\n\
+Current interpretation documents:\n\
+{}\n",
+        request.user_prompt,
+        context.summary,
+        context
+            .documents
+            .iter()
+            .map(|doc| format!("- {} ({:?})", doc.source, doc.category))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
+fn build_interpretation_graph_refinement_prompt(
+    request: &InterpretationRequest,
+    _frontier: &[OperatorMemoryDocument],
+    loaded: &[OperatorMemoryDocument],
+    gaps: &[InterpretationGapEnvelope],
+) -> String {
+    format!(
+        "You are the operator-memory graph selector for Paddles (refinement phase).\n\
+Your goal is to fill specific guidance gaps identified in the initial interpretation.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Return this schema:\n\
+{{\n\
+  \"edges\":[{{\"source\":\"loaded/source/path\",\"targets\":[\"new/target/path\"]}}]\n\
+}}\n\
+\n\
+Identified gaps:\n\
+{}\n\
+\n\
+User prompt:\n\
+{}\n\
+\n\
+Currently loaded sources:\n\
+{}\n",
+        gaps.iter()
+            .map(|gap| format!("- {}: {}", gap.area, gap.rationale))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        request.user_prompt,
+        format_operator_memory_documents(loaded),
+    )
+}
+
 fn build_interpretation_graph_prompt(
     request: &InterpretationRequest,
     frontier: &[OperatorMemoryDocument],
@@ -2150,15 +2319,30 @@ fn build_interpretation_context_prompt(
     format!(
         "You are the interpretation assembler for Paddles.\n\
 Build the turn-time interpretation context from the loaded AGENTS-rooted guidance graph.\n\
+Identify guidance categories, extract the precedence chain, and detect any conflicts.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Return this schema:\n\
 {{\n\
   \"summary\":\"...\",\n\
-  \"documents\":[{{\"source\":\"loaded/source/path\",\"excerpt\":\"...\"}}],\n\
+  \"documents\":[{{\"source\":\"loaded/source/path\",\"category\":\"rule|convention|constraint|preference\",\"excerpt\":\"...\"}}],\n\
   \"tool_hints\":[{{\"source\":\"loaded/source/path\",\"action\":{{...workspace action...}},\"note\":\"...\"}}],\n\
-  \"procedures\":[{{\"source\":\"loaded/source/path\",\"label\":\"...\",\"purpose\":\"...\",\"steps\":[{{\"index\":0,\"action\":{{...workspace action...}},\"note\":\"...\"}}]}}]\n\
+  \"procedures\":[{{\"source\":\"loaded/source/path\",\"label\":\"...\",\"purpose\":\"...\",\"steps\":[{{\"index\":0,\"action\":{{...workspace action...}},\"note\":\"...\"}}]}}],\n\
+  \"precedence_chain\":[\"source1\", \"source2\"],\n\
+  \"conflicts\":[{{\"source_a\":\"...\",\"source_b\":\"...\",\"description\":\"...\",\"resolution\":\"...\"}}],\n\
+  \"coverage_confidence\":\"low|medium|high\"\n\
 }}\n\
+\n\
+Categories:\n\
+- rule: mandatory requirement or policy\n\
+- convention: preferred style or approach\n\
+- constraint: hard limitation (technical or procedural)\n\
+- preference: operator-specific preference\n\
+\n\
+Precedence Rules:\n\
+- Use the provided document hierarchy to establish the precedence chain.\n\
+- Identify conflicts between guidance documents and state how you resolved them.\n\
+- Assess coverage confidence: \"high\" if all aspects of the user prompt are covered by rules/procedures, \"low\" if major gaps exist.\n\
 \n\
 Workspace action schema:\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\"}}\n\
@@ -2201,7 +2385,15 @@ fn build_interpretation_context_retry_prompt(
     format!(
         "Your last interpretation-context reply was empty or invalid.\n\
 Return ONLY one valid JSON object with this shape:\n\
-{{\"summary\":\"...\",\"documents\":[{{\"source\":\"loaded/source/path\",\"excerpt\":\"...\"}}],\"tool_hints\":[{{\"source\":\"loaded/source/path\",\"action\":{{...workspace action...}},\"note\":\"...\"}}],\"procedures\":[{{\"source\":\"loaded/source/path\",\"label\":\"...\",\"purpose\":\"...\",\"steps\":[{{\"index\":0,\"action\":{{...workspace action...}},\"note\":\"...\"}}]}}]}}\n\
+{{\n\
+  \"summary\":\"...\",\n\
+  \"documents\":[{{\"source\":\"loaded/source/path\",\"category\":\"rule|convention|constraint|preference\",\"excerpt\":\"...\"}}],\n\
+  \"tool_hints\":[{{\"source\":\"loaded/source/path\",\"action\":{{...workspace action...}},\"note\":\"...\"}}],\n\
+  \"procedures\":[{{\"source\":\"loaded/source/path\",\"label\":\"...\",\"purpose\":\"...\",\"steps\":[{{\"index\":0,\"action\":{{...workspace action...}},\"note\":\"...\"}}]}}],\n\
+  \"precedence_chain\":[\"source1\", \"source2\"],\n\
+  \"conflicts\":[{{\"source_a\":\"...\",\"source_b\":\"...\",\"description\":\"...\",\"resolution\":\"...\"}}],\n\
+  \"coverage_confidence\":\"low|medium|high\"\n\
+}}\n\
 \n\
 Use ONLY the loaded document sources and only actions justified by the guidance.\n\
 \n\
@@ -3189,6 +3381,16 @@ fn parse_interpretation_graph(response: &str) -> Result<Option<InterpretationGra
     Ok(serde_json::from_str(json).ok())
 }
 
+fn parse_interpretation_validation(
+    response: &str,
+) -> Result<Option<InterpretationValidationEnvelope>> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(json).ok())
+}
+
 fn parse_interpretation_context(response: &str) -> Result<Option<InterpretationContextEnvelope>> {
     let trimmed = response.trim();
     let Some(json) = extract_json_payload(trimmed) else {
@@ -3259,6 +3461,7 @@ fn interpretation_context_from_envelope(
             (!excerpt.trim().is_empty()).then(|| InterpretationDocument {
                 source: normalize_citation_source(workspace_root, &document.source),
                 excerpt,
+                category: document.category,
             })
         })
         .take(5)
@@ -3321,6 +3524,18 @@ fn interpretation_context_from_envelope(
         documents,
         tool_hints,
         decision_framework: InterpretationDecisionFramework { procedures },
+        precedence_chain: envelope.precedence_chain,
+        conflicts: envelope
+            .conflicts
+            .into_iter()
+            .map(|c| InterpretationConflict {
+                source_a: normalize_citation_source(workspace_root, &c.source_a),
+                source_b: normalize_citation_source(workspace_root, &c.source_b),
+                description: c.description,
+                resolution: c.resolution,
+            })
+            .collect(),
+        coverage_confidence: envelope.coverage_confidence,
     }
 }
 
@@ -4619,11 +4834,13 @@ mod tests {
                 crate::domain::ports::InterpretationDocument {
                     source: "AGENTS.md".to_string(),
                     excerpt: "Use AGENTS guidance before choosing the next action.".to_string(),
+                    category: crate::domain::ports::GuidanceCategory::Rule,
                 },
                 crate::domain::ports::InterpretationDocument {
                     source: "POLICY.md".to_string(),
                     excerpt: "Controller validates actions after the model selects them."
                         .to_string(),
+                    category: crate::domain::ports::GuidanceCategory::Rule,
                 },
             ],
             tool_hints: vec![InterpretationToolHint {
@@ -4647,6 +4864,7 @@ mod tests {
                     }],
                 }],
             },
+            ..Default::default()
         };
         let request = PlannerRequest::new(
             "What's next on the board?",
@@ -4707,22 +4925,30 @@ mod tests {
                     Arc::clone(&recorded_messages),
                 )),
                 Box::new(RecordingConversation::new(
-                    r#"{"summary":"Operator interpretation context assembled from AGENTS-rooted guidance document(s). Use it before choosing recursive workspace actions.","documents":[{"source":"AGENTS.md","excerpt":"Follow `INSTRUCTIONS.md` for the canonical turn loop."},{"source":"INSTRUCTIONS.md","excerpt":"Inspect with `keel mission next` and `keel pulse`."}],"tool_hints":[{"source":"INSTRUCTIONS.md","action":{"action":"inspect","command":"keel mission next"},"note":"Inspect current board demand before acting."}],"procedures":[{"source":"INSTRUCTIONS.md","label":"Inspect","purpose":"Read current demand on the board.","steps":[{"index":0,"action":{"action":"inspect","command":"keel mission next"},"note":"Inspect current board demand."}]}]}"#,
+                    r#"{"summary":"Operator interpretation context assembled from AGENTS-rooted guidance document(s). Use it before choosing recursive workspace actions.","documents":[{"source":"AGENTS.md","excerpt":"Follow `INSTRUCTIONS.md` for the canonical turn loop.","category":"rule"},{"source":"INSTRUCTIONS.md","excerpt":"Inspect with `keel mission next` and `keel pulse`.","category":"rule"}],"tool_hints":[{"source":"INSTRUCTIONS.md","action":{"action":"inspect","command":"keel mission next"},"note":"Inspect current board demand before acting."}],"procedures":[{"source":"INSTRUCTIONS.md","label":"Inspect","purpose":"Read current demand on the board.","steps":[{"index":0,"action":{"action":"inspect","command":"keel mission next"},"note":"Inspect current board demand."}]}]}"#,
+                    Arc::clone(&recorded_messages),
+                )),
+                Box::new(RecordingConversation::new(
+                    r#"{"gaps":[],"needs_more_guidance":false}"#,
                     Arc::clone(&recorded_messages),
                 )),
             ],
         );
 
         let interpretation = adapter
-            .derive_interpretation_context(&InterpretationRequest::new(
-                "What's next on the keel board?",
-                workspace.path(),
-                vec![OperatorMemoryDocument {
-                    path: workspace.path().join("AGENTS.md"),
-                    source: "AGENTS.md".to_string(),
-                    contents: "Follow `INSTRUCTIONS.md` for the canonical turn loop.".to_string(),
-                }],
-            ))
+            .derive_interpretation_context(
+                &InterpretationRequest::new(
+                    "What's next on the keel board?",
+                    workspace.path(),
+                    vec![OperatorMemoryDocument {
+                        path: workspace.path().join("AGENTS.md"),
+                        source: "AGENTS.md".to_string(),
+                        contents: "Follow `INSTRUCTIONS.md` for the canonical turn loop."
+                            .to_string(),
+                    }],
+                ),
+                Arc::new(NullTurnEventSink),
+            )
             .expect("interpretation");
 
         assert!(interpretation.sources().contains(&"AGENTS.md".to_string()));
@@ -4823,6 +5049,7 @@ mod tests {
                         }],
                     }],
                 },
+                ..Default::default()
             },
             crate::domain::ports::PlannerBudget::default(),
         );
@@ -4880,6 +5107,7 @@ mod tests {
                         }],
                     }],
                 },
+                ..Default::default()
             },
             crate::domain::ports::PlannerBudget::default(),
         )
@@ -4955,6 +5183,7 @@ mod tests {
                         }],
                     }],
                 },
+                ..Default::default()
             },
             crate::domain::ports::PlannerBudget::default(),
         )

@@ -1,9 +1,10 @@
 ---
 # system-managed
 id: VFNvkxVgP
-status: backlog
-created_at: 2026-03-30T13:35:16
-updated_at: 2026-03-30T14:19:09
+status: done
+updated_at: 2026-03-30T15:10:00
+started_at: 2026-03-30T14:30:00
+completed_at: 2026-03-30T15:10:00
 # authored
 title: Emit Guidance Graph Expansion Event
 type: feat
@@ -20,8 +21,8 @@ Add a new TurnEvent::GuidanceGraphExpanded variant emitted after expand_interpre
 
 ## Acceptance Criteria
 
-- [ ] TurnEvent::GuidanceGraphExpanded exists with docs_discovered, depth_reached, root_sources fields [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
-- [ ] Event emitted from sift_agent.rs after graph expansion completes [SRS-03/AC-02] <!-- verify: manual, SRS-03:start:end -->
-- [ ] format_turn_event_row renders it as a human-readable line [SRS-03/AC-03] <!-- verify: manual, SRS-03:start:end -->
-- [ ] Event emitted through existing event sink to TUI [SRS-04/AC-04] <!-- verify: manual, SRS-04:start:end -->
-- [ ] min_verbosity=1; hidden at default, visible at -v and above [SRS-04/AC-05] <!-- verify: manual, SRS-04:start:end -->
+- [x] TurnEvent::GuidanceGraphExpanded exists with docs_discovered, depth_reached, root_sources fields [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
+- [x] Event emitted from sift_agent.rs after graph expansion completes [SRS-03/AC-02] <!-- verify: manual, SRS-03:start:end -->
+- [x] format_turn_event_row renders it as a human-readable line [SRS-03/AC-03] <!-- verify: manual, SRS-03:start:end -->
+- [x] Event emitted through existing event sink to TUI [SRS-04/AC-04] <!-- verify: manual, SRS-04:start:end -->
+- [x] min_verbosity=1; hidden at default, visible at -v and above [SRS-04/AC-05] <!-- verify: manual, SRS-04:start:end -->

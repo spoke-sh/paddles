@@ -1,8 +1,14 @@
 use anyhow::Result;
 
+pub mod interpretation;
 pub mod threading;
 pub mod traces;
 pub mod turns;
+pub use interpretation::{
+    GuidanceCategory, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
+};
 pub use paddles_conversation::{
     ArtifactEnvelope, ArtifactKind, ConversationThread, ConversationThreadRef,
     ConversationThreadStatus, TaskTraceId, ThreadCandidate, ThreadCandidateId, ThreadDecision,

@@ -1,12 +1,17 @@
 use super::context_gathering::{
     EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy,
 };
-use crate::domain::model::{
-    ConversationThread, ThreadCandidate, ThreadDecision, TraceBranch, TraceBranchId,
+pub use crate::domain::model::{
+    ConversationThread, GuidanceCategory, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate,
+    ThreadDecision, TraceBranch, TraceBranchId, WorkspaceAction,
 };
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+use crate::domain::model::TurnEventSink;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait RecursivePlanner: Send + Sync {
@@ -15,6 +20,7 @@ pub trait RecursivePlanner: Send + Sync {
     async fn derive_interpretation_context(
         &self,
         request: &InterpretationRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InterpretationContext, anyhow::Error>;
 
     async fn select_initial_action(
@@ -37,69 +43,6 @@ pub trait RecursivePlanner: Send + Sync {
 pub enum PlannerCapability {
     Available,
     Unsupported { reason: String },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct InterpretationContext {
-    pub summary: String,
-    pub documents: Vec<InterpretationDocument>,
-    pub tool_hints: Vec<InterpretationToolHint>,
-    pub decision_framework: InterpretationDecisionFramework,
-}
-
-impl InterpretationContext {
-    pub fn is_empty(&self) -> bool {
-        self.summary.trim().is_empty()
-            && self.documents.is_empty()
-            && self.tool_hints.is_empty()
-            && self.decision_framework.procedures.is_empty()
-    }
-
-    pub fn sources(&self) -> Vec<String> {
-        self.documents
-            .iter()
-            .map(|document| document.source.clone())
-            .collect()
-    }
-
-    pub fn render(&self) -> String {
-        if self.is_empty() {
-            return "No operator interpretation context was assembled.".to_string();
-        }
-
-        let mut sections = vec![self.summary.trim().to_string()];
-        for document in &self.documents {
-            sections.push(format!(
-                "--- {} ---\n{}",
-                document.source,
-                document.excerpt.trim()
-            ));
-        }
-        if !self.tool_hints.is_empty() {
-            sections.push("--- Tool Hints ---".to_string());
-            sections.extend(self.tool_hints.iter().map(|hint| {
-                format!(
-                    "- {} ({}) — {}",
-                    hint.action.summary(),
-                    hint.source,
-                    hint.note
-                )
-            }));
-        }
-        if !self.decision_framework.procedures.is_empty() {
-            sections.push("--- Decision Framework ---".to_string());
-            sections.extend(self.decision_framework.procedures.iter().map(|procedure| {
-                format!(
-                    "- {} ({}) — {} [{} step(s)]",
-                    procedure.label,
-                    procedure.source,
-                    procedure.purpose,
-                    procedure.steps.len()
-                )
-            }));
-        }
-        sections.join("\n\n")
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,39 +71,6 @@ pub struct OperatorMemoryDocument {
     pub path: PathBuf,
     pub source: String,
     pub contents: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InterpretationDocument {
-    pub source: String,
-    pub excerpt: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InterpretationToolHint {
-    pub source: String,
-    pub action: WorkspaceAction,
-    pub note: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct InterpretationDecisionFramework {
-    pub procedures: Vec<InterpretationProcedure>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InterpretationProcedure {
-    pub source: String,
-    pub label: String,
-    pub purpose: String,
-    pub steps: Vec<InterpretationProcedureStep>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InterpretationProcedureStep {
-    pub index: usize,
-    pub action: WorkspaceAction,
-    pub note: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -283,120 +193,6 @@ pub struct PlannerStepRecord {
     pub branch_id: Option<TraceBranchId>,
     pub action: PlannerAction,
     pub outcome: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
-pub enum WorkspaceAction {
-    Search {
-        query: String,
-        mode: RetrievalMode,
-        strategy: RetrievalStrategy,
-        #[serde(default)]
-        intent: Option<String>,
-    },
-    ListFiles {
-        #[serde(default)]
-        pattern: Option<String>,
-    },
-    Read {
-        path: String,
-    },
-    Inspect {
-        command: String,
-    },
-    Shell {
-        command: String,
-    },
-    Diff {
-        #[serde(default)]
-        path: Option<String>,
-    },
-    WriteFile {
-        path: String,
-        content: String,
-    },
-    ReplaceInFile {
-        path: String,
-        old: String,
-        new: String,
-        #[serde(default)]
-        replace_all: bool,
-    },
-    ApplyPatch {
-        patch: String,
-    },
-}
-
-impl WorkspaceAction {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Search { .. } => "search",
-            Self::ListFiles { .. } => "list_files",
-            Self::Read { .. } => "read",
-            Self::Inspect { .. } => "inspect",
-            Self::Shell { .. } => "shell",
-            Self::Diff { .. } => "diff",
-            Self::WriteFile { .. } => "write_file",
-            Self::ReplaceInFile { .. } => "replace_in_file",
-            Self::ApplyPatch { .. } => "apply_patch",
-        }
-    }
-
-    pub fn summary(&self) -> String {
-        match self {
-            Self::Search {
-                query,
-                mode,
-                strategy,
-                ..
-            } => format!("search `{query}` [{} / {}]", mode.label(), strategy.label()),
-            Self::ListFiles { pattern } => match pattern {
-                Some(pattern) if !pattern.trim().is_empty() => {
-                    format!("list files matching `{pattern}`")
-                }
-                _ => "list files".to_string(),
-            },
-            Self::Read { path } => format!("read `{path}`"),
-            Self::Inspect { command } => format!("inspect `{command}`"),
-            Self::Shell { command } => command.clone(),
-            Self::Diff { path } => match path {
-                Some(path) if !path.trim().is_empty() => format!("diff `{path}`"),
-                _ => "git diff --no-ext-diff".to_string(),
-            },
-            Self::WriteFile { path, .. } => format!("write `{path}`"),
-            Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
-            Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
-        }
-    }
-
-    /// Human-readable description of this action for event and trace output.
-    pub fn describe(&self) -> String {
-        match self {
-            Self::Search { query, intent, .. } => match intent {
-                Some(intent) => format!("search workspace for `{query}` ({intent})"),
-                None => format!("search workspace for `{query}`"),
-            },
-            Self::ListFiles { pattern } => match pattern {
-                Some(pattern) if !pattern.trim().is_empty() => {
-                    format!("list files matching `{pattern}`")
-                }
-                _ => "list workspace files".to_string(),
-            },
-            Self::Read { path } => format!("read `{path}`"),
-            Self::Inspect { command } => format!("inspect `{command}`"),
-            Self::Shell { command } => command.clone(),
-            Self::Diff { path } => match path {
-                Some(path) if !path.trim().is_empty() => {
-                    format!("git diff --no-ext-diff -- {path}")
-                }
-                _ => "git diff --no-ext-diff".to_string(),
-            },
-            Self::WriteFile { path, .. } => format!("write `{path}`"),
-            Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
-            Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
-        }
-    }
 }
 
 /// The first bounded action the planner may choose for a turn.
@@ -558,7 +354,7 @@ pub struct PlannerDecision {
 #[cfg(test)]
 mod tests {
     use super::{
-        InitialAction, InterpretationContext, InterpretationDecisionFramework,
+        GuidanceCategory, InitialAction, InterpretationContext, InterpretationDecisionFramework,
         InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
         InterpretationToolHint, PlannerAction, PlannerBudget, RetrievalMode, RetrievalStrategy,
         ThreadDecisionRequest, WorkspaceAction,
@@ -575,6 +371,7 @@ mod tests {
             documents: vec![InterpretationDocument {
                 source: "AGENTS.md".to_string(),
                 excerpt: "guidance".to_string(),
+                category: GuidanceCategory::Rule,
             }],
             tool_hints: vec![InterpretationToolHint {
                 source: "INSTRUCTIONS.md".to_string(),
@@ -597,6 +394,7 @@ mod tests {
                     }],
                 }],
             },
+            ..InterpretationContext::default()
         };
 
         let rendered = context.render();
@@ -606,7 +404,10 @@ mod tests {
         assert!(rendered.contains("keel mission next"));
         assert!(rendered.contains("Decision Framework"));
         assert!(rendered.contains("Inspect"));
-        assert_eq!(context.sources(), vec!["AGENTS.md".to_string()]);
+        assert_eq!(
+            context.sources(),
+            vec!["AGENTS.md".to_string(), "INSTRUCTIONS.md".to_string()]
+        );
     }
 
     #[test]
