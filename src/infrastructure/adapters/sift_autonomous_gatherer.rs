@@ -1,3 +1,4 @@
+use crate::domain::model::{TurnEvent, TurnEventSink};
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
     GathererCapability, PlannerDecision, PlannerGraphBranch, PlannerGraphBranchStatus,
@@ -16,23 +17,31 @@ use sift::{
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub struct SiftAutonomousGathererAdapter {
     workspace_root: PathBuf,
-    sift: Sift,
+    sift: Arc<Sift>,
     verbose: AtomicU8,
     planner_profile: Option<String>,
+    event_sink: Option<Arc<dyn TurnEventSink>>,
 }
 
 impl SiftAutonomousGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self {
             workspace_root: workspace_root.into(),
-            sift: Sift::builder().build(),
+            sift: Arc::new(Sift::builder().build()),
             verbose: AtomicU8::new(0),
             planner_profile: None,
+            event_sink: None,
         }
+    }
+
+    pub fn with_event_sink(mut self, sink: Arc<dyn TurnEventSink>) -> Self {
+        self.event_sink = Some(sink);
+        self
     }
 
     pub fn set_verbose(&self, level: u8) {
@@ -59,10 +68,7 @@ impl SiftAutonomousGathererAdapter {
         }
     }
 
-    fn search_autonomous(
-        &self,
-        request: &ContextGatherRequest,
-    ) -> Result<AutonomousSearchResponse> {
+    fn build_search_request(&self, request: &ContextGatherRequest) -> AutonomousSearchRequest {
         let local_context = request
             .prior_context
             .iter()
@@ -75,21 +81,19 @@ impl SiftAutonomousGathererAdapter {
             })
             .collect::<Vec<_>>();
 
-        self.sift.search_autonomous(
-            AutonomousSearchRequest::new(&self.workspace_root, &request.user_query)
-                .with_plan(search_plan_for_strategy(
-                    request.planning.retrieval_strategy,
-                ))
-                .with_mode(map_retrieval_mode(request.planning.mode))
-                .with_intent(request.intent_reason.clone())
-                .with_planner_strategy(self.planner_strategy(request))
-                .with_step_limit(request.planning.step_limit)
-                .with_limit(request.budget.max_items)
-                .with_shortlist(request.budget.max_items)
-                .with_retained_artifact_limit(request.planning.retained_artifact_limit)
-                .with_local_context(local_context)
-                .with_verbose(self.verbose.load(Ordering::Relaxed)),
-        )
+        AutonomousSearchRequest::new(&self.workspace_root, &request.user_query)
+            .with_plan(search_plan_for_strategy(
+                request.planning.retrieval_strategy,
+            ))
+            .with_mode(map_retrieval_mode(request.planning.mode))
+            .with_intent(request.intent_reason.clone())
+            .with_planner_strategy(self.planner_strategy(request))
+            .with_step_limit(request.planning.step_limit)
+            .with_limit(request.budget.max_items)
+            .with_shortlist(request.budget.max_items)
+            .with_retained_artifact_limit(request.planning.retained_artifact_limit)
+            .with_local_context(local_context)
+            .with_verbose(self.verbose.load(Ordering::Relaxed))
     }
 }
 
@@ -103,7 +107,60 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         &self,
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
-        let response = self.search_autonomous(request)?;
+        let search_request = self.build_search_request(request);
+        let sift = Arc::clone(&self.sift);
+        let event_sink = self.event_sink.clone();
+
+        let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
+
+        // Heartbeat timer: sends elapsed seconds every 2s until search completes.
+        // Runs as a separate tokio task so it doesn't block the spawn_blocking closure.
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_flag = Arc::clone(&done);
+        let timer_handle = tokio::spawn(async move {
+            let start = tokio::time::Instant::now();
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+            interval.tick().await; // skip the immediate first tick
+            loop {
+                interval.tick().await;
+                if done_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                if heartbeat_tx.send(start.elapsed().as_secs()).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let search_handle = tokio::task::spawn_blocking(move || {
+            let result = sift.search_autonomous(search_request);
+            done.store(true, Ordering::Relaxed);
+            result
+        });
+
+        // Forward heartbeats as TurnEvents while waiting for the search to complete.
+        let mut search_handle = search_handle;
+        let response = loop {
+            tokio::select! {
+                biased;
+                elapsed = heartbeat_rx.recv() => {
+                    if let Some(elapsed_seconds) = elapsed
+                        && let Some(sink) = event_sink.as_ref()
+                    {
+                        sink.emit(TurnEvent::GathererSearchProgress {
+                            phase: "searching".to_string(),
+                            elapsed_seconds,
+                            detail: None,
+                        });
+                    }
+                }
+                result = &mut search_handle => {
+                    timer_handle.abort();
+                    break result??;
+                }
+            }
+        };
+
         if self.verbose.load(Ordering::Relaxed) >= 1 {
             println!(
                 "[LANE] Autonomous gatherer executed {} planner turn(s) for `{}`.",
