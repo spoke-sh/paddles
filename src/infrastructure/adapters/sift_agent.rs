@@ -2733,18 +2733,10 @@ fn citation_sources(workspace_root: &Path, evidence: &EvidenceBundle) -> Vec<Str
             }
         }
     }
-    let has_non_keel = sources.iter().any(|source| !is_keel_source(source));
-    if has_non_keel {
-        sources.retain(|source| !is_keel_source(source));
-    }
     if sources.len() > MAX_CITATIONS {
         sources.truncate(MAX_CITATIONS);
     }
     sources
-}
-
-fn is_keel_source(source: &str) -> bool {
-    source.starts_with(".keel/") || source.contains("/.keel/")
 }
 
 fn ensure_citation_section(reply: &str, citations: &[String]) -> String {

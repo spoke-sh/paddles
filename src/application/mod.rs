@@ -1833,29 +1833,7 @@ fn validate_inspect_command(command: &str) -> Result<()> {
     {
         anyhow::bail!("planner inspect command must stay read-only and single-step");
     }
-
-    let allowed_prefixes = [
-        "git status",
-        "git diff",
-        "git log",
-        "keel ",
-        "rg ",
-        "ls",
-        "find ",
-        "cat ",
-        "sed -n",
-        "head ",
-        "tail ",
-        "pwd",
-    ];
-    if allowed_prefixes
-        .iter()
-        .any(|prefix| normalized.starts_with(prefix))
-    {
-        Ok(())
-    } else {
-        anyhow::bail!("planner inspect command is outside the safe read-only allowlist")
-    }
+    Ok(())
 }
 
 fn trim_for_planner(input: &str, limit: usize) -> String {
