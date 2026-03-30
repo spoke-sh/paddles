@@ -16,7 +16,7 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// Context passed from main to the TUI for credential management.
@@ -207,8 +207,30 @@ impl Drop for TerminalSession {
 
 #[derive(Debug)]
 enum UiMessage {
-    TurnEvent(TurnEvent),
-    TurnFinished(std::result::Result<String, String>),
+    TurnEvent {
+        event: TurnEvent,
+        occurred_at: Instant,
+    },
+    TurnFinished {
+        result: std::result::Result<String, String>,
+        occurred_at: Instant,
+    },
+}
+
+impl UiMessage {
+    fn turn_event(event: TurnEvent) -> Self {
+        Self::TurnEvent {
+            event,
+            occurred_at: Instant::now(),
+        }
+    }
+
+    fn turn_finished(result: std::result::Result<String, String>) -> Self {
+        Self::TurnFinished {
+            result,
+            occurred_at: Instant::now(),
+        }
+    }
 }
 
 fn dispatch_prompt(
@@ -232,7 +254,7 @@ fn dispatch_prompt(
             }
         }
         .map_err(|err| format!("{err:#}"));
-        let _ = tx.send(UiMessage::TurnFinished(result));
+        let _ = tx.send(UiMessage::turn_finished(result));
     });
 }
 
@@ -243,7 +265,7 @@ struct InteractiveTurnEventSink {
 
 impl TurnEventSink for InteractiveTurnEventSink {
     fn emit(&self, event: TurnEvent) {
-        let _ = self.tx.send(UiMessage::TurnEvent(event));
+        let _ = self.tx.send(UiMessage::turn_event(event));
     }
 }
 
@@ -260,6 +282,7 @@ struct TranscriptRow {
     kind: TranscriptRowKind,
     header: String,
     content: String,
+    timing: Option<TranscriptTiming>,
 }
 
 impl TranscriptRow {
@@ -268,13 +291,14 @@ impl TranscriptRow {
             kind,
             header: header.into(),
             content: content.into(),
+            timing: None,
         }
     }
 
     fn estimated_height(&self, width: usize) -> usize {
         let width = width.max(8);
         let body_width = width.saturating_sub(4).max(1);
-        let mut lines = wrapped_line_count(&self.header, width);
+        let mut lines = wrapped_line_count(&self.display_header(), width);
         if self.content.is_empty() {
             return lines + 1;
         }
@@ -283,6 +307,88 @@ impl TranscriptRow {
             lines += wrapped_line_count(line, body_width);
         }
         lines + 1
+    }
+
+    fn timed(mut self, timing: TranscriptTiming) -> Self {
+        self.timing = Some(timing);
+        self
+    }
+
+    fn display_header(&self) -> String {
+        match self.timing {
+            Some(timing) => format!("{} · {}", self.header, timing.label()),
+            None => self.header.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TranscriptTiming {
+    elapsed: Duration,
+    delta: Option<Duration>,
+    kind: TranscriptTimingKind,
+}
+
+impl TranscriptTiming {
+    fn label(&self) -> String {
+        let elapsed = format_duration_compact(self.elapsed);
+        let suffix = match self.kind {
+            TranscriptTimingKind::Step => None,
+            TranscriptTimingKind::TurnTotal => Some(" total"),
+        };
+        let delta = self
+            .delta
+            .map(|delta| format!(" (+{})", format_duration_compact(delta)))
+            .unwrap_or_default();
+        format!("{elapsed}{}{}", suffix.unwrap_or(""), delta)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TranscriptTimingKind {
+    Step,
+    TurnTotal,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ActiveTurnTiming {
+    started_at: Instant,
+    last_step_at: Instant,
+    saw_step: bool,
+}
+
+impl ActiveTurnTiming {
+    fn new(started_at: Instant) -> Self {
+        Self {
+            started_at,
+            last_step_at: started_at,
+            saw_step: false,
+        }
+    }
+
+    fn mark_step(&mut self, occurred_at: Instant) -> TranscriptTiming {
+        let timing = TranscriptTiming {
+            elapsed: occurred_at.duration_since(self.started_at),
+            delta: self
+                .saw_step
+                .then(|| occurred_at.duration_since(self.last_step_at)),
+            kind: TranscriptTimingKind::Step,
+        };
+        self.last_step_at = occurred_at;
+        self.saw_step = true;
+        timing
+    }
+
+    fn finish(mut self, occurred_at: Instant) -> TranscriptTiming {
+        let timing = TranscriptTiming {
+            elapsed: occurred_at.duration_since(self.started_at),
+            delta: self
+                .saw_step
+                .then(|| occurred_at.duration_since(self.last_step_at)),
+            kind: TranscriptTimingKind::TurnTotal,
+        };
+        self.last_step_at = occurred_at;
+        timing
     }
 }
 
@@ -332,6 +438,7 @@ struct InteractiveApp {
     pending_login: Option<PendingLogin>,
     provider_name: String,
     credential_provider: Option<String>,
+    active_turn_timing: Option<ActiveTurnTiming>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -399,6 +506,7 @@ impl InteractiveApp {
             pending_login: None,
             provider_name,
             credential_provider,
+            active_turn_timing: None,
         }
     }
 
@@ -489,6 +597,10 @@ impl InteractiveApp {
     }
 
     fn dispatch_next_prompt(&mut self) -> Option<QueuedPrompt> {
+        self.dispatch_next_prompt_at(Instant::now())
+    }
+
+    fn dispatch_next_prompt_at(&mut self, started_at: Instant) -> Option<QueuedPrompt> {
         if self.busy {
             return None;
         }
@@ -496,32 +608,37 @@ impl InteractiveApp {
         let prompt = self.queued_prompts.pop_front()?;
         self.busy = true;
         self.busy_phase = BusyPhase::Thinking;
+        self.active_turn_timing = Some(ActiveTurnTiming::new(started_at));
         Some(prompt)
     }
 
     fn handle_message(&mut self, message: UiMessage) {
         match message {
-            UiMessage::TurnEvent(event) => {
-                self.rows.push(format_turn_event_row(event));
+            UiMessage::TurnEvent { event, occurred_at } => {
+                let row = self.annotate_step_timing(format_turn_event_row(event), occurred_at);
+                self.rows.push(row);
             }
-            UiMessage::TurnFinished(result) => match result {
+            UiMessage::TurnFinished {
+                result,
+                occurred_at,
+            } => match result {
                 Ok(response) => {
                     let row_index = self.rows.len();
-                    self.rows.push(TranscriptRow::new(
-                        TranscriptRowKind::Assistant,
-                        "Paddles",
-                        "",
-                    ));
+                    let row = self.annotate_turn_total(
+                        TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", ""),
+                        occurred_at,
+                    );
+                    self.rows.push(row);
                     self.pending_reveal = Some(PendingReveal::new(row_index, response));
                     self.busy = true;
                     self.busy_phase = BusyPhase::Rendering;
                 }
                 Err(error) => {
-                    self.rows.push(TranscriptRow::new(
-                        TranscriptRowKind::Error,
-                        "• Turn failed",
-                        error,
-                    ));
+                    let row = self.annotate_turn_total(
+                        TranscriptRow::new(TranscriptRowKind::Error, "• Turn failed", error),
+                        occurred_at,
+                    );
+                    self.rows.push(row);
                     self.busy = false;
                     self.busy_phase = BusyPhase::Idle;
                 }
@@ -712,6 +829,20 @@ impl InteractiveApp {
         visible.reverse();
         visible
     }
+
+    fn annotate_step_timing(&mut self, row: TranscriptRow, occurred_at: Instant) -> TranscriptRow {
+        match self.active_turn_timing.as_mut() {
+            Some(timing) => row.timed(timing.mark_step(occurred_at)),
+            None => row,
+        }
+    }
+
+    fn annotate_turn_total(&mut self, row: TranscriptRow, occurred_at: Instant) -> TranscriptRow {
+        match self.active_turn_timing.take() {
+            Some(timing) => row.timed(timing.finish(occurred_at)),
+            None => row,
+        }
+    }
 }
 
 fn trim_for_display(input: &str, limit: usize) -> String {
@@ -731,10 +862,15 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         TranscriptRowKind::Error => (palette.error_header, palette.error_body),
     };
 
-    let mut lines = vec![Line::from(Span::styled(
+    let mut header_spans = vec![Span::styled(
         row.header.clone(),
         header_style.add_modifier(Modifier::BOLD),
-    ))];
+    )];
+    if let Some(timing) = row.timing {
+        header_spans.push(Span::styled(format!(" · {}", timing.label()), body_style));
+    }
+
+    let mut lines = vec![Line::from(header_spans)];
 
     if row.content.is_empty() {
         return lines;
@@ -1042,6 +1178,28 @@ fn wrapped_line_count(line: &str, width: usize) -> usize {
     chars.div_ceil(width)
 }
 
+fn format_duration_compact(duration: Duration) -> String {
+    if duration < Duration::from_secs(1) {
+        return format!("{}ms", duration.as_millis());
+    }
+
+    if duration < Duration::from_secs(60) {
+        return format!("{:.1}s", duration.as_secs_f64());
+    }
+
+    if duration < Duration::from_secs(3600) {
+        let total_seconds = duration.as_secs();
+        let minutes = total_seconds / 60;
+        let seconds = total_seconds % 60;
+        return format!("{minutes}m {seconds:02}s");
+    }
+
+    let total_minutes = duration.as_secs() / 60;
+    let hours = total_minutes / 60;
+    let minutes = total_minutes % 60;
+    format!("{hours}h {minutes:02}m")
+}
+
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 #[derive(Clone, Copy)]
@@ -1125,11 +1283,13 @@ fn terminal_uses_light_background() -> bool {
 mod tests {
     use super::{
         BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
-        TranscriptRow, TranscriptRowKind, collapse_event_details, detect_palette,
-        format_turn_event_row, render_row_lines, select_interactive_frontend,
+        TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind,
+        collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
+        render_row_lines, select_interactive_frontend,
     };
     use crate::application::ConversationSession;
     use crate::domain::model::{TaskTraceId, TurnEvent};
+    use std::time::{Duration, Instant};
 
     fn session() -> ConversationSession {
         ConversationSession::new(TaskTraceId::new("task-1").expect("task"))
@@ -1198,6 +1358,34 @@ mod tests {
     }
 
     #[test]
+    fn duration_formatting_stays_compact() {
+        assert_eq!(format_duration_compact(Duration::from_millis(125)), "125ms");
+        assert_eq!(format_duration_compact(Duration::from_millis(1530)), "1.5s");
+        assert_eq!(format_duration_compact(Duration::from_secs(65)), "1m 05s");
+    }
+
+    #[test]
+    fn transcript_rows_render_timing_suffixes() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(TranscriptRowKind::Event, "• Routed", "direct").timed(
+            TranscriptTiming {
+                elapsed: Duration::from_millis(1530),
+                delta: Some(Duration::from_millis(430)),
+                kind: TranscriptTimingKind::TurnTotal,
+            },
+        );
+
+        let lines = render_row_lines(&row, &palette);
+
+        assert!(
+            lines[0]
+                .spans
+                .iter()
+                .any(|span| span.content.contains("1.5s total (+430ms)"))
+        );
+    }
+
+    #[test]
     fn app_tracks_busy_state_through_reveal_completion() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -1216,7 +1404,10 @@ mod tests {
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Thinking);
 
-        app.handle_message(super::UiMessage::TurnFinished(Ok("hi there".to_string())));
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("hi there".to_string()),
+            occurred_at: Instant::now(),
+        });
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Rendering);
 
@@ -1289,7 +1480,10 @@ mod tests {
         app.input = "second".to_string();
         app.submit_prompt();
 
-        app.handle_message(super::UiMessage::TurnFinished(Ok("done".to_string())));
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("done".to_string()),
+            occurred_at: Instant::now(),
+        });
         while app.busy {
             app.tick();
         }
@@ -1379,6 +1573,63 @@ mod tests {
                 .any(|row| row.kind == TranscriptRowKind::Error
                     && row.header == "• Login unavailable"
                     && row.content.contains("does not use API-key login"))
+        );
+    }
+
+    #[test]
+    fn app_attaches_elapsed_and_delta_timings_to_turn_rows() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+        );
+        let start = Instant::now();
+
+        app.input = "hello".to_string();
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt_at(start),
+            Some(QueuedPrompt::Prompt("hello".to_string()))
+        );
+
+        app.handle_message(super::UiMessage::TurnEvent {
+            event: TurnEvent::RouteSelected {
+                summary: "direct".to_string(),
+            },
+            occurred_at: start + Duration::from_millis(120),
+        });
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("done".to_string()),
+            occurred_at: start + Duration::from_millis(350),
+        });
+
+        let event_row = app
+            .rows
+            .iter()
+            .find(|row| row.header == "• Routed")
+            .unwrap();
+        assert_eq!(
+            event_row.timing,
+            Some(TranscriptTiming {
+                elapsed: Duration::from_millis(120),
+                delta: None,
+                kind: TranscriptTimingKind::Step,
+            })
+        );
+
+        let assistant_row = app.rows.last().expect("assistant row");
+        assert_eq!(assistant_row.header, "Paddles");
+        assert_eq!(
+            assistant_row.timing,
+            Some(TranscriptTiming {
+                elapsed: Duration::from_millis(350),
+                delta: Some(Duration::from_millis(230)),
+                kind: TranscriptTimingKind::TurnTotal,
+            })
         );
     }
 }
