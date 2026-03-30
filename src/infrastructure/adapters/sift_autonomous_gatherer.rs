@@ -3,7 +3,7 @@ use crate::domain::ports::{
     GathererCapability, PlannerDecision, PlannerGraphBranch, PlannerGraphBranchStatus,
     PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode, PlannerGraphFrontierEntry,
     PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RetainedEvidence, RetrievalMode,
+    RetainedEvidence, RetrievalMode, RetrievalStrategy,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,10 +11,10 @@ use sift::{
     AutonomousGraphBranchStatus, AutonomousGraphEdgeKind, AutonomousPlannerAction,
     AutonomousPlannerStopReason, AutonomousPlannerStrategy, AutonomousPlannerStrategyKind,
     AutonomousSearchMode, AutonomousSearchRequest, AutonomousSearchResponse, EnvironmentFactInput,
-    LocalContextSource, SearchEmission, SearchPlan, Sift,
+    FusionPolicy, LocalContextSource, QueryExpansionPolicy, RerankingPolicy, RetrieverPolicy,
+    SearchEmission, SearchPlan, Sift,
 };
 use std::collections::HashSet;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -50,7 +50,7 @@ impl SiftAutonomousGathererAdapter {
             .profile
             .as_ref()
             .or(self.planner_profile.as_ref());
-        match request.planning.strategy {
+        match request.planning.planner_strategy {
             PlannerStrategyKind::Heuristic => AutonomousPlannerStrategy::heuristic(),
             PlannerStrategyKind::ModelDriven => match profile {
                 Some(profile) => AutonomousPlannerStrategy::model_driven().with_profile(profile),
@@ -77,7 +77,9 @@ impl SiftAutonomousGathererAdapter {
 
         self.sift.search_autonomous(
             AutonomousSearchRequest::new(&self.workspace_root, &request.user_query)
-                .with_plan(SearchPlan::default_lexical())
+                .with_plan(search_plan_for_strategy(
+                    request.planning.retrieval_strategy,
+                ))
                 .with_mode(map_retrieval_mode(request.planning.mode))
                 .with_intent(request.intent_reason.clone())
                 .with_planner_strategy(self.planner_strategy(request))
@@ -162,7 +164,7 @@ fn collect_evidence_items(
         })
         .collect::<Vec<_>>();
     if !retained.is_empty() {
-        return (prioritize_evidence_items(retained), Vec::new());
+        return (retained, Vec::new());
     }
 
     let Some(view) = response
@@ -196,7 +198,7 @@ fn collect_evidence_items(
         .collect::<Vec<_>>();
 
     (
-        prioritize_evidence_items(items),
+        items,
         vec!["Autonomous gatherer fell back to last-turn hits because no retained artifacts were available.".to_string()],
     )
 }
@@ -403,59 +405,17 @@ fn retained_evidence_from_response(response: &AutonomousSearchResponse) -> Vec<R
         .collect()
 }
 
-fn prioritize_evidence_items(items: Vec<EvidenceItem>) -> Vec<EvidenceItem> {
-    let has_non_keel = items.iter().any(|item| !is_keel_path(&item.source));
-    let has_non_test_snippet = items.iter().any(|item| !is_test_snippet(&item.snippet));
-    let mut prioritized = items
-        .into_iter()
-        .filter(|item| !has_non_keel || !is_keel_path(&item.source))
-        .filter(|item| !has_non_test_snippet || !is_test_snippet(&item.snippet))
-        .collect::<Vec<_>>();
-    prioritized.sort_by_key(|item| {
-        (
-            evidence_priority(&item.source),
-            snippet_noise_priority(&item.snippet),
-            item.rank,
-        )
-    });
-    for (index, item) in prioritized.iter_mut().enumerate() {
-        item.rank = index + 1;
+fn search_plan_for_strategy(strategy: RetrievalStrategy) -> SearchPlan {
+    match strategy {
+        RetrievalStrategy::Lexical => SearchPlan::default_lexical(),
+        RetrievalStrategy::Hybrid => SearchPlan {
+            name: "hybrid".to_string(),
+            query_expansion: QueryExpansionPolicy::None,
+            retrievers: vec![RetrieverPolicy::Bm25, RetrieverPolicy::Vector],
+            fusion: FusionPolicy::Rrf,
+            reranking: RerankingPolicy::None,
+        },
     }
-    prioritized
-}
-
-fn evidence_priority(source: &str) -> usize {
-    if is_src_path(source) {
-        0
-    } else if is_top_level_doc(source) {
-        1
-    } else if is_keel_path(source) {
-        3
-    } else {
-        2
-    }
-}
-
-fn is_src_path(source: &str) -> bool {
-    source.starts_with("src/") || source.contains("/src/")
-}
-
-fn is_top_level_doc(source: &str) -> bool {
-    let path = Path::new(source);
-    path.extension().and_then(|value| value.to_str()) == Some("md")
-        && path.components().count() == 1
-}
-
-fn is_keel_path(source: &str) -> bool {
-    source.starts_with(".keel/") || source.contains("/.keel/")
-}
-
-fn snippet_noise_priority(snippet: &str) -> usize {
-    if is_test_snippet(snippet) { 1 } else { 0 }
-}
-
-fn is_test_snippet(snippet: &str) -> bool {
-    snippet.contains("#[cfg(test)]") || snippet.contains("mod tests")
 }
 
 fn format_action(action: AutonomousPlannerAction) -> String {

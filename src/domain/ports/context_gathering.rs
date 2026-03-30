@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Port for specialized context-gathering subagents.
@@ -75,7 +76,8 @@ impl Default for EvidenceBudget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannerConfig {
     pub mode: RetrievalMode,
-    pub strategy: PlannerStrategyKind,
+    pub retrieval_strategy: RetrievalStrategy,
+    pub planner_strategy: PlannerStrategyKind,
     pub profile: Option<String>,
     pub step_limit: usize,
     pub retained_artifact_limit: usize,
@@ -85,7 +87,8 @@ impl Default for PlannerConfig {
     fn default() -> Self {
         Self {
             mode: RetrievalMode::default(),
-            strategy: PlannerStrategyKind::Heuristic,
+            retrieval_strategy: RetrievalStrategy::default(),
+            planner_strategy: PlannerStrategyKind::Heuristic,
             profile: None,
             step_limit: 3,
             retained_artifact_limit: 5,
@@ -99,8 +102,13 @@ impl PlannerConfig {
         self
     }
 
+    pub fn with_retrieval_strategy(mut self, strategy: RetrievalStrategy) -> Self {
+        self.retrieval_strategy = strategy;
+        self
+    }
+
     pub fn with_strategy(mut self, strategy: PlannerStrategyKind) -> Self {
-        self.strategy = strategy;
+        self.planner_strategy = strategy;
         self
     }
 
@@ -121,7 +129,8 @@ impl PlannerConfig {
 }
 
 /// Retrieval mode used by a gatherer-backed autonomous planner.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RetrievalMode {
     #[default]
     Linear,
@@ -133,6 +142,24 @@ impl RetrievalMode {
         match self {
             Self::Linear => "linear",
             Self::Graph => "graph",
+        }
+    }
+}
+
+/// Retrieval strategy used by a gatherer-backed search plan.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalStrategy {
+    #[default]
+    Lexical,
+    Hybrid,
+}
+
+impl RetrievalStrategy {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Lexical => "lexical",
+            Self::Hybrid => "hybrid",
         }
     }
 }
@@ -383,7 +410,7 @@ mod tests {
     use super::{
         ContextGatherRequest, ContextGatherResult, EvidenceBudget, EvidenceBundle, EvidenceItem,
         GathererCapability, PlannerConfig, PlannerDecision, PlannerStrategyKind,
-        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode,
+        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
     };
     use std::path::PathBuf;
 
@@ -405,7 +432,8 @@ mod tests {
         let config = PlannerConfig::default().with_mode(RetrievalMode::Graph);
 
         assert_eq!(config.mode, RetrievalMode::Graph);
-        assert_eq!(config.strategy, PlannerStrategyKind::Heuristic);
+        assert_eq!(config.planner_strategy, PlannerStrategyKind::Heuristic);
+        assert_eq!(config.retrieval_strategy, RetrievalStrategy::Lexical);
     }
 
     #[test]

@@ -22,8 +22,8 @@ index: 20
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Model-Judged Interpretation And Retrieval](voyages/VFJ5t0Pbk/) | planned | 0/5 |
+| [Model-Judged Interpretation And Retrieval](voyages/VFJ5t0Pbk/) | done | 5/5 |
 <!-- END GENERATED -->

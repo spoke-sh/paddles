@@ -1252,7 +1252,12 @@ impl MechSuitService {
 
             let outcome = match &decision.action {
                 PlannerAction::Workspace { action } => match action {
-                    WorkspaceAction::Search { query, intent } => {
+                    WorkspaceAction::Search {
+                        query,
+                        mode,
+                        strategy,
+                        intent,
+                    } => {
                         if let Some(gatherer) = context.gatherer.as_ref() {
                             trace.emit(TurnEvent::GathererCapability {
                                 provider: gatherer_provider.clone(),
@@ -1270,7 +1275,8 @@ impl MechSuitService {
                                     )
                                     .with_planning(
                                         PlannerConfig::default()
-                                            .with_mode(RetrievalMode::Graph)
+                                            .with_mode(*mode)
+                                            .with_retrieval_strategy(*strategy)
                                             .with_step_limit(1),
                                     )
                                     .with_prior_context(build_planner_prior_context(
@@ -1422,7 +1428,12 @@ impl MechSuitService {
                         }
                     }
                 },
-                PlannerAction::Refine { query, .. } => {
+                PlannerAction::Refine {
+                    query,
+                    mode,
+                    strategy,
+                    ..
+                } => {
                     if let Some(gatherer) = context.gatherer.as_ref() {
                         trace.emit(TurnEvent::GathererCapability {
                             provider: gatherer_provider.clone(),
@@ -1438,7 +1449,8 @@ impl MechSuitService {
                                 )
                                 .with_planning(
                                     PlannerConfig::default()
-                                        .with_mode(RetrievalMode::Graph)
+                                        .with_mode(*mode)
+                                        .with_retrieval_strategy(*strategy)
                                         .with_step_limit(1),
                                 )
                                 .with_prior_context(
@@ -2678,6 +2690,8 @@ mod tests {
                 action: InitialAction::Workspace {
                     action: WorkspaceAction::Search {
                         query: "what should the recursive gatherer inspect".to_string(),
+                        mode: RetrievalMode::Graph,
+                        strategy: crate::domain::ports::RetrievalStrategy::Hybrid,
                         intent: Some("repo-question".to_string()),
                     },
                 },

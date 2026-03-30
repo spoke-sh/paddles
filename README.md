@@ -166,7 +166,7 @@ Today, the runtime has:
 
 The remaining gaps are narrower now:
 
-- legacy direct adapter helpers outside the main mech-suit service still contain heuristic intent inference and should not be treated as the backbone contract
+- direct adapter paths now share the same controller boundary: the model must emit a valid bounded action/tool choice, and the controller only retries, validates, or fails closed instead of inferring intent on its behalf
 - the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
 - the runtime defaults to `noop` recording today; embedded `transit-core` recording is available through the recorder boundary but is not yet the default CLI/runtime policy
 - graph-mode gatherer traces still use inline envelopes today; the contract leaves room for external artifact refs, but no artifact store promotion policy exists yet

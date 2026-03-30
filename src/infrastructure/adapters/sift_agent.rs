@@ -5,8 +5,10 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext,
-    InterpretationRequest, OperatorMemoryDocument, PlannerAction, PlannerRequest,
-    RecursivePlannerDecision, ThreadDecisionRequest, WorkspaceAction,
+    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
+    OperatorMemoryDocument, PlannerAction, PlannerRequest, RecursivePlannerDecision, RetrievalMode,
+    RetrievalStrategy, ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -118,6 +120,8 @@ pub(crate) struct ToolResult {
 enum PlannerActionEnvelope {
     Search {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         #[serde(default)]
         intent: Option<String>,
         rationale: String,
@@ -163,6 +167,8 @@ enum PlannerActionEnvelope {
     },
     Refine {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         #[serde(default)]
         rationale: Option<String>,
     },
@@ -186,6 +192,8 @@ enum InitialActionEnvelope {
     },
     Search {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         #[serde(default)]
         intent: Option<String>,
         rationale: String,
@@ -231,6 +239,8 @@ enum InitialActionEnvelope {
     },
     Refine {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         #[serde(default)]
         rationale: Option<String>,
     },
@@ -269,6 +279,47 @@ enum ThreadDecisionEnvelope {
 struct InterpretationGraphEnvelope {
     #[serde(default)]
     edges: Vec<InterpretationGraphEdge>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationContextEnvelope {
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    documents: Vec<InterpretationDocumentEnvelope>,
+    #[serde(default)]
+    tool_hints: Vec<InterpretationToolHintEnvelope>,
+    #[serde(default)]
+    procedures: Vec<InterpretationProcedureEnvelope>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationDocumentEnvelope {
+    source: String,
+    excerpt: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationToolHintEnvelope {
+    source: String,
+    action: WorkspaceAction,
+    note: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationProcedureEnvelope {
+    source: String,
+    label: String,
+    purpose: String,
+    #[serde(default)]
+    steps: Vec<InterpretationProcedureStepEnvelope>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationProcedureStepEnvelope {
+    index: usize,
+    action: WorkspaceAction,
+    note: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -945,8 +996,7 @@ impl SiftAgentAdapter {
     }
 
     pub fn respond(&self, prompt: &str) -> Result<String> {
-        let intent = legacy_turn_intent(prompt, None);
-        self.respond_internal(prompt, intent, None, &NullTurnEventSink)
+        self.respond_internal(prompt, TurnIntent::DirectResponse, None, &NullTurnEventSink)
     }
 
     pub fn respond_with_evidence(
@@ -954,7 +1004,11 @@ impl SiftAgentAdapter {
         prompt: &str,
         gathered_evidence: Option<&EvidenceBundle>,
     ) -> Result<String> {
-        let intent = legacy_turn_intent(prompt, gathered_evidence);
+        let intent = if gathered_evidence.is_some_and(|bundle| !bundle.items.is_empty()) {
+            TurnIntent::Planned
+        } else {
+            TurnIntent::DirectResponse
+        };
         self.respond_internal(prompt, intent, gathered_evidence, &NullTurnEventSink)
     }
 
@@ -992,6 +1046,18 @@ impl SiftAgentAdapter {
             )?;
         }
 
+        if parse_initial_action(&reply)?.is_none() {
+            self.log_retry_reason(
+                "initial-action-redecision",
+                &reply,
+                "asking the planner for one final constrained initial action before failing closed",
+            );
+            reply = self.send_to_model(
+                conversation.as_mut(),
+                &build_initial_action_redecision_prompt(request, &reply),
+            )?;
+        }
+
         if let Some(decision) = parse_initial_action(&reply)? {
             return Ok(decision);
         }
@@ -999,9 +1065,9 @@ impl SiftAgentAdapter {
         self.log_retry_reason(
             "initial-action-fallback",
             &reply,
-            "falling back to bounded initial action selection",
+            "failing closed after invalid initial action replies",
         );
-        Ok(fallback_initial_action(request))
+        Ok(fail_closed_initial_action(request))
     }
 
     pub fn select_planner_action(
@@ -1029,6 +1095,18 @@ impl SiftAgentAdapter {
                 self.send_to_model(conversation.as_mut(), &build_planner_retry_prompt(request))?;
         }
 
+        if parse_planner_action(&reply)?.is_none() {
+            self.log_retry_reason(
+                "planner-redecision",
+                &reply,
+                "asking the planner for one final constrained next action before failing closed",
+            );
+            reply = self.send_to_model(
+                conversation.as_mut(),
+                &build_planner_redecision_prompt(request, &reply),
+            )?;
+        }
+
         if let Some(decision) = parse_planner_action(&reply)? {
             return Ok(decision);
         }
@@ -1036,9 +1114,9 @@ impl SiftAgentAdapter {
         self.log_retry_reason(
             "planner-fallback",
             &reply,
-            "falling back to bounded heuristic planner action",
+            "failing closed after invalid planner replies",
         );
-        Ok(fallback_planner_action(request))
+        Ok(fail_closed_planner_action())
     }
 
     pub fn select_thread_decision(
@@ -1089,6 +1167,37 @@ impl SiftAgentAdapter {
 
         let memory = AgentMemory::load(&request.workspace_root);
         let documents = self.expand_interpretation_guidance_graph(request)?;
+        let mut conversation = self.conversation_factory.start_conversation()?;
+        let mut reply = self.send_to_model(
+            conversation.as_mut(),
+            &build_interpretation_context_prompt(request, &documents),
+        )?;
+
+        if is_blank_model_reply(&reply) || parse_interpretation_context(&reply)?.is_none() {
+            self.log_retry_reason(
+                "interpretation-context-retry",
+                &reply,
+                "missing or invalid interpretation context response",
+            );
+            reply = self.send_to_model(
+                conversation.as_mut(),
+                &build_interpretation_context_retry_prompt(request, &documents),
+            )?;
+        }
+
+        if let Some(envelope) = parse_interpretation_context(&reply)? {
+            return Ok(interpretation_context_from_envelope(
+                envelope,
+                &request.workspace_root,
+                &documents,
+            ));
+        }
+
+        self.log_retry_reason(
+            "interpretation-context-fallback",
+            &reply,
+            "falling back to AGENTS-rooted interpretation context only",
+        );
         Ok(memory.build_interpretation_context_from_documents(
             &request.user_prompt,
             &request.workspace_root,
@@ -1154,23 +1263,17 @@ impl SiftAgentAdapter {
                 AgentTurnInput::new(&turn_id, "user", prompt).with_session_id(&state.session_id),
             ),
         );
-        let casual_turn = turn_intent.is_casual();
+        let direct_response_turn =
+            matches!(turn_intent, TurnIntent::DirectResponse | TurnIntent::Casual);
         let require_grounding = gathered_evidence.is_some_and(|bundle| !bundle.items.is_empty());
         let prefer_tools = turn_intent.prefers_tools();
-        let follow_up_execution = is_follow_up_execution_request(prompt);
-        let mut pending_tool_call = if casual_turn {
-            None
-        } else {
-            infer_tool_call(prompt, &state.local_context)
-        };
+        let follow_up_execution = false;
         let mut conversation = self.conversation_factory.start_conversation()?;
-        let mut reply = if casual_turn {
+        let mut reply = if direct_response_turn {
             self.send_to_model(
                 conversation.as_mut(),
                 &build_direct_turn_prompt(prompt, &memory_prompt),
             )?
-        } else if pending_tool_call.is_some() {
-            String::new()
         } else if require_grounding {
             match gathered_evidence.filter(|bundle| !bundle.items.is_empty()) {
                 Some(evidence) => self.send_to_model(
@@ -1218,12 +1321,12 @@ impl SiftAgentAdapter {
             )?
         };
 
-        if casual_turn {
+        if direct_response_turn {
             if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
                 self.log_retry_reason(
-                    "casual-direct-retry",
+                    "direct-response-retry",
                     &reply,
-                    "empty or tool-like casual response",
+                    "empty or tool-like direct response",
                 );
                 reply = self.send_to_model(
                     conversation.as_mut(),
@@ -1232,11 +1335,12 @@ impl SiftAgentAdapter {
             }
             if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
                 self.log_retry_reason(
-                    "casual-fallback",
+                    "direct-response-fallback",
                     &reply,
-                    "repeated empty or tool-like casual response",
+                    "repeated empty or tool-like direct response",
                 );
-                reply = fallback_casual_reply(prompt);
+                reply =
+                    "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
             }
         } else {
             if require_grounding {
@@ -1260,44 +1364,28 @@ impl SiftAgentAdapter {
                         )?;
                     }
                 }
-            } else if pending_tool_call.is_none() {
-                if prefer_tools
-                    && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
-                {
-                    self.log_retry_reason(
-                        "tool-retry",
-                        &reply,
-                        "missing or empty tool call response",
-                    );
-                    reply = self.send_to_model(
-                        conversation.as_mut(),
-                        &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
-                    )?;
-                } else if is_blank_model_reply(&reply)
-                    || response_looks_like_malformed_tool_protocol(&reply)?
-                {
-                    self.log_retry_reason(
-                        "direct-retry",
-                        &reply,
-                        "empty or tool-like direct response",
-                    );
-                    reply = self.send_to_model(
-                        conversation.as_mut(),
-                        &build_direct_retry_prompt(prompt, &memory_prompt),
-                    )?;
-                }
+            } else if prefer_tools
+                && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
+            {
+                self.log_retry_reason("tool-retry", &reply, "missing or empty tool call response");
+                reply = self.send_to_model(
+                    conversation.as_mut(),
+                    &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
+                )?;
+            } else if is_blank_model_reply(&reply)
+                || response_looks_like_malformed_tool_protocol(&reply)?
+            {
+                self.log_retry_reason("direct-retry", &reply, "empty or tool-like direct response");
+                reply = self.send_to_model(
+                    conversation.as_mut(),
+                    &build_direct_retry_prompt(prompt, &memory_prompt),
+                )?;
             }
 
             for _ in 0..MAX_TOOL_STEPS {
-                let (tool_call, controller_inferred) =
-                    if let Some(tool_call) = pending_tool_call.take() {
-                        (tool_call, true)
-                    } else {
-                        let Some(tool_call) = parse_tool_call(&reply)? else {
-                            break;
-                        };
-                        (tool_call, false)
-                    };
+                let Some(tool_call) = parse_tool_call(&reply)? else {
+                    break;
+                };
 
                 state.tool_counter += 1;
                 let call_id = format!("tool-{}", state.tool_counter);
@@ -1339,11 +1427,6 @@ impl SiftAgentAdapter {
                         result.summary.clone(),
                     )),
                 );
-
-                if controller_inferred {
-                    reply = result.summary.clone();
-                    break;
-                }
 
                 reply = self.send_to_model(
                     conversation.as_mut(),
@@ -1986,6 +2069,78 @@ Frontier documents to expand:\n\
     )
 }
 
+fn build_interpretation_context_prompt(
+    request: &InterpretationRequest,
+    documents: &[OperatorMemoryDocument],
+) -> String {
+    format!(
+        "You are the interpretation assembler for Paddles.\n\
+Build the turn-time interpretation context from the loaded AGENTS-rooted guidance graph.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Return this schema:\n\
+{{\n\
+  \"summary\":\"...\",\n\
+  \"documents\":[{{\"source\":\"loaded/source/path\",\"excerpt\":\"...\"}}],\n\
+  \"tool_hints\":[{{\"source\":\"loaded/source/path\",\"action\":{{...workspace action...}},\"note\":\"...\"}}],\n\
+  \"procedures\":[{{\"source\":\"loaded/source/path\",\"label\":\"...\",\"purpose\":\"...\",\"steps\":[{{\"index\":0,\"action\":{{...workspace action...}},\"note\":\"...\"}}]}}]\n\
+}}\n\
+\n\
+Workspace action schema:\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\"}}\n\
+\n\
+Rules:\n\
+- Use ONLY the loaded document sources shown below.\n\
+- Select only the documents, hints, and procedures that matter for the current turn.\n\
+- Prefer a small relevant context over a broad dump.\n\
+- Extract excerpts from the loaded guidance; do not invent file contents.\n\
+- Tool hints and procedure steps should come from the guidance, not from controller guesses.\n\
+- Use inspect only for read-only commands.\n\
+- If no tool hints or procedures are justified, return empty arrays.\n\
+\n\
+Workspace root:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n\
+\n\
+Loaded AGENTS-rooted guidance graph:\n\
+{}\n",
+        request.workspace_root.display(),
+        request.user_prompt,
+        format_operator_memory_documents(documents),
+    )
+}
+
+fn build_interpretation_context_retry_prompt(
+    request: &InterpretationRequest,
+    documents: &[OperatorMemoryDocument],
+) -> String {
+    format!(
+        "Your last interpretation-context reply was empty or invalid.\n\
+Return ONLY one valid JSON object with this shape:\n\
+{{\"summary\":\"...\",\"documents\":[{{\"source\":\"loaded/source/path\",\"excerpt\":\"...\"}}],\"tool_hints\":[{{\"source\":\"loaded/source/path\",\"action\":{{...workspace action...}},\"note\":\"...\"}}],\"procedures\":[{{\"source\":\"loaded/source/path\",\"label\":\"...\",\"purpose\":\"...\",\"steps\":[{{\"index\":0,\"action\":{{...workspace action...}},\"note\":\"...\"}}]}}]}}\n\
+\n\
+Use ONLY the loaded document sources and only actions justified by the guidance.\n\
+\n\
+Current user request:\n\
+{}\n\
+\n\
+Loaded AGENTS-rooted guidance graph:\n\
+{}\n",
+        request.user_prompt,
+        format_operator_memory_documents(documents),
+    )
+}
+
 fn format_operator_memory_documents(documents: &[OperatorMemoryDocument]) -> String {
     if documents.is_empty() {
         return "No operator-memory documents are loaded.".to_string();
@@ -2010,7 +2165,7 @@ Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2019,7 +2174,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
@@ -2027,6 +2182,7 @@ Rules:\n\
 - Read the interpretation context before choosing.\n\
 - Answer when the synthesizer can reply directly without more workspace resources.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
+- Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
 - Use write_file, replace_in_file, or apply_patch only when the requested next step is an explicit workspace edit.\n\
@@ -2068,7 +2224,7 @@ Return ONLY one valid JSON initial action.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2077,7 +2233,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
@@ -2105,14 +2261,16 @@ Current user request:\n\
     )
 }
 
-fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
+fn build_initial_action_redecision_prompt(request: &PlannerRequest, invalid_reply: &str) -> String {
     format!(
-        "You are the recursive planner lane for Paddles.\n\
-Choose the NEXT bounded workspace resource action for this turn.\n\
-Reply with ONLY one JSON object and no prose or markdown.\n\
+        "Your previous initial-action replies were invalid.\n\
+Make one final constrained routing decision.\n\
+If no workspace action is clearly justified by the interpretation context, return stop.\n\
+Return ONLY one valid JSON object.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2121,12 +2279,55 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+\n\
+Invalid reply to correct:\n\
+{}\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Interpretation tool hints:\n\
+{}\n\
+\n\
+Derived decision framework:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n",
+        trim_for_context(invalid_reply, 800),
+        format_interpretation_context_digest(&request.interpretation),
+        format_interpretation_tool_hints(&request.interpretation),
+        format_decision_framework(&request.interpretation),
+        request.user_prompt,
+    )
+}
+
+fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
+    format!(
+        "You are the recursive planner lane for Paddles.\n\
+Choose the NEXT bounded workspace resource action for this turn.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Allowed actions:\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
+- Choose retrieval mode and strategy explicitly when you search or refine.\n\
 - List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
 - Inspect when a read-only workspace command would clarify state.\n\
@@ -2174,7 +2375,7 @@ fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
 Return ONLY one valid JSON planner action.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2183,7 +2384,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
@@ -2205,6 +2406,49 @@ Current user request:\n\
 {}\n",
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
+        format_decision_framework(&request.interpretation),
+        format_planner_loop_state_digest(request),
+        request.user_prompt,
+    )
+}
+
+fn build_planner_redecision_prompt(request: &PlannerRequest, invalid_reply: &str) -> String {
+    format!(
+        "Your previous planner replies were invalid.\n\
+Make one final constrained next-action decision.\n\
+If the loop state already contains enough evidence, return stop.\n\
+Return ONLY one valid JSON planner action.\n\
+\n\
+Allowed actions:\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+\n\
+Invalid reply to correct:\n\
+{}\n\
+\n\
+Interpretation context:\n\
+{}\n\
+\n\
+Derived decision framework:\n\
+{}\n\
+\n\
+Current loop state:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n",
+        trim_for_context(invalid_reply, 800),
+        format_interpretation_context_digest(&request.interpretation),
         format_decision_framework(&request.interpretation),
         format_planner_loop_state_digest(request),
         request.user_prompt,
@@ -2434,7 +2678,7 @@ fn insufficient_evidence_reply(prompt: &str) -> String {
 
 fn citation_sources(workspace_root: &Path, evidence: &EvidenceBundle) -> Vec<String> {
     let mut sources = Vec::new();
-    for item in prioritized_evidence_items(evidence) {
+    for item in &evidence.items {
         let source = normalize_citation_source(workspace_root, &item.source);
         if !sources.contains(&source) {
             sources.push(source);
@@ -2507,7 +2751,7 @@ fn grounded_answer_fallback(workspace_root: &Path, evidence: &EvidenceBundle) ->
         evidence.summary.clone(),
     ];
 
-    for item in prioritized_evidence_items(evidence).into_iter().take(3) {
+    for item in evidence.items.iter().take(3) {
         lines.push(format!(
             "- {}: {}",
             normalize_citation_source(workspace_root, &item.source),
@@ -2516,27 +2760,6 @@ fn grounded_answer_fallback(workspace_root: &Path, evidence: &EvidenceBundle) ->
     }
 
     lines.join("\n")
-}
-
-fn prioritized_evidence_items(
-    evidence: &EvidenceBundle,
-) -> Vec<&crate::domain::ports::EvidenceItem> {
-    let mut items = evidence.items.iter().enumerate().collect::<Vec<_>>();
-    items.sort_by_key(|(index, item)| (evidence_source_priority(&item.source), *index));
-    items.into_iter().map(|(_, item)| item).collect()
-}
-
-fn evidence_source_priority(source: &str) -> usize {
-    if source.starts_with("command: ")
-        || source.starts_with("git diff")
-        || source.starts_with("diff: ")
-    {
-        return 0;
-    }
-    if source.contains('/') || source.ends_with(".md") {
-        return 1;
-    }
-    2
 }
 
 fn normalize_citation_source(workspace_root: &Path, source: &str) -> String {
@@ -2635,10 +2858,7 @@ fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String 
     if evidence.items.is_empty() {
         lines.push("No ranked evidence items were attached.".to_string());
     } else {
-        for item in prioritized_evidence_items(evidence)
-            .into_iter()
-            .take(MAX_CONTEXT_HITS)
-        {
+        for item in evidence.items.iter().take(MAX_CONTEXT_HITS) {
             lines.push(format!(
                 "- [{}] {}: {}",
                 item.rank,
@@ -2866,146 +3086,6 @@ fn format_recent_turns(local_context: &[LocalContextSource]) -> String {
     turns.into_iter().rev().collect::<Vec<_>>().join("\n")
 }
 
-fn legacy_turn_intent(prompt: &str, gathered_evidence: Option<&EvidenceBundle>) -> TurnIntent {
-    if is_casual_prompt(prompt) {
-        TurnIntent::Casual
-    } else if should_prefer_tools(prompt) {
-        TurnIntent::DeterministicAction
-    } else {
-        let _ = gathered_evidence;
-        TurnIntent::Planned
-    }
-}
-
-fn is_casual_prompt(prompt: &str) -> bool {
-    let normalized = normalize_prompt(prompt);
-
-    matches!(
-        normalized.as_str(),
-        "hi" | "hello"
-            | "hey"
-            | "howdy"
-            | "yo"
-            | "sup"
-            | "whats up"
-            | "what's up"
-            | "how are you"
-            | "who are you"
-            | "thanks"
-            | "thank you"
-            | "good morning"
-            | "good afternoon"
-            | "good evening"
-            | "bye"
-            | "goodbye"
-    ) || normalized.starts_with("hello ")
-        || normalized.starts_with("hi ")
-        || normalized.starts_with("hey ")
-        || normalized.starts_with("howdy ")
-        || normalized.starts_with("thanks ")
-        || normalized.starts_with("thank you ")
-}
-
-fn fallback_casual_reply(prompt: &str) -> String {
-    let normalized = normalize_prompt(prompt);
-
-    if matches!(normalized.as_str(), "hi" | "hello" | "hey" | "yo") {
-        return "Hello.".to_string();
-    }
-    if matches!(normalized.as_str(), "whats up" | "what's up" | "sup") {
-        return "Not much. What do you want to work on?".to_string();
-    }
-    if normalized == "how are you" {
-        return "I am here and ready to help.".to_string();
-    }
-    if matches!(normalized.as_str(), "thanks" | "thank you") {
-        return "You're welcome.".to_string();
-    }
-
-    "I am here. What do you want to work on?".to_string()
-}
-
-fn should_prefer_tools(prompt: &str) -> bool {
-    let normalized = normalize_prompt(prompt);
-    if is_casual_prompt(prompt) || is_follow_up_execution_request(prompt) {
-        return !is_casual_prompt(prompt);
-    }
-
-    normalized.contains("git status")
-        || normalized.contains("git diff")
-        || normalized.split_whitespace().any(|word| {
-            matches!(
-                word,
-                "run"
-                    | "show"
-                    | "check"
-                    | "inspect"
-                    | "list"
-                    | "find"
-                    | "search"
-                    | "open"
-                    | "read"
-                    | "edit"
-                    | "write"
-                    | "replace"
-                    | "diff"
-                    | "patch"
-                    | "apply"
-                    | "create"
-                    | "delete"
-            )
-        })
-}
-
-fn infer_tool_call(prompt: &str, local_context: &[LocalContextSource]) -> Option<ToolCall> {
-    infer_shell_command(prompt)
-        .map(|command| ToolCall::Shell {
-            command: command.to_string(),
-        })
-        .or_else(|| {
-            if is_follow_up_execution_request(prompt) {
-                infer_recent_shell_command(local_context).map(|command| ToolCall::Shell {
-                    command: command.to_string(),
-                })
-            } else {
-                None
-            }
-        })
-}
-
-fn infer_shell_command(prompt: &str) -> Option<&'static str> {
-    let normalized = normalize_prompt(prompt);
-    if normalized.contains("git status") {
-        return Some("git status");
-    }
-    if normalized.contains("git diff") {
-        return Some("git diff --stat");
-    }
-    None
-}
-
-fn infer_recent_shell_command(local_context: &[LocalContextSource]) -> Option<&'static str> {
-    local_context.iter().rev().find_map(|item| match item {
-        LocalContextSource::AgentTurn(turn) => infer_shell_command(&turn.content),
-        _ => None,
-    })
-}
-
-fn is_follow_up_execution_request(prompt: &str) -> bool {
-    matches!(
-        normalize_prompt(prompt).as_str(),
-        "run it"
-            | "i mean run it"
-            | "do it"
-            | "i mean do it"
-            | "execute it"
-            | "i mean execute it"
-            | "run that"
-            | "execute that"
-            | "do that"
-    )
-}
-
 fn describe_tool_call(tool_call: &ToolCall) -> String {
     match tool_call {
         ToolCall::Search { query, intent } => match intent {
@@ -3044,6 +3124,14 @@ fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
 }
 
 fn parse_interpretation_graph(response: &str) -> Result<Option<InterpretationGraphEnvelope>> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(json).ok())
+}
+
+fn parse_interpretation_context(response: &str) -> Result<Option<InterpretationContextEnvelope>> {
     let trimmed = response.trim();
     let Some(json) = extract_json_payload(trimmed) else {
         return Ok(None);
@@ -3090,6 +3178,94 @@ fn parse_thread_decision(
     Ok(Some(thread_decision_from_envelope(decision, request)?))
 }
 
+fn interpretation_context_from_envelope(
+    envelope: InterpretationContextEnvelope,
+    workspace_root: &Path,
+    loaded_documents: &[OperatorMemoryDocument],
+) -> InterpretationContext {
+    let allowed_sources = loaded_documents
+        .iter()
+        .map(|document| document.source.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let fallback_summary = format!(
+        "Operator interpretation context assembled from {} AGENTS-rooted guidance document(s). Use it before choosing recursive workspace actions.",
+        loaded_documents.len()
+    );
+
+    let documents = envelope
+        .documents
+        .into_iter()
+        .filter(|document| allowed_sources.contains(document.source.as_str()))
+        .filter_map(|document| {
+            let excerpt = trim_for_context(&document.excerpt, 1_200);
+            (!excerpt.trim().is_empty()).then(|| InterpretationDocument {
+                source: normalize_citation_source(workspace_root, &document.source),
+                excerpt,
+            })
+        })
+        .take(5)
+        .collect::<Vec<_>>();
+
+    let tool_hints = envelope
+        .tool_hints
+        .into_iter()
+        .filter(|hint| allowed_sources.contains(hint.source.as_str()))
+        .filter_map(|hint| {
+            let note = trim_for_context(&hint.note, 240);
+            (!note.trim().is_empty()).then(|| InterpretationToolHint {
+                source: normalize_citation_source(workspace_root, &hint.source),
+                action: hint.action,
+                note,
+            })
+        })
+        .take(6)
+        .collect::<Vec<_>>();
+
+    let procedures = envelope
+        .procedures
+        .into_iter()
+        .filter(|procedure| allowed_sources.contains(procedure.source.as_str()))
+        .filter_map(|procedure| {
+            let label = procedure.label.trim().to_string();
+            let purpose = trim_for_context(&procedure.purpose, 240);
+            let steps = procedure
+                .steps
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, step)| {
+                    let note = trim_for_context(&step.note, 240);
+                    (!note.trim().is_empty()).then_some(InterpretationProcedureStep {
+                        index,
+                        action: step.action,
+                        note,
+                    })
+                })
+                .collect::<Vec<_>>();
+            (!label.is_empty() && !purpose.trim().is_empty() && !steps.is_empty()).then(|| {
+                InterpretationProcedure {
+                    source: normalize_citation_source(workspace_root, &procedure.source),
+                    label,
+                    purpose,
+                    steps,
+                }
+            })
+        })
+        .take(4)
+        .collect::<Vec<_>>();
+
+    let summary = envelope.summary.trim();
+    InterpretationContext {
+        summary: if summary.is_empty() {
+            fallback_summary
+        } else {
+            trim_for_context(summary, 320)
+        },
+        documents,
+        tool_hints,
+        decision_framework: InterpretationDecisionFramework { procedures },
+    }
+}
+
 fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
     let decision = match envelope {
         InitialActionEnvelope::Answer { rationale } => InitialActionDecision {
@@ -3098,12 +3274,16 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
         },
         InitialActionEnvelope::Search {
             query,
+            mode,
+            strategy,
             intent,
             rationale,
         } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::Search {
                     query: required_planner_field("query", query)?,
+                    mode,
+                    strategy,
                     intent: intent.and_then(|value| {
                         let trimmed = value.trim();
                         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -3196,7 +3376,12 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
-        InitialActionEnvelope::Refine { query, rationale } => {
+        InitialActionEnvelope::Refine {
+            query,
+            mode,
+            strategy,
+            rationale,
+        } => {
             let rationale_text = rationale
                 .as_deref()
                 .map(str::trim)
@@ -3205,6 +3390,8 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             InitialActionDecision {
                 action: InitialAction::Refine {
                     query: required_planner_field("query", query)?,
+                    mode,
+                    strategy,
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
@@ -3247,12 +3434,16 @@ fn planner_action_from_envelope(
     let decision = match envelope {
         PlannerActionEnvelope::Search {
             query,
+            mode,
+            strategy,
             intent,
             rationale,
         } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Search {
                     query: required_planner_field("query", query)?,
+                    mode,
+                    strategy,
                     intent: intent.and_then(|value| {
                         let trimmed = value.trim();
                         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -3345,7 +3536,12 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
         },
-        PlannerActionEnvelope::Refine { query, rationale } => {
+        PlannerActionEnvelope::Refine {
+            query,
+            mode,
+            strategy,
+            rationale,
+        } => {
             let rationale_text = rationale
                 .as_deref()
                 .map(str::trim)
@@ -3354,6 +3550,8 @@ fn planner_action_from_envelope(
             RecursivePlannerDecision {
                 action: PlannerAction::Refine {
                     query: required_planner_field("query", query)?,
+                    mode,
+                    strategy,
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
@@ -3483,254 +3681,26 @@ fn parse_merge_mode(value: &str) -> Result<ThreadMergeMode> {
     }
 }
 
-fn fallback_initial_action(request: &PlannerRequest) -> InitialActionDecision {
-    if let Some(tool_call) = infer_tool_call(&request.user_prompt, &[]) {
-        return InitialActionDecision {
-            action: InitialAction::Workspace {
-                action: workspace_action_from_tool_call(tool_call),
-            },
-            rationale: "prefer a concrete workspace action inside the planner loop when the initial action reply is invalid"
-                .to_string(),
-        };
-    }
-
-    if let Some(action) = next_decision_framework_action(request) {
-        return InitialActionDecision {
-            action: InitialAction::Workspace { action },
-            rationale: "prefer the next step from the interpretation-derived decision framework when the initial action reply is invalid"
-                .to_string(),
-        };
-    }
-
-    if let Some(action) = best_interpretation_workspace_hint(request, true) {
-        return InitialActionDecision {
-            action: InitialAction::Workspace { action },
-            rationale: "prefer a concrete interpretation-derived workspace action when the initial action reply is invalid"
-                .to_string(),
-        };
-    }
-
-    if request.user_prompt.split_whitespace().count() <= 6 && request.loop_state.steps.is_empty() {
-        return InitialActionDecision {
-            action: InitialAction::Answer,
-            rationale: "answer directly when the initial action reply is invalid and the turn looks lightweight"
-                .to_string(),
-        };
-    }
-
+fn fail_closed_initial_action(request: &PlannerRequest) -> InitialActionDecision {
     InitialActionDecision {
-        action: InitialAction::Workspace {
-            action: WorkspaceAction::Search {
-                query: fallback_planner_query(&request.user_prompt),
-                intent: Some("initial action fallback".to_string()),
-            },
+        action: InitialAction::Stop {
+            reason: format!(
+                "initial-action-unavailable after invalid planner replies for `{}`",
+                trim_for_context(&request.user_prompt, 120)
+            ),
         },
-        rationale: "start with a bounded workspace search when the initial action reply is invalid"
+        rationale: "controller failed closed after repeated invalid initial-action replies"
             .to_string(),
     }
 }
 
-fn fallback_planner_action(request: &PlannerRequest) -> RecursivePlannerDecision {
-    if let Some(branch) = request.loop_state.pending_branches.first() {
-        return RecursivePlannerDecision {
-            action: PlannerAction::Workspace {
-                action: WorkspaceAction::Search {
-                    query: branch.label.clone(),
-                    intent: Some("queued planner branch".to_string()),
-                },
-            },
-            rationale: "continue with the oldest queued branch".to_string(),
-        };
-    }
-
-    if let Some(reason) = decision_framework_stop_reason(request) {
-        return RecursivePlannerDecision {
-            action: PlannerAction::Stop { reason },
-            rationale: "stop because interpretation-derived procedure evidence appears sufficient"
-                .to_string(),
-        };
-    }
-
-    if let Some(action) = next_decision_framework_action(request) {
-        return RecursivePlannerDecision {
-            action: PlannerAction::Workspace { action },
-            rationale: "continue with the next interpretation-derived procedure step when the planner reply is invalid"
-                .to_string(),
-        };
-    }
-
-    if let Some(action) = best_interpretation_workspace_hint(request, false) {
-        return RecursivePlannerDecision {
-            action: PlannerAction::Workspace { action },
-            rationale: "use a relevant interpretation-derived workspace action when the planner reply is invalid"
-                .to_string(),
-        };
-    }
-
-    if request.loop_state.steps.is_empty() && request.loop_state.evidence_items.is_empty() {
-        return RecursivePlannerDecision {
-            action: PlannerAction::Workspace {
-                action: WorkspaceAction::Search {
-                    query: fallback_planner_query(&request.user_prompt),
-                    intent: Some("initial planner fallback".to_string()),
-                },
-            },
-            rationale: "start with a bounded workspace search when the planner reply is invalid"
-                .to_string(),
-        };
-    }
-
+fn fail_closed_planner_action() -> RecursivePlannerDecision {
     RecursivePlannerDecision {
         action: PlannerAction::Stop {
-            reason: "planner fallback stop".to_string(),
+            reason: "planner-action-unavailable after invalid planner replies".to_string(),
         },
-        rationale: "stop after invalid planner replies once some loop state already exists"
-            .to_string(),
+        rationale: "controller failed closed after repeated invalid planner replies".to_string(),
     }
-}
-
-fn best_interpretation_workspace_hint(
-    request: &PlannerRequest,
-    allow_reuse: bool,
-) -> Option<WorkspaceAction> {
-    request
-        .interpretation
-        .tool_hints
-        .iter()
-        .find(|hint| allow_reuse || !planner_loop_used_action(&request.loop_state, &hint.action))
-        .map(|hint| hint.action.clone())
-}
-
-fn next_decision_framework_action(request: &PlannerRequest) -> Option<WorkspaceAction> {
-    let procedure = best_interpretation_procedure(request)?;
-    procedure
-        .steps
-        .iter()
-        .find(|step| !planner_loop_used_action(&request.loop_state, &step.action))
-        .map(|step| step.action.clone())
-}
-
-fn decision_framework_stop_reason(request: &PlannerRequest) -> Option<String> {
-    let procedure = best_interpretation_procedure(request)?;
-    let relevant_step = procedure
-        .steps
-        .iter()
-        .filter_map(|step| {
-            let score = action_match_score(&step.action, &request.user_prompt)
-                + text_match_score(&step.note, &request.user_prompt);
-            (score > 0).then_some((score, step))
-        })
-        .max_by_key(|(score, _)| *score)
-        .map(|(_, step)| step)?;
-    let source = workspace_action_evidence_source(&relevant_step.action);
-    let has_relevant_evidence = request.loop_state.evidence_items.iter().any(|item| {
-        item.source == source
-            && !item.snippet.trim().is_empty()
-            && !item.snippet.contains("budget exhausted")
-            && !item.snippet.contains("failed")
-    });
-    has_relevant_evidence.then(|| format!("decision-framework step satisfied by `{source}`"))
-}
-
-fn best_interpretation_procedure(
-    request: &PlannerRequest,
-) -> Option<&crate::domain::ports::InterpretationProcedure> {
-    request
-        .interpretation
-        .decision_framework
-        .procedures
-        .iter()
-        .filter_map(|procedure| {
-            let step_score = procedure
-                .steps
-                .iter()
-                .map(|step| {
-                    action_match_score(&step.action, &request.user_prompt)
-                        + text_match_score(&step.note, &request.user_prompt)
-                })
-                .sum::<usize>();
-            let score = text_match_score(&procedure.label, &request.user_prompt)
-                + text_match_score(&procedure.purpose, &request.user_prompt)
-                + step_score;
-            (score > 0).then_some((score, procedure))
-        })
-        .max_by_key(|(score, _)| *score)
-        .map(|(_, procedure)| procedure)
-}
-
-fn planner_loop_used_action(
-    loop_state: &crate::domain::ports::PlannerLoopState,
-    action: &WorkspaceAction,
-) -> bool {
-    loop_state.steps.iter().any(|step| match &step.action {
-        PlannerAction::Workspace { action: existing } => existing == action,
-        _ => false,
-    })
-}
-
-fn workspace_action_evidence_source(action: &WorkspaceAction) -> String {
-    match action {
-        WorkspaceAction::Search { query, .. } => format!("search: {query}"),
-        WorkspaceAction::ListFiles { pattern } => match pattern {
-            Some(pattern) => format!("list_files: {pattern}"),
-            None => "list_files".to_string(),
-        },
-        WorkspaceAction::Read { path } => path.clone(),
-        WorkspaceAction::Inspect { command } => format!("command: {command}"),
-        WorkspaceAction::Shell { command } => format!("command: {command}"),
-        WorkspaceAction::Diff { path } => match path {
-            Some(path) => format!("diff: {path}"),
-            None => "git diff --no-ext-diff".to_string(),
-        },
-        WorkspaceAction::WriteFile { path, .. } => path.clone(),
-        WorkspaceAction::ReplaceInFile { path, .. } => path.clone(),
-        WorkspaceAction::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
-    }
-}
-
-fn action_match_score(action: &WorkspaceAction, user_prompt: &str) -> usize {
-    text_match_score(&action.summary(), user_prompt)
-}
-
-fn text_match_score(text: &str, user_prompt: &str) -> usize {
-    let normalized = text.to_ascii_lowercase();
-    planner_query_terms(user_prompt)
-        .iter()
-        .filter(|term| normalized.contains(term.as_str()))
-        .count()
-}
-
-fn planner_query_terms(prompt: &str) -> Vec<String> {
-    let mut terms = prompt
-        .to_ascii_lowercase()
-        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.')
-        .filter(|term| term.len() >= 3)
-        .filter(|term| {
-            !matches!(
-                *term,
-                "the"
-                    | "and"
-                    | "with"
-                    | "from"
-                    | "into"
-                    | "that"
-                    | "this"
-                    | "what"
-                    | "when"
-                    | "where"
-                    | "which"
-                    | "would"
-                    | "could"
-                    | "should"
-                    | "about"
-                    | "your"
-            )
-        })
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    terms.sort();
-    terms.dedup();
-    terms
 }
 
 fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
@@ -3751,32 +3721,9 @@ fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
     }
 }
 
-fn workspace_action_from_tool_call(tool_call: ToolCall) -> WorkspaceAction {
-    match tool_call {
-        ToolCall::Search { query, intent } => WorkspaceAction::Search { query, intent },
-        ToolCall::ListFiles { pattern } => WorkspaceAction::ListFiles { pattern },
-        ToolCall::ReadFile { path } => WorkspaceAction::Read { path },
-        ToolCall::WriteFile { path, content } => WorkspaceAction::WriteFile { path, content },
-        ToolCall::ReplaceInFile {
-            path,
-            old,
-            new,
-            replace_all,
-        } => WorkspaceAction::ReplaceInFile {
-            path,
-            old,
-            new,
-            replace_all,
-        },
-        ToolCall::Shell { command } => WorkspaceAction::Shell { command },
-        ToolCall::Diff { path } => WorkspaceAction::Diff { path },
-        ToolCall::ApplyPatch { patch } => WorkspaceAction::ApplyPatch { patch },
-    }
-}
-
 fn tool_call_from_workspace_action(action: &WorkspaceAction) -> Option<ToolCall> {
     match action {
-        WorkspaceAction::Search { query, intent } => Some(ToolCall::Search {
+        WorkspaceAction::Search { query, intent, .. } => Some(ToolCall::Search {
             query: query.clone(),
             intent: intent.clone(),
         }),
@@ -3807,15 +3754,6 @@ fn tool_call_from_workspace_action(action: &WorkspaceAction) -> Option<ToolCall>
         WorkspaceAction::ApplyPatch { patch } => Some(ToolCall::ApplyPatch {
             patch: patch.clone(),
         }),
-    }
-}
-
-fn fallback_planner_query(user_prompt: &str) -> String {
-    let query = user_prompt.trim();
-    if query.is_empty() {
-        "workspace context".to_string()
-    } else {
-        query.to_string()
     }
 }
 
@@ -4040,13 +3978,6 @@ fn format_command_summary(header: &str, command: &str, output: &std::process::Ou
     trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
 }
 
-fn normalize_prompt(prompt: &str) -> String {
-    prompt
-        .trim()
-        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
-        .to_ascii_lowercase()
-}
-
 fn unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -4082,11 +4013,10 @@ impl ConversationFactory for StaticConversationFactory {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentTurnInput, LocalContextSource, MAX_TOOL_STEPS, QwenGenerationConfig, SiftAgentAdapter,
-        ToolCall, extract_json_payload, format_qwen_prompt, generation_sampling,
-        grounded_answer_fallback, infer_tool_call, is_follow_up_execution_request,
-        normalize_relative_path, preferred_qwen_weight_dtype, should_prefer_tools,
-        should_retry_qwen_on_cpu_message, trim_for_context,
+        LocalContextSource, MAX_TOOL_STEPS, QwenGenerationConfig, SiftAgentAdapter, ToolCall,
+        extract_json_payload, format_qwen_prompt, generation_sampling, grounded_answer_fallback,
+        normalize_relative_path, preferred_qwen_weight_dtype, should_retry_qwen_on_cpu_message,
+        trim_for_context,
     };
     use crate::domain::model::{NullTurnEventSink, TurnIntent};
     use crate::domain::ports::{
@@ -4094,7 +4024,8 @@ mod tests {
         InterpretationDecisionFramework, InterpretationProcedure, InterpretationProcedureStep,
         InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
         PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
-        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, WorkspaceAction,
+        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -4309,7 +4240,12 @@ mod tests {
         );
 
         let reply = adapter
-            .respond("Where is the entrypoint?")
+            .respond_for_turn(
+                "Where is the entrypoint?",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
             .expect("response");
         assert_eq!(reply, "The entrypoint is src/main.rs.");
 
@@ -4524,15 +4460,31 @@ mod tests {
             workspace.path(),
             "qwen-1.5b",
             Box::new(RecordingConversation::new(
-                "The repository layout is straightforward.",
+                "The repository layout is straightforward.\n\nSources: README.md",
                 Arc::clone(&recorded_messages),
             )),
         );
 
         let reply = adapter
-            .respond("Summarize the repository layout")
+            .respond_for_turn(
+                "Summarize the repository layout",
+                TurnIntent::Planned,
+                Some(&EvidenceBundle::new(
+                    "Repository evidence for the runtime layout.",
+                    vec![EvidenceItem {
+                        source: "README.md".to_string(),
+                        snippet: "The README explains the runtime layout.".to_string(),
+                        rationale: "Ground the answer in repository evidence.".to_string(),
+                        rank: 1,
+                    }],
+                )),
+                Arc::new(NullTurnEventSink),
+            )
             .expect("response");
-        assert_eq!(reply, "The repository layout is straightforward.");
+        assert_eq!(
+            reply,
+            "The repository layout is straightforward.\n\nSources: README.md"
+        );
 
         let prompt = recorded_messages
             .lock()
@@ -4542,7 +4494,7 @@ mod tests {
             .expect("recorded prompt");
         assert!(prompt.contains("Persistent operator memory"));
         assert!(prompt.contains("Prefer concrete repository answers over generic advice."));
-        assert!(prompt.contains("Planner evidence handoff"));
+        assert!(prompt.contains("Gathered repository evidence"));
     }
 
     #[test]
@@ -4652,6 +4604,10 @@ mod tests {
                     r#"{"edges":[]}"#,
                     Arc::clone(&recorded_messages),
                 )),
+                Box::new(RecordingConversation::new(
+                    r#"{"summary":"Operator interpretation context assembled from AGENTS-rooted guidance document(s). Use it before choosing recursive workspace actions.","documents":[{"source":"AGENTS.md","excerpt":"Follow `INSTRUCTIONS.md` for the canonical turn loop."},{"source":"INSTRUCTIONS.md","excerpt":"Inspect with `keel mission next` and `keel pulse`."}],"tool_hints":[{"source":"INSTRUCTIONS.md","action":{"action":"inspect","command":"keel mission next"},"note":"Inspect current board demand before acting."}],"procedures":[{"source":"INSTRUCTIONS.md","label":"Inspect","purpose":"Read current demand on the board.","steps":[{"index":0,"action":{"action":"inspect","command":"keel mission next"},"note":"Inspect current board demand."}]}]}"#,
+                    Arc::clone(&recorded_messages),
+                )),
             ],
         );
 
@@ -4694,15 +4650,16 @@ mod tests {
     }
 
     #[test]
-    fn invalid_initial_action_replies_fall_back_to_concrete_workspace_actions() {
+    fn invalid_initial_action_replies_use_constrained_redecision_before_succeeding() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
-            Box::new(RecordingConversation::new(
-                "not json",
-                Arc::new(Mutex::new(Vec::new())),
-            )),
+            Box::new(MockConversation::new(vec![
+                "not json".to_string(),
+                "still not json".to_string(),
+                r#"{"action":"inspect","command":"git status","rationale":"confirm the repository state after invalid replies"}"#.to_string(),
+            ])),
         );
 
         let request = PlannerRequest::new(
@@ -4714,19 +4671,19 @@ mod tests {
 
         let decision = adapter
             .select_initial_action(&request)
-            .expect("initial action fallback");
+            .expect("initial action redecision");
         assert_eq!(
             decision.action,
             InitialAction::Workspace {
-                action: WorkspaceAction::Shell {
-                    command: "git status".to_string()
+                action: WorkspaceAction::Inspect {
+                    command: "git status".to_string(),
                 }
             }
         );
     }
 
     #[test]
-    fn invalid_initial_action_replies_fall_back_to_interpretation_tool_hints() {
+    fn invalid_initial_action_replies_fail_closed_after_redecision_is_still_invalid() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
@@ -4773,24 +4730,25 @@ mod tests {
             .expect("initial action fallback");
         assert_eq!(
             decision.action,
-            InitialAction::Workspace {
-                action: WorkspaceAction::Inspect {
-                    command: "keel mission next".to_string()
-                }
+            InitialAction::Stop {
+                reason:
+                    "initial-action-unavailable after invalid planner replies for `What's the next step on the keel board?`"
+                        .to_string()
             }
         );
     }
 
     #[test]
-    fn invalid_planner_replies_fall_back_to_unused_interpretation_tool_hints() {
+    fn invalid_planner_replies_use_constrained_redecision_before_succeeding() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
-            Box::new(RecordingConversation::new(
-                "not json",
-                Arc::new(Mutex::new(Vec::new())),
-            )),
+            Box::new(MockConversation::new(vec![
+                "not json".to_string(),
+                "still not json".to_string(),
+                r#"{"action":"inspect","command":"keel mission next","rationale":"read the current board demand after invalid replies"}"#.to_string(),
+            ])),
         );
 
         let request = PlannerRequest::new(
@@ -4831,6 +4789,8 @@ mod tests {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Search {
                         query: "What's the next step on the keel board?".to_string(),
+                        mode: RetrievalMode::Linear,
+                        strategy: RetrievalStrategy::Lexical,
                         intent: Some("initial planner fallback".to_string()),
                     },
                 },
@@ -4849,7 +4809,7 @@ mod tests {
 
         let decision = adapter
             .select_planner_action(&request)
-            .expect("planner action fallback");
+            .expect("planner action redecision");
         assert_eq!(
             decision.action,
             PlannerAction::Workspace {
@@ -4861,7 +4821,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_planner_replies_stop_once_framework_step_has_answered_the_request() {
+    fn invalid_planner_replies_fail_closed_after_redecision_is_still_invalid() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
@@ -4925,14 +4885,13 @@ mod tests {
         assert_eq!(
             decision.action,
             PlannerAction::Stop {
-                reason: "decision-framework step satisfied by `command: keel mission next`"
-                    .to_string()
+                reason: "planner-action-unavailable after invalid planner replies".to_string()
             }
         );
     }
 
     #[test]
-    fn grounded_answer_fallback_prioritizes_command_evidence() {
+    fn grounded_answer_fallback_preserves_evidence_order_without_source_priority() {
         let evidence = EvidenceBundle::new(
             "Planner collected board evidence.",
             vec![
@@ -4952,11 +4911,13 @@ mod tests {
         );
 
         let reply = grounded_answer_fallback(Path::new("."), &evidence);
-        let command_index = reply
-            .find("command: keel mission next")
-            .expect("command evidence");
-        let agents_index = reply.find("AGENTS.md").expect("doc evidence");
-        assert!(command_index < agents_index);
+        let bullets = reply
+            .lines()
+            .filter(|line| line.starts_with("- "))
+            .collect::<Vec<_>>();
+        assert_eq!(bullets.len(), 2);
+        assert!(bullets[0].contains("command: keel mission next"));
+        assert!(bullets[1].contains("AGENTS.md"));
     }
 
     #[test]
@@ -5065,7 +5026,12 @@ mod tests {
         );
 
         let reply = adapter
-            .respond("Try reading the missing file.")
+            .respond_for_turn(
+                "Try reading the missing file.",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
             .expect("response");
         assert_eq!(reply, "Recovered after the failed read.");
 
@@ -5132,7 +5098,10 @@ mod tests {
         );
 
         let reply = adapter.respond("What's up?").expect("response");
-        assert_eq!(reply, "Not much. What do you want to work on?");
+        assert_eq!(
+            reply,
+            "I couldn't produce a usable response. Ask again or request a concrete workspace action."
+        );
 
         let state = adapter.state.lock().expect("state");
         assert_eq!(state.tool_counter, 0);
@@ -5153,7 +5122,10 @@ mod tests {
         );
 
         let reply = adapter.respond("What's up?").expect("response");
-        assert_eq!(reply, "Not much. What do you want to work on?");
+        assert_eq!(
+            reply,
+            "I couldn't produce a usable response. Ask again or request a concrete workspace action."
+        );
 
         let state = adapter.state.lock().expect("state");
         assert_eq!(state.tool_counter, 0);
@@ -5193,31 +5165,6 @@ mod tests {
     }
 
     #[test]
-    fn action_requests_prefer_tools() {
-        assert!(should_prefer_tools("Can you show me the git status?"));
-        assert!(should_prefer_tools("Open src/main.rs"));
-        assert!(is_follow_up_execution_request("I mean run it"));
-        assert!(!should_prefer_tools("Do you know how to use tools?"));
-    }
-
-    #[test]
-    fn follow_up_execution_infers_recent_shell_command() {
-        let local_context = vec![LocalContextSource::AgentTurn(AgentTurnInput::new(
-            "turn-1",
-            "assistant",
-            "Run `git status` to inspect the repo.",
-        ))];
-
-        let inferred = infer_tool_call("I mean run it", &local_context).expect("tool call");
-        assert_eq!(
-            inferred,
-            ToolCall::Shell {
-                command: "git status".to_string()
-            }
-        );
-    }
-
-    #[test]
     fn respond_starts_a_fresh_conversation_each_turn() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test_with_conversations(
@@ -5234,7 +5181,12 @@ mod tests {
 
         let first = adapter.respond("Hello").expect("first response");
         let second = adapter
-            .respond("Inspect the repository status")
+            .respond_for_turn(
+                "Inspect the repository status",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
             .expect("second response");
 
         assert_eq!(first, "Hello.");
@@ -5262,7 +5214,12 @@ mod tests {
         );
 
         let reply = adapter
-            .respond("Inspect the repository status")
+            .respond_for_turn(
+                "Inspect the repository status",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
             .expect("response");
 
         assert_eq!(reply, "Working tree is clean.");
@@ -5291,7 +5248,12 @@ mod tests {
         );
 
         let reply = adapter
-            .respond("Inspect the repository status")
+            .respond_for_turn(
+                "Inspect the repository status",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
             .expect("response");
 
         assert_eq!(reply, "Working tree is clean.");
@@ -5300,7 +5262,7 @@ mod tests {
     }
 
     #[test]
-    fn action_prompts_can_use_controller_inferred_tool_calls() {
+    fn deterministic_action_turns_require_model_selected_tool_calls() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         std::process::Command::new("git")
             .arg("init")
@@ -5313,14 +5275,21 @@ mod tests {
             workspace.path(),
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
+                r#"{"tool":"shell","command":"git status"}"#.to_string(),
                 "Working tree is clean.".to_string(),
             ])),
         );
 
-        let reply = adapter.respond("Show me the git status").expect("response");
+        let reply = adapter
+            .respond_for_turn(
+                "Show me the git status",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
+            .expect("response");
 
-        assert!(reply.contains("git status"));
-        assert!(reply.contains("Exit status"));
+        assert_eq!(reply, "Working tree is clean.");
         let state = adapter.state.lock().expect("state");
         assert_eq!(state.tool_counter, 1);
     }
@@ -5388,7 +5357,12 @@ mod tests {
         );
 
         let err = adapter
-            .respond("Keep listing files forever.")
+            .respond_for_turn(
+                "Keep listing files forever.",
+                TurnIntent::DeterministicAction,
+                None,
+                Arc::new(NullTurnEventSink),
+            )
             .expect_err("tool budget error");
         assert!(err.to_string().contains("tool step limit exceeded"));
     }

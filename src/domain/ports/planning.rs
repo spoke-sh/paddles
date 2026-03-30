@@ -1,4 +1,6 @@
-use super::context_gathering::{EvidenceItem, PlannerTraceMetadata};
+use super::context_gathering::{
+    EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy,
+};
 use crate::domain::model::{
     ConversationThread, ThreadCandidate, ThreadDecision, TraceBranch, TraceBranchId,
 };
@@ -288,6 +290,8 @@ pub struct PlannerStepRecord {
 pub enum WorkspaceAction {
     Search {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         #[serde(default)]
         intent: Option<String>,
     },
@@ -341,7 +345,12 @@ impl WorkspaceAction {
 
     pub fn summary(&self) -> String {
         match self {
-            Self::Search { query, .. } => format!("search `{query}`"),
+            Self::Search {
+                query,
+                mode,
+                strategy,
+                ..
+            } => format!("search `{query}` [{} / {}]", mode.label(), strategy.label()),
             Self::ListFiles { pattern } => match pattern {
                 Some(pattern) if !pattern.trim().is_empty() => {
                     format!("list files matching `{pattern}`")
@@ -376,6 +385,8 @@ pub enum InitialAction {
     },
     Refine {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         rationale: Option<String>,
     },
     Branch {
@@ -402,7 +413,16 @@ impl InitialAction {
         match self {
             Self::Answer => "answer directly".to_string(),
             Self::Workspace { action } => action.summary(),
-            Self::Refine { query, .. } => format!("refine toward `{query}`"),
+            Self::Refine {
+                query,
+                mode,
+                strategy,
+                ..
+            } => format!(
+                "refine toward `{query}` [{} / {}]",
+                mode.label(),
+                strategy.label()
+            ),
             Self::Branch { branches, .. } => format!("branch into {}", branches.join(" | ")),
             Self::Stop { reason } => format!("stop ({reason})"),
         }
@@ -414,8 +434,15 @@ impl InitialAction {
             Self::Workspace { action } => Some(PlannerAction::Workspace {
                 action: action.clone(),
             }),
-            Self::Refine { query, rationale } => Some(PlannerAction::Refine {
+            Self::Refine {
+                query,
+                mode,
+                strategy,
+                rationale,
+            } => Some(PlannerAction::Refine {
                 query: query.clone(),
+                mode: *mode,
+                strategy: *strategy,
                 rationale: rationale.clone(),
             }),
             Self::Branch {
@@ -446,6 +473,8 @@ pub enum PlannerAction {
     },
     Refine {
         query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
         rationale: Option<String>,
     },
     Branch {
@@ -470,7 +499,16 @@ impl PlannerAction {
     pub fn summary(&self) -> String {
         match self {
             Self::Workspace { action } => action.summary(),
-            Self::Refine { query, .. } => format!("refine toward `{query}`"),
+            Self::Refine {
+                query,
+                mode,
+                strategy,
+                ..
+            } => format!(
+                "refine toward `{query}` [{} / {}]",
+                mode.label(),
+                strategy.label()
+            ),
             Self::Branch { branches, .. } => {
                 format!("branch into {}", branches.join(" | "))
             }
@@ -494,8 +532,8 @@ mod tests {
     use super::{
         InitialAction, InterpretationContext, InterpretationDecisionFramework,
         InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-        InterpretationToolHint, PlannerAction, PlannerBudget, ThreadDecisionRequest,
-        WorkspaceAction,
+        InterpretationToolHint, PlannerAction, PlannerBudget, RetrievalMode, RetrievalStrategy,
+        ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
         ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadCandidate,
@@ -557,6 +595,8 @@ mod tests {
         let action = PlannerAction::Workspace {
             action: WorkspaceAction::Search {
                 query: "memory reload".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
                 intent: None,
             },
         };

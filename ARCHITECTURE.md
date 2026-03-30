@@ -146,9 +146,9 @@ The repo now contains the main pieces of the target architecture:
 The remaining transitional pieces are now smaller:
 
 - the main mech-suit service now keeps explicit workspace actions inside the planner loop instead of routing them through a separate top-level bridge
-- interpretation-driven fallbacks now prefer relevant read-only command hints and derived procedures from the AGENTS-rooted guidance graph before generic search/stop
-- planner fallback stopping can now terminate recursion when an interpretation-derived procedure step has already produced matching evidence for the user request
-- legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
+- interpretation context is selected from an AGENTS-rooted, model-derived guidance graph instead of lexical controller scoring
+- invalid initial/planner replies now get one more constrained model re-decision pass before the controller fails closed
+- recursive search/refine actions now carry model-selected retrieval mode and retrieval strategy into the gatherer boundary instead of hardcoded graph/lexical defaults
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
 - the default `sift-autonomous` gatherer path now runs bounded graph-mode retrieval for recursive planner `search` / `refine` work and preserves graph episode/frontier/branch state as typed `paddles` metadata
 - the recorder boundary is live, but the default runtime still uses the noop recorder until a policy/config slice chooses an always-on local recorder
@@ -171,7 +171,7 @@ The recorder path is now:
 This keeps the domain storage-neutral while making lineage durable enough for
 later replay, branch comparison, and graph-trace analysis.
 
-## Transitional Gap: Tool Bridge And Legacy Helpers
+## Transitional Gap: Resource Graph
 
 The main runtime path now follows the target backbone shape:
 
@@ -182,7 +182,7 @@ The main runtime path now follows the target backbone shape:
 
 The remaining mismatch is narrower:
 
-1. some legacy direct adapter helper methods still infer intent heuristically when called outside `MechSuitService`
+1. planner `search` / `refine` still delegate through the configured gatherer backend instead of a richer unified resource graph
 2. auto-threading is checkpoint-bounded and sequential today; it replays and
    merges explicit thread lineage but does not provide simultaneous sibling
    generation on one local model session

@@ -58,9 +58,6 @@ Paddles treats inference as a routing problem, not a single-model problem.
 11. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
 12. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, thread semantics, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
 
-Current transitional note:
-- The main mech-suit runtime now uses model-directed first action selection and keeps explicit workspace actions inside the planner loop. Remaining transitional debt is limited to legacy direct adapter helpers that still contain heuristic intent inference outside the main service path.
-
 ## Human Interaction & Pokes
 
 Keel's autonomous flow is governed by a physical battery metaphor, but the charge is now derived from real repository activity rather than a synthetic wake file.

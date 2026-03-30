@@ -10,7 +10,7 @@ pub use context_gathering::{
     EvidenceItem, GathererCapability, PlannerConfig, PlannerDecision, PlannerGraphBranch,
     PlannerGraphBranchStatus, PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode,
     PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RetainedEvidence, RetrievalMode,
+    PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
 };
 pub use planning::{
     InitialAction, InitialActionDecision, InterpretationContext, InterpretationDecisionFramework,
