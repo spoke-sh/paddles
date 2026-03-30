@@ -674,35 +674,40 @@ impl InteractiveApp {
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
         let input_height = self.input_area_height();
+        let activity_height = u16::from(self.busy && !self.is_masked_input());
+        let fixed_bottom = input_height + activity_height + 1;
         let transcript_height = self.live_tail_height(
             usize::from(area.width.max(1)),
-            usize::from(area.height.saturating_sub(1 + input_height)),
+            usize::from(area.height.saturating_sub(fixed_bottom)),
         );
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),
                 Constraint::Min(transcript_height),
+                Constraint::Length(activity_height),
                 Constraint::Length(input_height),
+                Constraint::Length(1),
             ])
             .split(area);
 
-        frame.render_widget(self.render_header(), layout[0]);
         if transcript_height > 0 {
-            frame.render_widget(self.render_transcript(layout[1]), layout[1]);
+            frame.render_widget(self.render_transcript(layout[0]), layout[0]);
+        }
+        if activity_height > 0 {
+            frame.render_widget(self.render_activity_indicator(), layout[1]);
         }
         frame.render_widget(self.render_input(), layout[2]);
         frame.set_cursor_position(self.cursor_position(layout[2]));
+        frame.render_widget(self.render_status_bar(), layout[3]);
     }
 
-    fn render_header(&self) -> Paragraph<'static> {
-        let spinner = SPINNER_FRAMES[self.spinner_index];
+    fn render_status_bar(&self) -> Paragraph<'static> {
         let active_thread = self.session.active_thread().thread_ref.stable_id();
         let status = match self.busy_phase {
             BusyPhase::Idle if self.queued_prompts.is_empty() => "idle".to_string(),
             BusyPhase::Idle => format!("idle · {} queued", self.queued_prompts.len()),
-            BusyPhase::Thinking => format!("{spinner} thinking"),
-            BusyPhase::Rendering => format!("{spinner} rendering"),
+            BusyPhase::Thinking => "thinking".to_string(),
+            BusyPhase::Rendering => "rendering".to_string(),
         };
 
         let line = Line::from(vec![
@@ -722,6 +727,30 @@ impl InteractiveApp {
             ),
         ]);
 
+        Paragraph::new(Text::from(vec![line]))
+    }
+
+    fn render_activity_indicator(&self) -> Paragraph<'static> {
+        let spinner = SPINNER_FRAMES[self.spinner_index];
+        let label = match self.busy_phase {
+            BusyPhase::Thinking => "thinking",
+            BusyPhase::Rendering => "rendering",
+            _ => "working",
+        };
+        let elapsed = self
+            .active_turn_timing
+            .as_ref()
+            .map(|t| Instant::now().duration_since(t.started_at).as_secs())
+            .unwrap_or(0);
+        let timer = if elapsed > 0 {
+            format!(" {elapsed}s")
+        } else {
+            String::new()
+        };
+        let line = Line::from(vec![
+            Span::styled(format!(" {spinner} {label}"), self.palette.event_body),
+            Span::styled(timer, self.palette.event_body),
+        ]);
         Paragraph::new(Text::from(vec![line]))
     }
 
@@ -754,24 +783,18 @@ impl InteractiveApp {
             prompt_line.push(Span::raw(" "));
             prompt_line.push(Span::styled(hint, self.palette.input_hint));
         }
-        let mut lines = vec![
+        let lines = vec![
             Line::from(prompt_line),
             Line::from(Span::styled(input_text, input_style)),
         ];
 
-        if self.busy && !is_masked {
-            lines.push(Line::from(Span::styled(
-                "Action events stream above while you can keep typing and queue steering prompts.",
-                self.palette.input_hint,
-            )));
-        }
-
         Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
-                    .title(" Composer ")
+                    .title(" Prompt ")
                     .borders(Borders::ALL)
-                    .border_style(self.palette.border),
+                    .border_style(self.palette.border)
+                    .style(Style::default().bg(self.palette.input_bg)),
             )
             .wrap(Wrap { trim: false })
     }
@@ -828,11 +851,7 @@ impl InteractiveApp {
     }
 
     fn input_area_height(&self) -> u16 {
-        let mut lines = 2;
-        if self.busy && !self.is_masked_input() {
-            lines += 1;
-        }
-        lines + 2
+        2 + 2 // label + input + top/bottom border
     }
 
     fn live_tail_height(&self, width: usize, max_height: usize) -> u16 {
@@ -895,8 +914,13 @@ impl InteractiveApp {
 
 fn inline_viewport_height() -> u16 {
     terminal_size()
-        .map(|(_, height)| height.saturating_sub(2))
+        .map(|(_, height)| inline_viewport_height_for_terminal(height))
         .unwrap_or(INLINE_VIEWPORT_MAX_HEIGHT)
+}
+
+fn inline_viewport_height_for_terminal(terminal_height: u16) -> u16 {
+    terminal_height
+        .saturating_sub(2)
         .clamp(INLINE_VIEWPORT_MIN_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT)
 }
 
@@ -1303,19 +1327,21 @@ struct Palette {
     input_label: Style,
     input_text: Style,
     input_hint: Style,
+    input_bg: Color,
     code: Style,
     citation: Style,
 }
 
 fn detect_palette() -> Palette {
     if terminal_uses_light_background() {
+        let prompt_bg = Color::Rgb(234, 237, 243);
         Palette {
             header_title: Style::default().fg(Color::Rgb(24, 63, 115)),
             header_meta: Style::default().fg(Color::Rgb(78, 87, 103)),
             header_status: Style::default().fg(Color::Rgb(19, 120, 95)),
             border: Style::default().fg(Color::Rgb(132, 145, 165)),
-            user_header: Style::default().fg(Color::Rgb(18, 74, 140)),
-            user_body: Style::default().fg(Color::Rgb(35, 43, 54)),
+            user_header: Style::default().fg(Color::Rgb(18, 74, 140)).bg(prompt_bg),
+            user_body: Style::default().fg(Color::Rgb(35, 43, 54)).bg(prompt_bg),
             assistant_header: Style::default().fg(Color::Rgb(0, 120, 102)),
             assistant_body: Style::default().fg(Color::Rgb(24, 33, 45)),
             event_header: Style::default().fg(Color::Rgb(138, 87, 0)),
@@ -1325,17 +1351,19 @@ fn detect_palette() -> Palette {
             input_label: Style::default().fg(Color::Rgb(24, 63, 115)),
             input_text: Style::default().fg(Color::Rgb(35, 43, 54)),
             input_hint: Style::default().fg(Color::Rgb(109, 117, 129)),
+            input_bg: prompt_bg,
             code: Style::default().fg(Color::Rgb(87, 56, 130)),
             citation: Style::default().fg(Color::Rgb(94, 66, 0)),
         }
     } else {
+        let prompt_bg = Color::Rgb(30, 33, 39);
         Palette {
             header_title: Style::default().fg(Color::Rgb(125, 194, 255)),
             header_meta: Style::default().fg(Color::Rgb(155, 169, 187)),
             header_status: Style::default().fg(Color::Rgb(116, 225, 175)),
             border: Style::default().fg(Color::Rgb(84, 95, 114)),
-            user_header: Style::default().fg(Color::Rgb(115, 197, 255)),
-            user_body: Style::default().fg(Color::Rgb(224, 229, 236)),
+            user_header: Style::default().fg(Color::Rgb(115, 197, 255)).bg(prompt_bg),
+            user_body: Style::default().fg(Color::Rgb(224, 229, 236)).bg(prompt_bg),
             assistant_header: Style::default().fg(Color::Rgb(111, 231, 183)),
             assistant_body: Style::default().fg(Color::Rgb(234, 240, 247)),
             event_header: Style::default().fg(Color::Rgb(255, 202, 92)),
@@ -1345,6 +1373,7 @@ fn detect_palette() -> Palette {
             input_label: Style::default().fg(Color::Rgb(125, 194, 255)),
             input_text: Style::default().fg(Color::Rgb(236, 242, 250)),
             input_hint: Style::default().fg(Color::Rgb(145, 154, 168)),
+            input_bg: prompt_bg,
             code: Style::default().fg(Color::Rgb(204, 171, 255)),
             citation: Style::default().fg(Color::Rgb(255, 216, 130)),
         }
@@ -1369,14 +1398,32 @@ mod tests {
         BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
         TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind,
         collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
-        render_row_lines, select_interactive_frontend,
+        inline_viewport_height_for_terminal, render_row_lines, select_interactive_frontend,
     };
     use crate::application::ConversationSession;
     use crate::domain::model::{TaskTraceId, TurnEvent};
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
     use std::time::{Duration, Instant};
 
     fn session() -> ConversationSession {
         ConversationSession::new(TaskTraceId::new("task-1").expect("task"))
+    }
+
+    fn render_buffer(app: &InteractiveApp, width: u16, height: u16) -> Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| app.render(frame))
+            .expect("frame")
+            .buffer
+            .clone()
+    }
+
+    fn buffer_line(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     #[test]
@@ -1446,6 +1493,33 @@ mod tests {
         assert_eq!(format_duration_compact(Duration::from_millis(125)), "125ms");
         assert_eq!(format_duration_compact(Duration::from_millis(1530)), "1.5s");
         assert_eq!(format_duration_compact(Duration::from_secs(65)), "1m 05s");
+    }
+
+    #[test]
+    fn inline_viewport_height_remains_compact() {
+        assert_eq!(inline_viewport_height_for_terminal(0), 5);
+        assert_eq!(inline_viewport_height_for_terminal(7), 5);
+        assert_eq!(inline_viewport_height_for_terminal(11), 9);
+        assert_eq!(inline_viewport_height_for_terminal(48), 9);
+    }
+
+    #[test]
+    fn idle_viewport_keeps_prompt_attached_to_scrollback() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+        );
+        let _ = app.take_scrollback_rows();
+
+        let buffer = render_buffer(&app, 80, 9);
+        // transcript (4 empty) + prompt box (4) + status bar (1) = 9
+        // Prompt box border with title starts at line 4.
+        assert!(buffer_line(&buffer, 4).contains("Prompt"));
     }
 
     #[test]
