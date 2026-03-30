@@ -1,13 +1,15 @@
 ---
 # system-managed
 id: VFNyo7ahu
-status: delivered
+status: done
 epic: VFNyZ12IX
 created_at: 2026-03-30T13:47:23
 # authored
 title: Search Progress Implementation
 index: 1
 updated_at: 2026-03-30T14:13:12
+started_at: 2026-03-30T16:39:14
+completed_at: 2026-03-30T16:41:30
 ---
 
 # Search Progress Implementation
@@ -21,6 +23,8 @@ updated_at: 2026-03-30T14:13:12
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories

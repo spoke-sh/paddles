@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:40:07.127036622-07:00
+mode: manual
+---
+format_turn_event_row handles GathererSearchProgress with phase and format_duration_compact(elapsed_seconds) in interactive_tui.rs

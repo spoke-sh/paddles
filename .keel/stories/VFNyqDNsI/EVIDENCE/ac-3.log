@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:40:07.220042947-07:00
+mode: manual
+---
+search_progress_row cleared on any non-progress event or TurnFinished; GathererSummary is a non-progress event so it naturally supersedes

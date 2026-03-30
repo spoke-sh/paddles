@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:39:57.401851225-07:00
+mode: manual
+---
+search_autonomous wrapped in tokio::task::spawn_blocking in sift_autonomous_gatherer.rs:115

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:40:42.308823471-07:00
+mode: manual
+---
+ADR identifies search_autonomous_with_progress as the integration seam with std::sync::mpsc bridged to tokio on paddles side

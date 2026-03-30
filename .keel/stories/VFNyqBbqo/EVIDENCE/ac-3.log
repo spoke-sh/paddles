@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:39:57.487194500-07:00
+mode: manual
+---
+tokio::time::interval(2s) sends elapsed seconds via the mpsc channel until search completes

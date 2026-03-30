@@ -15,3 +15,7 @@ Mission completed. All 4 stories delivered across 4 commits:
 - TUI progress rows update in-place via search_progress_row index; superseded by GathererSummary on completion.
 - ADR-001 documents upstream sift callback requirements: std::sync::mpsc::Sender shape, 5 progress phases, typed phase data, and search_autonomous_with_progress integration seam.
 Key decision: used tokio::spawn for the heartbeat timer instead of std::thread inside spawn_blocking to avoid blocking the join on timer sleep.
+
+## 2026-03-30T16:41:53
+
+Mission achieved by local system user 'alex'

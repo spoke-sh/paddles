@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:39:57.580237756-07:00
+mode: manual
+---
+spawn_blocking JoinHandle returns AutonomousSearchResponse which is processed identically to the previous synchronous path

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:39:57.534927902-07:00
+mode: manual
+---
+TUI remains responsive because search runs on blocking pool thread, not the tokio runtime

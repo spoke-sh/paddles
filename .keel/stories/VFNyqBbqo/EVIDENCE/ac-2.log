@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:39:57.443970524-07:00
+mode: manual
+---
+tokio::sync::mpsc::unbounded_channel connects the blocking thread heartbeat timer to the async gather_context caller

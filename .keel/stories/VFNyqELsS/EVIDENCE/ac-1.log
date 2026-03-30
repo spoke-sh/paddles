@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:40:42.160695907-07:00
+mode: manual
+---
+ADR VFOfsYAjc specifies std::sync::mpsc::Sender<SearchProgress> as the recommended callback shape

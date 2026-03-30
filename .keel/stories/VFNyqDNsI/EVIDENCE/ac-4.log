@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T16:40:07.265700040-07:00
+mode: manual
+---
+Elapsed time rendered via format_duration_compact(Duration::from_secs(elapsed_seconds)) in the GathererSearchProgress arm
