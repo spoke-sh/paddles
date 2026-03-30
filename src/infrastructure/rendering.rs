@@ -63,11 +63,11 @@ impl AssistantResponse {
     fn parse(response: &str) -> Option<Self> {
         let json = extract_json_payload(response.trim())?;
         let envelope: AssistantResponseEnvelope = serde_json::from_str(json).ok()?;
-        let blocks = envelope
+        let blocks: Vec<AssistantBlock> = envelope
             .blocks
             .into_iter()
-            .map(AssistantBlock::from_wire)
-            .collect::<Option<Vec<_>>>()?;
+            .filter_map(AssistantBlock::from_wire)
+            .collect();
         if blocks.is_empty() {
             return None;
         }
@@ -559,6 +559,12 @@ mod tests {
         assert!(prompt.contains("Use the render_final_answer tool exactly once"));
         let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, false);
         assert!(prompt.contains("transport enforces a JSON schema"));
+    }
+
+    #[test]
+    fn empty_citation_sources_do_not_poison_parse() {
+        let response = r#"{"render_types":["paragraph","citations"],"blocks":[{"type":"paragraph","text":"Hello."},{"type":"citations","sources":[]}]}"#;
+        assert_eq!(normalize_assistant_response(response), "Hello.");
     }
 
     #[test]
