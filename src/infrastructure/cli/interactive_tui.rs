@@ -5,16 +5,15 @@ use anyhow::Result;
 use crossterm::cursor;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size as terminal_size};
+use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, Line, Modifier, Span, Style, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::{Frame, Terminal};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use std::cmp;
 use std::collections::VecDeque;
-use std::io;
+use std::io::{self, Write};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -32,6 +31,8 @@ pub struct TuiContext {
 const FRAME_INTERVAL: Duration = Duration::from_millis(32);
 const ASSISTANT_REVEAL_STEP: usize = 24;
 const EVENT_DETAIL_LINE_LIMIT: usize = 8;
+const INLINE_VIEWPORT_MIN_HEIGHT: u16 = 5;
+const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InteractiveFrontend {
@@ -58,8 +59,12 @@ pub async fn run_interactive_tui(
 ) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(inline_viewport_height()),
+        },
+    )?;
 
     let (tx, mut rx) = unbounded_channel();
     let session = service.create_conversation_session();
@@ -114,6 +119,7 @@ pub async fn run_interactive_tui(
             }
         }
 
+        flush_scrollback_rows(&mut terminal, &mut app)?;
         terminal.draw(|frame| app.render(frame))?;
 
         if event::poll(FRAME_INTERVAL)? {
@@ -193,7 +199,7 @@ struct TerminalSession;
 impl TerminalSession {
     fn enter() -> Result<Self> {
         enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, cursor::Hide)?;
+        execute!(io::stdout(), cursor::Hide)?;
         Ok(Self)
     }
 }
@@ -201,7 +207,8 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, cursor::Show);
+        let _ = execute!(io::stdout(), cursor::Show);
+        let _ = writeln!(io::stdout());
     }
 }
 
@@ -439,6 +446,7 @@ struct InteractiveApp {
     provider_name: String,
     credential_provider: Option<String>,
     active_turn_timing: Option<ActiveTurnTiming>,
+    flushed_row_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -477,12 +485,12 @@ impl InteractiveApp {
     ) -> Self {
         let ready_message = match credential_provider.as_deref() {
             Some(provider) => format!(
-                "Codex-style transcript active. Enter to send, Ctrl+C to quit.\n\
+                "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
                  Type `/login` to set or replace your API key for `{provider}`.",
             ),
             None => format!(
-                "Codex-style transcript active. Enter to send, Ctrl+C to quit.\n\
+                "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
                  No API login required.",
             ),
@@ -507,6 +515,7 @@ impl InteractiveApp {
             provider_name,
             credential_provider,
             active_turn_timing: None,
+            flushed_row_count: 0,
         }
     }
 
@@ -667,7 +676,7 @@ impl InteractiveApp {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),
-                Constraint::Min(8),
+                Constraint::Min(1),
                 Constraint::Length(4),
             ])
             .split(frame.area());
@@ -709,9 +718,9 @@ impl InteractiveApp {
     }
 
     fn render_transcript(&self, area: Rect) -> Paragraph<'static> {
-        let inner_width = usize::from(area.width.saturating_sub(2).max(1));
-        let inner_height = usize::from(area.height.saturating_sub(2).max(1));
-        let visible_rows = self.visible_rows(inner_width, inner_height);
+        let inner_width = usize::from(area.width.max(1));
+        let inner_height = usize::from(area.height.max(1));
+        let visible_rows = self.visible_live_rows(inner_width, inner_height);
         let mut lines = Vec::new();
 
         for (index, row) in visible_rows.iter().enumerate() {
@@ -721,14 +730,7 @@ impl InteractiveApp {
             }
         }
 
-        Paragraph::new(Text::from(lines))
-            .block(
-                Block::default()
-                    .title(" Transcript ")
-                    .borders(Borders::ALL)
-                    .border_style(self.palette.border),
-            )
-            .wrap(Wrap { trim: false })
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false })
     }
 
     fn render_input(&self) -> Paragraph<'static> {
@@ -813,11 +815,12 @@ impl InteractiveApp {
         (x.min(area.right().saturating_sub(1)), y)
     }
 
-    fn visible_rows(&self, width: usize, height: usize) -> Vec<TranscriptRow> {
+    fn visible_live_rows(&self, width: usize, height: usize) -> Vec<TranscriptRow> {
         let mut visible = Vec::new();
         let mut used = 0;
+        let live_rows = &self.rows[self.flushed_row_count..];
 
-        for row in self.rows.iter().rev() {
+        for row in live_rows.iter().rev() {
             let row_height = row.estimated_height(width);
             if !visible.is_empty() && used + row_height > height {
                 break;
@@ -828,6 +831,21 @@ impl InteractiveApp {
 
         visible.reverse();
         visible
+    }
+
+    fn take_scrollback_rows(&mut self) -> Vec<TranscriptRow> {
+        let flush_cutoff = self.flush_cutoff_index();
+        let rows = self.rows[self.flushed_row_count..flush_cutoff].to_vec();
+        self.flushed_row_count = flush_cutoff;
+        rows
+    }
+
+    fn flush_cutoff_index(&self) -> usize {
+        if self.pending_reveal.is_some() {
+            self.rows.len().saturating_sub(1)
+        } else {
+            self.rows.len()
+        }
     }
 
     fn annotate_step_timing(&mut self, row: TranscriptRow, occurred_at: Instant) -> TranscriptRow {
@@ -843,6 +861,35 @@ impl InteractiveApp {
             None => row,
         }
     }
+}
+
+fn inline_viewport_height() -> u16 {
+    terminal_size()
+        .map(|(_, height)| height.saturating_sub(2))
+        .unwrap_or(INLINE_VIEWPORT_MAX_HEIGHT)
+        .clamp(INLINE_VIEWPORT_MIN_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT)
+}
+
+fn flush_scrollback_rows<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut InteractiveApp,
+) -> io::Result<()> {
+    terminal.autoresize()?;
+    let width = usize::from(terminal.size()?.width.max(1));
+    let palette = app.palette;
+
+    for row in app.take_scrollback_rows() {
+        let height = row.estimated_height(width) as u16;
+        terminal.insert_before(height, |buffer| {
+            let mut lines = render_row_lines(&row, &palette);
+            lines.push(Line::default());
+            Paragraph::new(Text::from(lines))
+                .wrap(Wrap { trim: false })
+                .render(buffer.area, buffer);
+        })?;
+    }
+
+    Ok(())
 }
 
 fn trim_for_display(input: &str, limit: usize) -> String {
@@ -1494,6 +1541,49 @@ mod tests {
         ));
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Thinking);
+    }
+
+    #[test]
+    fn completed_rows_become_scrollback_while_live_reveal_stays_inline() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+        );
+
+        let initial = app.take_scrollback_rows();
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].header, "• Interactive mode ready");
+
+        app.input = "hello".to_string();
+        app.submit_prompt();
+        let user_rows = app.take_scrollback_rows();
+        assert_eq!(user_rows.len(), 1);
+        assert_eq!(user_rows[0].header, "You");
+
+        app.dispatch_next_prompt();
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("hi there".to_string()),
+            occurred_at: Instant::now(),
+        });
+
+        assert!(app.take_scrollback_rows().is_empty());
+        assert_eq!(app.visible_live_rows(80, 20).len(), 1);
+        assert_eq!(app.visible_live_rows(80, 20)[0].header, "Paddles");
+
+        while app.busy {
+            app.tick();
+        }
+
+        let assistant_rows = app.take_scrollback_rows();
+        assert_eq!(assistant_rows.len(), 1);
+        assert_eq!(assistant_rows[0].header, "Paddles");
+        assert_eq!(assistant_rows[0].content, "hi there");
+        assert!(app.visible_live_rows(80, 20).is_empty());
     }
 
     #[test]

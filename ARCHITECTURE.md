@@ -31,7 +31,7 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model.
+**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page.
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
