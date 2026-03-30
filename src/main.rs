@@ -23,6 +23,7 @@ use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, run_interactive_tui, select_interactive_frontend,
 };
+use paddles::infrastructure::config::PaddlesConfig;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 enum ModelProvider {
@@ -49,32 +50,32 @@ struct Cli {
     prompt: Option<String>,
 
     /// Initial credit inheritance balance.
-    #[arg(short, long, default_value = "0")]
-    credits: u64,
+    #[arg(short, long)]
+    credits: Option<u64>,
 
     /// Foundational environmental weights for calibration.
-    #[arg(short, long, default_value = "0.5")]
-    weights: f64,
+    #[arg(short, long)]
+    weights: Option<f64>,
 
     /// Foundational environmental biases for calibration.
-    #[arg(short, long, default_value = "0.0")]
-    biases: f64,
+    #[arg(short, long)]
+    biases: Option<f64>,
 
     /// Flag to simulate reality mode (violates dogma).
-    #[arg(long, default_value = "false")]
+    #[arg(long)]
     reality_mode: bool,
 
     /// Model provider backend.
-    #[arg(long, value_enum, default_value = "sift")]
-    provider: ModelProvider,
+    #[arg(long, value_enum)]
+    provider: Option<ModelProvider>,
 
     /// Custom API base URL (overrides provider default).
     #[arg(long)]
     provider_url: Option<String>,
 
-    /// Model ID to use from the registry (e.g. qwen-1.5b, gpt-4o, claude-sonnet-4-20250514).
-    #[arg(short, long, default_value = "qwen-1.5b")]
-    model: String,
+    /// Model ID to use (e.g. qwen-1.5b, gpt-4o, claude-sonnet-4-20250514).
+    #[arg(short, long)]
+    model: Option<String>,
 
     /// Optional planner model ID. Defaults to the synthesizer model when unset.
     #[arg(long)]
@@ -85,11 +86,11 @@ struct Cli {
     gatherer_model: Option<String>,
 
     /// Provider to use for the default gatherer lane.
-    #[arg(long, value_enum, default_value = "sift-autonomous")]
-    gatherer_provider: GathererProvider,
+    #[arg(long, value_enum)]
+    gatherer_provider: Option<GathererProvider>,
 
     /// Acknowledge that the external Context-1 harness is actually available.
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     context1_harness_ready: bool,
 
     /// Verbosity level (-v, -vv, -vvv)
@@ -97,8 +98,8 @@ struct Cli {
     verbose: u8,
 
     /// Port for the HTTP API server.
-    #[arg(long, default_value = "3000")]
-    port: u16,
+    #[arg(long)]
+    port: Option<u16>,
 
     /// Hugging Face API token for gated models.
     #[arg(long, env = "HF_TOKEN", hide_env_values = true)]
@@ -108,6 +109,46 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let root_path = env::current_dir()?;
+
+    // Load config: paddles.toml -> ~/.config/paddles/paddles.toml -> /etc/paddles/paddles.toml
+    let config = PaddlesConfig::load(&root_path);
+
+    // Merge: CLI flags override config values
+    let model = cli.model.unwrap_or(config.model);
+    let credits = cli.credits.unwrap_or(config.credits);
+    let weights = cli.weights.unwrap_or(config.weights);
+    let biases = cli.biases.unwrap_or(config.biases);
+    let reality_mode = cli.reality_mode || config.reality_mode;
+    let port = cli.port.unwrap_or(config.port);
+    let verbose = if cli.verbose > 0 {
+        cli.verbose
+    } else {
+        config.verbose
+    };
+    let hf_token = cli.hf_token.or(config.hf_token);
+    let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
+    let planner_model = cli.planner_model.or(config.planner_model);
+    let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
+    let provider_url = cli.provider_url.or(config.provider_url);
+
+    let provider = cli.provider.unwrap_or(match config.provider.as_str() {
+        "openai" => ModelProvider::Openai,
+        "anthropic" => ModelProvider::Anthropic,
+        "google" => ModelProvider::Google,
+        "moonshot" => ModelProvider::Moonshot,
+        "ollama" => ModelProvider::Ollama,
+        _ => ModelProvider::Sift,
+    });
+
+    let gatherer_provider =
+        cli.gatherer_provider
+            .unwrap_or(match config.gatherer_provider.as_str() {
+                "local" => GathererProvider::Local,
+                "context1" => GathererProvider::Context1,
+                _ => GathererProvider::SiftAutonomous,
+            });
+
     let frontend = select_interactive_frontend(
         cli.prompt.is_some(),
         std::io::stdin().is_terminal(),
@@ -117,7 +158,7 @@ async fn main() -> Result<()> {
     // Initialize tracing based on verbosity
     let log_level = match frontend {
         InteractiveFrontend::Tui => tracing::Level::ERROR,
-        InteractiveFrontend::PlainLines => match cli.verbose {
+        InteractiveFrontend::PlainLines => match verbose {
             0 => tracing::Level::ERROR,
             1 => tracing::Level::INFO,
             2 => tracing::Level::DEBUG,
@@ -127,12 +168,8 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
-    let root_path = env::current_dir()?;
     let registry = Arc::new(SiftRegistryAdapter::new());
     let operator_memory = Arc::new(AgentMemory::load(&root_path));
-
-    let provider = cli.provider;
-    let provider_url = cli.provider_url.clone();
 
     let (api_format, default_base_url, api_key_env) = match provider {
         ModelProvider::Openai => (
@@ -270,23 +307,17 @@ async fn main() -> Result<()> {
     ));
     let runtime_verbose = match frontend {
         InteractiveFrontend::Tui => 0,
-        InteractiveFrontend::PlainLines => cli.verbose,
+        InteractiveFrontend::PlainLines => verbose,
     };
     service.set_verbose(runtime_verbose);
 
     // Boot sequence
-    if cli.verbose >= 1 {
+    if verbose >= 1 {
         println!("[BOOT] Initializing system...");
     }
-    let boot_ctx = service.boot(
-        cli.credits,
-        cli.weights,
-        cli.biases,
-        cli.hf_token.clone(),
-        cli.reality_mode,
-    )?;
+    let boot_ctx = service.boot(credits, weights, biases, hf_token.clone(), reality_mode)?;
 
-    if cli.verbose >= 1 {
+    if verbose >= 1 {
         println!("[BOOT] Inherited Credits: {}", boot_ctx.credits);
         println!("[BOOT] Applying Foundational Weights: {}", boot_ctx.weight);
         println!("[BOOT] Applying Foundational Biases: {}", boot_ctx.bias);
@@ -297,42 +328,32 @@ async fn main() -> Result<()> {
     }
 
     // Registry Synchronization via Sift
-    if cli.verbose >= 1 {
-        println!(
-            "[BOOT] Syncing synthesizer lane via SIFT for: {}...",
-            cli.model
-        );
-        if let Some(planner_model) = &cli.planner_model {
-            println!(
-                "[BOOT] Syncing planner lane via SIFT for: {}...",
-                planner_model
-            );
+    if verbose >= 1 {
+        println!("[BOOT] Syncing synthesizer lane via SIFT for: {model}...");
+        if let Some(pm) = &planner_model {
+            println!("[BOOT] Syncing planner lane via SIFT for: {pm}...");
         }
-        if let Some(gatherer_model) = &cli.gatherer_model {
-            println!(
-                "[BOOT] Syncing gatherer lane via SIFT for: {}...",
-                gatherer_model
-            );
+        if let Some(gm) = &gatherer_model {
+            println!("[BOOT] Syncing gatherer lane via SIFT for: {gm}...");
         }
-        match cli.gatherer_provider {
+        match gatherer_provider {
             GathererProvider::SiftAutonomous => {
                 println!("[BOOT] Sift autonomous gatherer provider selected.");
             }
             GathererProvider::Context1 => {
                 println!(
-                    "[BOOT] Context-1 gatherer provider selected (harness ready: {}).",
-                    cli.context1_harness_ready
+                    "[BOOT] Context-1 gatherer provider selected (harness ready: {context1_harness_ready})."
                 );
             }
             GathererProvider::Local => {}
         }
     }
-    let runtime_lanes = RuntimeLaneConfig::new(cli.model.clone(), cli.gatherer_model.clone())
-        .with_planner_model_id(cli.planner_model.clone())
-        .with_gatherer_provider(cli.gatherer_provider)
-        .with_context1_harness_ready(cli.context1_harness_ready);
+    let runtime_lanes = RuntimeLaneConfig::new(model.clone(), gatherer_model.clone())
+        .with_planner_model_id(planner_model.clone())
+        .with_gatherer_provider(gatherer_provider)
+        .with_context1_harness_ready(context1_harness_ready);
     let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
-    if cli.verbose >= 1 {
+    if verbose >= 1 {
         println!("[BOOT] Runtime lanes ready.");
     }
 
@@ -340,9 +361,9 @@ async fn main() -> Result<()> {
     let (web_router, web_observer) =
         paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
     service.register_event_observer(web_observer);
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", cli.port)).await?;
-    if cli.verbose >= 1 {
-        println!("[BOOT] HTTP API server listening on port {}.", cli.port);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    if verbose >= 1 {
+        println!("[BOOT] HTTP API server listening on port {port}.");
     }
     tokio::spawn(async move {
         if let Err(err) = axum::serve(listener, web_router).await {
@@ -355,7 +376,7 @@ async fn main() -> Result<()> {
         println!("Chord Response: {}", response);
     } else {
         match frontend {
-            InteractiveFrontend::Tui => run_interactive_tui(service, cli.model.clone()).await?,
+            InteractiveFrontend::Tui => run_interactive_tui(service, model.clone()).await?,
             InteractiveFrontend::PlainLines => run_plain_interactive_loop(service).await?,
         }
     }

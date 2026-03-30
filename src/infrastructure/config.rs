@@ -1,0 +1,130 @@
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
+
+const CONFIG_FILE_NAME: &str = "paddles.toml";
+const USER_CONFIG_RELATIVE_PATH: &str = ".config/paddles/paddles.toml";
+const SYSTEM_CONFIG_PATH: &str = "/etc/paddles/paddles.toml";
+
+/// Paddles configuration loaded from paddles.toml.
+///
+/// Search order: `./paddles.toml`, `~/.config/paddles/paddles.toml`, `/etc/paddles/paddles.toml`.
+/// First file found wins. CLI flags override all config values.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PaddlesConfig {
+    pub provider: String,
+    pub provider_url: Option<String>,
+    pub model: String,
+    pub planner_model: Option<String>,
+    pub gatherer_model: Option<String>,
+    pub gatherer_provider: String,
+    pub port: u16,
+    pub verbose: u8,
+    pub hf_token: Option<String>,
+    pub context1_harness_ready: bool,
+    pub credits: u64,
+    pub weights: f64,
+    pub biases: f64,
+    pub reality_mode: bool,
+}
+
+impl Default for PaddlesConfig {
+    fn default() -> Self {
+        Self {
+            provider: "sift".to_string(),
+            provider_url: None,
+            model: "qwen-1.5b".to_string(),
+            planner_model: None,
+            gatherer_model: None,
+            gatherer_provider: "sift-autonomous".to_string(),
+            port: 3000,
+            verbose: 0,
+            hf_token: None,
+            context1_harness_ready: false,
+            credits: 0,
+            weights: 0.5,
+            biases: 0.0,
+            reality_mode: false,
+        }
+    }
+}
+
+impl PaddlesConfig {
+    /// Load configuration from the first paddles.toml found in the search path.
+    pub fn load(workspace_root: &Path) -> Self {
+        let candidates = config_search_paths(workspace_root);
+        for path in &candidates {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                match toml::from_str::<PaddlesConfig>(&contents) {
+                    Ok(config) => return config,
+                    Err(err) => {
+                        eprintln!("[WARN] Failed to parse {}: {err}", path.display());
+                    }
+                }
+            }
+        }
+        Self::default()
+    }
+
+    /// Path where the config was found, if any.
+    pub fn find_config_path(workspace_root: &Path) -> Option<PathBuf> {
+        config_search_paths(workspace_root)
+            .into_iter()
+            .find(|p| p.exists())
+    }
+}
+
+fn config_search_paths(workspace_root: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![workspace_root.join(CONFIG_FILE_NAME)];
+    if let Ok(home) = std::env::var("HOME") {
+        paths.push(PathBuf::from(home).join(USER_CONFIG_RELATIVE_PATH));
+    }
+    paths.push(PathBuf::from(SYSTEM_CONFIG_PATH));
+    paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn default_config_uses_sift_and_qwen() {
+        let config = PaddlesConfig::default();
+        assert_eq!(config.provider, "sift");
+        assert_eq!(config.model, "qwen-1.5b");
+        assert_eq!(config.port, 3000);
+        assert_eq!(config.weights, 0.5);
+        assert_eq!(config.biases, 0.0);
+    }
+
+    #[test]
+    fn load_parses_toml_from_workspace() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("paddles.toml"),
+            r#"
+provider = "openai"
+model = "gpt-4o"
+port = 8080
+"#,
+        )
+        .expect("write config");
+
+        let config = PaddlesConfig::load(dir.path());
+        assert_eq!(config.provider, "openai");
+        assert_eq!(config.model, "gpt-4o");
+        assert_eq!(config.port, 8080);
+        // Unset fields use defaults
+        assert_eq!(config.weights, 0.5);
+        assert!(config.planner_model.is_none());
+    }
+
+    #[test]
+    fn load_returns_defaults_when_no_file_exists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = PaddlesConfig::load(dir.path());
+        assert_eq!(config.provider, "sift");
+        assert_eq!(config.model, "qwen-1.5b");
+    }
+}
