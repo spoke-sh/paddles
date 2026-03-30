@@ -201,16 +201,15 @@ drop-in answer model:
 paddles --model qwen-1.5b --gatherer-provider context1
 ```
 
-That provider fails closed by design.
+That provider is explicit and honest about its readiness:
 
-- Without `--context1-harness-ready`, the adapter reports
-  `harness-required` and Paddles falls back to the synthesizer lane.
-- With `--context1-harness-ready`, the adapter boundary is still honest about
-  the current state and reports `unsupported` until a real harness-backed
-  implementation exists.
+- Without `--context1-harness-ready`, the adapter reports `harness-required`
+  and Paddles gracefully falls back to the synthesizer lane.
+- With `--context1-harness-ready`, the adapter boundary reports the current
+  harness state transparently until a real harness-backed implementation exists.
 - The default REPL event stream surfaces the selected gatherer provider,
-  capability state, fallback reason, and evidence summary so missing-context and
-  misrouting cases can be diagnosed from terminal output.
+  capability state, fallback reason, and evidence summary — making diagnosis
+  straightforward from terminal output.
 
 ## Subsystem Health (The Med-Bay)
 
@@ -267,13 +266,12 @@ mode = "constrained"
 [doctor.checks.story-id-uniqueness]
 disabled = false
 ```
-# Trace Recording
+## Trace Recording
 
-The runtime recorder boundary is separate from transcript rendering:
+The runtime recorder boundary is independent of transcript rendering:
 
-- default runtime policy: `noop` recorder
-- available local adapters in code: in-memory and embedded `transit-core`
-- current CLI/runtime policy: no user-facing recorder-selection flag yet
+- **Default runtime policy**: `noop` recorder — safe and local-first
+- **Available local adapters**: in-memory and embedded `transit-core`
+- **Growing edge**: a user-facing recorder-selection flag will land when the policy slice is ready
 
-This keeps the live runtime local-first and fail-closed while the recorder
-policy hardens.
+This keeps the live runtime local-first and safe while the recorder policy matures.

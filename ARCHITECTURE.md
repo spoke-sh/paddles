@@ -1,195 +1,185 @@
 # Paddles Architecture: Recursive Harness Backbone
 
-This document describes the implemented recursive harness backbone of `paddles` and the remaining experimental edges around it.
+How `paddles` turns a user prompt into a grounded, evidence-backed answer through recursive in-context planning.
 
 > Foundational stack position: `6/8`
 > Read this after [POLICY.md](POLICY.md) and before [PROTOCOL.md](PROTOCOL.md).
 
-## Backbone Architecture
+## The Story of a Turn
 
-`paddles` should operate as a recursive in-context planning harness.
+Every turn through Paddles follows the same narrative arc: understand, investigate, and synthesize. The architecture exists to give small local models the structured support they need to produce answers that rival much larger models.
 
-The backbone has five layers:
+### Act 1: Interpretation
 
-1. `InterpretationContextAssembler`
-   Builds turn-time context from `AGENTS.md`, a model-derived guidance subgraph,
-   recent turns, retained evidence, prior tool outputs, and extracted read-only
-   tool hints plus derived decision procedures from that guidance graph.
+**`InterpretationContextAssembler`** builds the full picture before any decision is made.
 
-2. `PlannerLane`
-   A planner-capable model chooses the next bounded action before route
-   selection: answer, concrete workspace actions, refine, branch, or stop.
+The harness loads `AGENTS.md` operator memory from system, user, and ancestor scopes. A model-derived guidance subgraph discovers relevant procedures, tool hints, and project knowledge rooted at that memory. Recent turns, retained evidence, and prior tool state round out the context.
 
-3. `RecursiveExecutionLoop`
-   Validates and executes planner actions, appends outputs back into context,
-   and repeats until evidence is sufficient or budgets are exhausted.
+By the time the planner sees the prompt, it already knows the operator's priorities, the project's conventions, and the tools at its disposal.
 
-4. `SynthesisLane`
-   A separate answer model produces the final user-facing response from the
-   accumulated planner trace and evidence bundle.
+### Act 2: Recursive Planning
 
-5. `Renderer`
-   The TUI/plain output surfaces show the recursive work and final answer.
+**`PlannerLane`** drives an iterative investigation. The planner model evaluates the assembled context and selects its next bounded action: answer directly, search the workspace, read a file, inspect state, run a shell command, refine a query, branch into subqueries, or stop.
 
-6. `RecorderBoundary`
-   A paddles-owned trace contract projects the same runtime transitions into a
-   `TraceRecorder` port, with transcript rendering staying a projection rather
-   than the durable source of truth.
+**`RecursiveExecutionLoop`** validates each action against schema and budget contracts, executes it safely, appends the output back into context, and loops. Each pass through the loop adds real evidence — file contents, search results, tool outputs — grounding the eventual answer in workspace reality.
 
-7. `ConversationThreadLayer`
-   Interactive sessions keep a paddles-owned conversation root, structured
-   steering candidates, model-driven thread decisions, and explicit merge-back
-   records above the recorder boundary.
+The loop continues until the planner determines it has enough evidence, the budget is met, or an explicit stop is reached.
 
-## Why This Shape
+### Act 3: Synthesis
 
-This architecture exists to solve three failures of one-shot small-model
-interaction:
+**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered.
 
-- the model answers before it has recursively gathered enough context
-- operator memory influences style late, but not interpretation early
-- retrieval and final synthesis are treated as the same workload
+### Visibility Throughout
 
-The recursive harness fixes that by putting recursive context work in front of
-final synthesis.
+**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, fallback decisions, and synthesis — through a TUI transcript or plain CLI output.
 
-## Core Rules
+**`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
-- Interpretation should happen before routing commits to a path.
-- Top-level routing should come from a constrained model-selected next action, not a controller string heuristic.
-- `AGENTS.md` is part of interpretation context, not just answer prompting.
-- `AGENTS.md` should be the only hardcoded interpretation root; additional guidance should be loaded through a turn-time model-derived document graph before fallback planning drops to generic search
-- Planner and synthesizer are different roles and may use different models.
-- Keel is an evidence domain, not a first-class runtime intent.
-- Recursive planning must stay bounded and observable.
-- Local-first remains the default operating mode.
+**`ConversationThreadLayer`** maintains one durable conversation root across interactive sessions. Steering prompts become structured thread candidates, classified by a model into continuation, child-thread, or merge-back decisions — preserving full lineage for replay and analysis.
 
-## Planner Loop
+## Why This Shape Works
 
-The planner loop is the heart of the backbone:
+Three properties of this architecture compound to raise effective model performance:
 
-1. assemble interpretation context
-2. ask the planner for the next bounded action
-3. validate the action
-4. execute it
-5. append outputs into loop state
-6. repeat or stop
-7. synthesize the final answer from the resulting evidence
+1. **Interpretation arrives first.** Operator memory and project guidance shape the planner's priorities before it commits to any action. The model reasons within the operator's context from the start.
+2. **Recursive evidence gathering earns the answer.** Instead of generating an answer from memory alone, the planner iteratively reads, searches, and refines until it has concrete evidence. Small models with tools consistently outperform the same models without them.
+3. **Planning and synthesis are separate workloads.** The best recursive investigator may differ from the best answer composer. Separating these roles lets each be optimized independently and routed to the smallest capable model.
 
-The planner does not get to execute arbitrary unconstrained behavior. It stays
-inside bounded action and budget contracts.
+## Core Commitments
 
-## Planner Actions
+- **Interpretation before routing.** The model sees full context and chooses its own path.
+- **Model-directed action selection.** The planner selects from a constrained action schema; the controller validates and executes.
+- **`AGENTS.md` as the interpretation root.** Operator memory shapes investigation, priorities, and procedures — additional guidance flows through the model-derived graph.
+- **Planner and synthesizer as distinct roles.** Each can use different models optimized for their workload.
+- **Project artifacts as context.** Keel, board state, and domain knowledge enter through memory, search, and tools — keeping the harness general-purpose.
+- **Bounded and observable recursion.** Every planner action is validated, budgeted, and visible to the operator.
+- **Local-first by default.** The core loop runs on local models; heavier lanes are opt-in and degrade gracefully.
 
-The planner boundary should be able to express actions like:
+## The Planner Loop In Detail
 
-- answer or synthesize now
-- search the workspace
-- list candidate files
-- read a file or artifact
-- inspect read-only workspace state
-- run a concrete workspace action such as shell, diff, or an explicit edit
-- refine a search query
-- branch an investigation into subqueries
-- stop and request synthesis
+The planner loop is the heart of the backbone. Each cycle follows a clear rhythm:
 
-Those actions can be backed by Sift search, workspace tools, retained artifacts,
-or future planner-capable providers such as `context-1`.
+```mermaid
+flowchart TD
+    A["1. Assemble interpretation context"]
+    B["2. Planner selects next bounded action"]
+    C["3. Controller validates against schema + budget"]
+    D["4. Execute the action safely"]
+    E["5. Append outputs into loop state"]
+    F{"6. Sufficient evidence?"}
+    G["7. Synthesize grounded answer"]
 
-## Planner And Synthesizer Separation
+    A --> B --> C --> D --> E --> F
+    F -->|"continue"| A
+    F -->|"ready"| G
 
-This split is important:
+    style A fill:#fff3e0,stroke:#FF9800
+    style B fill:#f3e5f5,stroke:#9C27B0
+    style C fill:#ffebee,stroke:#f44336
+    style G fill:#e8f5e9,stroke:#4CAF50
+```
 
-- the planner is optimized for recursive resource use
-- the synthesizer is optimized for final answer quality
+The planner operates within bounded action and budget contracts. Every action is validated before execution, every output is recorded, and the operator can observe the full trace.
 
-That means:
+## Planner Action Vocabulary
 
-- the best planner model may not be the best answer model
-- planner traces should not be treated as final user answers
-- routing should be able to select different providers for each role
+The planner expresses its intentions through a constrained action schema:
 
-## Keel And Project Context
+| Action | Purpose |
+|--------|---------|
+| **answer** | Synthesize now — evidence is sufficient |
+| **search** | Find relevant files or content in the workspace |
+| **list_files** | Discover candidate files by pattern |
+| **read** | Read a specific file or artifact |
+| **inspect** | Examine read-only workspace state |
+| **shell** / **diff** / **edit** | Execute concrete workspace modifications |
+| **refine** | Sharpen a search query based on prior results |
+| **branch** | Split an investigation into parallel subqueries |
+| **stop** | Request synthesis with current evidence |
 
-Keel is not special-cased as a first-class intent in the backbone design.
+These actions are backed by Sift search, workspace tools, retained artifacts, and future planner-capable providers like `context-1`.
 
-Mission files, charters, PRDs, voyage docs, and board commands should enter the
-planner the same way other project evidence enters it:
+## The Value of Planner/Synthesizer Separation
 
-- through memory
-- through search
-- through file reads
-- through tool outputs
-- through retained evidence from prior recursive steps
+Separating these roles unlocks three benefits:
 
-That preserves generality and keeps `paddles` useful outside one board engine.
+- **Independent optimization** — the best recursive investigator and the best answer composer are often different models, and each can be routed to its ideal lane
+- **Cleaner evidence flow** — planner traces are working artifacts that inform synthesis; the synthesizer transforms them into polished, grounded responses
+- **Flexible routing** — operators can mix a lightweight synthesizer with a heavier planner, or vice versa, matching each role to available hardware
 
-## Current Implementation Snapshot
+## Project Context as Evidence
 
-The repo now contains the main pieces of the target architecture:
+Keel, board state, mission files, PRDs, and domain knowledge all enter the planner through the same channels as any other evidence:
 
-- a controller-owned runtime in [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs)
-- typed turn and planner events in [src/domain/model/turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs)
-- a planner contract in [src/domain/ports/planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs)
-- a Sift-backed planner/synth model adapter in [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) and [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs)
-- a local gatherer backend in [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs)
-- interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
-- interpretation-time tool hint extraction and decision-procedure derivation from a model-derived guidance graph rooted at `AGENTS.md` in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs) and [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs)
-- a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
-- a paddles-owned trace contract in [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs)
-- a reusable internal workspace crate for conversation/thread/session primitives in [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)
-- a paddles-side replay/projection layer for those conversation traces in [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs)
-- a recorder port in [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs)
-- embedded/noop/in-memory recorder adapters in [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs)
-- session-scoped thread orchestration in [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs) using the shared conversation crate
+- operator memory (AGENTS.md hierarchy)
+- workspace search results
+- file reads and tool outputs
+- retained evidence from prior recursive steps
 
-The remaining transitional pieces are now smaller:
+This keeps `paddles` general-purpose — useful with any project tooling, board engine, or domain.
 
-- the main mech-suit service now keeps explicit workspace actions inside the planner loop instead of routing them through a separate top-level bridge
-- interpretation context is selected from an AGENTS-rooted, model-derived guidance graph instead of lexical controller scoring
-- invalid initial/planner replies now get one more constrained model re-decision pass before the controller fails closed
-- recursive search/refine actions now carry model-selected retrieval mode and retrieval strategy into the gatherer boundary instead of hardcoded graph/lexical defaults
-- planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
-- the default `sift-autonomous` gatherer path now runs bounded graph-mode retrieval for recursive planner `search` / `refine` work and preserves graph episode/frontier/branch state as typed `paddles` metadata
-- the recorder boundary is live, but the default runtime still uses the noop recorder until a policy/config slice chooses an always-on local recorder
-- artifact envelopes keep large payloads behind logical ids and optional locators, but there is no external artifact-store promotion policy yet
-- `context-1` remains an explicit experimental boundary
+## Implementation Map
+
+The target architecture is implemented across these modules:
+
+| Layer | Module | Role |
+|-------|--------|------|
+| **Runtime** | [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs) | Controller-owned service, session-scoped thread orchestration |
+| **Turn Events** | [src/domain/model/turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs) | Typed turn and planner event definitions |
+| **Planner Contract** | [src/domain/ports/planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs) | Bounded action schema and planner port |
+| **Planner Adapter** | [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs) | Sift-backed planner model |
+| **Synthesizer Adapter** | [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) | Sift-backed synthesis + guidance graph derivation |
+| **Gatherer** | [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs) | Local graph-mode retrieval backend |
+| **Operator Memory** | [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs) | AGENTS.md hierarchy + tool hint extraction + procedure derivation |
+| **Trace Contract** | [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs) | Stable task/turn/record/branch/checkpoint ids |
+| **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
+| **Recorder Adapters** | [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs) | Noop, in-memory, embedded transit-core |
+| **Thread Replay** | [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs) | Replay/projection layer for conversation traces |
+| **Conversation Crate** | [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs) | Shared conversation/thread/session primitives |
+| **Transcript TUI** | [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs) | Default Codex-style action stream |
+
+### How The Pieces Fit Together
+
+The runtime follows the backbone narrative from above:
+
+1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid initial replies get one constrained re-decision pass before the controller fails closed.
+2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode and strategy into the gatherer boundary. The `sift-autonomous` gatherer runs bounded graph-mode retrieval, preserving episode/frontier/branch state as typed metadata.
+3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind logical ids with optional locators.
+4. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
+
+### Growing Edges
+
+- **Unified resource graph** — planner search/refine delegates through the configured gatherer; a richer resource graph will strengthen this
+- **Default recorder policy** — embedded transit-core is available; the default runtime uses noop until the policy slice lands
+- **Artifact store promotion** — the contract supports external artifact refs; a promotion policy will formalize this
+- **Context-1 integration** — available as an explicit experimental boundary for opt-in use
 
 ## Recorder Boundary
 
-The recorder path is now:
+The recorder path delivers storage-neutral trace durability:
 
-1. runtime transitions create typed `TraceRecord` values
-2. transcript rendering still flows through `TurnEventSink`
-3. durable recording flows through `TraceRecorder`
-4. noop and in-memory adapters preserve local safety and tests
-5. embedded `transit-core` maps roots, branch heads, appends, replay, and
-   checkpoints without leaking raw transit types into the domain
-6. interactive sessions add model-selected thread split/merge records on top of
-   the same recorder path instead of hiding thread structure in TUI-only state
+1. Runtime transitions produce typed `TraceRecord` values
+2. Transcript rendering flows through `TurnEventSink` as operator-facing projection
+3. Durable recording flows through `TraceRecorder` as the source of truth
+4. Noop and in-memory adapters preserve local safety and enable testing
+5. Embedded `transit-core` maps roots, branch heads, appends, replay, and checkpoints — all through the domain boundary, keeping transit types internal
+6. Interactive thread split/merge records flow through the same recorder path, making thread structure part of the durable trace
 
-This keeps the domain storage-neutral while making lineage durable enough for
-later replay, branch comparison, and graph-trace analysis.
+This design keeps the domain storage-neutral while providing lineage durable enough for replay, branch comparison, and graph-trace analysis.
 
-## Transitional Gap: Resource Graph
+## Current Backbone Status
 
-The main runtime path now follows the target backbone shape:
+The backbone contract is delivered for the primary interactive and `process_prompt` runtime:
 
-1. assemble interpretation context
-2. ask the model for the first bounded action
-3. validate and execute it
-4. recurse until synthesis is appropriate
+1. Interpretation context assembles before routing
+2. The model selects its first bounded action
+3. The controller validates and executes it
+4. The loop recurses until synthesis is appropriate
 
-The remaining mismatch is narrower:
+Two capabilities are still maturing:
 
-1. planner `search` / `refine` still delegate through the configured gatherer backend instead of a richer unified resource graph
-2. auto-threading is checkpoint-bounded and sequential today; it replays and
-   merges explicit thread lineage but does not provide simultaneous sibling
-   generation on one local model session
-
-That means the backbone contract is delivered for the primary interactive and
-`process_prompt` runtime, while a few compatibility surfaces still need to be
-folded into the same model-directed action system.
+- **Resource graph breadth** — planner search/refine delegates through the configured gatherer backend today; a unified resource graph will broaden what the planner can reach
+- **Concurrent threading** — auto-threading replays and merges explicit thread lineage at safe checkpoints; true simultaneous sibling generation on one local model session is a future capability
 
 ## Current Model Routing
 
@@ -206,21 +196,15 @@ Current routing now uses explicit planner/synth roles:
 
 ## Context-1 Fit
 
-`context-1` belongs on the planner side of the architecture, not as the default
-answer model.
-
-It is a candidate specialized planner/gatherer lane because the recursive loop
-is fundamentally about iterative retrieval, pruning, and refinement. The final
-answer should still come from a separate synthesizer contract.
+`context-1` belongs on the planner side of the architecture — a candidate specialized planner/gatherer lane. The recursive loop is fundamentally about iterative retrieval, pruning, and refinement, which aligns with context-1's strengths. Final answers continue to come from the separate synthesizer contract.
 
 ## Documentation Contract
 
-Because the implementation still has experimental edges, the docs must stay honest:
+The foundational documents work together to tell the full story:
 
-- README explains the backbone architecture and current status at a high level
-- ARCHITECTURE.md explains the target/current split in more detail
-- POLICY.md captures the invariants that should govern the transition
-- AGENTS.md keeps operator guidance aligned with those invariants
+- **README** — backbone architecture narrative and current capabilities
+- **ARCHITECTURE** — detailed turn loop, implementation map, and growing edges
+- **POLICY** — operational commitments that govern the runtime
+- **AGENTS** — operator guidance aligned with those commitments
 
-Do not document the recursive planner loop as fully delivered until mission
-`VFDv1ha1G` is verified.
+The recursive planner loop tracks toward full delivery under mission `VFDv1ha1G`.

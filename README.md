@@ -6,182 +6,191 @@
 
 > `paddles` is the mech suit around a local-first coding agent. Its backbone architecture is a recursive in-context planning harness: operator memory shapes turn interpretation, a planner model recursively gathers and refines evidence through bounded resource use, and a separate synthesizer model produces the final answer from that trace.
 
-> Foundational stack position: `3/8`
-> This is the repository entrypoint and navigation hub. In the formal foundational reading order it follows [AGENTS.md](AGENTS.md) and [INSTRUCTIONS.md](INSTRUCTIONS.md), then leads into [CONSTITUTION.md](CONSTITUTION.md).
-
 ## Backbone Architecture
 
-The central idea is simple:
+The architecture rests on four commitments:
 
-- do not hardcode domain-specific turn types as the primary reasoning engine
-- do not let controller heuristics commit the route before the model has seen interpretation context and chosen its next bounded action
-- do not ask one small model to answer before it has done enough recursive context work
-- do not treat retrieval and final answering as the same workload
+- **Let the model reason first.** Interpretation context — operator memory, guidance graphs, tool hints, derived procedures — arrives before any routing decision. The model sees the full picture and chooses its own next action.
+- **Earn the answer through recursive work.** Small models become dramatically more capable when the harness gives them bounded tools to gather evidence iteratively rather than answering in one shot.
+- **Separate planning from synthesis.** Recursive context gathering and final answer generation are distinct workloads, each routed to the smallest model that excels at that role.
+- **Keep every step visible.** The harness shows its recursive work — planner actions, evidence gathered, decisions made — so the operator always knows why an answer was produced.
 
-Instead, `paddles` should behave like a bounded recursive harness.
+### The Turn Loop
 
-### Recursive Loop
+Every interaction follows the same recursive cycle. The harness assembles context, the planner model decides what to do next, the controller validates and executes that action, and the loop continues until evidence is sufficient for synthesis.
 
 ```mermaid
 flowchart TD
-    U["User Turn"]
-    I["Interpretation Context<br/>AGENTS.md roots + model-derived guidance subgraph + tool hints + derived procedures + recent turns + prior tool state"]
-    P["Planner Lane<br/>planner-capable model"]
-    D{"Next bounded action?"}
-    A["Validated resource action<br/>search / list_files / read / inspect / shell / diff / edit / refine / branch"]
-    X["Concrete workspace action<br/>validated executor"]
-    S["Planner Trace + Evidence State"]
-    T["Stop condition<br/>enough evidence / budget exhausted / explicit stop"]
-    Y["Synthesizer Lane<br/>final answer model"]
-    R["TUI / Plain Output"]
+    U["🎯 User Turn"]
+    I["📖 Interpretation Context<br/>operator memory · guidance graph · tool hints<br/>derived procedures · recent turns · prior evidence"]
+    P["🧠 Planner Lane<br/>model chooses next bounded action"]
+    D{"What does the<br/>evidence need?"}
+    W["🔧 Workspace Action<br/>search · read · inspect · shell · diff · edit"]
+    R["🔄 Refine / Branch<br/>sharpen the query · split into subqueries"]
+    E["📋 Evidence Accumulates<br/>planner trace · tool outputs · typed metadata"]
+    T["✅ Synthesis Ready<br/>enough evidence · budget met · explicit stop"]
+    S["💬 Synthesizer Lane<br/>grounded final answer from evidence bundle"]
+    O["📺 Visible Output<br/>TUI transcript or plain CLI"]
 
     U --> I --> P --> D
-    D -->|answer| Y
-    D -->|workspace action| X --> S --> I
-    D -->|search/read/refine| A --> S --> I
-    D -->|stop| T --> Y
-    S --> T
-    Y --> R
+    D -->|"answer directly"| T
+    D -->|"gather more"| W --> E
+    D -->|"refine focus"| R --> E
+    E -->|"loop back"| I
+    E -->|"sufficient"| T
+    T --> S --> O
+
+    style U fill:#e8f4f8,stroke:#2196F3
+    style I fill:#fff3e0,stroke:#FF9800
+    style P fill:#f3e5f5,stroke:#9C27B0
+    style S fill:#e8f5e9,stroke:#4CAF50
+    style O fill:#e8f4f8,stroke:#2196F3
 ```
+
+This is the heart of Paddles: a bounded recursive loop where the model drives its own investigation within safe guardrails. Each pass through the loop adds evidence, refines understanding, and brings the answer closer to ground truth.
 
 ### Model Routing
 
-Routing is workload-specific. The point is not to find one default model for everything. The point is to route each phase of the turn to the smallest capable lane.
+Each phase of the turn flows to the smallest model capable of that workload. A lightweight synthesizer handles final answers while a more capable planner drives the recursive investigation.
 
 ```mermaid
 flowchart LR
     Turn["Incoming Turn"]
-    Interpret["Interpretation context<br/>AGENTS.md roots + model-derived guidance subgraph + tool hints + derived procedures + recent turns + local state"]
-    Decide["Model-selected next action<br/>bounded schema"]
-    Direct["Answer/synthesize now"]
-    Tool["Concrete workspace action"]
-    Resource["Validated resource action<br/>search / list_files / read / inspect / shell / diff / edit / refine / branch"]
-    LocalPlanner["Local planner path<br/>Sift autonomous / local Qwen planner"]
-    HeavyPlanner["Specialized planner path<br/>Context-1 boundary or future planner model"]
-    Evidence["Trace + Evidence Bundle"]
-    Synth["Synthesizer lane<br/>grounded final answer"]
+
+    subgraph Interpret ["Interpretation"]
+        Memory["Operator memory<br/>AGENTS.md hierarchy"]
+        Graph["Guidance graph<br/>model-derived subgraph"]
+        Hints["Tool hints +<br/>derived procedures"]
+    end
+
+    subgraph Plan ["Recursive Planning"]
+        Decide["Model selects<br/>next bounded action"]
+        Local["Local planner<br/>Sift / Qwen"]
+        Heavy["Specialized planner<br/>Context-1 boundary"]
+        Evidence["Evidence bundle<br/>typed trace + metadata"]
+    end
+
+    subgraph Finish ["Synthesis"]
+        Synth["Synthesizer lane<br/>grounded cited answer"]
+    end
 
     Turn --> Interpret --> Decide
-    Decide --> Direct --> Synth
-    Decide --> Tool --> Evidence
-    Decide --> Resource
-    Resource --> LocalPlanner --> Evidence
-    Resource --> HeavyPlanner --> Evidence
-    Evidence --> Decide
-    Evidence --> Synth
+    Decide -->|"workspace action"| Local --> Evidence
+    Decide -->|"specialized retrieval"| Heavy --> Evidence
+    Evidence -->|"loop back"| Decide
+    Evidence -->|"ready"| Synth
+    Decide -->|"answer directly"| Synth
 ```
 
-### Delivered Backbone Step
+### The Recursive Harness in Practice
 
-The primary mech-suit path now assembles interpretation context first and asks
-the planner model to choose the first bounded action before the controller
-commits to a route. The controller still owns schema validation, allowlists,
-budgets, and fail-closed behavior, but it no longer heuristically decides the
-initial path for normal turns.
+The primary mech-suit path assembles interpretation context first, then lets the planner model choose each bounded action. The controller validates, executes, and enforces budgets — the model drives direction, the controller ensures safety.
 
 ```mermaid
 flowchart TD
-    U["User turn"]
-    I["Interpretation context<br/>AGENTS.md roots + model-derived guidance subgraph + tool hints + derived procedures + turns + local state"]
-    M["Action-selection model"]
-    C{"Choose one"}
-    A["answer / synthesize"]
-    T["workspace action"]
-    R["search / list_files / read / inspect / shell / diff / edit / refine / branch"]
-    L["validated recursive loop"]
-    S["grounded synthesizer answer"]
+    U["User turn arrives"]
+    I["Assemble interpretation context<br/>operator memory · guidance graph · tool hints · procedures"]
+    M["Planner model evaluates context"]
+    C{"Model's choice"}
+    A["Answer — evidence is sufficient"]
+    T["Act — workspace action needed"]
+    R["Recurse — search · refine · branch"]
+    L["Execute within validated loop<br/>controller enforces schema + budgets"]
+    S["Synthesizer produces grounded answer<br/>with source citations"]
 
     U --> I --> M --> C
     C --> A --> S
     C --> T --> S
     C --> R --> L --> M
     L --> S
+
+    style M fill:#f3e5f5,stroke:#9C27B0
+    style L fill:#fff3e0,stroke:#FF9800
+    style S fill:#e8f5e9,stroke:#4CAF50
 ```
 
-### Recorder Boundary
+### Trace Recording
 
-Recursive turns now have a paddles-owned recorder seam beside transcript
-rendering. The UI remains a projection; durable traces come from typed runtime
-records.
+Every recursive step produces typed trace records alongside the visible transcript. The UI is a projection; durable lineage lives in the recorder boundary.
 
 ```mermaid
 flowchart LR
-    Turn["Planner / Gatherer / Tool / Synth runtime"]
-    Records["Paddles trace contract<br/>task root | planner action | branch | tool pair | checkpoint"]
-    Events["Turn events / TUI rows"]
-    Port["TraceRecorder port"]
-    Noop["Noop / In-memory"]
-    Transit["Embedded transit-core"]
+    Runtime["Runtime transitions<br/>planner · gatherer · tool · synth"]
 
-    Turn --> Records --> Port --> Noop
-    Turn --> Events
-    Port --> Transit
-    Records --> Events
+    subgraph Recording ["Durable Trace Path"]
+        Contract["Trace contract<br/>task root · action · branch · checkpoint"]
+        Port["TraceRecorder port"]
+        Adapters["Noop · In-memory · transit-core"]
+    end
+
+    subgraph Display ["Operator View"]
+        Events["Turn events → TUI transcript"]
+    end
+
+    Runtime --> Contract --> Port --> Adapters
+    Runtime --> Events
+    Contract -.->|"projects to"| Events
 ```
 
-### Threaded Interactive Sessions
+### Threaded Conversations
 
-Interactive sessions now keep one durable conversation root and let the planner
-classify queued steering prompts into mainline continuation, child-thread
-splits, or merge-back transitions.
+Interactive sessions maintain one durable conversation root. When a steering prompt arrives mid-turn, the planner classifies it as continuation, child-thread, or merge-back — preserving full lineage for replay.
 
 ```mermaid
 flowchart TD
     U["Active turn running"]
     Q["Steering prompt captured<br/>structured thread candidate"]
-    M["Thread decision model"]
-    D{"Decision"}
-    C["Continue current thread"]
-    B["Open child thread<br/>new transit branch"]
-    G["Merge / summarize back<br/>explicit recorded outcome"]
-    X["Run queued prompt on selected thread"]
-    R["Thread-aware transcript + replay"]
+    M["Thread decision model<br/>evaluates context + thread state"]
+    D{"Classification"}
+    C["Continue — same thread"]
+    B["Branch — open child thread<br/>new transit branch with lineage"]
+    G["Merge — reconcile back<br/>explicit recorded outcome"]
+    X["Execute on selected thread"]
+    R["Thread-aware transcript<br/>full replay + branch history"]
 
     U --> Q --> M --> D
     D --> C --> X --> R
     D --> B --> X --> R
     D --> G --> X --> R
+
+    style M fill:#f3e5f5,stroke:#9C27B0
+    style R fill:#e8f5e9,stroke:#4CAF50
 ```
 
-## Current Implementation Snapshot
+## What The Harness Delivers Today
 
-The repository now implements the recursive harness in a bounded local-first form.
+The recursive harness runs as a bounded local-first runtime:
 
-Today, the runtime has:
+- **Interpretation-first routing** — every turn assembles operator memory, a model-derived guidance subgraph, read-only tool hints, and derived decision procedures before the planner chooses its first action
+- **Model-driven action selection** — the planner chooses from `answer`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), `refine`, `branch`, or `stop`
+- **Guidance-aware fallbacks** — fallback selection draws on command hints and decision procedures from foundational docs, and halts recursion when a procedure step has already resolved the request
+- **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the planner until evidence is sufficient or budgets are met
+- **Separate synthesis** — a distinct synthesizer lane produces the final grounded answer from the accumulated evidence bundle
+- **Full-stream visibility** — a default TUI/event stream shows interpretation, planner actions, retrieval, fallbacks, and synthesis as they happen
+- **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary with noop, in-memory, and embedded `transit-core` adapters
+- **Artifact envelopes** — prompts, tool I/O, evidence bundles, planner traces, and responses sit behind logical refs, ready for external storage when needed
+- **Threaded conversations** — interactive sessions keep one durable root task with model-driven steering-thread decisions, structured thread candidates, explicit merge-back records, and full replay views
+- **Shared conversation primitives** — an internal workspace crate ([crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)) cleanly separates conversation/thread/session types from the main binary
 
-- a planner lane that sees interpretation context before choosing the first bounded action
-- hierarchical `AGENTS.md` reload plus a model-derived guidance subgraph, read-only command hints, and derived decision procedures at interpretation time
-- a model-directed first action schema that can choose `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), `refine`, `branch`, or `stop`
-- interpretation-aware fallback selection that prefers relevant command hints and derived decision procedures from foundational docs before generic search/stop
-- evidence-aware fallback stopping that halts recursion once an interpretation-derived procedure step has already answered the current request
-- a bounded recursive loop for concrete workspace actions, `refine`, `branch`, and `stop`
-- a distinct synthesizer lane that answers from the resulting evidence bundle
-- a default TUI/event stream that shows interpretation, planner actions, retrieval, fallbacks, and synthesis
-- a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids
-- an internal workspace crate for conversation/thread/session primitives in [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs), so the transit-facing conversation layer is no longer fused into the main binary crate
-- a `TraceRecorder` boundary beside `TurnEventSink`, with `noop`, in-memory, and embedded `transit-core` adapters
-- artifact envelopes for prompts, tool I/O, evidence bundles, planner traces, and final responses so larger payloads can move behind logical refs later
-- interactive conversation sessions with one durable root task, model-driven steering-thread decisions, and explicit merge-back records
-- structured thread candidates and thread replay views instead of opaque queued prompt strings
+### Growing Edges
 
-The remaining gaps are narrower now:
+A few areas are still maturing:
 
-- direct adapter paths now share the same controller boundary: the model must emit a valid bounded action/tool choice, and the controller only retries, validates, or fails closed instead of inferring intent on its behalf
-- the recursive loop currently relies on the configured gatherer backend for workspace search rather than a richer unified resource graph
-- the runtime defaults to `noop` recording today; embedded `transit-core` recording is available through the recorder boundary but is not yet the default CLI/runtime policy
-- graph-mode gatherer traces still use inline envelopes today; the contract leaves room for external artifact refs, but no artifact store promotion policy exists yet
-- `context-1` is still an explicit experimental boundary, not the default planner lane
-- auto-threading remains bounded to safe checkpoints between turns; paddles does not yet run true concurrent local generation across sibling threads on one model session
+- **Unified resource graph** — planner `search`/`refine` currently delegates through the configured gatherer backend; a richer unified resource graph will strengthen this path
+- **Default recording policy** — embedded `transit-core` recording is available through the recorder boundary; the default runtime still uses noop until the policy slice lands
+- **Artifact store promotion** — graph-mode gatherer traces use inline envelopes today; the contract supports external artifact refs when a promotion policy is ready
+- **Context-1 integration** — `context-1` remains an explicit experimental boundary, available for opt-in use
+- **Concurrent threading** — auto-threading is checkpoint-bounded and sequential today; true concurrent sibling generation is a future capability
 
 ## Design Principles
 
-- `AGENTS.md` should influence interpretation, not just answer style.
-- The model should choose the next bounded action from interpretation context; the controller should validate and execute it safely.
-- Recursive context refinement should do the heavy lifting for difficult workspace questions.
-- Planner and synthesizer are different roles and may use different models.
-- Keel and other project-specific artifacts are context, not hardcoded product logic.
-- Local-first remains the default. Heavier planner lanes must degrade safely.
-- Operator-visible traces matter. The harness should show its recursive work.
+- **Interpretation shapes direction.** `AGENTS.md` memory influences what the planner investigates, how it prioritizes, and which procedures it follows.
+- **The model drives, the controller guards.** The model selects its next bounded action from interpretation context; the controller validates, executes, and enforces budgets.
+- **Recursive work earns better answers.** Difficult workspace questions improve through iterative evidence gathering rather than one-shot generation.
+- **Separation of concerns.** Planner and synthesizer are distinct roles, potentially using different models optimized for their respective workloads.
+- **Context over hardcoding.** Keel, project artifacts, and board state flow through memory, search, and tool outputs — the harness stays general-purpose.
+- **Local-first by default.** The core loop runs on local models. Heavier planner lanes are opt-in and degrade gracefully.
+- **Visible execution.** Every recursive step is surfaced to the operator. The harness shows its work because transparency builds trust.
 
 ## Current Runtime Lanes
 
@@ -201,8 +210,8 @@ Use these in this order when reading the foundational stack:
 2. [INSTRUCTIONS.md](INSTRUCTIONS.md) for the canonical Keel turn loop and checklists
 3. [README.md](README.md) for the backbone architecture and navigation map
 4. [CONSTITUTION.md](CONSTITUTION.md) for collaboration philosophy and bounds
-5. [POLICY.md](POLICY.md) for runtime invariants and safety rules
-6. [ARCHITECTURE.md](ARCHITECTURE.md) for the target/current implementation split
+5. [POLICY.md](POLICY.md) for operational commitments and runtime guarantees
+6. [ARCHITECTURE.md](ARCHITECTURE.md) for the turn loop narrative and implementation map
 7. [PROTOCOL.md](PROTOCOL.md) for communications and data contracts
 8. [CONFIGURATION.md](CONFIGURATION.md) for concrete lane/runtime configuration
 
@@ -279,15 +288,15 @@ Later files are more specific. That memory now participates in turn interpretati
 
 ## Why This Architecture
 
-The goal is to raise the effective performance of smaller local models through recursive resource use rather than by hardcoding project-specific turn classes or jumping immediately to a larger answer model.
+The mech suit raises the effective performance of smaller local models through recursive resource use. A small model with bounded tools and iterative evidence gathering consistently outperforms the same model answering in one shot.
 
 That is the mech suit:
 
-- human-authored guidance and architecture
-- bounded recursive planning
-- explicit evidence accumulation
-- separate final synthesis
-- visible execution
+- **Human-authored guidance** shapes every turn through operator memory and derived procedures
+- **Bounded recursive planning** lets the model investigate iteratively within safe guardrails
+- **Explicit evidence accumulation** grounds answers in real workspace artifacts
+- **Separate final synthesis** optimizes each phase independently
+- **Visible execution** makes every decision transparent and auditable
 
 ## License
 

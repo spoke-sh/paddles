@@ -14,21 +14,21 @@ policy, defer to the documents listed below.
 
 ## Core Principles
 
-1. **Garden First**: Resolve board drift, doctor errors, broken tests, and dirty
-   open loops before escalating to the human.
-2. **Work In Sealed Slices**: Prefer small, coherent changes that can be landed
-   with a single sealing commit.
-3. **Protect Local-First Constraints**: Do not casually weaken the local-first
-   runtime or introduce unnecessary network dependencies into the core loop.
-4. **Respect Existing Work**: Do not revert or trample unrelated user changes.
-   Work with the current tree unless the user explicitly asks otherwise.
-5. **Use The Board Engine**: Manage project state through the `keel` CLI, not
-   by manually editing `.keel` structure.
-6. **Escalate Only For Real Decisions**: Ask the human when product direction,
-   UX behavior, or design tradeoffs need input. Handle tactical implementation
-   and drift autonomously.
+1. **Garden First**: Resolve board drift, doctor errors, broken tests, and open
+   loops before escalating to the human. A healthy garden supports healthy work.
+2. **Work In Sealed Slices**: Prefer small, coherent changes that land with a
+   single sealing commit. Each slice is self-contained and verifiable.
+3. **Protect Local-First Constraints**: The local-first runtime is the
+   foundation — preserve it and justify any new network dependencies via ADR.
+4. **Respect Existing Work**: Work with the current tree. Preserve unrelated
+   user changes unless the user explicitly asks otherwise.
+5. **Use The Board Engine**: Manage project state through the `keel` CLI. The
+   board engine maintains structural integrity of `.keel` artifacts.
+6. **Escalate Only For Real Decisions**: Handle tactical implementation and drift
+   autonomously. Ask the human when product direction, UX behavior, or design
+   tradeoffs need input.
 7. **Update The Right Source Of Truth**: When behavior changes, update the doc
-   that owns that behavior. Do not duplicate runtime contracts in `AGENTS.md`.
+   that owns that behavior. Each contract lives in exactly one place.
 
 ## Canonical Turn Loop
 

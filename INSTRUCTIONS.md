@@ -7,7 +7,7 @@ Procedural instructions and workflow guidance for agents and operators working w
 
 ## The Turn Loop
 
-Keel is an engine with strict constraints. Your job is to move the board through the canonical `Orient -> Inspect -> Pull -> Ship -> Close` loop while eliminating drift.
+Keel is an engine built around a disciplined rhythm. Your job is to move the board through the canonical `Orient -> Inspect -> Pull -> Ship -> Close` loop, keeping the system healthy and drift-free.
 
 The `keel` CLI is the canonical reference surface for this rhythm. Every session follows this deterministic cycle:
 
@@ -43,20 +43,20 @@ Focus on **technical discovery and fog reduction**.
 
 ## Paddles Runtime Routing
 
-Paddles treats inference as a routing problem, not a single-model problem.
+Paddles treats inference as a routing problem — each phase of the turn flows to the smallest capable model for that workload.
 
-1. **Interpretation Context First**: Assemble `AGENTS.md`, a turn-time model-derived guidance subgraph, extracted read-only tool hints, derived decision procedures, recent turns, and relevant local state before choosing the next bounded action.
-2. **Model Selects The Next Bounded Action**: Do not rely on controller string heuristics as the primary reasoning engine. Present the model with the allowed action options and require it to return one of them.
-3. **Controller Owns Validation And Budgets**: The controller remains authoritative for schema validation, safe-command allowlists, deterministic execution, loop budgets, and fail-closed behavior.
-4. **Planner Before Synthesizer**: Resource-intensive turns should recurse through bounded planner actions and only then hand typed evidence to the synthesizer lane.
-5. **Grounded Repository Answers**: Repository-question answers should cite source files by default and degrade to extractive evidence or explicit insufficiency rather than unsupported prose.
-6. **Visible Turn Stream**: TTY interactive sessions should render a default Codex-style transcript UI for interpretation, planner actions, gatherer work, tool calls, fallback reasons, and synthesis readiness.
-7. **Model-Driven Auto-Threading**: Steering prompts captured during an active turn should become structured thread candidates, then flow through a constrained model-selected thread decision (`continue`, `open-child-thread`, or `merge/reconcile`) at a safe checkpoint.
-8. **Explicit Merge Outcomes**: Merge-back behavior must be recorded as explicit lineage plus visible transcript output rather than implied history rewrite.
-9. **One Local Turn At A Time**: Until true concurrent local generation exists, auto-threading must remain checkpoint-bounded and honest about sequential execution.
-10. **One-Shot Path Stays Plain**: `--prompt` usage and non-TTY stdin/stdout flows must remain plain CLI output paths for scripting and shell composition.
-11. **Context-1 Boundary**: Chroma `context-1` is an experimental gatherer provider only. It must be selected explicitly, acknowledged with `--context1-harness-ready`, and fail closed when the harness/runtime is unavailable.
-12. **Docs Move With Behavior**: Whenever routing contracts, model-selected action schemas, provider boundaries, thread semantics, or turn-stream behavior change, update [ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), and [INSTRUCTIONS.md](INSTRUCTIONS.md) in the same change slice.
+1. **Interpretation Context First**: Every turn assembles `AGENTS.md` memory, a model-derived guidance subgraph, tool hints, derived decision procedures, recent turns, and local state before the planner selects its first action.
+2. **Model Drives Action Selection**: The planner model receives the allowed action options and selects its next bounded action. The model reasons about direction; the controller ensures safety.
+3. **Controller Ensures Safety**: The controller validates schemas, enforces command allowlists, manages budgets, and executes deterministically with fail-closed behavior.
+4. **Planner Before Synthesizer**: Resource-intensive turns recurse through bounded planner actions, accumulating typed evidence before handing the bundle to the synthesizer lane.
+5. **Grounded Repository Answers**: Repository-question answers cite source files by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
+6. **Visible Turn Stream**: TTY interactive sessions render a Codex-style transcript UI showing interpretation, planner actions, gatherer work, tool calls, fallback reasons, and synthesis readiness.
+7. **Model-Driven Auto-Threading**: Steering prompts captured during an active turn become structured thread candidates, flowing through a constrained model-selected thread decision (`continue`, `open-child-thread`, or `merge/reconcile`) at a safe checkpoint.
+8. **Explicit Merge Outcomes**: Merge-back behavior is recorded as explicit lineage plus visible transcript output — full traceability for every thread transition.
+9. **Honest Sequential Execution**: Auto-threading is checkpoint-bounded and sequential today. Concurrent sibling generation ships when it is implemented.
+10. **Plain CLI For Scripts**: `--prompt` usage and non-TTY stdin/stdout flows remain plain CLI output paths for scripting and shell composition.
+11. **Context-1 As Experimental Boundary**: Chroma `context-1` is an opt-in experimental gatherer provider, selected explicitly and acknowledged with `--context1-harness-ready`. It fails closed when its harness is unavailable.
+12. **Docs Move With Behavior**: Whenever routing contracts, action schemas, provider boundaries, thread semantics, or turn-stream behavior change, the corresponding foundational docs ([ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), [INSTRUCTIONS.md](INSTRUCTIONS.md)) update in the same change slice.
 
 ## Human Interaction & Pokes
 
@@ -126,13 +126,12 @@ To upgrade Keel to the latest version:
 
 ## Compatibility Policy (Hard Cutover)
 
-At this stage of development, this repository uses a **hard cutover** policy by default.
+At this stage of development, this repository uses a **hard cutover** policy — clean forward motion over backward compatibility.
 
-1. **No Backward Compatibility by Default**: Do not add compatibility aliases, dual-write logic, soft-deprecated schema fields, or fallback parsing for legacy formats unless a story explicitly requires it.
-2. **Replace, Don't Bridge**: When introducing a new canonical token, field, command behavior, or document contract, remove the old path in the same change slice.
-3. **Fail Fast in Validation**: `keel doctor` and transition gates should treat legacy or unfilled scaffold patterns as hard failures when they violate the new contract.
-4. **Single Canonical Path**: Keep one source of truth for rendering, parsing, and validation; avoid parallel implementations meant only to preserve old behavior.
-5. **Migration Is Explicit Work**: If existing board artifacts need updates, handle that in a dedicated migration pass or story instead of embedding runtime compatibility logic.
+1. **Clean Forward Motion**: New canonical tokens, fields, behaviors, and contracts replace their predecessors in the same change slice. One source of truth at all times.
+2. **Fail Fast In Validation**: `keel doctor` and transition gates enforce the current contract immediately. Legacy and unfilled scaffold patterns surface as hard failures, making drift visible early.
+3. **Single Canonical Path**: One source of truth for rendering, parsing, and validation — clarity and simplicity over legacy support.
+4. **Explicit Migration**: When existing board artifacts need updates, a dedicated migration pass or story handles the transition — keeping runtime code focused on the current contract.
 
 ## Commands
 
@@ -173,7 +172,7 @@ Run `keel --help` for the full command tree. The core commands you should rely o
 
 ## Story and Milestone State Changes
 
-Use CLI commands only; do not move `.keel` files manually.
+Use CLI commands only — the board engine maintains structural integrity of `.keel` artifacts.
 
 | Action | Command |
 |--------|---------|
