@@ -146,6 +146,31 @@ impl TurnEvent {
             Self::SynthesisReady { .. } => "synthesis_ready",
         }
     }
+
+    /// Inherent minimum verbosity tier for this event kind.
+    /// Pace classification can promote events below their inherent level.
+    pub fn min_verbosity(&self) -> u8 {
+        match self {
+            Self::ToolCalled { .. }
+            | Self::ToolFinished { .. }
+            | Self::Fallback { .. }
+            | Self::SynthesisReady { .. } => 0,
+
+            Self::PlannerActionSelected { .. }
+            | Self::GathererSummary { .. }
+            | Self::PlannerSummary { .. }
+            | Self::ContextAssembly { .. }
+            | Self::ThreadDecisionApplied { .. }
+            | Self::ThreadMerged { .. } => 1,
+
+            Self::IntentClassified { .. }
+            | Self::InterpretationContext { .. }
+            | Self::RouteSelected { .. }
+            | Self::PlannerCapability { .. }
+            | Self::GathererCapability { .. }
+            | Self::ThreadCandidateCaptured { .. } => 2,
+        }
+    }
 }
 
 pub trait TurnEventSink: Send + Sync {

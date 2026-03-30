@@ -28,6 +28,7 @@ pub struct TuiContext {
     pub provider_name: String,
     pub credential_provider: Option<String>,
     pub credential_status: String,
+    pub verbose: u8,
 }
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(32);
@@ -77,6 +78,7 @@ pub async fn run_interactive_tui(
         tui_ctx.provider_name.clone(),
         tui_ctx.credential_provider.clone(),
         tui_ctx.credential_status.clone(),
+        tui_ctx.verbose,
     );
 
     loop {
@@ -469,6 +471,7 @@ struct InteractiveApp {
     flushed_row_count: usize,
     step_timing: StepTimingReservoir,
     step_timing_path: PathBuf,
+    verbose: u8,
     prompt_history: Vec<String>,
     history_cursor: Option<usize>,
     history_draft: String,
@@ -507,6 +510,7 @@ impl InteractiveApp {
         provider_name: String,
         credential_provider: Option<String>,
         credential_status: String,
+        verbose: u8,
     ) -> Self {
         let ready_message = match credential_provider.as_deref() {
             Some(provider) => format!(
@@ -543,6 +547,7 @@ impl InteractiveApp {
             flushed_row_count: 0,
             step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
             step_timing_path: step_timing_cache_path(),
+            verbose,
             prompt_history: Vec::new(),
             history_cursor: None,
             history_draft: String::new(),
@@ -683,13 +688,50 @@ impl InteractiveApp {
         Some(prompt)
     }
 
+    fn should_show_event(&self, event: &TurnEvent, pace: Pace, is_first_step: bool) -> bool {
+        if is_first_step {
+            return true;
+        }
+        let base = event.min_verbosity();
+        let promotion = match pace {
+            Pace::Slow => 2,
+            Pace::Normal => 1,
+            Pace::Fast => 0,
+        };
+        base.saturating_sub(promotion) <= self.verbose
+    }
+
     fn handle_message(&mut self, message: UiMessage) {
         match message {
             UiMessage::TurnEvent { event, occurred_at } => {
                 let key = event.event_type_key();
-                let row = format_turn_event_row(event);
-                let row = self.annotate_step_timing(row, key, occurred_at);
-                self.rows.push(row);
+                let is_first_step = self
+                    .active_turn_timing
+                    .as_ref()
+                    .is_some_and(|t| !t.saw_step);
+
+                let delta = self.active_turn_timing.as_ref().and_then(|t| {
+                    t.saw_step
+                        .then(|| occurred_at.duration_since(t.last_step_at))
+                });
+                if let Some(d) = delta {
+                    self.step_timing.record(key, d);
+                }
+                let pace = delta
+                    .map(|d| self.step_timing.classify(key, d))
+                    .unwrap_or(Pace::Normal);
+
+                if self.should_show_event(&event, pace, is_first_step) {
+                    let row = format_turn_event_row(event);
+                    let row = if let Some(timing) = self.active_turn_timing.as_mut() {
+                        row.timed(timing.mark_step(occurred_at, pace))
+                    } else {
+                        row
+                    };
+                    self.rows.push(row);
+                } else if let Some(timing) = self.active_turn_timing.as_mut() {
+                    timing.mark_step(occurred_at, pace);
+                }
             }
             UiMessage::TurnFinished {
                 result,
@@ -960,27 +1002,6 @@ impl InteractiveApp {
         } else {
             self.rows.len()
         }
-    }
-
-    fn annotate_step_timing(
-        &mut self,
-        row: TranscriptRow,
-        event_type_key: &str,
-        occurred_at: Instant,
-    ) -> TranscriptRow {
-        let Some(timing) = self.active_turn_timing.as_mut() else {
-            return row;
-        };
-        let delta = timing
-            .saw_step
-            .then(|| occurred_at.duration_since(timing.last_step_at));
-        if let Some(d) = delta {
-            self.step_timing.record(event_type_key, d);
-        }
-        let pace = delta
-            .map(|d| self.step_timing.classify(event_type_key, d))
-            .unwrap_or(Pace::Normal);
-        row.timed(timing.mark_step(occurred_at, pace))
     }
 
     fn annotate_turn_total(&mut self, row: TranscriptRow, occurred_at: Instant) -> TranscriptRow {
@@ -1618,6 +1639,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
         let _ = app.take_scrollback_rows();
 
@@ -1656,6 +1678,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
         app.input = "hello".to_string();
 
@@ -1693,6 +1716,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
 
         app.input = "first".to_string();
@@ -1729,6 +1753,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
 
         app.input = "first".to_string();
@@ -1767,6 +1792,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
 
         let initial = app.take_scrollback_rows();
@@ -1811,6 +1837,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
 
         let (label, hint) = app.input_label_and_hint(false);
@@ -1828,6 +1855,7 @@ mod tests {
             "moonshot".to_string(),
             Some("moonshot".to_string()),
             "Provider: `moonshot`. Auth: loaded from the local credential store.".to_string(),
+            2,
         );
         app.input = "/login".to_string();
 
@@ -1854,6 +1882,7 @@ mod tests {
             "moonshot".to_string(),
             Some("moonshot".to_string()),
             "Provider: `moonshot`. Auth: loaded from the local credential store.".to_string(),
+            2,
         );
         app.input_mode = InputMode::MaskedKey {
             provider: "moonshot".to_string(),
@@ -1883,6 +1912,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
         app.input = "/login".to_string();
 
@@ -1908,6 +1938,7 @@ mod tests {
             "sift".to_string(),
             None,
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
         );
         let start = Instant::now();
 

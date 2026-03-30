@@ -369,12 +369,12 @@ async fn main() -> Result<()> {
     service.set_verbose(runtime_verbose);
 
     // Boot sequence
-    if verbose >= 1 {
+    if verbose >= 3 {
         println!("[BOOT] Initializing system...");
     }
     let boot_ctx = service.boot(credits, weights, biases, hf_token.clone(), reality_mode)?;
 
-    if verbose >= 1 {
+    if verbose >= 3 {
         println!("[BOOT] Inherited Credits: {}", boot_ctx.credits);
         println!("[BOOT] Applying Foundational Weights: {}", boot_ctx.weight);
         println!("[BOOT] Applying Foundational Biases: {}", boot_ctx.bias);
@@ -385,7 +385,7 @@ async fn main() -> Result<()> {
     }
 
     // Registry Synchronization via Sift
-    if verbose >= 1 {
+    if verbose >= 3 {
         println!("[BOOT] Syncing synthesizer lane via SIFT for: {model}...");
         if let Some(pm) = &planner_model {
             println!("[BOOT] Syncing planner lane via SIFT for: {pm}...");
@@ -411,7 +411,7 @@ async fn main() -> Result<()> {
         .with_context1_harness_ready(context1_harness_ready)
         .with_requires_local_models(provider == ModelProvider::Sift);
     let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
-    if verbose >= 1 {
+    if verbose >= 3 {
         println!("[BOOT] Runtime lanes ready.");
     }
 
@@ -420,7 +420,7 @@ async fn main() -> Result<()> {
         paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
     service.register_event_observer(web_observer);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
-    if verbose >= 1 {
+    if verbose >= 3 {
         println!("[BOOT] HTTP API server listening on port {port}.");
     }
     tokio::spawn(async move {
@@ -442,6 +442,7 @@ async fn main() -> Result<()> {
                     provider_name: provider_name.to_string(),
                     credential_provider: credential_provider.clone(),
                     credential_status: credential_status.clone(),
+                    verbose,
                 };
                 run_interactive_tui(service, model.clone(), tui_ctx).await?
             }
