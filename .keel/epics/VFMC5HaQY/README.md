@@ -9,7 +9,7 @@ index: 29
 
 # Mistral RS Native Inference
 
-> The current local inference is hardcoded to Qwen via Candle. mistral.rs is a pure-Rust inference engine built on Candle that supports many architectures (Llama, Mistral, Gemma, Phi, Qwen) with quantization and CUDA. Replacing the Qwen-specific runtime with mistral.rs would give paddles native multi-architecture local inference without an external server process.
+> mistral.rs is a pure-Rust inference engine that supports many architectures (Llama, Mistral, Gemma, Phi, Qwen) with quantization and CUDA. Adding it as a separate provider alongside sift gives paddles a second local inference option with broader model support, without modifying the existing sift stack.
 
 ## Documents
 

@@ -3,7 +3,7 @@
 ## Summary
 
 Epic: VFMC5HaQY
-Goal: Replace Qwen-specific Candle code with mistral.rs for multi-architecture local inference
+Goal: Add mistral.rs as a separate local inference provider alongside sift
 
 ## Scope
 

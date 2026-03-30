@@ -11,7 +11,7 @@ index: 1
 
 # Mistral RS Local Inference Backend
 
-> Replace Qwen-specific Candle code with mistral.rs for multi-architecture local inference
+> Add mistral.rs as a separate local inference provider alongside sift
 
 ## Documents
 

@@ -2,35 +2,35 @@
 
 ## Problem Statement
 
-The current local inference is hardcoded to Qwen via Candle. mistral.rs is a pure-Rust inference engine built on Candle that supports many architectures (Llama, Mistral, Gemma, Phi, Qwen) with quantization and CUDA. Replacing the Qwen-specific runtime with mistral.rs would give paddles native multi-architecture local inference without an external server process.
+The existing local provider (sift) is coupled to Qwen models. mistral.rs is a pure-Rust inference engine that supports many architectures (Llama, Mistral, Gemma, Phi, Qwen) with quantization and CUDA. Adding mistral.rs as a separate provider gives paddles a second local inference option that supports a broader range of models without an external server process.
 
 ## Goals & Objectives
 
 | ID | Goal | Success Metric | Target |
 |----|------|----------------|--------|
-| GOAL-01 | mistral.rs replaces Qwen-specific Candle code as the local inference backend, supporting multiple model architectures | paddles --provider local --model mistralai/Mistral-7B-Instruct processes a prompt via mistral.rs | CLI proof |
+| GOAL-01 | mistral.rs is available as a provider for native multi-architecture local inference alongside sift | paddles --provider mistralrs --model mistralai/Mistral-7B-Instruct processes a prompt | CLI proof |
 
 ## Users
 
 | Persona | Description | Primary Need |
 |---------|-------------|--------------|
-| Local inference user | Developer running models locally without external API dependencies | Multi-architecture model support beyond Qwen |
+| Local inference user | Developer running models locally without external API dependencies | Multi-architecture model support beyond what sift provides |
 
 ## Scope
 
 ### In Scope
 
-- [SCOPE-01] Add mistral.rs as a dependency replacing direct Candle model loading
-- [SCOPE-02] New LocalInferenceAdapter implementing SynthesizerEngine using mistral.rs
-- [SCOPE-03] Support for multiple architectures (Llama, Mistral, Gemma, Phi, Qwen) via mistral.rs
-- [SCOPE-04] Quantized model support (GGUF) via mistral.rs
-- [SCOPE-05] CUDA and CPU inference via mistral.rs device selection
+- [SCOPE-01] Add mistral.rs as a dependency for a new provider adapter
+- [SCOPE-02] MistralRsAdapter implementing SynthesizerEngine using mistral.rs inference
+- [SCOPE-03] Same adapter implementing RecursivePlanner via structured JSON parsing
+- [SCOPE-04] Support for multiple architectures (Llama, Mistral, Gemma, Phi, Qwen) via mistral.rs
+- [SCOPE-05] GGUF quantized model support via mistral.rs
 
 ### Out of Scope
 
-- [SCOPE-06] Removing the existing SiftAgentAdapter (can coexist initially)
+- [SCOPE-06] Modifying the existing sift provider or SiftAgentAdapter
 - [SCOPE-07] Vision or multimodal model support
-- [SCOPE-08] Model download/management (use HF Hub or manual download)
+- [SCOPE-08] Model download or management (use HF Hub or manual download)
 
 ## Requirements
 
@@ -39,9 +39,9 @@ The current local inference is hardcoded to Qwen via Candle. mistral.rs is a pur
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| FR-01 | LocalInferenceAdapter loads models via mistral.rs and implements SynthesizerEngine | GOAL-01 | must | Core adapter for local inference |
+| FR-01 | MistralRsAdapter loads models via mistral.rs and implements SynthesizerEngine | GOAL-01 | must | Core adapter for mistral.rs inference |
 | FR-02 | Same adapter implements RecursivePlanner via structured JSON parsing | GOAL-01 | must | Planning requires structured output from local models |
-| FR-03 | --provider local --model <any-supported-arch> works with mistral.rs backend | GOAL-01 | must | CLI entry point for multi-architecture local inference |
+| FR-03 | --provider mistralrs --model <hf-model-id> selects the mistral.rs backend | GOAL-01 | must | CLI entry point |
 | FR-04 | GGUF quantized models are supported for memory-constrained environments | GOAL-01 | should | Enables running larger models on consumer hardware |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
@@ -50,15 +50,15 @@ The current local inference is hardcoded to Qwen via Candle. mistral.rs is a pur
 <!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| NFR-01 | Existing SiftAgentAdapter continues to work as --provider sift for backwards compat | GOAL-01 | must | No regression for existing users |
+| NFR-01 | Existing sift provider continues to work unchanged as --provider sift | GOAL-01 | must | No regression for existing local inference path |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->
 
 ## Verification Strategy
 
 | Area | Method | Evidence |
 |------|--------|----------|
-| Multi-arch inference | Manual CLI proof | paddles --provider local --model mistralai/Mistral-7B-Instruct processes a prompt |
-| Backwards compat | Existing tests | --provider sift path continues to work |
+| Multi-arch inference | Manual CLI proof | paddles --provider mistralrs --model mistralai/Mistral-7B-Instruct processes a prompt |
+| Sift unchanged | Existing tests | All 90 tests pass, --provider sift works |
 
 ## Assumptions
 
@@ -70,11 +70,11 @@ The current local inference is hardcoded to Qwen via Candle. mistral.rs is a pur
 
 | Question/Risk | Owner | Status |
 |---------------|-------|--------|
-| Whether to keep SiftAgentAdapter as a separate provider or fully replace it | Epic owner | Resolved - coexist as --provider sift vs --provider local |
+| Whether mistral.rs should be an optional feature flag to avoid heavy compile times | operator | Open |
 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] paddles --provider local --model mistralai/Mistral-7B-Instruct processes a prompt via mistral.rs
-- [ ] Existing --provider sift path continues to work unchanged
+- [ ] paddles --provider mistralrs --model mistralai/Mistral-7B-Instruct processes a prompt via mistral.rs
+- [ ] Existing sift provider continues to work unchanged
 <!-- END SUCCESS_CRITERIA -->
