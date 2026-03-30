@@ -1,15 +1,14 @@
 ---
 # system-managed
-id: VFKBCVjpo
-created_at: 2026-03-29T22:11:32
+id: VFKApee25
+created_at: 2026-03-29T22:37:17
 # authored
-title: HTTP Server Foundation
-index: 21
+title: HTTP API Design For Paddles
 ---
 
-# HTTP Server Foundation
+# HTTP API Design For Paddles
 
-> Paddles has no HTTP interface. An axum server needs to run alongside the CLI, sharing the MechSuitService instance, with endpoints for session lifecycle, turn submission, and SSE event streaming.
+> Research bearing converted to epic. The HTTP API design has been implemented across epics VFKBCVjpo, VFKBDgewu, and VFKBFMq8J.
 
 ## Documents
 
@@ -21,8 +20,7 @@ index: 21
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/1 voyages complete, 1/1 stories done
+**Progress:** 0/0 voyages complete, 0/0 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Axum Server With SSE Turn Events](voyages/VFKDkffWL/) | done | 1/1 |
 <!-- END GENERATED -->

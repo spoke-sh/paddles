@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFKDkffWL
-status: in-progress
+status: done
 epic: VFKBCVjpo
 created_at: 2026-03-29T22:21:39
 # authored
@@ -9,6 +9,7 @@ title: Axum Server With SSE Turn Events
 index: 1
 updated_at: 2026-03-29T22:24:15
 started_at: 2026-03-29T22:24:20
+completed_at: 2026-03-29T22:37:20
 ---
 
 # Axum Server With SSE Turn Events
@@ -22,14 +23,16 @@ started_at: 2026-03-29T22:24:20
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 stories complete
+**Progress:** 1/1 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Axum Server With Health And SSE Turn Streaming](../../../../stories/VFKDoq2kc/README.md) | feat | needs-human-verification |
+| [Axum Server With Health And SSE Turn Streaming](../../../../stories/VFKDoq2kc/README.md) | feat | done |
 <!-- END GENERATED -->

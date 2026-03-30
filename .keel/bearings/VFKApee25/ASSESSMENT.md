@@ -8,36 +8,35 @@ id: VFKApee25
 
 | Factor | Score | Rationale |
 |--------|-------|-----------|
-| Impact | 3 | Expected value delivered if successful |
-| Confidence | 3 | Certainty we can achieve the outcome |
-| Effort | 3 | Resources and time required |
-| Risk | 3 | Probability of negative outcomes |
-
-*Scores range from 1-5:*
-- 1 = Very Low
-- 2 = Low
-- 3 = Medium
-- 4 = High
-- 5 = Very High
+| Impact | 5 | Unlocks web interface, visualization, and external client access to the harness |
+| Confidence | 5 | Implemented and verified: axum server, SSE streaming, trace graph endpoint all working |
+| Effort | 2 | Existing domain ports mapped directly to HTTP endpoints with no new application logic |
+| Risk | 1 | Infrastructure adapter only, no domain changes, all 90 tests pass unchanged |
 
 ## Findings
 
-- Key finding with canonical support [SRC-01]
+- MechSuitService methods map directly to REST endpoints without new application logic [SRC-01]
+- TurnEvent Serialize derive enables typed SSE payloads with zero manual serialization [SRC-02]
+- TraceRecord lineage DAG provides the graph structure needed for railroad visualization [SRC-03]
+- axum integrates with existing tokio runtime and tower middleware at zero friction [SRC-04]
 
 ## Opportunity Cost
 
-What are we not doing by pursuing this? Cite the tradeoff, for example [SRC-01].
+Minimal. The HTTP server runs as a background tokio task alongside the CLI/TUI. No existing functionality was modified or displaced.
 
 ## Dependencies
 
-- Dependency or prerequisite with support [SRC-01]
+- tokio async runtime (already present) [SRC-04]
+- tower-http for CORS (new, lightweight) [SRC-04]
+- axum 0.8 for HTTP framework (new) [SRC-04]
 
 ## Alternatives Considered
 
-- Alternative path with support [SRC-01]
+- WebSocket instead of SSE: rejected because TurnEvent flow is unidirectional (server to client), SSE is HTTP-native with browser auto-reconnection, and no upgrade negotiation is needed [SRC-02]
+- Separate process instead of shared MechSuitService: rejected because local model inference is sequential regardless of interface, and sharing the service avoids duplicate model loading [SRC-01]
 
 ## Recommendation
 
-[ ] Proceed → convert to epic [SRC-01]
-[ ] Park → revisit later [SRC-01]
-[ ] Decline → document learnings [SRC-01]
+[x] Proceed: converted to epic VFKBCVjpo, implemented and delivered [SRC-01]
+[ ] Park
+[ ] Decline

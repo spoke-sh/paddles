@@ -160,13 +160,17 @@ async fn main() -> Result<()> {
             }
         },
     );
-    let service = Arc::new(MechSuitService::new(
+    let trace_recorder = Arc::new(
+        paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder::default(),
+    );
+    let service = Arc::new(MechSuitService::with_trace_recorder(
         root_path,
         registry,
         operator_memory,
         synthesizer_factory,
         planner_factory,
         gatherer_factory,
+        trace_recorder.clone(),
     ));
     let runtime_verbose = match frontend {
         InteractiveFrontend::Tui => 0,
@@ -237,7 +241,7 @@ async fn main() -> Result<()> {
     }
 
     // Start HTTP API server
-    let web_router = paddles::infrastructure::web::router(Arc::clone(&service));
+    let web_router = paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", cli.port)).await?;
     if cli.verbose >= 1 {
         println!("[BOOT] HTTP API server listening on port {}.", cli.port);

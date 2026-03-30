@@ -1,5 +1,6 @@
 use crate::application::MechSuitService;
-use crate::domain::model::{TurnEvent, TurnEventSink};
+use crate::domain::model::{TraceRecordKind, TurnEvent, TurnEventSink};
+use crate::domain::ports::TraceRecorder;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -17,6 +18,7 @@ use tower_http::cors::CorsLayer;
 
 struct AppState {
     service: Arc<MechSuitService>,
+    trace_recorder: Arc<dyn TraceRecorder>,
     sessions: Mutex<HashMap<String, SessionEntry>>,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
 }
@@ -45,6 +47,36 @@ struct TurnResponse {
     response: String,
 }
 
+#[derive(Serialize)]
+struct TraceGraphResponse {
+    nodes: Vec<TraceGraphNode>,
+    edges: Vec<TraceGraphEdge>,
+    branches: Vec<TraceGraphBranch>,
+}
+
+#[derive(Serialize)]
+struct TraceGraphNode {
+    id: String,
+    kind: String,
+    label: String,
+    branch_id: Option<String>,
+    sequence: u64,
+}
+
+#[derive(Serialize)]
+struct TraceGraphEdge {
+    from: String,
+    to: String,
+}
+
+#[derive(Serialize)]
+struct TraceGraphBranch {
+    id: String,
+    label: String,
+    status: String,
+    parent_branch_id: Option<String>,
+}
+
 struct BroadcastEventSink {
     session_id: String,
     tx: broadcast::Sender<(String, TurnEvent)>,
@@ -56,10 +88,11 @@ impl TurnEventSink for BroadcastEventSink {
     }
 }
 
-pub fn router(service: Arc<MechSuitService>) -> Router {
+pub fn router(service: Arc<MechSuitService>, trace_recorder: Arc<dyn TraceRecorder>) -> Router {
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
     let state = Arc::new(AppState {
         service,
+        trace_recorder,
         sessions: Mutex::new(HashMap::new()),
         event_tx,
     });
@@ -70,6 +103,7 @@ pub fn router(service: Arc<MechSuitService>) -> Router {
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
         .route("/sessions/{id}/events", get(event_stream))
+        .route("/sessions/{id}/trace/graph", get(trace_graph))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -134,4 +168,102 @@ async fn event_stream(
     });
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn trace_graph(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<TraceGraphResponse>, axum::http::StatusCode> {
+    let task_id = {
+        let sessions = state.sessions.lock().await;
+        sessions
+            .get(&id)
+            .map(|entry| entry.session.task_id())
+            .ok_or(axum::http::StatusCode::NOT_FOUND)?
+    };
+
+    let replay = state
+        .trace_recorder
+        .replay(&task_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut branches = Vec::new();
+
+    for record in &replay.records {
+        let (kind, label) = match &record.kind {
+            TraceRecordKind::TaskRootStarted(root) => {
+                ("root".to_string(), root.planner_model.clone())
+            }
+            TraceRecordKind::TurnStarted(_) => ("turn".to_string(), "turn".to_string()),
+            TraceRecordKind::PlannerAction { action, .. } => {
+                ("action".to_string(), truncate(action, 24))
+            }
+            TraceRecordKind::PlannerBranchDeclared(branch) => {
+                branches.push(TraceGraphBranch {
+                    id: branch.branch_id.as_str().to_string(),
+                    label: branch.label.clone(),
+                    status: branch.status.label().to_string(),
+                    parent_branch_id: branch
+                        .parent_branch_id
+                        .as_ref()
+                        .map(|id| id.as_str().to_string()),
+                });
+                ("branch".to_string(), truncate(&branch.label, 24))
+            }
+            TraceRecordKind::ToolCallRequested(tool) => {
+                ("tool".to_string(), tool.tool_name.clone())
+            }
+            TraceRecordKind::ToolCallCompleted(tool) => {
+                ("tool_done".to_string(), tool.tool_name.clone())
+            }
+            TraceRecordKind::SelectionArtifact(sel) => {
+                ("evidence".to_string(), truncate(&sel.summary, 24))
+            }
+            TraceRecordKind::CompletionCheckpoint(cp) => {
+                ("checkpoint".to_string(), cp.kind.label().to_string())
+            }
+            TraceRecordKind::ThreadMerged(_) => ("merge".to_string(), "merge".to_string()),
+            TraceRecordKind::ThreadCandidateCaptured(_) => {
+                ("thread".to_string(), "candidate".to_string())
+            }
+            TraceRecordKind::ThreadDecisionSelected(_) => {
+                ("thread".to_string(), "decision".to_string())
+            }
+        };
+
+        nodes.push(TraceGraphNode {
+            id: record.record_id.as_str().to_string(),
+            kind,
+            label,
+            branch_id: record
+                .lineage
+                .branch_id
+                .as_ref()
+                .map(|id| id.as_str().to_string()),
+            sequence: record.sequence,
+        });
+
+        if let Some(parent_id) = &record.lineage.parent_record_id {
+            edges.push(TraceGraphEdge {
+                from: parent_id.as_str().to_string(),
+                to: record.record_id.as_str().to_string(),
+            });
+        }
+    }
+
+    Ok(Json(TraceGraphResponse {
+        nodes,
+        edges,
+        branches,
+    }))
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.len() > n {
+        format!("{}...", &s[..n])
+    } else {
+        s.to_string()
+    }
 }

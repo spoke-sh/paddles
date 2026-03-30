@@ -1,11 +1,13 @@
 ---
 # system-managed
 id: VFKApee25
-status: exploring
+status: laid
 created_at: 2026-03-29T22:10:04
 # authored
 title: HTTP API Design For Paddles
 index: 1
+laid_at: 2026-03-29T22:37:17
+epic: VFKApee25
 ---
 
 # HTTP API Design For Paddles

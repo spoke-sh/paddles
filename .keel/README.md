@@ -7,7 +7,7 @@
 
 | Bearing | Status | Evidence | Assessment | Readiness | EV | Laid |
 |---------|--------|----------|------------|-----------|----|------|
-| [HTTP API Design For Paddles](bearings/VFKApee25/) | exploring | ✓ | ✓ | repair citations | - | - |
+| [HTTP API Design For Paddles](bearings/VFKApee25/) | laid | ✓ | ✓ | decision-ready | 10.31 | ✓ |
 
 ## Epics
 
@@ -138,21 +138,23 @@
 |--------|--------|
 | [Model-Judged Interpretation And Retrieval](epics/VFJ5rdPZP/voyages/VFJ5t0Pbk/) | done |
 
-### [HTTP Server Foundation](epics/VFKBCVjpo/) (active)
+### [HTTP Server Foundation](epics/VFKBCVjpo/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Axum Server With SSE Turn Events](epics/VFKBCVjpo/voyages/VFKDkffWL/) | in-progress |
+| [Axum Server With SSE Turn Events](epics/VFKBCVjpo/voyages/VFKDkffWL/) | done |
 
-### [Web Chat Interface](epics/VFKBDgewu/) (active)
-
-| Voyage | Status |
-|--------|--------|
-| [Browser Chat Page](epics/VFKBDgewu/voyages/VFKDlUda0/) | in-progress |
-
-### [Transit Trace Visualization](epics/VFKBFMq8J/) (active)
+### [Web Chat Interface](epics/VFKBDgewu/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Trace DAG Visualization](epics/VFKBFMq8J/voyages/VFKDmXte3/) | in-progress |
+| [Browser Chat Page](epics/VFKBDgewu/voyages/VFKDlUda0/) | done |
+
+### [Transit Trace Visualization](epics/VFKBFMq8J/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Trace DAG Visualization](epics/VFKBFMq8J/voyages/VFKDmXte3/) | done |
+
+### [HTTP API Design For Paddles](epics/VFKApee25/) (draft)
 

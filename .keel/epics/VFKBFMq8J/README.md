@@ -21,8 +21,8 @@ index: 23
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Trace DAG Visualization](voyages/VFKDmXte3/) | in-progress | 0/1 |
+| [Trace DAG Visualization](voyages/VFKDmXte3/) | done | 1/1 |
 <!-- END GENERATED -->
