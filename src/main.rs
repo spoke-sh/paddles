@@ -12,6 +12,9 @@ use paddles::application::{
 use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
 use paddles::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
+use paddles::infrastructure::adapters::http_provider::{
+    ApiFormat, HttpPlannerAdapter, HttpProviderAdapter,
+};
 use paddles::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use paddles::infrastructure::adapters::sift_autonomous_gatherer::SiftAutonomousGathererAdapter;
 use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
@@ -20,6 +23,22 @@ use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, run_interactive_tui, select_interactive_frontend,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum ModelProvider {
+    /// Local Qwen inference via sift (default)
+    Sift,
+    /// OpenAI chat completions API
+    Openai,
+    /// Anthropic messages API
+    Anthropic,
+    /// Google Gemini generateContent API
+    Google,
+    /// Moonshot Kimi (OpenAI-compatible)
+    Moonshot,
+    /// Ollama (OpenAI-compatible, localhost:11434)
+    Ollama,
+}
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -45,7 +64,15 @@ struct Cli {
     #[arg(long, default_value = "false")]
     reality_mode: bool,
 
-    /// Model ID to use from the registry (e.g. qwen-1.5b, qwen-coder-1.5b).
+    /// Model provider backend.
+    #[arg(long, value_enum, default_value = "sift")]
+    provider: ModelProvider,
+
+    /// Custom API base URL (overrides provider default).
+    #[arg(long)]
+    provider_url: Option<String>,
+
+    /// Model ID to use from the registry (e.g. qwen-1.5b, gpt-4o, claude-sonnet-4-20250514).
     #[arg(short, long, default_value = "qwen-1.5b")]
     model: String,
 
@@ -103,17 +130,86 @@ async fn main() -> Result<()> {
     let root_path = env::current_dir()?;
     let registry = Arc::new(SiftRegistryAdapter::new());
     let operator_memory = Arc::new(AgentMemory::load(&root_path));
-    let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
-        Box::new(|workspace: &Path, model_id: &str| {
+
+    let provider = cli.provider;
+    let provider_url = cli.provider_url.clone();
+
+    let (api_format, default_base_url, api_key_env) = match provider {
+        ModelProvider::Openai => (
+            Some(ApiFormat::OpenAi),
+            "https://api.openai.com",
+            "OPENAI_API_KEY",
+        ),
+        ModelProvider::Anthropic => (
+            Some(ApiFormat::Anthropic),
+            "https://api.anthropic.com",
+            "ANTHROPIC_API_KEY",
+        ),
+        ModelProvider::Google => (
+            Some(ApiFormat::Gemini),
+            "https://generativelanguage.googleapis.com",
+            "GOOGLE_API_KEY",
+        ),
+        ModelProvider::Moonshot => (
+            Some(ApiFormat::OpenAi),
+            "https://api.moonshot.cn",
+            "MOONSHOT_API_KEY",
+        ),
+        ModelProvider::Ollama => (
+            Some(ApiFormat::OpenAi),
+            "http://localhost:11434",
+            "OLLAMA_API_KEY",
+        ),
+        ModelProvider::Sift => (None, "", ""),
+    };
+
+    let synthesizer_factory: Box<paddles::application::SynthesizerFactory> = match provider {
+        ModelProvider::Sift => Box::new(|workspace: &Path, model_id: &str| {
             let engine = SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?;
             Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
-        });
-    let planner_factory: Box<paddles::application::PlannerFactory> =
-        Box::new(|workspace: &Path, model_id: &str| {
+        }),
+        _ => {
+            let format = api_format.expect("api format set for non-sift providers");
+            let base_url = provider_url
+                .clone()
+                .unwrap_or_else(|| default_base_url.to_string());
+            let api_key = std::env::var(api_key_env).unwrap_or_default();
+            Box::new(move |workspace: &Path, model_id: &str| {
+                let engine = HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    model_id,
+                    api_key.clone(),
+                    base_url.clone(),
+                    format,
+                );
+                Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
+            })
+        }
+    };
+
+    let planner_factory: Box<paddles::application::PlannerFactory> = match provider {
+        ModelProvider::Sift => Box::new(|workspace: &Path, model_id: &str| {
             let engine = Arc::new(SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?);
             let adapter = SiftPlannerAdapter::new(engine);
             Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
-        });
+        }),
+        _ => {
+            let format = api_format.expect("api format set for non-sift providers");
+            let base_url = provider_url.unwrap_or_else(|| default_base_url.to_string());
+            let api_key = std::env::var(api_key_env).unwrap_or_default();
+            Box::new(move |workspace: &Path, model_id: &str| {
+                let engine = Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    model_id,
+                    api_key.clone(),
+                    base_url.clone(),
+                    format,
+                ));
+                let adapter = HttpPlannerAdapter::new(engine);
+                Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
+            })
+        }
+    };
     let gatherer_factory: Box<paddles::application::GathererFactory> = Box::new(
         |config: &RuntimeLaneConfig,
          workspace: &Path,

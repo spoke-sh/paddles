@@ -22,8 +22,8 @@ mission: VFKMCihEt
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Anthropic Messages API Adapter](voyages/VFKN5dR0L/) | draft | 0/1 |
+| [Anthropic Messages API Adapter](voyages/VFKN5dR0L/) | done | 1/1 |
 <!-- END GENERATED -->

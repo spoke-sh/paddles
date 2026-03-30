@@ -22,8 +22,8 @@ mission: VFKMCihEt
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Gemini GenerateContent Adapter](voyages/VFKN5eD1D/) | draft | 0/1 |
+| [Gemini GenerateContent Adapter](voyages/VFKN5eD1D/) | done | 1/1 |
 <!-- END GENERATED -->

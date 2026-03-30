@@ -156,41 +156,41 @@
 |--------|--------|
 | [Trace DAG Visualization](epics/VFKBFMq8J/voyages/VFKDmXte3/) | done |
 
-### [Provider Abstraction And Routing](epics/VFKMjf28V/) (active)
+### [Provider Abstraction And Routing](epics/VFKMjf28V/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Provider Routing And CLI Flags](epics/VFKMjf28V/voyages/VFKN403tG/) | planned |
+| [Provider Routing And CLI Flags](epics/VFKMjf28V/voyages/VFKN403tG/) | done |
 
-### [OpenAI Compatible Provider](epics/VFKMlkWBt/) (draft)
-
-| Voyage | Status |
-|--------|--------|
-| [OpenAI Chat Completions Adapter](epics/VFKMlkWBt/voyages/VFKN5cgzb/) | draft |
-
-### [Anthropic Claude Provider](epics/VFKMmuJFY/) (draft)
+### [OpenAI Compatible Provider](epics/VFKMlkWBt/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Anthropic Messages API Adapter](epics/VFKMmuJFY/voyages/VFKN5dR0L/) | draft |
+| [OpenAI Chat Completions Adapter](epics/VFKMlkWBt/voyages/VFKN5cgzb/) | done |
 
-### [Google Gemini Provider](epics/VFKMo6YJb/) (draft)
-
-| Voyage | Status |
-|--------|--------|
-| [Gemini GenerateContent Adapter](epics/VFKMo6YJb/voyages/VFKN5eD1D/) | draft |
-
-### [Ollama Provider](epics/VFMC4fdIO/) (draft)
+### [Anthropic Claude Provider](epics/VFKMmuJFY/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Ollama Provider Variant](epics/VFMC4fdIO/voyages/VFMCQUMOd/) | draft |
+| [Anthropic Messages API Adapter](epics/VFKMmuJFY/voyages/VFKN5dR0L/) | done |
 
-### [Mistral RS Native Inference](epics/VFMC5HaQY/) (draft)
+### [Google Gemini Provider](epics/VFKMo6YJb/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Mistral RS Local Inference Backend](epics/VFMC5HaQY/voyages/VFMCRb7SD/) | draft |
+| [Gemini GenerateContent Adapter](epics/VFKMo6YJb/voyages/VFKN5eD1D/) | done |
+
+### [Ollama Provider](epics/VFMC4fdIO/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Ollama Provider Variant](epics/VFMC4fdIO/voyages/VFMCQUMOd/) | done |
+
+### [Mistral RS Native Inference](epics/VFMC5HaQY/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Mistral RS Local Inference Backend](epics/VFMC5HaQY/voyages/VFMCRb7SD/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

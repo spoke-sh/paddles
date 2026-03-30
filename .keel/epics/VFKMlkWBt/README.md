@@ -22,8 +22,8 @@ mission: VFKMCihEt
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [OpenAI Chat Completions Adapter](voyages/VFKN5cgzb/) | draft | 0/1 |
+| [OpenAI Chat Completions Adapter](voyages/VFKN5cgzb/) | done | 1/1 |
 <!-- END GENERATED -->

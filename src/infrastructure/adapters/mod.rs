@@ -1,4 +1,5 @@
 pub mod agent_memory;
+pub mod http_provider;
 
 pub mod context1_gatherer;
 pub mod hf_hub;

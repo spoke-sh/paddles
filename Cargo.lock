@@ -2809,6 +2809,7 @@ dependencies = [
  "hf-hub",
  "paddles-conversation",
  "ratatui",
+ "reqwest",
  "serde",
  "serde_json",
  "sift",
