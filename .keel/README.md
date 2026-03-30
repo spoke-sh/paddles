@@ -198,6 +198,19 @@
 |--------|--------|
 | [Step Timing Implementation](epics/VFNccFj7d/voyages/VFNcoxjU3/) | done |
 
+### [Interpretation Context TUI Visibility](epics/VFNvFQPuA/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Interpretation Visibility](epics/VFNvFQPuA/voyages/VFNvfKIV6/) | draft |
+
+### [Recursive Interpretation Refinement](epics/VFNvH5LxS/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Refinement Loop Core](epics/VFNvH5LxS/voyages/VFNvha5ZW/) | draft |
+| [Refinement Loop Integration](epics/VFNvH5LxS/voyages/VFNvhauZg/) | draft |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
