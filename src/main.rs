@@ -351,7 +351,8 @@ async fn main() -> Result<()> {
     let runtime_lanes = RuntimeLaneConfig::new(model.clone(), gatherer_model.clone())
         .with_planner_model_id(planner_model.clone())
         .with_gatherer_provider(gatherer_provider)
-        .with_context1_harness_ready(context1_harness_ready);
+        .with_context1_harness_ready(context1_harness_ready)
+        .with_requires_local_models(provider == ModelProvider::Sift);
     let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
     if verbose >= 1 {
         println!("[BOOT] Runtime lanes ready.");

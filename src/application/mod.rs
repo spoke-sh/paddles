@@ -83,6 +83,7 @@ pub struct RuntimeLaneConfig {
     gatherer_model_id: Option<String>,
     gatherer_provider: GathererProvider,
     context1_harness_ready: bool,
+    requires_local_models: bool,
 }
 
 impl RuntimeLaneConfig {
@@ -93,6 +94,7 @@ impl RuntimeLaneConfig {
             gatherer_model_id,
             gatherer_provider: GathererProvider::SiftAutonomous,
             context1_harness_ready: false,
+            requires_local_models: true,
         }
     }
 
@@ -108,6 +110,11 @@ impl RuntimeLaneConfig {
 
     pub fn with_context1_harness_ready(mut self, harness_ready: bool) -> Self {
         self.context1_harness_ready = harness_ready;
+        self
+    }
+
+    pub fn with_requires_local_models(mut self, requires: bool) -> Self {
+        self.requires_local_models = requires;
         self
     }
 
@@ -140,7 +147,7 @@ impl RuntimeLaneConfig {
 pub struct PreparedModelLane {
     pub role: RuntimeLaneRole,
     pub model_id: String,
-    pub paths: ModelPaths,
+    pub paths: Option<ModelPaths>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -893,7 +900,7 @@ impl MechSuitService {
     fn build_lane(
         role: RuntimeLaneRole,
         model_id: impl Into<String>,
-        paths: ModelPaths,
+        paths: Option<ModelPaths>,
     ) -> PreparedModelLane {
         PreparedModelLane {
             role,
@@ -907,18 +914,25 @@ impl MechSuitService {
         &self,
         config: &RuntimeLaneConfig,
     ) -> Result<PreparedRuntimeLanes> {
-        let synthesizer_paths = self
-            .registry
-            .get_model_paths(config.synthesizer_model_id())
-            .await?;
+        let synthesizer_paths = if config.requires_local_models {
+            Some(
+                self.registry
+                    .get_model_paths(config.synthesizer_model_id())
+                    .await?,
+            )
+        } else {
+            None
+        };
         let planner_model_id = config
             .planner_model_id()
             .unwrap_or(config.synthesizer_model_id())
             .to_string();
-        let planner_paths = if planner_model_id == config.synthesizer_model_id() {
+        let planner_paths = if !config.requires_local_models {
+            None
+        } else if planner_model_id == config.synthesizer_model_id() {
             synthesizer_paths.clone()
         } else {
-            self.registry.get_model_paths(&planner_model_id).await?
+            Some(self.registry.get_model_paths(&planner_model_id).await?)
         };
         let planner = Self::build_lane(RuntimeLaneRole::Planner, &planner_model_id, planner_paths);
         let synthesizer = Self::build_lane(
@@ -2329,12 +2343,12 @@ mod tests {
         let planner = MechSuitService::build_lane(
             RuntimeLaneRole::Planner,
             "qwen-1.5b",
-            sample_model_paths("planner"),
+            Some(sample_model_paths("planner")),
         );
         let synthesizer = MechSuitService::build_lane(
             RuntimeLaneRole::Synthesizer,
             "qwen-1.5b",
-            sample_model_paths("synth"),
+            Some(sample_model_paths("synth")),
         );
         let gatherer = PreparedGathererLane {
             provider: GathererProvider::Local,
@@ -2388,12 +2402,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: None,
         };
@@ -2416,12 +2430,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: None,
         };
@@ -2449,12 +2463,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: Some(PreparedGathererLane {
                 provider: GathererProvider::SiftAutonomous,
@@ -2488,12 +2502,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: None,
         };
@@ -2525,12 +2539,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: None,
         };
@@ -2614,12 +2628,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: None,
         };
@@ -2691,12 +2705,12 @@ mod tests {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
                 model_id: "planner".to_string(),
-                paths: sample_model_paths("planner"),
+                paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
                 model_id: "synth".to_string(),
-                paths: sample_model_paths("synth"),
+                paths: Some(sample_model_paths("synth")),
             },
             gatherer: Some(PreparedGathererLane {
                 provider: GathererProvider::SiftAutonomous,
