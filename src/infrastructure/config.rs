@@ -74,6 +74,14 @@ impl PaddlesConfig {
     }
 }
 
+/// Normalizes provider-specific model aliases so legacy configs keep working.
+pub fn normalize_provider_model_alias(provider: &str, model: &str) -> String {
+    match (provider, model) {
+        ("moonshot", "kimi-2.5") => "kimi-k2.5".to_string(),
+        _ => model.to_string(),
+    }
+}
+
 fn config_search_paths(workspace_root: &Path) -> Vec<PathBuf> {
     let mut paths = vec![workspace_root.join(CONFIG_FILE_NAME)];
     if let Ok(home) = std::env::var("HOME") {
@@ -126,5 +134,18 @@ port = 8080
         let config = PaddlesConfig::load(dir.path());
         assert_eq!(config.provider, "sift");
         assert_eq!(config.model, "qwen-1.5b");
+    }
+
+    #[test]
+    fn normalizes_legacy_moonshot_model_alias() {
+        assert_eq!(
+            normalize_provider_model_alias("moonshot", "kimi-2.5"),
+            "kimi-k2.5"
+        );
+        assert_eq!(
+            normalize_provider_model_alias("moonshot", "kimi-k2.5"),
+            "kimi-k2.5"
+        );
+        assert_eq!(normalize_provider_model_alias("openai", "gpt-4o"), "gpt-4o");
     }
 }

@@ -214,6 +214,9 @@ updates the referenced key file and rebuilds the active runtime lanes so
 subsequent turns use the new credential immediately. The local `sift` provider
 does not use API-key login.
 
+For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
+`kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
+
 ### Experimental Context-1 Boundary
 
 `context-1` is exposed as an explicit experimental gatherer provider, not as a

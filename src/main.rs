@@ -23,7 +23,7 @@ use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
-use paddles::infrastructure::config::PaddlesConfig;
+use paddles::infrastructure::config::{PaddlesConfig, normalize_provider_model_alias};
 use paddles::infrastructure::credentials::CredentialStore;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -116,7 +116,7 @@ async fn main() -> Result<()> {
     let config = PaddlesConfig::load(&root_path);
 
     // Merge: CLI flags override config values
-    let model = cli.model.unwrap_or(config.model);
+    let mut model = cli.model.unwrap_or(config.model);
     let credits = cli.credits.unwrap_or(config.credits);
     let weights = cli.weights.unwrap_or(config.weights);
     let biases = cli.biases.unwrap_or(config.biases);
@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
     };
     let hf_token = cli.hf_token.or(config.hf_token);
     let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
-    let planner_model = cli.planner_model.or(config.planner_model);
+    let mut planner_model = cli.planner_model.or(config.planner_model);
     let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
     let provider_url = cli.provider_url.or(config.provider_url);
 
@@ -140,6 +140,31 @@ async fn main() -> Result<()> {
         "moonshot" => ModelProvider::Moonshot,
         "ollama" => ModelProvider::Ollama,
         _ => ModelProvider::Sift,
+    });
+
+    let provider_name = match provider {
+        ModelProvider::Openai => "openai",
+        ModelProvider::Anthropic => "anthropic",
+        ModelProvider::Google => "google",
+        ModelProvider::Moonshot => "moonshot",
+        ModelProvider::Ollama => "ollama",
+        ModelProvider::Sift => "sift",
+    };
+    let normalized_model = normalize_provider_model_alias(provider_name, &model);
+    if normalized_model != model {
+        eprintln!(
+            "[WARN] Model `{model}` is no longer valid for provider `{provider_name}`; using `{normalized_model}` instead."
+        );
+        model = normalized_model;
+    }
+    planner_model = planner_model.map(|planner| {
+        let normalized = normalize_provider_model_alias(provider_name, &planner);
+        if normalized != planner {
+            eprintln!(
+                "[WARN] Planner model `{planner}` is no longer valid for provider `{provider_name}`; using `{normalized}` instead."
+            );
+        }
+        normalized
     });
 
     let gatherer_provider =
@@ -203,14 +228,6 @@ async fn main() -> Result<()> {
 
     // Resolve API key: env var first, then credential store.
     let credential_store = Arc::new(CredentialStore::new());
-    let provider_name = match provider {
-        ModelProvider::Openai => "openai",
-        ModelProvider::Anthropic => "anthropic",
-        ModelProvider::Google => "google",
-        ModelProvider::Moonshot => "moonshot",
-        ModelProvider::Ollama => "ollama",
-        ModelProvider::Sift => "sift",
-    };
     let credential_provider = CredentialStore::provider_for_env(api_key_env).map(str::to_string);
     let api_key = credential_provider
         .as_deref()
