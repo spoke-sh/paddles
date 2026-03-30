@@ -13,6 +13,10 @@ pub trait TraceRecorder: Send + Sync {
     fn record(&self, record: TraceRecord) -> Result<()>;
 
     fn replay(&self, task_id: &TaskTraceId) -> Result<TraceReplay>;
+
+    fn task_ids(&self) -> Vec<TaskTraceId> {
+        Vec::new()
+    }
 }
 
 #[derive(Default)]

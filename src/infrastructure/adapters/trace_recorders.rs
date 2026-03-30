@@ -50,6 +50,15 @@ impl TraceRecorder for InMemoryTraceRecorder {
         Ok(())
     }
 
+    fn task_ids(&self) -> Vec<TaskTraceId> {
+        self.records
+            .lock()
+            .expect("in-memory trace recorder lock")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     fn replay(&self, task_id: &TaskTraceId) -> Result<TraceReplay> {
         let mut records = self
             .records

@@ -112,7 +112,9 @@ pub fn router(
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
         .route("/sessions/{id}/events", get(event_stream))
+        .route("/events", get(global_event_stream))
         .route("/sessions/{id}/trace/graph", get(trace_graph))
+        .route("/trace/graph", get(trace_graph_all))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -195,6 +197,21 @@ async fn event_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+async fn global_event_stream(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.event_tx.subscribe();
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok((_session_id, event)) => {
+            let json = serde_json::to_string(&event).unwrap_or_default();
+            Some(Ok(Event::default().event("turn_event").data(json)))
+        }
+        _ => None,
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 async fn trace_graph(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -212,77 +229,93 @@ async fn trace_graph(
         .replay(&task_id)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    Ok(Json(build_trace_graph(&[replay])))
+}
+
+async fn trace_graph_all(State(state): State<Arc<AppState>>) -> Json<TraceGraphResponse> {
+    let replays: Vec<_> = state
+        .trace_recorder
+        .task_ids()
+        .iter()
+        .filter_map(|id| state.trace_recorder.replay(id).ok())
+        .collect();
+    Json(build_trace_graph(&replays))
+}
+
+fn build_trace_graph(replays: &[crate::domain::model::TraceReplay]) -> TraceGraphResponse {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut branches = Vec::new();
 
-    for record in &replay.records {
-        let (kind, label) = match &record.kind {
-            TraceRecordKind::TaskRootStarted(root) => {
-                ("root".to_string(), root.planner_model.clone())
-            }
-            TraceRecordKind::TurnStarted(_) => ("turn".to_string(), "turn".to_string()),
-            TraceRecordKind::PlannerAction { action, .. } => {
-                ("action".to_string(), truncate(action, 24))
-            }
-            TraceRecordKind::PlannerBranchDeclared(branch) => {
-                branches.push(TraceGraphBranch {
-                    id: branch.branch_id.as_str().to_string(),
-                    label: branch.label.clone(),
-                    status: branch.status.label().to_string(),
-                    parent_branch_id: branch
-                        .parent_branch_id
-                        .as_ref()
-                        .map(|id| id.as_str().to_string()),
-                });
-                ("branch".to_string(), truncate(&branch.label, 24))
-            }
-            TraceRecordKind::ToolCallRequested(tool) => {
-                ("tool".to_string(), tool.tool_name.clone())
-            }
-            TraceRecordKind::ToolCallCompleted(tool) => {
-                ("tool_done".to_string(), tool.tool_name.clone())
-            }
-            TraceRecordKind::SelectionArtifact(sel) => {
-                ("evidence".to_string(), truncate(&sel.summary, 24))
-            }
-            TraceRecordKind::CompletionCheckpoint(cp) => {
-                ("checkpoint".to_string(), cp.kind.label().to_string())
-            }
-            TraceRecordKind::ThreadMerged(_) => ("merge".to_string(), "merge".to_string()),
-            TraceRecordKind::ThreadCandidateCaptured(_) => {
-                ("thread".to_string(), "candidate".to_string())
-            }
-            TraceRecordKind::ThreadDecisionSelected(_) => {
-                ("thread".to_string(), "decision".to_string())
-            }
-        };
+    for replay in replays {
+        for record in &replay.records {
+            let (kind, label) = match &record.kind {
+                TraceRecordKind::TaskRootStarted(root) => {
+                    ("root".to_string(), root.planner_model.clone())
+                }
+                TraceRecordKind::TurnStarted(_) => ("turn".to_string(), "turn".to_string()),
+                TraceRecordKind::PlannerAction { action, .. } => {
+                    ("action".to_string(), truncate(action, 24))
+                }
+                TraceRecordKind::PlannerBranchDeclared(branch) => {
+                    branches.push(TraceGraphBranch {
+                        id: branch.branch_id.as_str().to_string(),
+                        label: branch.label.clone(),
+                        status: branch.status.label().to_string(),
+                        parent_branch_id: branch
+                            .parent_branch_id
+                            .as_ref()
+                            .map(|id| id.as_str().to_string()),
+                    });
+                    ("branch".to_string(), truncate(&branch.label, 24))
+                }
+                TraceRecordKind::ToolCallRequested(tool) => {
+                    ("tool".to_string(), tool.tool_name.clone())
+                }
+                TraceRecordKind::ToolCallCompleted(tool) => {
+                    ("tool_done".to_string(), tool.tool_name.clone())
+                }
+                TraceRecordKind::SelectionArtifact(sel) => {
+                    ("evidence".to_string(), truncate(&sel.summary, 24))
+                }
+                TraceRecordKind::CompletionCheckpoint(cp) => {
+                    ("checkpoint".to_string(), cp.kind.label().to_string())
+                }
+                TraceRecordKind::ThreadMerged(_) => ("merge".to_string(), "merge".to_string()),
+                TraceRecordKind::ThreadCandidateCaptured(_) => {
+                    ("thread".to_string(), "candidate".to_string())
+                }
+                TraceRecordKind::ThreadDecisionSelected(_) => {
+                    ("thread".to_string(), "decision".to_string())
+                }
+            };
 
-        nodes.push(TraceGraphNode {
-            id: record.record_id.as_str().to_string(),
-            kind,
-            label,
-            branch_id: record
-                .lineage
-                .branch_id
-                .as_ref()
-                .map(|id| id.as_str().to_string()),
-            sequence: record.sequence,
-        });
-
-        if let Some(parent_id) = &record.lineage.parent_record_id {
-            edges.push(TraceGraphEdge {
-                from: parent_id.as_str().to_string(),
-                to: record.record_id.as_str().to_string(),
+            nodes.push(TraceGraphNode {
+                id: record.record_id.as_str().to_string(),
+                kind,
+                label,
+                branch_id: record
+                    .lineage
+                    .branch_id
+                    .as_ref()
+                    .map(|id| id.as_str().to_string()),
+                sequence: record.sequence,
             });
+
+            if let Some(parent_id) = &record.lineage.parent_record_id {
+                edges.push(TraceGraphEdge {
+                    from: parent_id.as_str().to_string(),
+                    to: record.record_id.as_str().to_string(),
+                });
+            }
         }
     }
 
-    Ok(Json(TraceGraphResponse {
+    TraceGraphResponse {
         nodes,
         edges,
         branches,
-    }))
+    }
 }
 
 fn truncate(s: &str, n: usize) -> String {

@@ -75,16 +75,16 @@ const KIND_COLORS = {
 const LANE_W = 160, NODE_H = 44, GAP_Y = 14, PAD_X = 16, PAD_Y = 20;
 const HEX_RX = 64, HEX_RY = 18;
 
-async function initSession() {
+async function ensureSession() {
+  if (sessionId) return;
   const res = await fetch('/sessions', { method: 'POST' });
   const data = await res.json();
   sessionId = data.session_id;
-  connectSSE();
 }
 
 function connectSSE() {
   if (eventSource) eventSource.close();
-  eventSource = new EventSource('/sessions/' + sessionId + '/events');
+  eventSource = new EventSource('/events');
   eventSource.addEventListener('turn_event', (e) => {
     const event = JSON.parse(e.data);
     handleEvent(event);
@@ -159,7 +159,8 @@ async function sendTurn() {
   const input = document.getElementById('prompt');
   const btn = document.getElementById('send');
   const text = input.value.trim();
-  if (!text || !sessionId) return;
+  if (!text) return;
+  await ensureSession();
 
   addMessage('user', text);
   input.value = '';
@@ -193,7 +194,7 @@ function refreshTraceGraph() {
     graphDebounce = null;
     if (!sessionId) return;
     try {
-      const res = await fetch('/sessions/' + sessionId + '/trace/graph');
+      const res = await fetch('/trace/graph');
       if (!res.ok) return;
       const graph = await res.json();
       renderTraceDAG(graph);
@@ -269,7 +270,8 @@ function hexPoints(cx, cy, rx, ry) {
   return pts.join(' ');
 }
 
-initSession();
+connectSSE();
+refreshTraceGraph();
 </script>
 </body>
 </html>
