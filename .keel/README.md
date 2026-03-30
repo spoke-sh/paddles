@@ -126,3 +126,9 @@
 |--------|--------|
 | [Model-Driven Thread Split And Merge UX](epics/VFHIUOcFc/voyages/VFHIV59Hn/) | done |
 
+### [Model-Judged Heuristic Removal](epics/VFJ5rdPZP/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Model-Judged Interpretation And Retrieval](epics/VFJ5rdPZP/voyages/VFJ5t0Pbk/) | planned |
+
