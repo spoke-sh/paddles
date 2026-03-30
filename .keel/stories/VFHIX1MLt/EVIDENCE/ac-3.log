@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T11:57:24.260465275-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:12.246608989-07:00
+mode: llm-judge
 ---
-Invalid model decisions fail closed through fallback_thread_decision in src/infrastructure/adapters/sift_agent.rs, and recorder failures still degrade through explicit trace-recorder fallback events instead of silently mutating thread structure.
+LLM judge passed

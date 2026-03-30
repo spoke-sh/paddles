@@ -1,7 +1,15 @@
 id: VFHIX0uKc
-git_sha: 98c06cd836e5d940d353eb772bb7c97cd45e36cf
+git_sha: b4a3a723b462adcfaa3919c9295f4a28455b640a
 evidence:
-  EVIDENCE/ac-1.log: 717a14599b04b1b2079ed716c909285f9eeafe1ed85b230ed1217e122ceac926
-  EVIDENCE/ac-2.log: 92e93c35164eeee324536c211c241e7943b7588524bc43b4af7b43294340efaf
-  EVIDENCE/ac-3.log: 9beaaa454062608882d7c32016e47c1116973613ae3dde40b9ea1669e1b08df1
-  EVIDENCE/ac-4.log: 5c85b235d4bbd326eda5b718a99af862e8ebb03816cd6ef8e55660636ff75176
+  EVIDENCE/ac-1.log: 36e88377134b92974f28f98d17201e821516def6c5921fb0e0bee44fdc19e779
+  EVIDENCE/ac-2.log: 8bfec436265cf49670388f4a4ab9da8805d1c8ceefec25890d05c94069be9124
+  EVIDENCE/ac-3.log: ecf30ae8f65d3e14e49f1297289b92d8de799fe6e4d5b915da179cd52c59df26
+  EVIDENCE/ac-4.log: e6cdda75aa41795d90eeb7dd0d70663ac9a475463c46e3e13011820c81983e62
+  ? EVIDENCE/llm-judge-a-paddles-owned-conversation-thread-layer-exists-above-the-recorder-boundary-and-owns-the-thread-dtos-needed-by-runtime-and-ux-code.txt
+  : 853eb558bc5c0ffcfe821207df15a03f23e2a9e92a7e9b4ddbd7a09d3d21cb11
+  ? EVIDENCE/llm-judge-the-implementation-works-through-the-existing-embedded-recorder-path-does-not-require-a-separate-trace-server-and-remains-extractable-from-paddles-later.txt
+  : bf958adbc8b11741c0f720a119670ddd8261f4e298e7179b9d051cabd5f95809
+  ? EVIDENCE/llm-judge-the-layer-consumes-the-new-upstream-transit-core-metadata-branch-replay-and-artifact-helper-apis-where-they-simplify-low-level-plumbing-without-turning-transit-core-into-the-conversation-api-boundary.txt
+  : 2f7b6ffa6e519e9186794ab9b6b23c0a4e3d1063f3483c9dd570b2668696a073
+  ? EVIDENCE/llm-judge-thread-local-replay-reconstructs-enough-mainline-and-child-thread-provenance-for-later-planning-and-synthesis.txt
+  : dd9acf81eb161d978d23def89e4ef0abde521e45ae10ff12b09a67d156260786

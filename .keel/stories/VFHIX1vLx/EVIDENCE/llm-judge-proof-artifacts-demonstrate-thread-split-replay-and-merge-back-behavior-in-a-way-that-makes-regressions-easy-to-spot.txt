@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX1vLx
+Criterion: Proof artifacts demonstrate thread split, replay, and merge-back behavior in a way that makes regressions easy to spot.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

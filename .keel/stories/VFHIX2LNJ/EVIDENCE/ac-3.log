@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T11:57:28.646729455-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:29.947376181-07:00
+mode: llm-judge
 ---
-Merge-back rendering comes from explicit TurnEvent::ThreadMerged and TraceRecordKind::ThreadMerged records in src/domain/model/turns.rs, src/domain/model/traces.rs, and src/application/mod.rs.
+LLM judge passed

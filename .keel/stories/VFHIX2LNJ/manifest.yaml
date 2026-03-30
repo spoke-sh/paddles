@@ -1,6 +1,10 @@
 id: VFHIX2LNJ
-git_sha: 98c06cd836e5d940d353eb772bb7c97cd45e36cf
+git_sha: b4a3a723b462adcfaa3919c9295f4a28455b640a
 evidence:
-  EVIDENCE/ac-1.log: bb50dc50a84ed424b0ecd5ecae98ec64fccaa302f510dcef2198e6f09ba39ee3
-  EVIDENCE/ac-2.log: a24c30337ba1d87fbe2419323d4d4850318d05d589aa5bc5cd527118a9960de9
-  EVIDENCE/ac-3.log: c49f3aeaebc538adab1836b2229f559c851994dc515e10dd26226bed2b154a52
+  EVIDENCE/ac-1.log: 82cb9917b6abb9744787904859126c6d7c2d0cd442d0eb4f2717aa0c0d648f4f
+  EVIDENCE/ac-2.log: f8133c4e0c00e2cbb7f19dee4a64e85a9a09861de561cc20f2e9450bceb92cc0
+  EVIDENCE/ac-3.log: 7f208cd5fa649020e7265676756cebd1d944834633b269e32cbe487aea6e8cf1
+  EVIDENCE/llm-judge-merge-back-rendering-uses-explicit-recorded-outcomes-instead-of-implying-hidden-history-rewrites.txt: fa454f386989380e4a8ebaf8a71cfe12dfcea4f9a1e3a7cf4d907e94d2abf137
+  ? EVIDENCE/llm-judge-the-default-transcript-surfaces-thread-split-active-thread-state-and-merge-back-outcomes-clearly-enough-to-follow-live.txt
+  : 4c10c57dbba0e07d8088f405d8bd28f77f0fc31b6c1ed4537bbfc87e91e8eafd
+  EVIDENCE/llm-judge-thread-local-and-mainline-context-remain-visually-distinguishable-without-overwhelming-the-transcript.txt: ede7c7a6c8f32e191c8e2229dec1a02d66a266eeaaa780619025e51e6d913d36

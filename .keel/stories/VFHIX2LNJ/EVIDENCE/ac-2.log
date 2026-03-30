@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T11:57:28.608667108-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:27.666335011-07:00
+mode: llm-judge
 ---
-Mainline versus child-thread state stays visually distinguishable through the active-thread header, structured event rows, and typed thread refs rather than raw recorder dumps.
+LLM judge passed

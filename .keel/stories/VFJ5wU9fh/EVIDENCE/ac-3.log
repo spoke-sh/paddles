@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T18:26:11.369504351-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:36.801335631-07:00
+mode: llm-judge
 ---
-The updated docs remain generic across repositories: AGENTS.md is the only hardcoded interpretation root, guidance expansion is model-derived, and no project-specific replacement intent taxonomy was introduced.
+LLM judge passed

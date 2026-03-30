@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX2LNJ
+Criterion: The default transcript surfaces thread split, active-thread state, and merge-back outcomes clearly enough to follow live.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

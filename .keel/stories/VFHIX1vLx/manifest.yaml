@@ -1,6 +1,11 @@
 id: VFHIX1vLx
-git_sha: 98c06cd836e5d940d353eb772bb7c97cd45e36cf
+git_sha: b4a3a723b462adcfaa3919c9295f4a28455b640a
 evidence:
-  EVIDENCE/ac-1.log: 963835e20df522156012daddfde2a0cd36ac251db33072dd97a64a1282f37b1e
-  EVIDENCE/ac-2.log: 0c5f2cc058ba4211e7d7de2f70f87da78412fe5e3b6675593d8ec9eac4c87d59
-  EVIDENCE/ac-3.log: 9cf2db4c2340f20eca3a1b934deaeaefd26342ca0a4cb3970bbe1c07f85a7115
+  EVIDENCE/ac-1.log: c3674d2da1bc8191699349078a7439aa5c91c3c9ac1fad56fccebf52e402e64e
+  EVIDENCE/ac-2.log: 881b13d90ed3d006f99339feeca0938eea0b68ee6be988cd83c5421d261c78b1
+  EVIDENCE/ac-3.log: e053e73d9e8eddc9a368c410c7cf05bfc362838e9aab7a5bdbda2d74e097b03e
+  ? EVIDENCE/llm-judge-foundational-docs-explain-the-thread-decision-contract-transit-lineage-mapping-merge-back-semantics-and-the-remaining-concurrency-limits-honestly.txt
+  : d50a9e298afc8dc39939feaeeccb09599e8063f8dc6182e2c0d86c109f08fff3
+  EVIDENCE/llm-judge-operator-facing-guidance-remains-concise-even-though-the-underlying-thread-lineage-becomes-richer.txt: 4a2a53a88acbcc94b547e649c58f65ea0ffeeb5f3884214c2315e09286c8ae32
+  ? EVIDENCE/llm-judge-proof-artifacts-demonstrate-thread-split-replay-and-merge-back-behavior-in-a-way-that-makes-regressions-easy-to-spot.txt
+  : 1fbd6055757a57c9be687e0b22b568e2214a899ad81b26c46a3b417b117a378e

@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T11:57:24.223857152-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:09.948160525-07:00
+mode: llm-judge
 ---
-Safe-checkpoint routing now uses process_thread_candidate_in_session_with_sink in src/application/mod.rs, which asks the planner for select_thread_decision before running the queued prompt on the selected thread.
+LLM judge passed

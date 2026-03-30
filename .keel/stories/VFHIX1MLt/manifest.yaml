@@ -1,6 +1,12 @@
 id: VFHIX1MLt
-git_sha: 98c06cd836e5d940d353eb772bb7c97cd45e36cf
+git_sha: b4a3a723b462adcfaa3919c9295f4a28455b640a
 evidence:
-  EVIDENCE/ac-1.log: fd50460346e33c88f5f4d227a027337bc116db102c37f300bb6346f60774f5c7
-  EVIDENCE/ac-2.log: 32fddff27ce4305d4b026dac0adba05a6d9c823f12ebbed6e71c7bd50927a91c
-  EVIDENCE/ac-3.log: 0a0e98cf763c97ca155c2364048765544ac7f8bbc7bdabc039303aab696f628a
+  EVIDENCE/ac-1.log: 74d620298c3ab60a444ec8801e3b33926b1ccb2fa579cc00d42a6b9f7e13ad92
+  EVIDENCE/ac-2.log: d5986ca295b0209c2b2699236c262eb6a5faf3c83c1d0a6935ae4274c6227011
+  EVIDENCE/ac-3.log: d74eb3d0c65013127d45639590a273be118d5a2370fc599b8240ee6aa09b4b79
+  ? EVIDENCE/llm-judge-active-turn-steering-prompts-are-routed-through-the-model-driven-thread-decision-loop-at-safe-checkpoints-instead-of-being-silently-appended-to-opaque-queue-state.txt
+  : 5e70fcd19ef059b1b8271c47297ee7a8223aee99eef743d404c116850b6c6e2d
+  ? EVIDENCE/llm-judge-invalid-model-output-or-recorder-failures-degrade-through-bounded-local-first-fallback-behavior-instead-of-silently-mutating-thread-structure.txt
+  : 064e4c3adbe92c9533924d73fefe3754ad035cf7af31c23be615dfbef372072a
+  ? EVIDENCE/llm-judge-steering-prompts-received-during-an-active-turn-are-retained-as-structured-thread-candidates-instead-of-opaque-queue-entries.txt
+  : fa9236b1fe535cff447eae5810ee69da6da85de7e79fc2353a07c5651384cc13

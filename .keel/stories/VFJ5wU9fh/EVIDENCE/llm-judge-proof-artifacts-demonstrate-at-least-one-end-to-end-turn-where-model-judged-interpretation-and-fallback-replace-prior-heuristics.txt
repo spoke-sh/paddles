@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFJ5wU9fh
+Criterion: Proof artifacts demonstrate at least one end-to-end turn where model-judged interpretation and fallback replace prior heuristics.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

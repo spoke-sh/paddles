@@ -1,6 +1,11 @@
 id: VFJ5wU9fh
-git_sha: d384fd92bcc70038e5db465f1337d9de4d045b36
+git_sha: b4a3a723b462adcfaa3919c9295f4a28455b640a
 evidence:
-  EVIDENCE/ac-1.log: 03869c9859f61b9c03432df11f7d34ce271f7cd6760e40fcdbeaff1560b54849
-  EVIDENCE/ac-2.log: 083200515cc1bca7c074ca9aa5ed0adfadb4b8ea153d1463fba0159ec9555c02
-  EVIDENCE/ac-3.log: baeae9bba0ce3fbf1368181dda5bb879011e4d99af40f88d890bf77526a79b92
+  EVIDENCE/ac-1.log: b35b844cd6c23fbaa6ca7bb0afaa43e540046289afb817488b61ae1599d1f000
+  EVIDENCE/ac-2.log: 2bc5c0cb2dabee2892a4b105b2572bd4883da86a57a0aa4dedd01551b3bd6b15
+  EVIDENCE/ac-3.log: 3c8fc5499c00dfacecbd37df84a556a7c984a9443194803b82e436ec7f28e66e
+  EVIDENCE/llm-judge-foundational-docs-describe-which-decisions-are-model-judged-and-which-remain-controller-owned-constraints.txt: fe1af831fb2f575e08a3210dcb4ac9a971af4de4cfb4a0cbd868e6f1d40451b5
+  ? EVIDENCE/llm-judge-proof-artifacts-demonstrate-at-least-one-end-to-end-turn-where-model-judged-interpretation-and-fallback-replace-prior-heuristics.txt
+  : bc95cc130023b7e6993b3bb8ca839f704856aabf1301743c451fe1b0ce85fa2c
+  ? EVIDENCE/llm-judge-the-docs-stay-generic-across-repositories-rather-than-hardcoding-a-project-specific-replacement-intent-taxonomy.txt
+  : 2cca84beae52a91ce6570082c81cebabddb6334647baf8a561f5b40192222851

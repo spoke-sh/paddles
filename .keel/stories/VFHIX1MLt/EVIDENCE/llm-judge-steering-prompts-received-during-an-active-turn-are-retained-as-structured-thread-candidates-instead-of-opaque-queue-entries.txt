@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX1MLt
+Criterion: Steering prompts received during an active turn are retained as structured thread candidates instead of opaque queue entries.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

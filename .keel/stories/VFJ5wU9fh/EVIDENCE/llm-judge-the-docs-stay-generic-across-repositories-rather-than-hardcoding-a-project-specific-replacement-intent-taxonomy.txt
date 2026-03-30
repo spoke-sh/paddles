@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFJ5wU9fh
+Criterion: The docs stay generic across repositories rather than hardcoding a project-specific replacement intent taxonomy.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

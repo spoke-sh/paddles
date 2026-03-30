@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX1MLt
+Criterion: Active-turn steering prompts are routed through the model-driven thread decision loop at safe checkpoints instead of being silently appended to opaque queue state.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

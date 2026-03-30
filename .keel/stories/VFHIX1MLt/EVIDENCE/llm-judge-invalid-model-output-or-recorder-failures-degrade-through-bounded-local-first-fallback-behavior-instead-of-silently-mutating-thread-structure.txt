@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX1MLt
+Criterion: Invalid model output or recorder failures degrade through bounded local-first fallback behavior instead of silently mutating thread structure.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

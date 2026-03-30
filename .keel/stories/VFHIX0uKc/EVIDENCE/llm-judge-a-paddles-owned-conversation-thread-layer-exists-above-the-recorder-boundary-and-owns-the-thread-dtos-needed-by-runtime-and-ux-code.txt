@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX0uKc
+Criterion: A paddles-owned conversation/thread layer exists above the recorder boundary and owns the thread DTOs needed by runtime and UX code.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

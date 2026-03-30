@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX2LNJ
+Criterion: Merge-back rendering uses explicit recorded outcomes instead of implying hidden history rewrites.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

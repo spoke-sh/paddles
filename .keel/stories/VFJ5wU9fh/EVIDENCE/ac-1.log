@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T18:26:11.287609651-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:32.229897767-07:00
+mode: llm-judge
 ---
-Updated README.md, ARCHITECTURE.md, and INSTRUCTIONS.md to describe the delivered controller-versus-model boundary: model-judged interpretation, re-decision, and retrieval selection; controller-owned validation, budgets, allowlists, deterministic execution, and fail-closed behavior.
+LLM judge passed

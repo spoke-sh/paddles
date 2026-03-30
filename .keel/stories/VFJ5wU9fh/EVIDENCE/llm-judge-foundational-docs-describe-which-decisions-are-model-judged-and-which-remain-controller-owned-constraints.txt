@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFJ5wU9fh
+Criterion: Foundational docs describe which decisions are model-judged and which remain controller-owned constraints.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

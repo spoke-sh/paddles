@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T11:57:24.188262525-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:07.666166652-07:00
+mode: llm-judge
 ---
-Interactive TUI queue entries are now typed QueuedPrompt values, and steering prompts captured while busy become ThreadCandidate values via ConversationSession::capture_candidate in src/infrastructure/cli/interactive_tui.rs and src/application/session.rs.
+LLM judge passed

@@ -87,6 +87,9 @@ auditable and does not regress into hidden controller reasoning later.
 - [ac-1.log](../../../../stories/VFJ5wU9fh/EVIDENCE/ac-1.log)
 - [ac-2.log](../../../../stories/VFJ5wU9fh/EVIDENCE/ac-2.log)
 - [ac-3.log](../../../../stories/VFJ5wU9fh/EVIDENCE/ac-3.log)
+- [llm-judge-foundational-docs-describe-which-decisions-are-model-judged-and-which-remain-controller-owned-constraints.txt](../../../../stories/VFJ5wU9fh/EVIDENCE/llm-judge-foundational-docs-describe-which-decisions-are-model-judged-and-which-remain-controller-owned-constraints.txt)
+- [llm-judge-proof-artifacts-demonstrate-at-least-one-end-to-end-turn-where-model-judged-interpretation-and-fallback-replace-prior-heuristics.txt](../../../../stories/VFJ5wU9fh/EVIDENCE/llm-judge-proof-artifacts-demonstrate-at-least-one-end-to-end-turn-where-model-judged-interpretation-and-fallback-replace-prior-heuristics.txt)
+- [llm-judge-the-docs-stay-generic-across-repositories-rather-than-hardcoding-a-project-specific-replacement-intent-taxonomy.txt](../../../../stories/VFJ5wU9fh/EVIDENCE/llm-judge-the-docs-stay-generic-across-repositories-rather-than-hardcoding-a-project-specific-replacement-intent-taxonomy.txt)
 
 ### Replace Heuristic Planner Fallback With Constrained Model Re-Decision
 - **ID:** VFJ5wUdgP

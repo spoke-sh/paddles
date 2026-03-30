@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX1vLx
+Criterion: Foundational docs explain the thread decision contract, transit lineage mapping, merge-back semantics, and the remaining concurrency limits honestly.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

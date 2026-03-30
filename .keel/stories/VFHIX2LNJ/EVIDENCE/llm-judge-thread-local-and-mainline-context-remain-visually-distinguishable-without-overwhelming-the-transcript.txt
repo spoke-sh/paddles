@@ -1,0 +1,9 @@
+LLM Judge Transcript
+Story: VFHIX2LNJ
+Criterion: Thread-local and mainline context remain visually distinguishable without overwhelming the transcript.
+
+Diff:
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

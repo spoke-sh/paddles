@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-29T11:57:33.658255083-07:00
-mode: manual
+recorded_at: 2026-03-29T19:41:23.075446232-07:00
+mode: llm-judge
 ---
-Operator-facing guidance stays concise by keeping transcript output at the event-summary level while durable lineage remains in typed trace records and replay views.
+LLM judge passed
