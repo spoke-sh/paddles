@@ -180,6 +180,14 @@ fn handle_key_event(
             app.input.pop();
             false
         }
+        KeyCode::Up => {
+            app.history_back();
+            false
+        }
+        KeyCode::Down => {
+            app.history_forward();
+            false
+        }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.input.clear();
             false
@@ -187,6 +195,7 @@ fn handle_key_event(
         KeyCode::Char(ch) => {
             if !key.modifiers.contains(KeyModifiers::CONTROL) {
                 app.input.push(ch);
+                app.history_cursor = None;
             }
             false
         }
@@ -447,6 +456,9 @@ struct InteractiveApp {
     credential_provider: Option<String>,
     active_turn_timing: Option<ActiveTurnTiming>,
     flushed_row_count: usize,
+    prompt_history: Vec<String>,
+    history_cursor: Option<usize>,
+    history_draft: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -516,6 +528,38 @@ impl InteractiveApp {
             credential_provider,
             active_turn_timing: None,
             flushed_row_count: 0,
+            prompt_history: Vec::new(),
+            history_cursor: None,
+            history_draft: String::new(),
+        }
+    }
+
+    fn history_back(&mut self) {
+        if self.prompt_history.is_empty() {
+            return;
+        }
+        let index = match self.history_cursor {
+            None => {
+                self.history_draft = self.input.clone();
+                self.prompt_history.len() - 1
+            }
+            Some(0) => return,
+            Some(i) => i - 1,
+        };
+        self.history_cursor = Some(index);
+        self.input = self.prompt_history[index].clone();
+    }
+
+    fn history_forward(&mut self) {
+        let Some(cursor) = self.history_cursor else {
+            return;
+        };
+        if cursor + 1 < self.prompt_history.len() {
+            self.history_cursor = Some(cursor + 1);
+            self.input = self.prompt_history[cursor + 1].clone();
+        } else {
+            self.history_cursor = None;
+            self.input = self.history_draft.clone();
         }
     }
 
@@ -524,6 +568,9 @@ impl InteractiveApp {
         if raw.is_empty() {
             return;
         }
+        self.prompt_history.push(raw.clone());
+        self.history_cursor = None;
+        self.history_draft.clear();
         self.input.clear();
 
         // Handle masked key submission.
