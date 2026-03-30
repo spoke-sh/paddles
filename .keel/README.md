@@ -192,5 +192,9 @@
 |--------|--------|
 | [Mistral RS Local Inference Backend](epics/VFMC5HaQY/voyages/VFMCRb7SD/) | draft |
 
-### [HTTP API Design For Paddles](epics/VFKApee25/) (draft)
+### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Bearing Validation](epics/VFKApee25/voyages/VFMGQ1isG/) | done |
 

@@ -21,7 +21,8 @@ mission: VFKB6YlOS
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/0 voyages complete, 0/0 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
+| [Bearing Validation](voyages/VFMGQ1isG/) | done | 1/1 |
 <!-- END GENERATED -->

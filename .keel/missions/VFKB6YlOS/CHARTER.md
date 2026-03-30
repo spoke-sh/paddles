@@ -9,7 +9,7 @@ Archetype: Strategic
 | MG-01 | HTTP server runs alongside paddles with SSE-streamed turn events | board: VFKBCVjpo |
 | MG-02 | Web chat interface reflects current conversation state from transit trace streams | board: VFKBDgewu |
 | MG-03 | Railroad/turnstep visualization renders trace DAG with hexagonal nodes in real time | board: VFKBFMq8J |
-| MG-04 | HTTP API design is captured as a keel research bearing | board: VFKApee25 |
+| MG-04 | HTTP API design is captured as a keel research bearing | manual: bearing VFKApee25 assessed and laid |
 
 ## Constraints
 

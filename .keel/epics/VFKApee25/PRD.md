@@ -63,10 +63,10 @@ The API design must answer: what is the right HTTP surface for a recursive in-co
 
 | Question/Risk | Owner | Status |
 |---------------|-------|--------|
-| Should the web server share the same MechSuitService instance as the CLI, or run as a separate process? | Planner | Open |
-| How should concurrent sessions be managed when the local model can only serve one inference at a time? | Planner | Open |
-| What authentication/authorization model (if any) is appropriate for a local-first tool? | Planner | Open |
-| Should trace replay support incremental fetching (cursor-based) for large conversation histories? | Planner | Open |
+| Should the web server share the same MechSuitService instance as the CLI, or run as a separate process? | Planner | Resolved: shared instance, single process |
+| How should concurrent sessions be managed when the local model can only serve one inference at a time? | Planner | Resolved: sequential processing, tokio tasks for concurrency |
+| What authentication/authorization model (if any) is appropriate for a local-first tool? | Planner | Resolved: none needed for local-first |
+| Should trace replay support incremental fetching (cursor-based) for large conversation histories? | Planner | Resolved: full replay for now, cursor later |
 
 ## Success Criteria
 
