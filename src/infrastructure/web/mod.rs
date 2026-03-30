@@ -115,6 +115,7 @@ pub fn router(
         .route("/events", get(global_event_stream))
         .route("/sessions/{id}/trace/graph", get(trace_graph))
         .route("/trace/graph", get(trace_graph_all))
+        .route("/trace/replay", get(trace_replay_all))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -230,6 +231,19 @@ async fn trace_graph(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(build_trace_graph(&[replay])))
+}
+
+async fn trace_replay_all(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<crate::domain::model::TraceReplay>> {
+    let replays: Vec<_> = state
+        .trace_recorder
+        .task_ids()
+        .iter()
+        .filter_map(|id| state.trace_recorder.replay(id).ok())
+        .filter(|r| !r.records.is_empty())
+        .collect();
+    Json(replays)
 }
 
 async fn trace_graph_all(State(state): State<Arc<AppState>>) -> Json<TraceGraphResponse> {

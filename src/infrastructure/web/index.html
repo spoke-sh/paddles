@@ -192,7 +192,6 @@ function refreshTraceGraph() {
   if (graphDebounce) return;
   graphDebounce = setTimeout(async () => {
     graphDebounce = null;
-    if (!sessionId) return;
     try {
       const res = await fetch('/trace/graph');
       if (!res.ok) return;
@@ -270,8 +269,47 @@ function hexPoints(cx, cy, rx, ry) {
   return pts.join(' ');
 }
 
+async function replayHistory() {
+  try {
+    const res = await fetch('/trace/replay');
+    if (!res.ok) return;
+    const replays = await res.json();
+    for (const replay of replays) {
+      for (const record of replay.records) {
+        const k = record.kind;
+        if (typeof k === 'object') {
+          if ('TaskRootStarted' in k) {
+            const root = k.TaskRootStarted;
+            if (root.prompt && root.prompt.inline_content) {
+              addMessage('user', root.prompt.inline_content);
+            }
+          } else if ('TurnStarted' in k) {
+            const turn = k.TurnStarted;
+            if (turn.prompt && turn.prompt.inline_content) {
+              addMessage('user', turn.prompt.inline_content);
+            }
+          } else if ('PlannerAction' in k) {
+            addEventRow('planner', 'planner', k.PlannerAction.action);
+          } else if ('ToolCallRequested' in k) {
+            addEventRow('tool', 'tool', k.ToolCallRequested.tool_name);
+          } else if ('ToolCallCompleted' in k) {
+            addEventRow('tool', 'tool', k.ToolCallCompleted.tool_name + ' done');
+          } else if ('CompletionCheckpoint' in k) {
+            const cp = k.CompletionCheckpoint;
+            if (cp.response && cp.response.inline_content) {
+              addMessage('assistant', cp.response.inline_content);
+            }
+          } else if ('SelectionArtifact' in k) {
+            addEventRow('evidence', 'gatherer', k.SelectionArtifact.summary);
+          }
+        }
+      }
+    }
+  } catch (e) { /* ignore fetch errors */ }
+}
+
+replayHistory().then(() => refreshTraceGraph());
 connectSSE();
-refreshTraceGraph();
 </script>
 </body>
 </html>
