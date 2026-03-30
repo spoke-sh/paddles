@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFNyo7ahu
-status: planned
+status: delivered
 epic: VFNyZ12IX
 created_at: 2026-03-30T13:47:23
 # authored
@@ -26,12 +26,12 @@ updated_at: 2026-03-30T14:13:12
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Move Sift Search To Blocking Thread With Progress Channel](../../../../stories/VFNyqBbqo/README.md) | feat | backlog |
-| [Search Progress TurnEvent And Elapsed Timer](../../../../stories/VFNyqCTqy/README.md) | feat | backlog |
-| [TUI Rendering For Search Progress Events](../../../../stories/VFNyqDNsI/README.md) | feat | backlog |
-| [Upstream Sift Progress Callback Requirements](../../../../stories/VFNyqELsS/README.md) | feat | backlog |
+| [Move Sift Search To Blocking Thread With Progress Channel](../../../../stories/VFNyqBbqo/README.md) | feat | done |
+| [Search Progress TurnEvent And Elapsed Timer](../../../../stories/VFNyqCTqy/README.md) | feat | done |
+| [TUI Rendering For Search Progress Events](../../../../stories/VFNyqDNsI/README.md) | feat | done |
+| [Upstream Sift Progress Callback Requirements](../../../../stories/VFNyqELsS/README.md) | feat | done |
 <!-- END GENERATED -->

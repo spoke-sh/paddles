@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFNyOP874
-status: active
+status: completed
 created_at: 2026-03-30T13:45:44
 updated_at: 2026-03-30T14:13:19
 # authored
