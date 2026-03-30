@@ -211,11 +211,11 @@
 | [Refinement Loop Core](epics/VFNvH5LxS/voyages/VFNvha5ZW/) | draft |
 | [Refinement Loop Integration](epics/VFNvH5LxS/voyages/VFNvhauZg/) | draft |
 
-### [Sift Search Progress In Paddles TUI](epics/VFNyZ12IX/) (draft)
+### [Sift Search Progress In Paddles TUI](epics/VFNyZ12IX/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Search Progress Implementation](epics/VFNyZ12IX/voyages/VFNyo7ahu/) | draft |
+| [Search Progress Implementation](epics/VFNyZ12IX/voyages/VFNyo7ahu/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

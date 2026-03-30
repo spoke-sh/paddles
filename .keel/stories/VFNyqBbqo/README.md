@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFNyqBbqo
-status: icebox
+status: backlog
 created_at: 2026-03-30T13:47:31
-updated_at: 2026-03-30T13:47:31
+updated_at: 2026-03-30T14:13:12
 # authored
 title: Move Sift Search To Blocking Thread With Progress Channel
 type: feat
@@ -22,6 +22,6 @@ Wrap the synchronous `self.sift.search_autonomous()` call in `tokio::task::spawn
 
 - [ ] search_autonomous runs inside tokio::task::spawn_blocking [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
 - [ ] An mpsc channel connects the blocking thread to the async caller [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end -->
-- [ ] The blocking thread sends periodic heartbeats (every ~2s) with elapsed time [SRS-01/AC-03] <!-- verify: manual, SRS-01:start:end -->
-- [ ] The TUI remains responsive during sift search (spinner continues) [SRS-01/AC-04] <!-- verify: manual, SRS-01:start:end -->
+- [ ] The blocking thread sends periodic heartbeats (~2s) with elapsed time [SRS-02/AC-03] <!-- verify: manual, SRS-02:start:end -->
+- [ ] The TUI remains responsive during sift search (spinner continues) [SRS-NFR-02/AC-04] <!-- verify: manual, SRS-NFR-02:start:end -->
 - [ ] Search results are returned correctly after spawn_blocking completes [SRS-01/AC-05] <!-- verify: manual, SRS-01:start:end -->

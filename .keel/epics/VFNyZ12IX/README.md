@@ -25,5 +25,5 @@ mission: VFNyOP874
 **Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Search Progress Implementation](voyages/VFNyo7ahu/) | draft | 0/4 |
+| [Search Progress Implementation](voyages/VFNyo7ahu/) | planned | 0/4 |
 <!-- END GENERATED -->

@@ -1,12 +1,13 @@
 ---
 # system-managed
 id: VFNyOP874
-status: defining
+status: active
 created_at: 2026-03-30T13:45:44
-updated_at: 2026-03-30T13:45:44
+updated_at: 2026-03-30T14:13:19
 # authored
 title: Interactive Sift Search Progress
 watch: ~
+activated_at: 2026-03-30T14:13:19
 ---
 
 # Interactive Sift Search Progress
