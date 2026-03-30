@@ -25,6 +25,33 @@ pub struct CredentialStore {
     base_dir: PathBuf,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiKeySource {
+    Environment { env_var: String },
+    StoredFile { provider: String },
+    Missing { provider: String },
+}
+
+impl ApiKeySource {
+    pub fn interactive_status(&self, provider_name: &str) -> String {
+        match self {
+            Self::Environment { env_var } => format!(
+                "Provider: `{provider_name}`. Auth: using `{env_var}` from the environment. Environment values override stored credentials on restart."
+            ),
+            Self::StoredFile { .. } => format!(
+                "Provider: `{provider_name}`. Auth: loaded from the local credential store."
+            ),
+            Self::Missing { .. } => format!("Provider: `{provider_name}`. Auth: not configured."),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedApiKey {
+    pub value: String,
+    pub source: ApiKeySource,
+}
+
 impl Default for CredentialStore {
     fn default() -> Self {
         Self::new()
@@ -106,6 +133,39 @@ impl CredentialStore {
             "MOONSHOT_API_KEY" => Some("moonshot"),
             "OLLAMA_API_KEY" => Some("ollama"),
             _ => None,
+        }
+    }
+
+    pub fn resolve_api_key(&self, env_name: &str) -> ResolvedApiKey {
+        let env_value = std::env::var(env_name).ok().filter(|key| !key.is_empty());
+        self.resolve_api_key_from(env_name, env_value.as_deref())
+    }
+
+    fn resolve_api_key_from(&self, env_name: &str, env_value: Option<&str>) -> ResolvedApiKey {
+        if let Some(value) = env_value {
+            return ResolvedApiKey {
+                value: value.to_string(),
+                source: ApiKeySource::Environment {
+                    env_var: env_name.to_string(),
+                },
+            };
+        }
+
+        let provider = Self::provider_for_env(env_name).unwrap_or(env_name);
+        if let Some(value) = self.load_api_key(provider) {
+            return ResolvedApiKey {
+                value,
+                source: ApiKeySource::StoredFile {
+                    provider: provider.to_string(),
+                },
+            };
+        }
+
+        ResolvedApiKey {
+            value: String::new(),
+            source: ApiKeySource::Missing {
+                provider: provider.to_string(),
+            },
         }
     }
 }
@@ -220,5 +280,52 @@ mod tests {
             Some("openai")
         );
         assert_eq!(CredentialStore::provider_for_env("UNKNOWN_KEY"), None);
+    }
+
+    #[test]
+    fn resolve_api_key_prefers_environment_values() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CredentialStore::with_base_dir(dir.path());
+        store.save_api_key("moonshot", "stored-key").expect("save");
+
+        let resolved = store.resolve_api_key_from("MOONSHOT_API_KEY", Some("env-key"));
+        assert_eq!(resolved.value, "env-key");
+        assert_eq!(
+            resolved.source,
+            ApiKeySource::Environment {
+                env_var: "MOONSHOT_API_KEY".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_api_key_falls_back_to_stored_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CredentialStore::with_base_dir(dir.path());
+        store.save_api_key("moonshot", "stored-key").expect("save");
+
+        let resolved = store.resolve_api_key_from("MOONSHOT_API_KEY", None);
+        assert_eq!(resolved.value, "stored-key");
+        assert_eq!(
+            resolved.source,
+            ApiKeySource::StoredFile {
+                provider: "moonshot".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_api_key_reports_missing_configuration() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CredentialStore::with_base_dir(dir.path());
+
+        let resolved = store.resolve_api_key_from("MOONSHOT_API_KEY", None);
+        assert_eq!(resolved.value, "");
+        assert_eq!(
+            resolved.source,
+            ApiKeySource::Missing {
+                provider: "moonshot".to_string()
+            }
+        );
     }
 }

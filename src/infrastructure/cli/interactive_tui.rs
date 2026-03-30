@@ -26,6 +26,7 @@ pub struct TuiContext {
     pub runtime_lanes: RuntimeLaneConfig,
     pub provider_name: String,
     pub credential_provider: Option<String>,
+    pub credential_status: String,
 }
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(32);
@@ -68,6 +69,7 @@ pub async fn run_interactive_tui(
         session.clone(),
         tui_ctx.provider_name.clone(),
         tui_ctx.credential_provider.clone(),
+        tui_ctx.credential_status.clone(),
     );
 
     loop {
@@ -364,15 +366,18 @@ impl InteractiveApp {
         session: ConversationSession,
         provider_name: String,
         credential_provider: Option<String>,
+        credential_status: String,
     ) -> Self {
         let ready_message = match credential_provider.as_deref() {
             Some(provider) => format!(
                 "Codex-style transcript active. Enter to send, Ctrl+C to quit.\n\
-                 Provider: `{provider}`. Type `/login` to set your API key.",
+                 {credential_status}\n\
+                 Type `/login` to set or replace your API key for `{provider}`.",
             ),
             None => format!(
                 "Codex-style transcript active. Enter to send, Ctrl+C to quit.\n\
-                 Provider: `{provider_name}` (local-first). No API login required.",
+                 {credential_status}\n\
+                 No API login required.",
             ),
         };
         Self {
@@ -1201,6 +1206,7 @@ mod tests {
             session(),
             "sift".to_string(),
             None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
         );
         app.input = "hello".to_string();
 
@@ -1234,6 +1240,7 @@ mod tests {
             session(),
             "sift".to_string(),
             None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
         );
 
         app.input = "first".to_string();
@@ -1269,6 +1276,7 @@ mod tests {
             session(),
             "sift".to_string(),
             None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
         );
 
         app.input = "first".to_string();
@@ -1303,6 +1311,7 @@ mod tests {
             session(),
             "moonshot".to_string(),
             Some("moonshot".to_string()),
+            "Provider: `moonshot`. Auth: loaded from the local credential store.".to_string(),
         );
         app.input = "/login".to_string();
 
@@ -1328,6 +1337,7 @@ mod tests {
             session(),
             "moonshot".to_string(),
             Some("moonshot".to_string()),
+            "Provider: `moonshot`. Auth: loaded from the local credential store.".to_string(),
         );
         app.input_mode = InputMode::MaskedKey {
             provider: "moonshot".to_string(),
@@ -1356,6 +1366,7 @@ mod tests {
             session(),
             "sift".to_string(),
             None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
         );
         app.input = "/login".to_string();
 

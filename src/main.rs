@@ -24,7 +24,7 @@ use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
 use paddles::infrastructure::config::{PaddlesConfig, normalize_provider_model_alias};
-use paddles::infrastructure::credentials::CredentialStore;
+use paddles::infrastructure::credentials::{ApiKeySource, CredentialStore};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 enum ModelProvider {
@@ -229,16 +229,22 @@ async fn main() -> Result<()> {
     // Resolve API key: env var first, then credential store.
     let credential_store = Arc::new(CredentialStore::new());
     let credential_provider = CredentialStore::provider_for_env(api_key_env).map(str::to_string);
-    let api_key = credential_provider
-        .as_deref()
-        .and_then(|provider| {
-            std::env::var(api_key_env)
-                .ok()
-                .filter(|key| !key.is_empty())
-                .or_else(|| credential_store.load_api_key(provider))
-        })
-        .unwrap_or_default();
-    let api_key_shared: Arc<RwLock<String>> = Arc::new(RwLock::new(api_key));
+    let resolved_api_key = if credential_provider.is_some() {
+        credential_store.resolve_api_key(api_key_env)
+    } else {
+        paddles::infrastructure::credentials::ResolvedApiKey {
+            value: String::new(),
+            source: ApiKeySource::Missing {
+                provider: provider_name.to_string(),
+            },
+        }
+    };
+    let credential_status = if matches!(provider, ModelProvider::Sift) {
+        format!("Provider: `{provider_name}` (local-first). Auth: not required.")
+    } else {
+        resolved_api_key.source.interactive_status(provider_name)
+    };
+    let api_key_shared: Arc<RwLock<String>> = Arc::new(RwLock::new(resolved_api_key.value));
 
     let synthesizer_factory: Box<paddles::application::SynthesizerFactory> = match provider {
         ModelProvider::Sift => Box::new(|workspace: &Path, model_id: &str| {
@@ -426,6 +432,7 @@ async fn main() -> Result<()> {
                     runtime_lanes: runtime_lanes.clone(),
                     provider_name: provider_name.to_string(),
                     credential_provider: credential_provider.clone(),
+                    credential_status: credential_status.clone(),
                 };
                 run_interactive_tui(service, model.clone(), tui_ctx).await?
             }
