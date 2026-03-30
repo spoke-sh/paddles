@@ -1,12 +1,13 @@
 ---
 # system-managed
 id: VFKN403tG
-status: draft
+status: planned
 epic: VFKMjf28V
 created_at: 2026-03-29T22:58:39
 # authored
 title: Provider Routing And CLI Flags
 index: 1
+updated_at: 2026-03-30T06:50:48
 ---
 
 # Provider Routing And CLI Flags
@@ -29,5 +30,5 @@ index: 1
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Provider CLI Flag And Factory Routing](../../../../stories/VFKN7LdAb/README.md) | feat | icebox |
+| [Provider CLI Flag And Factory Routing](../../../../stories/VFKN7LdAb/README.md) | feat | backlog |
 <!-- END GENERATED -->

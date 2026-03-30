@@ -1,12 +1,13 @@
 ---
 # system-managed
 id: VFKMCihEt
-status: defining
+status: active
 created_at: 2026-03-29T22:55:14
-updated_at: 2026-03-29T22:55:14
+updated_at: 2026-03-30T06:50:57
 # authored
 title: Multi Provider Model Support
 watch: ~
+activated_at: 2026-03-30T06:50:57
 ---
 
 # Multi Provider Model Support

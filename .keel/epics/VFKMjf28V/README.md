@@ -25,5 +25,5 @@ mission: VFKMCihEt
 **Progress:** 0/1 voyages complete, 0/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Provider Routing And CLI Flags](voyages/VFKN403tG/) | draft | 0/1 |
+| [Provider Routing And CLI Flags](voyages/VFKN403tG/) | planned | 0/1 |
 <!-- END GENERATED -->

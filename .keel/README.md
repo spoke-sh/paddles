@@ -156,11 +156,11 @@
 |--------|--------|
 | [Trace DAG Visualization](epics/VFKBFMq8J/voyages/VFKDmXte3/) | done |
 
-### [Provider Abstraction And Routing](epics/VFKMjf28V/) (draft)
+### [Provider Abstraction And Routing](epics/VFKMjf28V/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Provider Routing And CLI Flags](epics/VFKMjf28V/voyages/VFKN403tG/) | draft |
+| [Provider Routing And CLI Flags](epics/VFKMjf28V/voyages/VFKN403tG/) | planned |
 
 ### [OpenAI Compatible Provider](epics/VFKMlkWBt/) (draft)
 
