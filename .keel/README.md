@@ -156,5 +156,29 @@
 |--------|--------|
 | [Trace DAG Visualization](epics/VFKBFMq8J/voyages/VFKDmXte3/) | done |
 
+### [Provider Abstraction And Routing](epics/VFKMjf28V/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Provider Routing And CLI Flags](epics/VFKMjf28V/voyages/VFKN403tG/) | draft |
+
+### [OpenAI Compatible Provider](epics/VFKMlkWBt/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [OpenAI Chat Completions Adapter](epics/VFKMlkWBt/voyages/VFKN5cgzb/) | draft |
+
+### [Anthropic Claude Provider](epics/VFKMmuJFY/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Anthropic Messages API Adapter](epics/VFKMmuJFY/voyages/VFKN5dR0L/) | draft |
+
+### [Google Gemini Provider](epics/VFKMo6YJb/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Gemini GenerateContent Adapter](epics/VFKMo6YJb/voyages/VFKN5eD1D/) | draft |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (draft)
 
