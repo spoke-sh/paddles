@@ -97,9 +97,8 @@
                               shellHook = ''
                                 # Shared target directory across shell sessions for faster rebuilds.
                                 export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
-                                runtime_ld_library_path="${pkgs.lib.makeLibraryPath [ pkgs.zlib pkgs.zstd pkgs.openssl ]}"
                               ''
-                    
+
            + pkgs.lib.optionalString isDarwin ''
             # Nix can set TMPDIR to a shell-specific path on macOS; use a stable path.
             export TMPDIR=/var/tmp
@@ -108,35 +107,48 @@
             export CUDA_PATH="${pkgs.cudatoolkit}"
             export CUDA_ROOT="${pkgs.cudatoolkit}"
             export CUDA_TOOLKIT_ROOT_DIR="${pkgs.cudatoolkit}"
+
+            # Build-time library search path for the linker.
+            # Unlike LD_LIBRARY_PATH, LIBRARY_PATH only affects the linker
+            # and does not break non-nix binaries (nix, git, etc.).
+            build_lib_path="${pkgs.lib.makeLibraryPath [ pkgs.zlib pkgs.zstd pkgs.openssl ]}"
             for candidate in \
               "${pkgs.cudatoolkit}/lib" \
               "${pkgs.cudatoolkit}/lib64" \
               "${pkgs.cudatoolkit}/targets/x86_64-linux/lib"
             do
               if [ -d "$candidate" ]; then
-                runtime_ld_library_path="$candidate:$runtime_ld_library_path"
+                build_lib_path="$candidate:$build_lib_path"
+              fi
+            done
+            export LIBRARY_PATH="$build_lib_path''${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
+            # Bake rpath into compiled binaries so they find shared libs
+            # at runtime without needing LD_LIBRARY_PATH.
+            linux_link_args="-C link-arg=-fuse-ld=mold"
+            linux_link_args="$linux_link_args -C link-arg=-Wl,-rpath,${pkgs.lib.getLib pkgs.zlib}/lib"
+            linux_link_args="$linux_link_args -C link-arg=-Wl,-rpath,${pkgs.lib.getLib pkgs.zstd}/lib"
+            linux_link_args="$linux_link_args -C link-arg=-Wl,-rpath,${pkgs.lib.getLib pkgs.openssl}/lib"
+            for candidate in \
+              "${pkgs.cudatoolkit}/lib" \
+              "${pkgs.cudatoolkit}/lib64" \
+              "${pkgs.cudatoolkit}/targets/x86_64-linux/lib"
+            do
+              if [ -d "$candidate" ]; then
+                linux_link_args="$linux_link_args -C link-arg=-Wl,-rpath,$candidate"
               fi
             done
 
-            cuda_driver_rpath=""
             for candidate in \
               /run/opengl-driver/lib \
               /usr/lib/x86_64-linux-gnu \
               /usr/lib/wsl/lib
             do
               if [ -f "$candidate/libcuda.so.1" ]; then
-                runtime_ld_library_path="$candidate:$runtime_ld_library_path"
-                cuda_driver_rpath="$candidate"
+                linux_link_args="$linux_link_args -C link-arg=-Wl,-rpath,$candidate"
                 break
               fi
             done
-
-            export LD_LIBRARY_PATH="$runtime_ld_library_path''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-
-            linux_link_args="-C link-arg=-fuse-ld=mold"
-            if [ -n "$cuda_driver_rpath" ]; then
-              linux_link_args="$linux_link_args -C link-arg=-Wl,-rpath,$cuda_driver_rpath"
-            fi
 
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="''${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS:+$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS }$linux_link_args"
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="''${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS:+$CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS }-C link-arg=-fuse-ld=mold"
