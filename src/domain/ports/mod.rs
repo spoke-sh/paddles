@@ -15,9 +15,10 @@ pub use context_gathering::{
 pub use planning::{
     InitialAction, InitialActionDecision, InterpretationContext, InterpretationDecisionFramework,
     InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationToolHint, PlannerAction, PlannerBudget, PlannerCapability,
-    PlannerDecision as RecursivePlannerDecision, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest, WorkspaceAction,
+    InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
+    PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest,
+    WorkspaceAction,
 };
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
 

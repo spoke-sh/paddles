@@ -1,11 +1,12 @@
-use super::agent_memory::AgentMemory;
+use super::agent_memory::{AgentMemory, load_guidance_document};
 use crate::domain::model::{
     ConversationThreadRef, NullTurnEventSink, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
     ThreadMergeMode, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
-    EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext, PlannerAction,
-    PlannerRequest, RecursivePlannerDecision, ThreadDecisionRequest, WorkspaceAction,
+    EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext,
+    InterpretationRequest, OperatorMemoryDocument, PlannerAction, PlannerRequest,
+    RecursivePlannerDecision, ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -44,6 +45,9 @@ const MAX_LISTED_FILES: usize = 200;
 const MAX_CONTEXT_HITS: usize = 5;
 const RETAINED_ARTIFACT_LIMIT: usize = 5;
 const MAX_CITATIONS: usize = 4;
+const MAX_INTERPRETATION_GRAPH_DEPTH: usize = 3;
+const MAX_INTERPRETATION_GRAPH_DOCS: usize = 8;
+const MAX_GRAPH_DOC_CHARS: usize = 6_000;
 const QWEN_SYSTEM_PROMPT: &str = "<|im_start|>system\nYou are Paddles, a helpful AI assistant and mech suit operator. You provide concise and accurate technical advice.<|im_end|>\n";
 
 pub struct SiftAgentAdapter {
@@ -259,6 +263,19 @@ enum ThreadDecisionEnvelope {
         summary: Option<String>,
         rationale: String,
     },
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationGraphEnvelope {
+    #[serde(default)]
+    edges: Vec<InterpretationGraphEdge>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InterpretationGraphEdge {
+    source: String,
+    #[serde(default)]
+    targets: Vec<String>,
 }
 
 struct TurnPrompt<'a> {
@@ -1062,6 +1079,23 @@ impl SiftAgentAdapter {
         Ok(fallback_thread_decision(request))
     }
 
+    pub fn derive_interpretation_context(
+        &self,
+        request: &InterpretationRequest,
+    ) -> Result<InterpretationContext> {
+        if request.operator_memory.is_empty() {
+            return Ok(InterpretationContext::default());
+        }
+
+        let memory = AgentMemory::load(&request.workspace_root);
+        let documents = self.expand_interpretation_guidance_graph(request)?;
+        Ok(memory.build_interpretation_context_from_documents(
+            &request.user_prompt,
+            &request.workspace_root,
+            &documents,
+        ))
+    }
+
     pub fn recent_turn_summaries(&self) -> Result<Vec<String>> {
         let state = self
             .state
@@ -1660,6 +1694,85 @@ impl SiftAgentAdapter {
             &NullTurnEventSink,
         )
     }
+
+    fn expand_interpretation_guidance_graph(
+        &self,
+        request: &InterpretationRequest,
+    ) -> Result<Vec<OperatorMemoryDocument>> {
+        let mut seen = request
+            .operator_memory
+            .iter()
+            .map(|document| canonical_document_path(&document.path))
+            .collect::<std::collections::HashSet<_>>();
+        let mut all_documents = request.operator_memory.clone();
+        let mut frontier = request.operator_memory.clone();
+
+        for _depth in 0..MAX_INTERPRETATION_GRAPH_DEPTH {
+            if frontier.is_empty() || all_documents.len() >= MAX_INTERPRETATION_GRAPH_DOCS {
+                break;
+            }
+
+            let mut conversation = self.conversation_factory.start_conversation()?;
+            let mut reply = self.send_to_model(
+                conversation.as_mut(),
+                &build_interpretation_graph_prompt(request, &frontier, &all_documents),
+            )?;
+
+            if is_blank_model_reply(&reply) || parse_interpretation_graph(&reply)?.is_none() {
+                self.log_retry_reason(
+                    "interpretation-graph-retry",
+                    &reply,
+                    "missing or invalid guidance graph response",
+                );
+                reply = self.send_to_model(
+                    conversation.as_mut(),
+                    &build_interpretation_graph_retry_prompt(request, &frontier, &all_documents),
+                )?;
+            }
+
+            let Some(graph) = parse_interpretation_graph(&reply)? else {
+                self.log_retry_reason(
+                    "interpretation-graph-fallback",
+                    &reply,
+                    "falling back to AGENTS-rooted interpretation only",
+                );
+                break;
+            };
+
+            let source_index = frontier
+                .iter()
+                .chain(all_documents.iter())
+                .map(|document| (document.source.clone(), document.path.clone()))
+                .collect::<std::collections::HashMap<_, _>>();
+
+            let mut next_frontier = Vec::new();
+            for edge in graph.edges {
+                let Some(source_path) = source_index.get(&edge.source) else {
+                    continue;
+                };
+                for target in edge.targets {
+                    if all_documents.len() >= MAX_INTERPRETATION_GRAPH_DOCS {
+                        break;
+                    }
+                    let Some(document) =
+                        load_guidance_document(source_path, &target, &request.workspace_root)?
+                    else {
+                        continue;
+                    };
+                    let canonical = canonical_document_path(&document.path);
+                    if !seen.insert(canonical) {
+                        continue;
+                    }
+                    next_frontier.push(document.clone());
+                    all_documents.push(document);
+                }
+            }
+
+            frontier = next_frontier;
+        }
+
+        Ok(all_documents)
+    }
 }
 
 fn build_turn_prompt(turn: &TurnPrompt<'_>) -> String {
@@ -1803,8 +1916,90 @@ Persistent operator memory:\n\
 {memory_prompt}\n\
 \n\
 Current user request:\n\
-{user_prompt}\n"
+        {user_prompt}\n"
     )
+}
+
+fn build_interpretation_graph_prompt(
+    request: &InterpretationRequest,
+    frontier: &[OperatorMemoryDocument],
+    loaded: &[OperatorMemoryDocument],
+) -> String {
+    format!(
+        "You are the operator-memory graph selector for Paddles.\n\
+Read the frontier documents and select the next local files that should be loaded to interpret the current turn.\n\
+Reply with ONLY one JSON object and no prose or markdown.\n\
+\n\
+Return this schema:\n\
+{{\"edges\":[{{\"source\":\"frontier/source/path\",\"targets\":[\"relative/or/absolute/path\", \"...\"]}}]}}\n\
+\n\
+Rules:\n\
+- The only roots are the loaded AGENTS.md memory files.\n\
+- Use ONLY targets that are explicitly referenced in the source document text.\n\
+- Keep the target path exactly as written in the source document.\n\
+- Select only local files that help interpret the current user request.\n\
+- Prefer a small relevant subgraph over a broad crawl.\n\
+- Never invent file names.\n\
+- If no more files should be loaded, return {{\"edges\":[]}}.\n\
+\n\
+Workspace root:\n\
+{}\n\
+\n\
+Current user request:\n\
+{}\n\
+\n\
+Already loaded operator-memory graph:\n\
+{}\n\
+\n\
+Frontier documents to expand:\n\
+{}\n",
+        request.workspace_root.display(),
+        request.user_prompt,
+        format_operator_memory_documents(loaded),
+        format_operator_memory_documents(frontier),
+    )
+}
+
+fn build_interpretation_graph_retry_prompt(
+    request: &InterpretationRequest,
+    frontier: &[OperatorMemoryDocument],
+    loaded: &[OperatorMemoryDocument],
+) -> String {
+    format!(
+        "Your last operator-memory graph reply was empty or invalid.\n\
+Return ONLY one valid JSON object with this shape:\n\
+{{\"edges\":[{{\"source\":\"frontier/source/path\",\"targets\":[\"relative/or/absolute/path\"]}}]}}\n\
+\n\
+If no more files should be loaded, return {{\"edges\":[]}}.\n\
+\n\
+Current user request:\n\
+{}\n\
+\n\
+Already loaded operator-memory graph:\n\
+{}\n\
+\n\
+Frontier documents to expand:\n\
+{}\n",
+        request.user_prompt,
+        format_operator_memory_documents(loaded),
+        format_operator_memory_documents(frontier),
+    )
+}
+
+fn format_operator_memory_documents(documents: &[OperatorMemoryDocument]) -> String {
+    if documents.is_empty() {
+        return "No operator-memory documents are loaded.".to_string();
+    }
+
+    let mut sections = Vec::new();
+    for document in documents {
+        sections.push(format!(
+            "--- {} ---\n{}",
+            document.source,
+            trim_for_context(&document.contents, MAX_GRAPH_DOC_CHARS)
+        ));
+    }
+    sections.join("\n\n")
 }
 
 fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
@@ -2848,6 +3043,14 @@ fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
     Ok(serde_json::from_str(json).ok())
 }
 
+fn parse_interpretation_graph(response: &str) -> Result<Option<InterpretationGraphEnvelope>> {
+    let trimmed = response.trim();
+    let Some(json) = extract_json_payload(trimmed) else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(json).ok())
+}
+
 fn parse_initial_action(response: &str) -> Result<Option<InitialActionDecision>> {
     let trimmed = response.trim();
     let Some(json) = extract_json_payload(trimmed) else {
@@ -3730,6 +3933,10 @@ fn resolve_existing_path(workspace_root: &Path, candidate: &Path) -> Result<Path
     Ok(resolved)
 }
 
+fn canonical_document_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn normalize_relative_path(workspace_root: &Path, requested: &Path) -> PathBuf {
     let mut normalized = workspace_root.to_path_buf();
     for component in requested.components() {
@@ -3885,9 +4092,9 @@ mod tests {
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext,
         InterpretationDecisionFramework, InterpretationProcedure, InterpretationProcedureStep,
-        InterpretationToolHint, PlannerAction, PlannerDecision, PlannerLoopState, PlannerRequest,
-        PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-        RetainedEvidence, WorkspaceAction,
+        InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
+        PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
+        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -4416,6 +4623,74 @@ mod tests {
         assert!(prompt.contains("Inspect (INSTRUCTIONS.md)"));
         assert!(prompt.contains("Recent turns"));
         assert!(prompt.contains("user: previous turn"));
+    }
+
+    #[test]
+    fn interpretation_context_expands_model_selected_guidance_subgraph_from_agents_roots() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "Follow `INSTRUCTIONS.md` for the canonical turn loop.",
+        )
+        .expect("write AGENTS");
+        fs::write(
+            workspace.path().join("INSTRUCTIONS.md"),
+            "Inspect with `keel mission next --status` and `keel pulse`.",
+        )
+        .expect("write INSTRUCTIONS");
+
+        let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = SiftAgentAdapter::new_for_test_with_conversations(
+            workspace.path(),
+            "qwen-1.5b",
+            vec![
+                Box::new(RecordingConversation::new(
+                    r#"{"edges":[{"source":"AGENTS.md","targets":["INSTRUCTIONS.md"]}]}"#,
+                    Arc::clone(&recorded_messages),
+                )),
+                Box::new(RecordingConversation::new(
+                    r#"{"edges":[]}"#,
+                    Arc::clone(&recorded_messages),
+                )),
+            ],
+        );
+
+        let interpretation = adapter
+            .derive_interpretation_context(&InterpretationRequest::new(
+                "What's next on the keel board?",
+                workspace.path(),
+                vec![OperatorMemoryDocument {
+                    path: workspace.path().join("AGENTS.md"),
+                    source: "AGENTS.md".to_string(),
+                    contents: "Follow `INSTRUCTIONS.md` for the canonical turn loop.".to_string(),
+                }],
+            ))
+            .expect("interpretation");
+
+        assert!(interpretation.sources().contains(&"AGENTS.md".to_string()));
+        assert!(
+            interpretation
+                .sources()
+                .contains(&"INSTRUCTIONS.md".to_string())
+        );
+        assert!(
+            interpretation
+                .tool_hints
+                .iter()
+                .any(|hint| hint.action.summary().contains("keel mission next --status"))
+        );
+
+        let history = recorded_messages.lock().expect("history lock");
+        assert!(
+            history
+                .first()
+                .is_some_and(|prompt| prompt.contains("AGENTS.md"))
+        );
+        assert!(
+            history
+                .iter()
+                .any(|prompt| prompt.contains("INSTRUCTIONS.md"))
+        );
     }
 
     #[test]

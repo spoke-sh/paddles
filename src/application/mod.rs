@@ -10,11 +10,12 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
-    GathererCapability, InitialAction, InitialActionDecision, InterpretationContext, ModelPaths,
-    ModelRegistry, NoopTraceRecorder, PlannerAction, PlannerBudget, PlannerCapability,
-    PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
-    PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision,
-    RetainedEvidence, RetrievalMode, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+    GathererCapability, InitialAction, InitialActionDecision, InterpretationContext,
+    InterpretationRequest, ModelPaths, ModelRegistry, NoopTraceRecorder, PlannerAction,
+    PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest,
+    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+    ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
 };
 use crate::infrastructure::adapters::agent_memory::AgentMemory;
 use crate::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
@@ -985,8 +986,9 @@ impl MechSuitService {
         let gatherer = runtime.gatherer.clone();
         drop(runtime_guard);
 
-        let memory = AgentMemory::load(&self.workspace_root);
-        let interpretation = memory.build_interpretation_context(prompt, &self.workspace_root);
+        let interpretation = self
+            .derive_interpretation_context(prompt, planner_engine.as_ref())
+            .await;
         let turn_id = session.allocate_turn_id();
         let active_thread = session.active_thread().thread_ref;
         let trace = Arc::new(StructuredTurnTrace::new(
@@ -1046,9 +1048,6 @@ impl MechSuitService {
 
         let gathered_evidence = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
-                let memory = AgentMemory::load(&self.workspace_root);
-                let interpretation =
-                    memory.build_interpretation_context(prompt, &self.workspace_root);
                 let recent_turns = synthesizer_engine.recent_turn_summaries()?;
                 self.execute_recursive_planner_loop(
                     prompt,
@@ -1057,7 +1056,7 @@ impl MechSuitService {
                         planner_engine,
                         synthesizer_engine: Arc::clone(&synthesizer_engine),
                         gatherer,
-                        interpretation,
+                        interpretation: interpretation.clone(),
                         recent_turns,
                     },
                     execution_plan.initial_planner_decision.clone(),
@@ -1105,8 +1104,9 @@ impl MechSuitService {
         let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
         drop(runtime_guard);
 
-        let interpretation = AgentMemory::load(&self.workspace_root)
-            .build_interpretation_context(&candidate.prompt, &self.workspace_root);
+        let interpretation = self
+            .derive_interpretation_context(&candidate.prompt, planner_engine.as_ref())
+            .await;
         let source_thread = candidate.active_thread.clone();
         let turn_id = session.allocate_turn_id();
         let trace = Arc::new(StructuredTurnTrace::new(
@@ -1183,6 +1183,30 @@ impl MechSuitService {
             trace.downstream.clone(),
         )
         .await
+    }
+
+    async fn derive_interpretation_context(
+        &self,
+        prompt: &str,
+        planner: &dyn RecursivePlanner,
+    ) -> InterpretationContext {
+        let memory = AgentMemory::load(&self.workspace_root);
+        let request = InterpretationRequest::new(
+            prompt,
+            self.workspace_root.clone(),
+            memory.operator_memory_documents(&self.workspace_root),
+        );
+        match planner.derive_interpretation_context(&request).await {
+            Ok(context) => context,
+            Err(err) => {
+                if self.verbose.load(Ordering::Relaxed) >= 1 {
+                    println!(
+                        "[WARN] Falling back to AGENTS-only interpretation context after model-driven derivation failed: {err:#}"
+                    );
+                }
+                memory.build_interpretation_context(prompt, &self.workspace_root)
+            }
+        }
     }
 
     async fn execute_recursive_planner_loop(
@@ -2066,11 +2090,11 @@ mod tests {
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-        InitialAction, InitialActionDecision, ModelPaths, ModelRegistry, PlannerAction,
-        PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode,
-        PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
-        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, ThreadDecisionRequest,
-        TraceRecorder, WorkspaceAction,
+        InitialAction, InitialActionDecision, InterpretationContext, InterpretationRequest,
+        ModelPaths, ModelRegistry, PlannerAction, PlannerCapability, PlannerGraphBranch,
+        PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerRequest, PlannerStrategyKind,
+        PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
+        RetrievalMode, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -2116,6 +2140,28 @@ mod tests {
     impl RecursivePlanner for TestPlanner {
         fn capability(&self) -> PlannerCapability {
             PlannerCapability::Available
+        }
+
+        async fn derive_interpretation_context(
+            &self,
+            request: &InterpretationRequest,
+        ) -> Result<InterpretationContext> {
+            Ok(InterpretationContext {
+                summary: format!(
+                    "test interpretation assembled from {} operator-memory document(s).",
+                    request.operator_memory.len()
+                ),
+                documents: request
+                    .operator_memory
+                    .iter()
+                    .map(|document| crate::domain::ports::InterpretationDocument {
+                        source: document.source.clone(),
+                        excerpt: document.contents.clone(),
+                    })
+                    .collect(),
+                tool_hints: Vec::new(),
+                decision_framework: Default::default(),
+            })
         }
 
         async fn select_initial_action(

@@ -1,6 +1,7 @@
 use crate::domain::ports::{
     InterpretationContext, InterpretationDecisionFramework, InterpretationDocument,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint,
+    OperatorMemoryDocument, WorkspaceAction,
 };
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -88,66 +89,43 @@ impl AgentMemory {
         user_prompt: &str,
         workspace_root: &Path,
     ) -> InterpretationContext {
-        if self.documents.is_empty() {
-            return InterpretationContext::default();
-        }
+        self.build_interpretation_context_from_documents(
+            user_prompt,
+            workspace_root,
+            &self.operator_memory_documents(workspace_root),
+        )
+    }
 
-        let mut scored_documents = self
-            .documents
+    pub(crate) fn operator_memory_documents(
+        &self,
+        workspace_root: &Path,
+    ) -> Vec<OperatorMemoryDocument> {
+        self.documents
             .iter()
-            .map(|document| {
-                let (excerpt, score) = select_relevant_excerpt(&document.contents, user_prompt);
-                (
-                    score + interpretation_kind_score(document.kind),
-                    document,
-                    InterpretationDocument {
-                        source: display_path(workspace_root, &document.path),
-                        excerpt,
-                    },
-                )
+            .filter(|document| document.kind == MemoryDocumentKind::AgentMemory)
+            .map(|document| OperatorMemoryDocument {
+                path: document.path.clone(),
+                source: display_path(workspace_root, &document.path),
+                contents: document.contents.clone(),
             })
-            .collect::<Vec<_>>();
-        scored_documents.sort_by(|(left_score, _, left_doc), (right_score, _, right_doc)| {
-            right_score
-                .cmp(left_score)
-                .then_with(|| left_doc.source.cmp(&right_doc.source))
-        });
-        let selected_documents = scored_documents
-            .into_iter()
-            .take(MAX_INTERPRETATION_DOCS)
-            .collect::<Vec<_>>();
-        let documents = selected_documents
-            .iter()
-            .map(|(_, _, document)| document.clone())
-            .collect::<Vec<_>>();
-        let tool_hints =
-            select_relevant_tool_hints(user_prompt, workspace_root, &selected_documents);
-        let decision_framework =
-            select_decision_framework(user_prompt, workspace_root, &selected_documents);
+            .collect()
+    }
 
-        InterpretationContext {
-            summary: format!(
-                "Operator interpretation context assembled from {} memory and linked guidance document(s), {} tool hint(s), and {} decision procedure(s). Use it before choosing recursive workspace actions.",
-                documents.len(),
-                tool_hints.len(),
-                decision_framework.procedures.len()
-            ),
-            documents,
-            tool_hints,
-            decision_framework,
-        }
+    pub(crate) fn build_interpretation_context_from_documents(
+        &self,
+        user_prompt: &str,
+        workspace_root: &Path,
+        documents: &[OperatorMemoryDocument],
+    ) -> InterpretationContext {
+        build_interpretation_context_from_documents(user_prompt, workspace_root, documents)
     }
 
     fn load_with_search_paths(start_dir: &Path, search_paths: MemorySearchPaths) -> Self {
         let mut memory = Self::default();
-        let mut seen_paths = HashSet::new();
-        let mut loaded_agent_docs = Vec::new();
 
         for path in discover_memory_files(start_dir, &search_paths) {
             match load_memory_document(path.clone(), MemoryDocumentKind::AgentMemory) {
                 Ok(Some(document)) => {
-                    seen_paths.insert(canonical_memory_path(&document.path));
-                    loaded_agent_docs.push(document.clone());
                     memory.documents.push(document);
                 }
                 Ok(None) => {}
@@ -156,25 +134,6 @@ impl AgentMemory {
                         "Skipped unreadable memory file {}: {err}",
                         path.display()
                     ));
-                }
-            }
-        }
-
-        for agent_doc in loaded_agent_docs {
-            for linked_path in discover_linked_documents(&agent_doc.path, &agent_doc.contents) {
-                let canonical = canonical_memory_path(&linked_path);
-                if !seen_paths.insert(canonical) {
-                    continue;
-                }
-
-                match load_memory_document(linked_path.clone(), MemoryDocumentKind::LinkedGuidance)
-                {
-                    Ok(Some(document)) => memory.documents.push(document),
-                    Ok(None) => {}
-                    Err(err) => memory.warnings.push(format!(
-                        "Skipped unreadable linked guidance {}: {err}",
-                        linked_path.display()
-                    )),
                 }
             }
         }
@@ -195,6 +154,68 @@ fn interpretation_kind_score(kind: MemoryDocumentKind) -> usize {
     match kind {
         MemoryDocumentKind::AgentMemory => 10,
         MemoryDocumentKind::LinkedGuidance => 0,
+    }
+}
+
+fn build_interpretation_context_from_documents(
+    user_prompt: &str,
+    workspace_root: &Path,
+    documents: &[OperatorMemoryDocument],
+) -> InterpretationContext {
+    if documents.is_empty() {
+        return InterpretationContext::default();
+    }
+
+    let mut scored_documents = documents
+        .iter()
+        .map(|document| {
+            let (excerpt, score) = select_relevant_excerpt(&document.contents, user_prompt);
+            let kind_score = if Path::new(&document.source)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name == MEMORY_FILE_NAME)
+            {
+                interpretation_kind_score(MemoryDocumentKind::AgentMemory)
+            } else {
+                interpretation_kind_score(MemoryDocumentKind::LinkedGuidance)
+            };
+            (
+                score + kind_score,
+                document,
+                InterpretationDocument {
+                    source: display_path(workspace_root, &document.path),
+                    excerpt,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    scored_documents.sort_by(|(left_score, _, left_doc), (right_score, _, right_doc)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left_doc.source.cmp(&right_doc.source))
+    });
+    let selected_documents = scored_documents
+        .into_iter()
+        .take(MAX_INTERPRETATION_DOCS)
+        .collect::<Vec<_>>();
+    let interpretation_documents = selected_documents
+        .iter()
+        .map(|(_, _, document)| document.clone())
+        .collect::<Vec<_>>();
+    let tool_hints = select_relevant_tool_hints(user_prompt, workspace_root, &selected_documents);
+    let decision_framework =
+        select_decision_framework(user_prompt, workspace_root, &selected_documents);
+
+    InterpretationContext {
+        summary: format!(
+            "Operator interpretation context assembled from {} memory and model-derived guidance document(s), {} tool hint(s), and {} decision procedure(s). Use it before choosing recursive workspace actions.",
+            interpretation_documents.len(),
+            tool_hints.len(),
+            decision_framework.procedures.len()
+        ),
+        documents: interpretation_documents,
+        tool_hints,
+        decision_framework,
     }
 }
 
@@ -269,80 +290,11 @@ fn push_if_present(
     }
 }
 
-fn canonical_memory_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
 fn default_user_memory_path() -> Option<PathBuf> {
     env::var_os("HOME").map(|home| PathBuf::from(home).join(USER_MEMORY_RELATIVE_PATH))
 }
 
-fn discover_linked_documents(agent_path: &Path, contents: &str) -> Vec<PathBuf> {
-    let mut ordered = Vec::new();
-    let mut seen = HashSet::new();
-    for target in extract_markdown_link_targets(contents)
-        .into_iter()
-        .chain(extract_backticked_doc_targets(contents))
-    {
-        let Some(resolved) = resolve_link_target(agent_path, &target) else {
-            continue;
-        };
-        let canonical = canonical_memory_path(&resolved);
-        if seen.insert(canonical) {
-            ordered.push(resolved);
-        }
-    }
-    ordered
-}
-
-fn extract_markdown_link_targets(contents: &str) -> Vec<String> {
-    let mut targets = Vec::new();
-    let mut remainder = contents;
-    while let Some(start) = remainder.find("](") {
-        let candidate = &remainder[start + 2..];
-        let Some(end) = candidate.find(')') else {
-            break;
-        };
-        let target = candidate[..end].trim();
-        if !target.is_empty() {
-            targets.push(target.to_string());
-        }
-        remainder = &candidate[end + 1..];
-    }
-    targets
-}
-
-fn extract_backticked_doc_targets(contents: &str) -> Vec<String> {
-    let mut targets = Vec::new();
-    let mut in_tick = false;
-    let mut current = String::new();
-
-    for ch in contents.chars() {
-        if ch == '`' {
-            if in_tick {
-                let trimmed = current.trim();
-                if looks_like_local_doc_target(trimmed) {
-                    targets.push(trimmed.to_string());
-                }
-                current.clear();
-            }
-            in_tick = !in_tick;
-            continue;
-        }
-
-        if in_tick {
-            current.push(ch);
-        }
-    }
-
-    targets
-}
-
-fn looks_like_local_doc_target(target: &str) -> bool {
-    target.ends_with(".md") || target.starts_with(".keel/")
-}
-
-fn resolve_link_target(agent_path: &Path, target: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_guidance_target(base_path: &Path, target: &str) -> Option<PathBuf> {
     if target.starts_with("http://")
         || target.starts_with("https://")
         || target.starts_with("mailto:")
@@ -351,14 +303,14 @@ fn resolve_link_target(agent_path: &Path, target: &str) -> Option<PathBuf> {
     }
 
     let target = target.split('#').next()?.trim();
-    if target.is_empty() || !looks_like_local_doc_target(target) {
+    if target.is_empty() {
         return None;
     }
 
     let candidate = if Path::new(target).is_absolute() {
         PathBuf::from(target)
     } else {
-        agent_path.parent()?.join(target)
+        base_path.parent()?.join(target)
     };
 
     if candidate.is_file() {
@@ -366,6 +318,25 @@ fn resolve_link_target(agent_path: &Path, target: &str) -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+pub(crate) fn load_guidance_document(
+    base_path: &Path,
+    target: &str,
+    workspace_root: &Path,
+) -> std::io::Result<Option<OperatorMemoryDocument>> {
+    let Some(resolved) = resolve_guidance_target(base_path, target) else {
+        return Ok(None);
+    };
+    let Some(document) = load_memory_document(resolved, MemoryDocumentKind::LinkedGuidance)? else {
+        return Ok(None);
+    };
+
+    Ok(Some(OperatorMemoryDocument {
+        source: display_path(workspace_root, &document.path),
+        path: document.path,
+        contents: document.contents,
+    }))
 }
 
 fn trim_memory_contents(contents: &str) -> String {
@@ -461,7 +432,7 @@ fn prompt_terms(user_prompt: &str) -> Vec<String> {
 fn select_relevant_tool_hints(
     user_prompt: &str,
     workspace_root: &Path,
-    selected_documents: &[(usize, &MemoryDocument, InterpretationDocument)],
+    selected_documents: &[(usize, &OperatorMemoryDocument, InterpretationDocument)],
 ) -> Vec<InterpretationToolHint> {
     let query_terms = prompt_terms(user_prompt);
     let mut deduped = HashMap::<String, (usize, InterpretationToolHint)>::new();
@@ -537,7 +508,7 @@ fn select_relevant_tool_hints(
 fn select_decision_framework(
     user_prompt: &str,
     workspace_root: &Path,
-    selected_documents: &[(usize, &MemoryDocument, InterpretationDocument)],
+    selected_documents: &[(usize, &OperatorMemoryDocument, InterpretationDocument)],
 ) -> InterpretationDecisionFramework {
     let query_terms = prompt_terms(user_prompt);
     let mut procedures = Vec::<(usize, InterpretationProcedure)>::new();
@@ -776,7 +747,7 @@ fn is_read_only_command(command: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentMemory, MemorySearchPaths};
+    use super::{AgentMemory, MemorySearchPaths, load_guidance_document};
     use std::fs;
 
     #[test]
@@ -823,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_linked_guidance_from_agents_documents() {
+    fn agent_memory_roots_only_load_agents_documents() {
         let sandbox = tempfile::tempdir().expect("sandbox");
         let session_root = sandbox.path().join("workspace/project");
         fs::create_dir_all(&session_root).expect("session root");
@@ -843,10 +814,30 @@ mod tests {
             },
         );
 
-        let interpretation = memory.build_interpretation_context("policy", &session_root);
-        assert!(interpretation.sources().contains(&"AGENTS.md".to_string()));
-        assert!(interpretation.sources().contains(&"POLICY.md".to_string()));
-        assert!(interpretation.sources().contains(&"README.md".to_string()));
+        assert_eq!(
+            memory.document_paths(),
+            vec![session_root.join("AGENTS.md")]
+        );
+        let operator_memory = memory.operator_memory_documents(&session_root);
+        assert_eq!(operator_memory.len(), 1);
+        assert_eq!(operator_memory[0].source, "AGENTS.md");
+    }
+
+    #[test]
+    fn load_guidance_document_resolves_targets_relative_to_source_documents() {
+        let sandbox = tempfile::tempdir().expect("sandbox");
+        let session_root = sandbox.path().join("workspace/project");
+        fs::create_dir_all(&session_root).expect("session root");
+        fs::write(session_root.join("AGENTS.md"), "See [Policy](POLICY.md).").expect("agents");
+        fs::write(session_root.join("POLICY.md"), "policy guidance").expect("policy");
+
+        let loaded =
+            load_guidance_document(&session_root.join("AGENTS.md"), "POLICY.md", &session_root)
+                .expect("guidance load")
+                .expect("guidance document");
+
+        assert_eq!(loaded.source, "POLICY.md");
+        assert_eq!(loaded.contents, "policy guidance");
     }
 
     #[test]

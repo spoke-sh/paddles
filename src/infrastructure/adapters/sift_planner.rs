@@ -1,7 +1,7 @@
 use crate::domain::model::ThreadDecision;
 use crate::domain::ports::{
-    InitialActionDecision, PlannerCapability, PlannerRequest, RecursivePlanner,
-    RecursivePlannerDecision, ThreadDecisionRequest,
+    InitialActionDecision, InterpretationContext, InterpretationRequest, PlannerCapability,
+    PlannerRequest, RecursivePlanner, RecursivePlannerDecision, ThreadDecisionRequest,
 };
 use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use anyhow::Result;
@@ -22,6 +22,13 @@ impl SiftPlannerAdapter {
 impl RecursivePlanner for SiftPlannerAdapter {
     fn capability(&self) -> PlannerCapability {
         PlannerCapability::Available
+    }
+
+    async fn derive_interpretation_context(
+        &self,
+        request: &InterpretationRequest,
+    ) -> Result<InterpretationContext, anyhow::Error> {
+        self.engine.derive_interpretation_context(request)
     }
 
     async fn select_initial_action(

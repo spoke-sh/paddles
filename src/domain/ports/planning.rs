@@ -10,6 +10,11 @@ use std::path::PathBuf;
 pub trait RecursivePlanner: Send + Sync {
     fn capability(&self) -> PlannerCapability;
 
+    async fn derive_interpretation_context(
+        &self,
+        request: &InterpretationRequest,
+    ) -> Result<InterpretationContext, anyhow::Error>;
+
     async fn select_initial_action(
         &self,
         request: &PlannerRequest,
@@ -93,6 +98,34 @@ impl InterpretationContext {
         }
         sections.join("\n\n")
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterpretationRequest {
+    pub user_prompt: String,
+    pub workspace_root: PathBuf,
+    pub operator_memory: Vec<OperatorMemoryDocument>,
+}
+
+impl InterpretationRequest {
+    pub fn new(
+        user_prompt: impl Into<String>,
+        workspace_root: impl Into<PathBuf>,
+        operator_memory: Vec<OperatorMemoryDocument>,
+    ) -> Self {
+        Self {
+            user_prompt: user_prompt.into(),
+            workspace_root: workspace_root.into(),
+            operator_memory,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OperatorMemoryDocument {
+    pub path: PathBuf,
+    pub source: String,
+    pub contents: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -25,7 +25,7 @@ Instead, `paddles` should behave like a bounded recursive harness.
 ```mermaid
 flowchart TD
     U["User Turn"]
-    I["Interpretation Context<br/>AGENTS.md + linked docs + tool hints + derived procedures + recent turns + prior tool state"]
+    I["Interpretation Context<br/>AGENTS.md roots + model-derived guidance subgraph + tool hints + derived procedures + recent turns + prior tool state"]
     P["Planner Lane<br/>planner-capable model"]
     D{"Next bounded action?"}
     A["Validated resource action<br/>search / list_files / read / inspect / shell / diff / edit / refine / branch"]
@@ -51,7 +51,7 @@ Routing is workload-specific. The point is not to find one default model for eve
 ```mermaid
 flowchart LR
     Turn["Incoming Turn"]
-    Interpret["Interpretation context<br/>AGENTS.md + linked docs + tool hints + derived procedures + recent turns + local state"]
+    Interpret["Interpretation context<br/>AGENTS.md roots + model-derived guidance subgraph + tool hints + derived procedures + recent turns + local state"]
     Decide["Model-selected next action<br/>bounded schema"]
     Direct["Answer/synthesize now"]
     Tool["Concrete workspace action"]
@@ -82,7 +82,7 @@ initial path for normal turns.
 ```mermaid
 flowchart TD
     U["User turn"]
-    I["Interpretation context<br/>AGENTS.md + linked docs + tool hints + derived procedures + turns + local state"]
+    I["Interpretation context<br/>AGENTS.md roots + model-derived guidance subgraph + tool hints + derived procedures + turns + local state"]
     M["Action-selection model"]
     C{"Choose one"}
     A["answer / synthesize"]
@@ -150,7 +150,7 @@ The repository now implements the recursive harness in a bounded local-first for
 Today, the runtime has:
 
 - a planner lane that sees interpretation context before choosing the first bounded action
-- hierarchical `AGENTS.md` reload plus linked foundational guidance excerpts, read-only command hints, and derived decision procedures at interpretation time
+- hierarchical `AGENTS.md` reload plus a model-derived guidance subgraph, read-only command hints, and derived decision procedures at interpretation time
 - a model-directed first action schema that can choose `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), `refine`, `branch`, or `stop`
 - interpretation-aware fallback selection that prefers relevant command hints and derived decision procedures from foundational docs before generic search/stop
 - evidence-aware fallback stopping that halts recursion once an interpretation-derived procedure step has already answered the current request
@@ -275,7 +275,7 @@ paddles --prompt "Summarize the current runtime lanes"
 2. `~/.config/paddles/AGENTS.md`
 3. every ancestor `AGENTS.md` from filesystem root to the current workspace
 
-Later files are more specific. That memory now participates in turn interpretation before planner action selection, and linked foundational docs are pulled in as compact excerpts rather than late prompt-only baggage.
+Later files are more specific. That memory now participates in turn interpretation before planner action selection, and additional guidance is loaded through a turn-time model-derived subgraph rooted at `AGENTS.md` rather than a hardcoded foundational file list.
 
 ## Why This Architecture
 

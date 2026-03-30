@@ -441,21 +441,9 @@ fn is_src_path(source: &str) -> bool {
 }
 
 fn is_top_level_doc(source: &str) -> bool {
-    Path::new(source)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .is_some_and(|name| {
-            matches!(
-                name,
-                "README.md"
-                    | "ARCHITECTURE.md"
-                    | "CONFIGURATION.md"
-                    | "POLICY.md"
-                    | "AGENTS.md"
-                    | "INSTRUCTIONS.md"
-                    | "PROTOCOL.md"
-            )
-        })
+    let path = Path::new(source);
+    path.extension().and_then(|value| value.to_str()) == Some("md")
+        && path.components().count() == 1
 }
 
 fn is_keel_path(source: &str) -> bool {

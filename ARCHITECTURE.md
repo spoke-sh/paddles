@@ -12,9 +12,9 @@ This document describes the implemented recursive harness backbone of `paddles` 
 The backbone has five layers:
 
 1. `InterpretationContextAssembler`
-   Builds turn-time context from `AGENTS.md`, linked foundational docs, recent
-   turns, retained evidence, prior tool outputs, and extracted read-only tool
-   hints plus derived decision procedures from foundational guidance.
+   Builds turn-time context from `AGENTS.md`, a model-derived guidance subgraph,
+   recent turns, retained evidence, prior tool outputs, and extracted read-only
+   tool hints plus derived decision procedures from that guidance graph.
 
 2. `PlannerLane`
    A planner-capable model chooses the next bounded action before route
@@ -58,7 +58,7 @@ final synthesis.
 - Interpretation should happen before routing commits to a path.
 - Top-level routing should come from a constrained model-selected next action, not a controller string heuristic.
 - `AGENTS.md` is part of interpretation context, not just answer prompting.
-- linked foundational docs should be able to bootstrap concrete read-only tool hints and decision procedures for the planner before it falls back to generic search
+- `AGENTS.md` should be the only hardcoded interpretation root; additional guidance should be loaded through a turn-time model-derived document graph before fallback planning drops to generic search
 - Planner and synthesizer are different roles and may use different models.
 - Keel is an evidence domain, not a first-class runtime intent.
 - Recursive planning must stay bounded and observable.
@@ -134,7 +134,7 @@ The repo now contains the main pieces of the target architecture:
 - a Sift-backed planner/synth model adapter in [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) and [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs)
 - a local gatherer backend in [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs)
 - interpretation-time operator memory in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
-- interpretation-time tool hint extraction and decision-procedure derivation from that same memory/guidance layer in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs)
+- interpretation-time tool hint extraction and decision-procedure derivation from a model-derived guidance graph rooted at `AGENTS.md` in [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs) and [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs)
 - a default transcript TUI in [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs)
 - a paddles-owned trace contract in [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs)
 - a reusable internal workspace crate for conversation/thread/session primitives in [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)
@@ -146,7 +146,7 @@ The repo now contains the main pieces of the target architecture:
 The remaining transitional pieces are now smaller:
 
 - the main mech-suit service now keeps explicit workspace actions inside the planner loop instead of routing them through a separate top-level bridge
-- interpretation-driven fallbacks now prefer relevant read-only command hints and derived procedures from foundational docs before generic search/stop
+- interpretation-driven fallbacks now prefer relevant read-only command hints and derived procedures from the AGENTS-rooted guidance graph before generic search/stop
 - planner fallback stopping can now terminate recursion when an interpretation-derived procedure step has already produced matching evidence for the user request
 - legacy direct adapter helpers still carry heuristic intent inference outside the normal `MechSuitService` path
 - planner `search` / `refine` actions currently delegate to the configured gatherer backend rather than a richer unified resource graph
