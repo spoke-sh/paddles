@@ -1323,6 +1323,19 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
                 )
             ),
         ),
+        TurnEvent::GathererSearchProgress {
+            phase,
+            elapsed_seconds,
+            detail,
+        } => {
+            let elapsed = format_duration_compact(Duration::from_secs(elapsed_seconds));
+            let content = detail.unwrap_or_default();
+            TranscriptRow::new(
+                TranscriptRowKind::Event,
+                format!("• Searching ({phase}) — {elapsed}"),
+                content,
+            )
+        }
         TurnEvent::GathererSummary {
             provider,
             summary,

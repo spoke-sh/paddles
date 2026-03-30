@@ -775,6 +775,17 @@ fn render_turn_event(event: &TurnEvent) -> String {
         TurnEvent::Fallback { stage, reason } => {
             format!("• Fell back\n  └ {stage}: {}", trim_event_detail(reason, 3))
         }
+        TurnEvent::GathererSearchProgress {
+            phase,
+            elapsed_seconds,
+            detail,
+        } => {
+            let suffix = detail
+                .as_deref()
+                .map(|d| format!(" — {d}"))
+                .unwrap_or_default();
+            format!("• Searching ({phase})\n  └ elapsed {elapsed_seconds}s{suffix}")
+        }
         TurnEvent::SynthesisReady {
             grounded,
             citations,
