@@ -13,6 +13,9 @@ use crate::domain::ports::{
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
 };
+use crate::infrastructure::rendering::{
+    ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -1906,7 +1909,9 @@ Routing guidance: {}\n\
 Persistent operator memory:\n\
 {}\n\
 \n\
-If you need a tool, respond with ONLY a single JSON object and no markdown or prose.\n\
+If you need a tool, respond with ONLY a single JSON tool call and no prose outside it.\n\
+If you do not need a tool, respond with ONLY a single JSON final answer object using this rendering contract:\n\
+{}\n\
 \n\
 When the user asks you to inspect repository state, run a command, read a file, search the workspace, or apply a change, prefer a tool call over describing how they could do it themselves.\n\
 Examples:\n\
@@ -1938,6 +1943,7 @@ Current user request:\n\
         turn.workspace_root.display(),
         routing_guidance,
         turn.memory_prompt,
+        final_answer_contract_prompt(turn.gathered_evidence.is_some()),
         turn.recent_turns,
         format_gathered_evidence_digest(turn.gathered_evidence),
         format_context_digest(turn.context),
@@ -1958,7 +1964,8 @@ Answer ONLY from the gathered repository evidence below.\n\
 Do not refer the user to external documentation.\n\
 If the evidence is insufficient, say that explicitly.\n\
 Include source/file citations in the final answer.\n\
-Do not emit JSON or tool calls.\n\
+Use this final answer rendering contract:\n\
+{}\n\
 \n\
 Persistent operator memory:\n\
 {memory_prompt}\n\
@@ -1971,6 +1978,7 @@ Gathered repository evidence:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
+        final_answer_contract_prompt(true),
         format_gathered_evidence_digest(Some(evidence)),
     )
 }
@@ -1979,15 +1987,16 @@ fn build_direct_turn_prompt(user_prompt: &str, memory_prompt: &str) -> String {
     format!(
         "You are Paddles, a local-first coding assistant.\n\
 The user is making a conversational request that does not require workspace tools.\n\
-Answer directly in plain text.\n\
-Do not emit JSON, code fences, or tool calls.\n\
+Use this final answer rendering contract:\n\
+{}\n\
 Do not modify files or suggest workspace actions unless the user explicitly asks for them.\n\
 \n\
 Persistent operator memory:\n\
 {memory_prompt}\n\
 \n\
 Current user request:\n\
-{user_prompt}\n"
+{user_prompt}\n",
+        final_answer_contract_prompt(false),
     )
 }
 
@@ -2000,10 +2009,10 @@ fn build_planned_direct_prompt(
     format!(
         "You are Paddles, a local-first coding assistant.\n\
 This turn has already passed through the planner lane.\n\
-Answer directly in plain text.\n\
+Use this final answer rendering contract:\n\
+{}\n\
 If planner evidence is attached, use it and stay grounded.\n\
 If no planner evidence is attached, do not invent repository-specific claims.\n\
-Do not emit JSON or tool calls.\n\
 \n\
 Persistent operator memory:\n\
 {memory_prompt}\n\
@@ -2016,6 +2025,7 @@ Planner evidence handoff:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
+        final_answer_contract_prompt(gathered_evidence.is_some()),
         format_gathered_evidence_digest(gathered_evidence),
     )
 }
@@ -2023,14 +2033,15 @@ Current user request:\n\
 fn build_direct_retry_prompt(user_prompt: &str, memory_prompt: &str) -> String {
     format!(
         "Your last reply tried to call a workspace tool for a conversational message.\n\
-Answer the user directly in plain text.\n\
-Do not emit JSON, code fences, or tool calls.\n\
+Use this final answer rendering contract:\n\
+{}\n\
 \n\
 Persistent operator memory:\n\
 {memory_prompt}\n\
 \n\
 Current user request:\n\
-        {user_prompt}\n"
+        {user_prompt}\n",
+        final_answer_contract_prompt(false),
     )
 }
 
@@ -2581,10 +2592,11 @@ fn build_grounded_retry_prompt(
 ) -> String {
     format!(
         "Your last reply was empty or tried to call a tool for a repository question.\n\
-Answer directly in plain text using ONLY the gathered repository evidence.\n\
+Answer using ONLY the gathered repository evidence.\n\
 Include source/file citations in the final answer.\n\
 If the evidence is insufficient, say so explicitly.\n\
-Do not emit JSON or tool calls.\n\
+Use this final answer rendering contract:\n\
+{}\n\
 \n\
 Persistent operator memory:\n\
 {memory_prompt}\n\
@@ -2597,6 +2609,7 @@ Gathered repository evidence:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
+        final_answer_contract_prompt(true),
         format_gathered_evidence_digest(Some(evidence)),
     )
 }
@@ -2647,7 +2660,9 @@ Original user request:\n\
 {user_prompt}\n\
 \n\
 If you need another tool, respond with ONLY one JSON tool call.\n\
-Otherwise answer the user directly and concisely."
+Otherwise respond with ONLY one JSON final answer object using this rendering contract:\n\
+{}",
+        final_answer_contract_prompt(false),
     )
 }
 
@@ -2659,6 +2674,7 @@ fn finalize_turn_reply(
     gathered_evidence: Option<&EvidenceBundle>,
     event_sink: &dyn TurnEventSink,
 ) -> String {
+    let reply = normalize_assistant_response(&reply);
     let Some(evidence) = gathered_evidence else {
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: false,
@@ -2737,14 +2753,6 @@ fn citation_sources(workspace_root: &Path, evidence: &EvidenceBundle) -> Vec<Str
         sources.truncate(MAX_CITATIONS);
     }
     sources
-}
-
-fn ensure_citation_section(reply: &str, citations: &[String]) -> String {
-    if citations.is_empty() || reply.contains("Sources:") {
-        return reply.to_string();
-    }
-
-    format!("{reply}\n\nSources: {}", citations.join(", "))
 }
 
 fn reply_contains_citation(reply: &str, citations: &[String]) -> bool {
@@ -4461,6 +4469,8 @@ mod tests {
         assert!(prompt.contains("Persistent operator memory"));
         assert!(prompt.contains("Reply tersely."));
         assert!(prompt.contains("AGENTS.md"));
+        assert!(prompt.contains("Final answer rendering contract"));
+        assert!(prompt.contains("render_types"));
     }
 
     #[test]
@@ -4511,6 +4521,48 @@ mod tests {
         assert!(prompt.contains("Persistent operator memory"));
         assert!(prompt.contains("Prefer concrete repository answers over generic advice."));
         assert!(prompt.contains("Gathered repository evidence"));
+        assert!(prompt.contains("Final answer rendering contract"));
+        assert!(prompt.contains("citations"));
+    }
+
+    #[test]
+    fn structured_final_answer_envelopes_are_normalized_before_return() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![json!({
+                "render_types": ["paragraph", "bullet_list", "citations"],
+                "blocks": [
+                    { "type": "paragraph", "text": "The repository layout is straightforward." },
+                    { "type": "bullet_list", "items": ["entrypoint: src/main.rs", "docs: README.md"] },
+                    { "type": "citations", "sources": ["README.md"] }
+                ]
+            })
+            .to_string()])),
+        );
+
+        let reply = adapter
+            .respond_for_turn(
+                "Summarize the repository layout",
+                TurnIntent::Planned,
+                Some(&EvidenceBundle::new(
+                    "Repository evidence for the runtime layout.",
+                    vec![EvidenceItem {
+                        source: "README.md".to_string(),
+                        snippet: "The README explains the runtime layout.".to_string(),
+                        rationale: "Ground the answer in repository evidence.".to_string(),
+                        rank: 1,
+                    }],
+                )),
+                Arc::new(NullTurnEventSink),
+            )
+            .expect("response");
+
+        assert_eq!(
+            reply,
+            "The repository layout is straightforward.\n\n- entrypoint: src/main.rs\n- docs: README.md\n\nSources: README.md"
+        );
     }
 
     #[test]

@@ -27,11 +27,11 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 ### Act 3: Synthesis
 
-**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered.
+**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. Final answers flow through a constrained render-envelope contract (`paragraph`, `bullet_list`, `code_block`, `citations`) before the UI projects them into transcript output.
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, fallback decisions, and synthesis — through a TUI transcript or plain CLI output.
+**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model.
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 

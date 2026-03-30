@@ -7,12 +7,17 @@ use crate::domain::ports::{
     RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesizerEngine,
     ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
 };
+use crate::infrastructure::rendering::{
+    ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
+};
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+
+const MAX_CITATIONS: usize = 4;
 
 /// Which HTTP API format to use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,6 +237,13 @@ Respond ONLY with the JSON object, no prose.
         system
     }
 
+    fn build_answer_system_prompt(&self, require_citations: bool) -> String {
+        format!(
+            "You are Paddles, a helpful AI assistant. Provide concise, accurate answers.\n\n{}",
+            final_answer_contract_prompt(require_citations)
+        )
+    }
+
     fn parse_planner_action(&self, response: &str) -> Result<RecursivePlannerDecision> {
         let json = extract_json(response).unwrap_or(response);
         let envelope: PlannerEnvelope = serde_json::from_str(json)
@@ -408,7 +420,7 @@ impl SynthesizerEngine for HttpProviderAdapter {
         gathered_evidence: Option<&EvidenceBundle>,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        let system = "You are Paddles, a helpful AI assistant. Provide concise, accurate answers.";
+        let system = self.build_answer_system_prompt(gathered_evidence.is_some());
         let mut user_msg = prompt.to_string();
         if let Some(evidence) = gathered_evidence {
             user_msg.push_str("\n\n## Evidence\n");
@@ -418,13 +430,13 @@ impl SynthesizerEngine for HttpProviderAdapter {
             }
         }
 
-        let response = self.send_blocking(system, &user_msg)?;
+        let mut response = normalize_assistant_response(&self.send_blocking(&system, &user_msg)?);
+        let citations = gathered_evidence.map(citation_sources).unwrap_or_default();
+        response = ensure_citation_section(&response, &citations);
 
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: gathered_evidence.is_some(),
-            citations: gathered_evidence
-                .map(|e| e.items.iter().map(|i| i.source.clone()).collect())
-                .unwrap_or_default(),
+            citations: citations.clone(),
             insufficient_evidence: false,
         });
 
@@ -655,6 +667,19 @@ fn truncate(s: &str, n: usize) -> String {
     } else {
         s.to_string()
     }
+}
+
+fn citation_sources(evidence: &EvidenceBundle) -> Vec<String> {
+    let mut citations = Vec::new();
+    for item in &evidence.items {
+        if !citations.contains(&item.source) {
+            citations.push(item.source.clone());
+        }
+    }
+    if citations.len() > MAX_CITATIONS {
+        citations.truncate(MAX_CITATIONS);
+    }
+    citations
 }
 
 #[cfg(test)]
@@ -906,6 +931,7 @@ mod tests {
     async fn run_mocked_turn(
         format: ApiFormat,
         model_id: &str,
+        final_answer: &str,
     ) -> (Vec<RecordedRequest>, Vec<TurnEvent>, String) {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -921,7 +947,7 @@ mod tests {
             },
             MockResponse {
                 status: StatusCode::OK,
-                body: provider_response(format, "Mocked final answer."),
+                body: provider_response(format, final_answer),
             },
         ])
         .await;
@@ -951,7 +977,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn openai_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "gpt-4o-mini";
-        let (requests, events, response) = run_mocked_turn(ApiFormat::OpenAi, model_id).await;
+        let (requests, events, response) =
+            run_mocked_turn(ApiFormat::OpenAi, model_id, "Mocked final answer.").await;
 
         assert_eq!(response, "Mocked final answer.");
         assert_eq!(requests.len(), 2);
@@ -974,10 +1001,12 @@ mod tests {
                 .expect("planner user prompt")
                 .contains("User prompt: Sup dawg")
         );
-        assert_eq!(
-            requests[1].body["messages"][0]["content"].as_str(),
-            Some("You are Paddles, a helpful AI assistant. Provide concise, accurate answers.")
-        );
+        let synth_system = requests[1].body["messages"][0]["content"]
+            .as_str()
+            .expect("synth system prompt");
+        assert!(synth_system.contains("You are Paddles, a helpful AI assistant."));
+        assert!(synth_system.contains("Final answer rendering contract"));
+        assert!(synth_system.contains("paragraph, bullet_list, code_block, citations"));
         assert!(
             requests[1].body["messages"][1]["content"]
                 .as_str()
@@ -1005,7 +1034,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn anthropic_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "claude-sonnet-4-20250514";
-        let (requests, events, response) = run_mocked_turn(ApiFormat::Anthropic, model_id).await;
+        let (requests, events, response) =
+            run_mocked_turn(ApiFormat::Anthropic, model_id, "Mocked final answer.").await;
 
         assert_eq!(response, "Mocked final answer.");
         assert_eq!(requests.len(), 2);
@@ -1035,10 +1065,11 @@ mod tests {
                 .expect("planner user prompt")
                 .contains("User prompt: Sup dawg")
         );
-        assert_eq!(
-            requests[1].body["system"].as_str(),
-            Some("You are Paddles, a helpful AI assistant. Provide concise, accurate answers.")
-        );
+        let synth_system = requests[1].body["system"]
+            .as_str()
+            .expect("synth system prompt");
+        assert!(synth_system.contains("You are Paddles, a helpful AI assistant."));
+        assert!(synth_system.contains("Final answer rendering contract"));
         assert!(
             requests[1].body["messages"][0]["content"]
                 .as_str()
@@ -1054,7 +1085,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn gemini_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "gemini-2.5-flash";
-        let (requests, events, response) = run_mocked_turn(ApiFormat::Gemini, model_id).await;
+        let (requests, events, response) =
+            run_mocked_turn(ApiFormat::Gemini, model_id, "Mocked final answer.").await;
 
         assert_eq!(response, "Mocked final answer.");
         assert_eq!(requests.len(), 2);
@@ -1078,10 +1110,11 @@ mod tests {
                 .expect("planner user prompt")
                 .contains("User prompt: Sup dawg")
         );
-        assert_eq!(
-            requests[1].body["system_instruction"]["parts"][0]["text"].as_str(),
-            Some("You are Paddles, a helpful AI assistant. Provide concise, accurate answers.")
-        );
+        let synth_system = requests[1].body["system_instruction"]["parts"][0]["text"]
+            .as_str()
+            .expect("synth system prompt");
+        assert!(synth_system.contains("You are Paddles, a helpful AI assistant."));
+        assert!(synth_system.contains("Final answer rendering contract"));
         assert!(
             requests[1].body["contents"][0]["parts"][0]["text"]
                 .as_str()
@@ -1095,6 +1128,26 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_provider_normalizes_structured_final_answers() {
+        let model_id = "gpt-4o-mini";
+        let structured = json!({
+            "render_types": ["paragraph", "bullet_list"],
+            "blocks": [
+                { "type": "paragraph", "text": "The next bearing is HTTP API Design For Paddles." },
+                { "type": "bullet_list", "items": ["status: decision-ready", "EV: 10.31"] }
+            ]
+        })
+        .to_string();
+
+        let (_, _, response) = run_mocked_turn(ApiFormat::OpenAi, model_id, &structured).await;
+
+        assert_eq!(
+            response,
+            "The next bearing is HTTP API Design For Paddles.\n\n- status: decision-ready\n- EV: 10.31"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
