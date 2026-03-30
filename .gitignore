@@ -1,4 +1,5 @@
 /target
+/paddles.toml
 
 # Keel ignored artifacts
 .keel/inbox/
