@@ -1,5 +1,6 @@
-use crate::application::{ConversationSession, MechSuitService};
+use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
 use crate::domain::model::{ThreadCandidate, TurnEvent, TurnEventSink};
+use crate::infrastructure::credentials::CredentialStore;
 use anyhow::Result;
 use crossterm::cursor;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -14,9 +15,18 @@ use ratatui::{Frame, Terminal};
 use std::cmp;
 use std::collections::VecDeque;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+/// Context passed from main to the TUI for credential management.
+pub struct TuiContext {
+    pub credential_store: Arc<CredentialStore>,
+    pub api_key_shared: Arc<RwLock<String>>,
+    pub runtime_lanes: RuntimeLaneConfig,
+    pub provider_name: String,
+    pub credential_provider: Option<String>,
+}
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(32);
 const ASSISTANT_REVEAL_STEP: usize = 24;
@@ -43,6 +53,7 @@ pub fn select_interactive_frontend(
 pub async fn run_interactive_tui(
     service: Arc<MechSuitService>,
     model_label: impl Into<String>,
+    tui_ctx: TuiContext,
 ) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
@@ -51,13 +62,54 @@ pub async fn run_interactive_tui(
 
     let (tx, mut rx) = unbounded_channel();
     let session = service.create_conversation_session();
-    let mut app = InteractiveApp::new(model_label.into(), detect_palette(), session.clone());
+    let mut app = InteractiveApp::new(
+        model_label.into(),
+        detect_palette(),
+        session.clone(),
+        tui_ctx.provider_name.clone(),
+        tui_ctx.credential_provider.clone(),
+    );
 
     loop {
         drain_messages(&mut app, &mut rx);
         app.tick();
         if let Some(prompt) = app.dispatch_next_prompt() {
             dispatch_prompt(prompt, Arc::clone(&service), session.clone(), tx.clone());
+        }
+
+        // Handle completed /login actions.
+        if let Some(login) = app.take_pending_login() {
+            match tui_ctx
+                .credential_store
+                .save_api_key(&login.provider, &login.api_key)
+            {
+                Ok(()) => {
+                    *tui_ctx.api_key_shared.write().unwrap() = login.api_key;
+                    match service.prepare_runtime_lanes(&tui_ctx.runtime_lanes).await {
+                        Ok(_) => {
+                            app.push_event(
+                                "API key saved",
+                                format!(
+                                    "Credentials stored for `{}`. Runtime reconnected.",
+                                    login.provider,
+                                ),
+                            );
+                        }
+                        Err(err) => {
+                            app.push_error(
+                                "Login failed",
+                                format!("Key saved but runtime rebuild failed: {err:#}",),
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    app.push_error(
+                        "Login failed",
+                        format!("Could not save credentials: {err:#}"),
+                    );
+                }
+            }
         }
 
         terminal.draw(|frame| app.render(frame))?;
@@ -102,7 +154,16 @@ fn handle_key_event(
     }
 
     match key.code {
-        KeyCode::Esc => true,
+        KeyCode::Esc => {
+            if matches!(app.input_mode, InputMode::MaskedKey { .. }) {
+                app.input.clear();
+                app.input_mode = InputMode::Normal;
+                app.push_event("Login cancelled", "Returned to normal input.");
+                false
+            } else {
+                true
+            }
+        }
         KeyCode::Enter => {
             app.submit_prompt();
             false
@@ -265,6 +326,10 @@ struct InteractiveApp {
     busy_phase: BusyPhase,
     pending_reveal: Option<PendingReveal>,
     spinner_index: usize,
+    input_mode: InputMode,
+    pending_login: Option<PendingLogin>,
+    provider_name: String,
+    credential_provider: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -280,8 +345,36 @@ enum BusyPhase {
     Rendering,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum InputMode {
+    Normal,
+    MaskedKey { provider: String },
+}
+
+#[derive(Clone, Debug)]
+struct PendingLogin {
+    provider: String,
+    api_key: String,
+}
+
 impl InteractiveApp {
-    fn new(model_label: String, palette: Palette, session: ConversationSession) -> Self {
+    fn new(
+        model_label: String,
+        palette: Palette,
+        session: ConversationSession,
+        provider_name: String,
+        credential_provider: Option<String>,
+    ) -> Self {
+        let ready_message = match credential_provider.as_deref() {
+            Some(provider) => format!(
+                "Codex-style transcript active. Enter to send, Ctrl+C to quit.\n\
+                 Provider: `{provider}`. Type `/login` to set your API key.",
+            ),
+            None => format!(
+                "Codex-style transcript active. Enter to send, Ctrl+C to quit.\n\
+                 Provider: `{provider_name}` (local-first). No API login required.",
+            ),
+        };
         Self {
             model_label,
             palette,
@@ -289,7 +382,7 @@ impl InteractiveApp {
             rows: vec![TranscriptRow::new(
                 TranscriptRowKind::Event,
                 "• Interactive mode ready",
-                "Codex-style transcript active. Enter to send, Ctrl+C to quit.",
+                ready_message,
             )],
             input: String::new(),
             queued_prompts: VecDeque::new(),
@@ -297,26 +390,66 @@ impl InteractiveApp {
             busy_phase: BusyPhase::Idle,
             pending_reveal: None,
             spinner_index: 0,
+            input_mode: InputMode::Normal,
+            pending_login: None,
+            provider_name,
+            credential_provider,
         }
     }
 
     fn submit_prompt(&mut self) {
-        let prompt = self.input.trim().to_string();
-        if prompt.is_empty() {
+        let raw = self.input.trim().to_string();
+        if raw.is_empty() {
+            return;
+        }
+        self.input.clear();
+
+        // Handle masked key submission.
+        if let InputMode::MaskedKey { ref provider } = self.input_mode {
+            let provider = provider.clone();
+            self.pending_login = Some(PendingLogin {
+                provider,
+                api_key: raw,
+            });
+            self.input_mode = InputMode::Normal;
             return;
         }
 
+        // Handle slash commands.
+        if raw.eq_ignore_ascii_case("/login") {
+            if let Some(provider) = self.credential_provider.clone() {
+                self.rows.push(TranscriptRow::new(
+                    TranscriptRowKind::Event,
+                    "• Login",
+                    format!(
+                        "Enter your API key for `{provider}`. Input is masked.\n\
+                         Press Esc to cancel.",
+                    ),
+                ));
+                self.input_mode = InputMode::MaskedKey { provider };
+            } else {
+                self.push_error(
+                    "Login unavailable",
+                    format!(
+                        "The current provider `{}` does not use API-key login.",
+                        self.provider_name
+                    ),
+                );
+            }
+            return;
+        }
+
+        // Normal prompt submission.
         let was_busy = self.busy || self.pending_reveal.is_some();
         self.rows
-            .push(TranscriptRow::new(TranscriptRowKind::User, "You", &prompt));
-        self.input.clear();
+            .push(TranscriptRow::new(TranscriptRowKind::User, "You", &raw));
         if was_busy || !self.queued_prompts.is_empty() {
             self.queued_prompts.push_back(QueuedPrompt::Steering(
-                self.session.capture_candidate(prompt.clone()),
+                self.session.capture_candidate(raw.clone()),
             ));
         } else {
             self.queued_prompts
-                .push_back(QueuedPrompt::Prompt(prompt.clone()));
+                .push_back(QueuedPrompt::Prompt(raw.clone()));
         }
         if was_busy || self.queued_prompts.len() > 1 {
             self.rows.push(TranscriptRow::new(
@@ -324,10 +457,30 @@ impl InteractiveApp {
                 "• Queued steering prompt",
                 format!(
                     "`{}` queued behind the active turn.",
-                    trim_for_display(&prompt, 96)
+                    trim_for_display(&raw, 96)
                 ),
             ));
         }
+    }
+
+    fn take_pending_login(&mut self) -> Option<PendingLogin> {
+        self.pending_login.take()
+    }
+
+    fn push_event(&mut self, header: impl Into<String>, content: impl Into<String>) {
+        self.rows.push(TranscriptRow::new(
+            TranscriptRowKind::Event,
+            format!("• {}", header.into()),
+            content,
+        ));
+    }
+
+    fn push_error(&mut self, header: impl Into<String>, content: impl Into<String>) {
+        self.rows.push(TranscriptRow::new(
+            TranscriptRowKind::Error,
+            format!("• {}", header.into()),
+            content,
+        ));
     }
 
     fn dispatch_next_prompt(&mut self) -> Option<QueuedPrompt> {
@@ -457,41 +610,20 @@ impl InteractiveApp {
     }
 
     fn render_input(&self) -> Paragraph<'static> {
+        let is_masked = self.is_masked_input();
         let input_style = self.palette.input_text;
-        let input_text = if self.input.is_empty() {
-            "Type a prompt...".to_string()
-        } else {
-            self.input.clone()
-        };
-        let queue_hint = if self.queued_prompts.is_empty() {
-            None
-        } else {
-            Some(format!("{} queued", self.queued_prompts.len()))
-        };
-        let turn_hint = if self.busy {
-            Some("Turn in progress".to_string())
-        } else {
-            Some("Enter to send".to_string())
-        };
-        let hint = match (turn_hint, queue_hint) {
-            (Some(turn), Some(queue)) => format!("{turn} • {queue}"),
-            (Some(turn), None) => turn,
-            (None, Some(queue)) => queue,
-            (None, None) => String::new(),
-        };
+        let input_text = self.input_display_text();
+        let (label, hint) = self.input_label_and_hint(is_masked);
         let mut lines = vec![
             Line::from(vec![
-                Span::styled(
-                    "Prompt",
-                    self.palette.input_label.add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(label, self.palette.input_label.add_modifier(Modifier::BOLD)),
                 Span::raw(" "),
                 Span::styled(hint, self.palette.input_hint),
             ]),
             Line::from(Span::styled(input_text, input_style)),
         ];
 
-        if self.busy {
+        if self.busy && !is_masked {
             lines.push(Line::from(Span::styled(
                 "Action events stream above while you can keep typing and queue steering prompts.",
                 self.palette.input_hint,
@@ -506,6 +638,51 @@ impl InteractiveApp {
                     .border_style(self.palette.border),
             )
             .wrap(Wrap { trim: false })
+    }
+
+    fn is_masked_input(&self) -> bool {
+        matches!(self.input_mode, InputMode::MaskedKey { .. })
+    }
+
+    fn input_display_text(&self) -> String {
+        if self.input.is_empty() {
+            if self.is_masked_input() {
+                "Paste or type your API key...".to_string()
+            } else {
+                "Type a prompt...".to_string()
+            }
+        } else if self.is_masked_input() {
+            "\u{2022}".repeat(self.input.chars().count())
+        } else {
+            self.input.clone()
+        }
+    }
+
+    fn input_label_and_hint(&self, is_masked: bool) -> (String, String) {
+        if is_masked {
+            (
+                "API Key".to_string(),
+                "Enter to save · Esc to cancel".to_string(),
+            )
+        } else {
+            let queue_hint = if self.queued_prompts.is_empty() {
+                None
+            } else {
+                Some(format!("{} queued", self.queued_prompts.len()))
+            };
+            let turn_hint = if self.busy {
+                Some("Turn in progress".to_string())
+            } else {
+                Some("Enter to send".to_string())
+            };
+            let hint = match (turn_hint, queue_hint) {
+                (Some(turn), Some(queue)) => format!("{turn} • {queue}"),
+                (Some(turn), None) => turn,
+                (None, Some(queue)) => queue,
+                (None, None) => String::new(),
+            };
+            ("Prompt".to_string(), hint)
+        }
     }
 
     fn cursor_position(&self, area: Rect) -> (u16, u16) {
@@ -942,9 +1119,9 @@ fn terminal_uses_light_background() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BusyPhase, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt, TranscriptRow,
-        TranscriptRowKind, collapse_event_details, detect_palette, format_turn_event_row,
-        render_row_lines, select_interactive_frontend,
+        BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
+        TranscriptRow, TranscriptRowKind, collapse_event_details, detect_palette,
+        format_turn_event_row, render_row_lines, select_interactive_frontend,
     };
     use crate::application::ConversationSession;
     use crate::domain::model::{TaskTraceId, TurnEvent};
@@ -1018,7 +1195,13 @@ mod tests {
     #[test]
     fn app_tracks_busy_state_through_reveal_completion() {
         let palette = detect_palette();
-        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette, session());
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+        );
         app.input = "hello".to_string();
 
         app.submit_prompt();
@@ -1045,7 +1228,13 @@ mod tests {
     #[test]
     fn app_accepts_steering_prompts_while_busy_and_queues_them() {
         let palette = detect_palette();
-        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette, session());
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+        );
 
         app.input = "first".to_string();
         app.submit_prompt();
@@ -1074,7 +1263,13 @@ mod tests {
     #[test]
     fn queued_prompt_dispatches_after_current_turn_finishes() {
         let palette = detect_palette();
-        let mut app = InteractiveApp::new("qwen-1.5b".to_string(), palette, session());
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+        );
 
         app.input = "first".to_string();
         app.submit_prompt();
@@ -1097,5 +1292,82 @@ mod tests {
         ));
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Thinking);
+    }
+
+    #[test]
+    fn login_command_enters_masked_mode_for_remote_provider() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "moonshot-v1".to_string(),
+            palette,
+            session(),
+            "moonshot".to_string(),
+            Some("moonshot".to_string()),
+        );
+        app.input = "/login".to_string();
+
+        app.submit_prompt();
+
+        assert!(matches!(
+            app.input_mode,
+            InputMode::MaskedKey { ref provider } if provider == "moonshot"
+        ));
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.header == "• Login" && row.content.contains("Input is masked"))
+        );
+    }
+
+    #[test]
+    fn login_submission_queues_pending_key_and_masks_display_text() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "moonshot-v1".to_string(),
+            palette,
+            session(),
+            "moonshot".to_string(),
+            Some("moonshot".to_string()),
+        );
+        app.input_mode = InputMode::MaskedKey {
+            provider: "moonshot".to_string(),
+        };
+        app.input = "sk-secret-123".to_string();
+
+        assert_eq!(
+            app.input_display_text(),
+            "\u{2022}".repeat("sk-secret-123".chars().count())
+        );
+
+        app.submit_prompt();
+
+        let pending = app.take_pending_login().expect("pending login");
+        assert_eq!(pending.provider, "moonshot");
+        assert_eq!(pending.api_key, "sk-secret-123");
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn login_command_is_rejected_for_local_provider() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+        );
+        app.input = "/login".to_string();
+
+        app.submit_prompt();
+
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.kind == TranscriptRowKind::Error
+                    && row.header == "• Login unavailable"
+                    && row.content.contains("does not use API-key login"))
+        );
     }
 }

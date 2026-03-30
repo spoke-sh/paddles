@@ -192,6 +192,28 @@ for:
 
 Repository-question answers also include source/file citations by default.
 
+### Provider Credentials
+
+Remote HTTP providers resolve API credentials in this order:
+
+1. provider-specific environment variable
+2. `~/.config/paddles/credentials.toml`
+
+The credential manifest stores only provider-to-file references. Each secret is
+written to its own file under `~/.config/paddles/keys/`, for example:
+
+```toml
+[keys]
+moonshot = "keys/moonshot.key"
+openai = "keys/openai.key"
+```
+
+Key files are written with restricted permissions on Unix systems. In the TUI,
+use `/login` to enter a remote-provider API key through masked input; `paddles`
+updates the referenced key file and rebuilds the active runtime lanes so
+subsequent turns use the new credential immediately. The local `sift` provider
+does not use API-key login.
+
 ### Experimental Context-1 Boundary
 
 `context-1` is exposed as an explicit experimental gatherer provider, not as a

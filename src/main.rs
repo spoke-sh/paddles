@@ -3,7 +3,7 @@ use clap::Parser;
 use std::env;
 use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
 use paddles::application::{
@@ -21,9 +21,10 @@ use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathere
 use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
-    InteractiveFrontend, run_interactive_tui, select_interactive_frontend,
+    InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
 use paddles::infrastructure::config::PaddlesConfig;
+use paddles::infrastructure::credentials::CredentialStore;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 enum ModelProvider {
@@ -200,6 +201,28 @@ async fn main() -> Result<()> {
         ModelProvider::Sift => (None, "", ""),
     };
 
+    // Resolve API key: env var first, then credential store.
+    let credential_store = Arc::new(CredentialStore::new());
+    let provider_name = match provider {
+        ModelProvider::Openai => "openai",
+        ModelProvider::Anthropic => "anthropic",
+        ModelProvider::Google => "google",
+        ModelProvider::Moonshot => "moonshot",
+        ModelProvider::Ollama => "ollama",
+        ModelProvider::Sift => "sift",
+    };
+    let credential_provider = CredentialStore::provider_for_env(api_key_env).map(str::to_string);
+    let api_key = credential_provider
+        .as_deref()
+        .and_then(|provider| {
+            std::env::var(api_key_env)
+                .ok()
+                .filter(|key| !key.is_empty())
+                .or_else(|| credential_store.load_api_key(provider))
+        })
+        .unwrap_or_default();
+    let api_key_shared: Arc<RwLock<String>> = Arc::new(RwLock::new(api_key));
+
     let synthesizer_factory: Box<paddles::application::SynthesizerFactory> = match provider {
         ModelProvider::Sift => Box::new(|workspace: &Path, model_id: &str| {
             let engine = SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?;
@@ -210,12 +233,13 @@ async fn main() -> Result<()> {
             let base_url = provider_url
                 .clone()
                 .unwrap_or_else(|| default_base_url.to_string());
-            let api_key = std::env::var(api_key_env).unwrap_or_default();
+            let key_ref = Arc::clone(&api_key_shared);
             Box::new(move |workspace: &Path, model_id: &str| {
+                let current_key = key_ref.read().unwrap().clone();
                 let engine = HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     model_id,
-                    api_key.clone(),
+                    current_key,
                     base_url.clone(),
                     format,
                 );
@@ -233,12 +257,13 @@ async fn main() -> Result<()> {
         _ => {
             let format = api_format.expect("api format set for non-sift providers");
             let base_url = provider_url.unwrap_or_else(|| default_base_url.to_string());
-            let api_key = std::env::var(api_key_env).unwrap_or_default();
+            let key_ref = Arc::clone(&api_key_shared);
             Box::new(move |workspace: &Path, model_id: &str| {
+                let current_key = key_ref.read().unwrap().clone();
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     model_id,
-                    api_key.clone(),
+                    current_key,
                     base_url.clone(),
                     format,
                 ));
@@ -377,7 +402,16 @@ async fn main() -> Result<()> {
         println!("Chord Response: {}", response);
     } else {
         match frontend {
-            InteractiveFrontend::Tui => run_interactive_tui(service, model.clone()).await?,
+            InteractiveFrontend::Tui => {
+                let tui_ctx = TuiContext {
+                    credential_store: Arc::clone(&credential_store),
+                    api_key_shared: Arc::clone(&api_key_shared),
+                    runtime_lanes: runtime_lanes.clone(),
+                    provider_name: provider_name.to_string(),
+                    credential_provider: credential_provider.clone(),
+                };
+                run_interactive_tui(service, model.clone(), tui_ctx).await?
+            }
             InteractiveFrontend::PlainLines => run_plain_interactive_loop(service).await?,
         }
     }
