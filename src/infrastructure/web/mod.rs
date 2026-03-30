@@ -88,8 +88,17 @@ impl TurnEventSink for BroadcastEventSink {
     }
 }
 
-pub fn router(service: Arc<MechSuitService>, trace_recorder: Arc<dyn TraceRecorder>) -> Router {
+/// Create the web router and return it along with a TurnEventSink that
+/// broadcasts events to all connected SSE clients. Register this sink
+/// as an event observer on MechSuitService so CLI turns are visible too.
+pub fn router(
+    service: Arc<MechSuitService>,
+    trace_recorder: Arc<dyn TraceRecorder>,
+) -> (Router, Arc<dyn TurnEventSink>) {
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
+    let observer: Arc<dyn TurnEventSink> = Arc::new(GlobalBroadcastSink {
+        tx: event_tx.clone(),
+    });
     let state = Arc::new(AppState {
         service,
         trace_recorder,
@@ -97,7 +106,7 @@ pub fn router(service: Arc<MechSuitService>, trace_recorder: Arc<dyn TraceRecord
         event_tx,
     });
 
-    Router::new()
+    let app = Router::new()
         .route("/", get(index_page))
         .route("/health", get(health))
         .route("/sessions", post(create_session))
@@ -105,7 +114,23 @@ pub fn router(service: Arc<MechSuitService>, trace_recorder: Arc<dyn TraceRecord
         .route("/sessions/{id}/events", get(event_stream))
         .route("/sessions/{id}/trace/graph", get(trace_graph))
         .layer(CorsLayer::permissive())
-        .with_state(state)
+        .with_state(state);
+
+    (app, observer)
+}
+
+/// Broadcasts all events to the SSE channel regardless of session.
+/// Used as a global observer on MechSuitService so CLI turns are visible.
+struct GlobalBroadcastSink {
+    tx: broadcast::Sender<(String, TurnEvent)>,
+}
+
+impl TurnEventSink for GlobalBroadcastSink {
+    fn emit(&self, event: TurnEvent) {
+        // Broadcast with empty session_id — SSE filtering uses session-specific sinks.
+        // The per-session BroadcastEventSink tags with the correct session_id.
+        let _ = self.tx.send((String::new(), event));
+    }
 }
 
 async fn index_page() -> Html<&'static str> {
@@ -156,11 +181,11 @@ async fn submit_turn(
 
 async fn event_stream(
     State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
+    Path(_id): Path<String>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let rx = state.event_tx.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
-        Ok((session_id, event)) if session_id == id => {
+    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok((_session_id, event)) => {
             let json = serde_json::to_string(&event).unwrap_or_default();
             Some(Ok(Event::default().event("turn_event").data(json)))
         }

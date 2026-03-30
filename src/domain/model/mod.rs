@@ -15,7 +15,7 @@ pub use traces::{
     TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
     TraceTaskRoot, TraceToolCall, TraceTurnStarted,
 };
-pub use turns::{NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
+pub use turns::{MultiplexEventSink, NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 
 /// Constitutional bounds for environmental calibration.
 pub struct Constitution {

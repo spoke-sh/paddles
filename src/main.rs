@@ -241,7 +241,9 @@ async fn main() -> Result<()> {
     }
 
     // Start HTTP API server
-    let web_router = paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
+    let (web_router, web_observer) =
+        paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
+    service.register_event_observer(web_observer);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", cli.port)).await?;
     if cli.verbose >= 1 {
         println!("[BOOT] HTTP API server listening on port {}.", cli.port);

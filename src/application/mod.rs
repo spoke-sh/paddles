@@ -1,12 +1,12 @@
 pub use paddles_conversation::ConversationSession;
 
 use crate::domain::model::{
-    ArtifactEnvelope, ArtifactKind, BootContext, ConversationThreadRef, TaskTraceId,
-    ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord,
-    TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind,
-    TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ArtifactEnvelope, ArtifactKind, BootContext, ConversationThreadRef, MultiplexEventSink,
+    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot, TraceToolCall,
+    TraceTurnStarted, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
@@ -57,6 +57,7 @@ pub struct MechSuitService {
     runtime: RwLock<Option<ActiveRuntimeState>>,
     verbose: AtomicU8,
     event_sink: Arc<dyn TurnEventSink>,
+    event_observers: Mutex<Vec<Arc<dyn TurnEventSink>>>,
     trace_recorder: Arc<dyn TraceRecorder>,
     trace_counter: AtomicU64,
 }
@@ -835,6 +836,7 @@ impl MechSuitService {
             runtime: RwLock::new(None),
             verbose: AtomicU8::new(0),
             event_sink: Arc::new(ConsoleTurnEventSink::default()),
+            event_observers: Mutex::new(Vec::new()),
             trace_recorder,
             trace_counter: AtomicU64::new(1),
         }
@@ -842,6 +844,29 @@ impl MechSuitService {
 
     pub fn set_verbose(&self, level: u8) {
         self.verbose.store(level, Ordering::Relaxed);
+    }
+
+    /// Register an additional event observer that receives all TurnEvents
+    /// from every turn, regardless of which interface submitted it.
+    pub fn register_event_observer(&self, observer: Arc<dyn TurnEventSink>) {
+        self.event_observers
+            .lock()
+            .expect("event observers lock")
+            .push(observer);
+    }
+
+    fn wrap_sink_with_observers(&self, sink: Arc<dyn TurnEventSink>) -> Arc<dyn TurnEventSink> {
+        let observers = self
+            .event_observers
+            .lock()
+            .expect("event observers lock")
+            .clone();
+        if observers.is_empty() {
+            return sink;
+        }
+        let mut sinks = vec![sink];
+        sinks.extend(observers);
+        Arc::new(MultiplexEventSink::new(sinks))
     }
 
     fn allocate_task_id(&self) -> TaskTraceId {
@@ -965,6 +990,7 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
+        let event_sink = self.wrap_sink_with_observers(event_sink);
         let runtime_guard = self.runtime.read().await;
         let runtime = runtime_guard
             .as_ref()
@@ -1085,6 +1111,7 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
+        let event_sink = self.wrap_sink_with_observers(event_sink);
         let runtime_guard = self.runtime.read().await;
         let runtime = runtime_guard
             .as_ref()

@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,4 +134,23 @@ pub struct NullTurnEventSink;
 
 impl TurnEventSink for NullTurnEventSink {
     fn emit(&self, _event: TurnEvent) {}
+}
+
+/// Forwards events to multiple sinks.
+pub struct MultiplexEventSink {
+    sinks: Vec<Arc<dyn TurnEventSink>>,
+}
+
+impl MultiplexEventSink {
+    pub fn new(sinks: Vec<Arc<dyn TurnEventSink>>) -> Self {
+        Self { sinks }
+    }
+}
+
+impl TurnEventSink for MultiplexEventSink {
+    fn emit(&self, event: TurnEvent) {
+        for sink in &self.sinks {
+            sink.emit(event.clone());
+        }
+    }
 }
