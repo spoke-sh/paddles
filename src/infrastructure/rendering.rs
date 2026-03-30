@@ -1,7 +1,37 @@
 use serde::Deserialize;
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 const SUPPORTED_RENDER_TYPES: [&str; 4] = ["paragraph", "bullet_list", "code_block", "citations"];
+pub const ANTHROPIC_RENDER_TOOL_NAME: &str = "render_final_answer";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderCapability {
+    PromptEnvelope,
+    OpenAiJsonSchema,
+    AnthropicToolUse,
+    GeminiJsonSchema,
+}
+
+impl RenderCapability {
+    pub fn resolve(provider: &str, _model_id: &str) -> Self {
+        match provider {
+            "openai" => Self::OpenAiJsonSchema,
+            "anthropic" => Self::AnthropicToolUse,
+            "google" => Self::GeminiJsonSchema,
+            _ => Self::PromptEnvelope,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PromptEnvelope => "prompt-envelope",
+            Self::OpenAiJsonSchema => "openai-json-schema",
+            Self::AnthropicToolUse => "anthropic-tool-use",
+            Self::GeminiJsonSchema => "gemini-json-schema",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum RenderType {
@@ -33,20 +63,6 @@ impl AssistantResponse {
     fn parse(response: &str) -> Option<Self> {
         let json = extract_json_payload(response.trim())?;
         let envelope: AssistantResponseEnvelope = serde_json::from_str(json).ok()?;
-        let render_types = envelope
-            .render_types
-            .iter()
-            .map(|value| RenderType::from_str(value))
-            .collect::<Option<Vec<_>>>()?;
-        if render_types.is_empty() {
-            return None;
-        }
-
-        let declared = render_types.iter().copied().collect::<BTreeSet<_>>();
-        if declared.len() != render_types.len() {
-            return None;
-        }
-
         let blocks = envelope
             .blocks
             .into_iter()
@@ -56,13 +72,24 @@ impl AssistantResponse {
             return None;
         }
 
-        let used = blocks
+        let repaired = render_types_for_blocks(&blocks);
+        let declared = envelope
+            .render_types
             .iter()
-            .map(AssistantBlock::render_type)
-            .collect::<BTreeSet<_>>();
-        if used != declared {
-            return None;
-        }
+            .map(|value| RenderType::from_str(value))
+            .collect::<Option<Vec<_>>>()
+            .filter(|render_types| !render_types.is_empty())
+            .and_then(unique_render_types);
+
+        let render_types = match declared {
+            Some(render_types)
+                if render_types.iter().copied().collect::<BTreeSet<_>>()
+                    == repaired.iter().copied().collect::<BTreeSet<_>>() =>
+            {
+                render_types
+            }
+            _ => repaired,
+        };
 
         Some(Self {
             render_types,
@@ -96,17 +123,18 @@ enum AssistantBlock {
 
 impl AssistantBlock {
     fn from_wire(block: AssistantBlockEnvelope) -> Option<Self> {
-        match block {
-            AssistantBlockEnvelope::Paragraph { text } => {
-                let text = text.trim().to_string();
+        match block.kind.as_str() {
+            "paragraph" => {
+                let text = block.text?.trim().to_string();
                 if text.is_empty() {
                     None
                 } else {
                     Some(Self::Paragraph(text))
                 }
             }
-            AssistantBlockEnvelope::BulletList { items } => {
-                let items = items
+            "bullet_list" => {
+                let items = block
+                    .items
                     .into_iter()
                     .map(|item| item.trim().to_string())
                     .filter(|item| !item.is_empty())
@@ -117,15 +145,20 @@ impl AssistantBlock {
                     Some(Self::BulletList(items))
                 }
             }
-            AssistantBlockEnvelope::CodeBlock { language, code } => {
+            "code_block" => {
+                let code = block.code?;
                 if code.trim().is_empty() {
                     None
                 } else {
-                    Some(Self::CodeBlock { language, code })
+                    Some(Self::CodeBlock {
+                        language: block.language,
+                        code,
+                    })
                 }
             }
-            AssistantBlockEnvelope::Citations { sources } => {
-                let sources = sources
+            "citations" => {
+                let sources = block
+                    .sources
                     .into_iter()
                     .map(|source| source.trim().to_string())
                     .filter(|source| !source.is_empty())
@@ -136,6 +169,7 @@ impl AssistantBlock {
                     Some(Self::Citations(sources))
                 }
             }
+            _ => None,
         }
     }
 
@@ -169,38 +203,50 @@ impl AssistantBlock {
 
 #[derive(Debug, Deserialize)]
 struct AssistantResponseEnvelope {
+    #[serde(default)]
     render_types: Vec<String>,
     blocks: Vec<AssistantBlockEnvelope>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum AssistantBlockEnvelope {
-    Paragraph {
-        text: String,
-    },
-    BulletList {
-        items: Vec<String>,
-    },
-    CodeBlock {
-        #[serde(default)]
-        language: Option<String>,
-        code: String,
-    },
-    Citations {
-        sources: Vec<String>,
-    },
+struct AssistantBlockEnvelope {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    items: Vec<String>,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    sources: Vec<String>,
 }
 
-pub fn final_answer_contract_prompt(require_citations: bool) -> String {
+pub fn final_answer_contract_prompt(
+    render_capability: RenderCapability,
+    require_citations: bool,
+) -> String {
     let citation_rule = if require_citations {
         "Include exactly one `citations` block listing the repository/file sources used in the answer."
     } else {
         "Use a `citations` block only when repository/file sources are part of the answer."
     };
+    let transport_rule = match render_capability {
+        RenderCapability::PromptEnvelope => {
+            "Respond with ONLY one JSON object and no prose outside it."
+        }
+        RenderCapability::OpenAiJsonSchema | RenderCapability::GeminiJsonSchema => {
+            "The transport enforces a JSON schema. Fill the structured response envelope exactly."
+        }
+        RenderCapability::AnthropicToolUse => {
+            "Use the render_final_answer tool exactly once with arguments that satisfy the schema."
+        }
+    };
     format!(
         "Final answer rendering contract:\n\
-Respond with ONLY one JSON object and no prose outside it.\n\
+{transport_rule}\n\
 Supported render types: {}.\n\
 Schema:\n\
 {{\"render_types\":[\"paragraph\",\"citations\"],\"blocks\":[{{\"type\":\"paragraph\",\"text\":\"...\"}},{{\"type\":\"citations\",\"sources\":[\"README.md\"]}}]}}\n\
@@ -214,6 +260,69 @@ Rules:\n\
 - {citation_rule}",
         SUPPORTED_RENDER_TYPES.join(", ")
     )
+}
+
+pub fn assistant_response_json_schema(require_citations: bool) -> Value {
+    let citation_guidance = if require_citations {
+        "Required when repository/file sources were used in the answer."
+    } else {
+        "Optional when no repository/file sources were used in the answer."
+    };
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "render_types": {
+                "type": "array",
+                "description": "The exact unique block types used in `blocks`.",
+                "items": {
+                    "type": "string",
+                    "enum": SUPPORTED_RENDER_TYPES,
+                },
+                "minItems": 1
+            },
+            "blocks": {
+                "type": "array",
+                "description": "Ordered render blocks for the final answer.",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": SUPPORTED_RENDER_TYPES,
+                            "description": "Render block type."
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Paragraph text for `paragraph` blocks."
+                        },
+                        "items": {
+                            "type": "array",
+                            "description": "Flat list entries for `bullet_list` blocks.",
+                            "items": { "type": "string" }
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Optional language tag for `code_block` blocks."
+                        },
+                        "code": {
+                            "type": "string",
+                            "description": "Literal code or terminal output for `code_block` blocks."
+                        },
+                        "sources": {
+                            "type": "array",
+                            "description": format!("Repository/file citations for `citations` blocks. {citation_guidance}"),
+                            "items": { "type": "string" }
+                        }
+                    },
+                    "required": ["type"]
+                }
+            }
+        },
+        "required": ["render_types", "blocks"]
+    })
 }
 
 pub fn normalize_assistant_response(response: &str) -> String {
@@ -251,6 +360,26 @@ fn sanitize_markdownish_fallback(input: &str) -> String {
     }
 
     sanitized.join("\n")
+}
+
+fn unique_render_types(render_types: Vec<RenderType>) -> Option<Vec<RenderType>> {
+    let unique = render_types.iter().copied().collect::<BTreeSet<_>>();
+    if unique.len() != render_types.len() {
+        None
+    } else {
+        Some(render_types)
+    }
+}
+
+fn render_types_for_blocks(blocks: &[AssistantBlock]) -> Vec<RenderType> {
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::new();
+    for render_type in blocks.iter().map(AssistantBlock::render_type) {
+        if seen.insert(render_type) {
+            ordered.push(render_type);
+        }
+    }
+    ordered
 }
 
 fn strip_balanced_marker_pairs(input: &str, marker: &str) -> String {
@@ -340,8 +469,8 @@ fn extract_json_payload(response: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssistantResponse, ensure_citation_section, final_answer_contract_prompt,
-        normalize_assistant_response,
+        AssistantResponse, RenderCapability, assistant_response_json_schema,
+        ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
     };
 
     #[test]
@@ -365,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_structured_responses_when_declared_types_do_not_match_blocks() {
+    fn repairs_structured_responses_when_declared_types_do_not_match_blocks() {
         let response = r#"{
   "render_types": ["paragraph"],
   "blocks": [
@@ -374,7 +503,22 @@ mod tests {
   ]
 }"#;
 
-        assert!(AssistantResponse::parse(response).is_none());
+        let parsed = AssistantResponse::parse(response).expect("repaired response");
+        assert_eq!(parsed.render_types.len(), 2);
+        assert_eq!(parsed.to_plain_text(), "Hello.\n\nSources: README.md");
+    }
+
+    #[test]
+    fn repairs_structured_responses_when_render_types_are_missing() {
+        let response = r#"{
+  "blocks": [
+    {"type": "paragraph", "text": "Hello."}
+  ]
+}"#;
+
+        let parsed = AssistantResponse::parse(response).expect("repaired response");
+        assert_eq!(parsed.render_types.len(), 1);
+        assert_eq!(parsed.to_plain_text(), "Hello.");
     }
 
     #[test]
@@ -404,8 +548,24 @@ mod tests {
 
     #[test]
     fn contract_prompt_advertises_supported_render_types() {
-        let prompt = final_answer_contract_prompt(true);
+        let prompt = final_answer_contract_prompt(RenderCapability::PromptEnvelope, true);
         assert!(prompt.contains("paragraph, bullet_list, code_block, citations"));
         assert!(prompt.contains("Include exactly one `citations` block"));
+    }
+
+    #[test]
+    fn native_render_capabilities_announce_transport_constraints() {
+        let prompt = final_answer_contract_prompt(RenderCapability::AnthropicToolUse, false);
+        assert!(prompt.contains("Use the render_final_answer tool exactly once"));
+        let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, false);
+        assert!(prompt.contains("transport enforces a JSON schema"));
+    }
+
+    #[test]
+    fn assistant_response_schema_requires_blocks_and_render_types() {
+        let schema = assistant_response_json_schema(true);
+        assert_eq!(schema["type"].as_str(), Some("object"));
+        assert_eq!(schema["required"][0].as_str(), Some("render_types"));
+        assert_eq!(schema["required"][1].as_str(), Some("blocks"));
     }
 }

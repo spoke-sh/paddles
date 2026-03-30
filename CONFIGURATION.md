@@ -217,6 +217,22 @@ does not use API-key login.
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
 
+### Final Answer Render Capability
+
+Paddles resolves final-answer rendering capability at boot from the selected
+provider/model pair and then uses the strictest supported transport for the
+synthesizer lane:
+
+- `openai`: native JSON Schema via Chat Completions `response_format`
+- `anthropic`: native structured tool use with a forced render tool
+- `google`: native JSON Schema via Gemini `generationConfig`
+- `moonshot`, `ollama`, and local `sift`: prompt-enveloped JSON with post-response normalization
+
+All providers still normalize into the same transcript-safe render envelope
+(`paragraph`, `bullet_list`, `code_block`, `citations`), and slightly
+inconsistent envelopes are repaired from the emitted `blocks` rather than shown
+raw.
+
 ### Experimental Context-1 Boundary
 
 `context-1` is exposed as an explicit experimental gatherer provider, not as a

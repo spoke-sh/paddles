@@ -672,17 +672,26 @@ impl InteractiveApp {
     }
 
     fn render(&self, frame: &mut Frame) {
+        let area = frame.area();
+        let input_height = self.input_area_height();
+        let transcript_height = self.live_tail_height(
+            usize::from(area.width.max(1)),
+            usize::from(area.height.saturating_sub(1 + input_height)),
+        );
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),
-                Constraint::Min(1),
-                Constraint::Length(4),
+                Constraint::Length(transcript_height),
+                Constraint::Length(input_height),
+                Constraint::Min(0),
             ])
-            .split(frame.area());
+            .split(area);
 
         frame.render_widget(self.render_header(), layout[0]);
-        frame.render_widget(self.render_transcript(layout[1]), layout[1]);
+        if transcript_height > 0 {
+            frame.render_widget(self.render_transcript(layout[1]), layout[1]);
+        }
         frame.render_widget(self.render_input(), layout[2]);
         frame.set_cursor_position(self.cursor_position(layout[2]));
     }
@@ -738,12 +747,16 @@ impl InteractiveApp {
         let input_style = self.palette.input_text;
         let input_text = self.input_display_text();
         let (label, hint) = self.input_label_and_hint(is_masked);
+        let mut prompt_line = vec![Span::styled(
+            label,
+            self.palette.input_label.add_modifier(Modifier::BOLD),
+        )];
+        if !hint.is_empty() {
+            prompt_line.push(Span::raw(" "));
+            prompt_line.push(Span::styled(hint, self.palette.input_hint));
+        }
         let mut lines = vec![
-            Line::from(vec![
-                Span::styled(label, self.palette.input_label.add_modifier(Modifier::BOLD)),
-                Span::raw(" "),
-                Span::styled(hint, self.palette.input_hint),
-            ]),
+            Line::from(prompt_line),
             Line::from(Span::styled(input_text, input_style)),
         ];
 
@@ -797,7 +810,7 @@ impl InteractiveApp {
             let turn_hint = if self.busy {
                 Some("Turn in progress".to_string())
             } else {
-                Some("Enter to send".to_string())
+                None
             };
             let hint = match (turn_hint, queue_hint) {
                 (Some(turn), Some(queue)) => format!("{turn} • {queue}"),
@@ -815,6 +828,23 @@ impl InteractiveApp {
         (x.min(area.right().saturating_sub(1)), y)
     }
 
+    fn input_area_height(&self) -> u16 {
+        let mut lines = 2;
+        if self.busy && !self.is_masked_input() {
+            lines += 1;
+        }
+        lines + 2
+    }
+
+    fn live_tail_height(&self, width: usize, max_height: usize) -> u16 {
+        if max_height == 0 {
+            return 0;
+        }
+
+        let visible_rows = self.visible_live_rows(width, max_height);
+        rendered_rows_height(&visible_rows, width).min(max_height) as u16
+    }
+
     fn visible_live_rows(&self, width: usize, height: usize) -> Vec<TranscriptRow> {
         let mut visible = Vec::new();
         let mut used = 0;
@@ -822,10 +852,11 @@ impl InteractiveApp {
 
         for row in live_rows.iter().rev() {
             let row_height = row.estimated_height(width);
-            if !visible.is_empty() && used + row_height > height {
+            let rendered_height = row_height + usize::from(!visible.is_empty());
+            if !visible.is_empty() && used + rendered_height > height {
                 break;
             }
-            used += row_height;
+            used += rendered_height;
             visible.push(row.clone());
         }
 
@@ -899,6 +930,13 @@ fn trim_for_display(input: &str, limit: usize) -> String {
 
     let kept = input.chars().take(limit).collect::<String>();
     format!("{}...", kept.trim_end())
+}
+
+fn rendered_rows_height(rows: &[TranscriptRow], width: usize) -> usize {
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| row.estimated_height(width) + usize::from(index > 0))
+        .sum()
 }
 
 fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>> {
@@ -1584,6 +1622,24 @@ mod tests {
         assert_eq!(assistant_rows[0].header, "Paddles");
         assert_eq!(assistant_rows[0].content, "hi there");
         assert!(app.visible_live_rows(80, 20).is_empty());
+        assert_eq!(app.live_tail_height(80, 20), 0);
+    }
+
+    #[test]
+    fn idle_prompt_line_has_no_redundant_send_hint() {
+        let palette = detect_palette();
+        let app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+        );
+
+        let (label, hint) = app.input_label_and_hint(false);
+        assert_eq!(label, "Prompt");
+        assert!(hint.is_empty());
     }
 
     #[test]

@@ -14,7 +14,8 @@ use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
 };
 use crate::infrastructure::rendering::{
-    ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
+    RenderCapability, ensure_citation_section, final_answer_contract_prompt,
+    normalize_assistant_response,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
@@ -60,6 +61,7 @@ pub struct SiftAgentAdapter {
     sift: Sift,
     conversation_factory: Box<dyn ConversationFactory>,
     base_context: Vec<LocalContextSource>,
+    render_capability: RenderCapability,
     state: Mutex<SessionState>,
     verbose: AtomicU8,
 }
@@ -341,6 +343,7 @@ struct TurnPrompt<'a> {
     gathered_evidence: Option<&'a EvidenceBundle>,
     prefer_tools: bool,
     follow_up_execution: bool,
+    render_capability: RenderCapability,
 }
 
 struct PlannerPrompt<'a> {
@@ -924,13 +927,18 @@ impl ToolCall {
 }
 
 impl SiftAgentAdapter {
-    pub fn new(workspace_root: impl Into<PathBuf>, model_id: &str) -> Result<Self> {
+    pub fn new(
+        workspace_root: impl Into<PathBuf>,
+        model_id: &str,
+        render_capability: RenderCapability,
+    ) -> Result<Self> {
         let workspace_root = workspace_root.into();
         let model = ReusableQwenConversationFactory::load(qwen_spec_for(model_id)?)?;
         Ok(Self::from_factory(
             workspace_root,
             model_id,
             Box::new(model),
+            render_capability,
         ))
     }
 
@@ -938,6 +946,7 @@ impl SiftAgentAdapter {
         workspace_root: PathBuf,
         model_id: &str,
         conversation_factory: Box<dyn ConversationFactory>,
+        render_capability: RenderCapability,
     ) -> Self {
         let session_id = format!("paddles-{}", unix_timestamp());
         let base_context = vec![
@@ -957,6 +966,7 @@ impl SiftAgentAdapter {
             sift: Sift::builder().build(),
             conversation_factory,
             base_context,
+            render_capability,
             state: Mutex::new(SessionState {
                 session_id,
                 turn_counter: 0,
@@ -978,6 +988,7 @@ impl SiftAgentAdapter {
             workspace_root.into(),
             model_id,
             Box::new(StaticConversationFactory::new(vec![conversation])),
+            RenderCapability::PromptEnvelope,
         )
     }
 
@@ -991,6 +1002,7 @@ impl SiftAgentAdapter {
             workspace_root.into(),
             model_id,
             Box::new(StaticConversationFactory::new(conversations)),
+            RenderCapability::PromptEnvelope,
         )
     }
 
@@ -1275,13 +1287,19 @@ impl SiftAgentAdapter {
         let mut reply = if direct_response_turn {
             self.send_to_model(
                 conversation.as_mut(),
-                &build_direct_turn_prompt(prompt, &memory_prompt),
+                &build_direct_turn_prompt(prompt, &memory_prompt, self.render_capability),
             )?
         } else if require_grounding {
             match gathered_evidence.filter(|bundle| !bundle.items.is_empty()) {
                 Some(evidence) => self.send_to_model(
                     conversation.as_mut(),
-                    &build_grounded_turn_prompt(prompt, &recent_turns, &memory_prompt, evidence),
+                    &build_grounded_turn_prompt(
+                        prompt,
+                        &recent_turns,
+                        &memory_prompt,
+                        evidence,
+                        self.render_capability,
+                    ),
                 )?,
                 None => {
                     event_sink.emit(TurnEvent::Fallback {
@@ -1310,6 +1328,7 @@ impl SiftAgentAdapter {
                     gathered_evidence,
                     prefer_tools,
                     follow_up_execution,
+                    render_capability: self.render_capability,
                 }),
             )?
         } else {
@@ -1320,6 +1339,7 @@ impl SiftAgentAdapter {
                     &recent_turns,
                     &memory_prompt,
                     gathered_evidence,
+                    self.render_capability,
                 ),
             )?
         };
@@ -1333,7 +1353,7 @@ impl SiftAgentAdapter {
                 );
                 reply = self.send_to_model(
                     conversation.as_mut(),
-                    &build_direct_retry_prompt(prompt, &memory_prompt),
+                    &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
                 )?;
             }
             if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
@@ -1363,6 +1383,7 @@ impl SiftAgentAdapter {
                                 &recent_turns,
                                 &memory_prompt,
                                 evidence,
+                                self.render_capability,
                             ),
                         )?;
                     }
@@ -1381,7 +1402,7 @@ impl SiftAgentAdapter {
                 self.log_retry_reason("direct-retry", &reply, "empty or tool-like direct response");
                 reply = self.send_to_model(
                     conversation.as_mut(),
-                    &build_direct_retry_prompt(prompt, &memory_prompt),
+                    &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
                 )?;
             }
 
@@ -1439,6 +1460,7 @@ impl SiftAgentAdapter {
                         result.name,
                         &result.summary,
                         &memory_prompt,
+                        self.render_capability,
                     ),
                 )?;
             }
@@ -1943,7 +1965,7 @@ Current user request:\n\
         turn.workspace_root.display(),
         routing_guidance,
         turn.memory_prompt,
-        final_answer_contract_prompt(turn.gathered_evidence.is_some()),
+        final_answer_contract_prompt(turn.render_capability, turn.gathered_evidence.is_some()),
         turn.recent_turns,
         format_gathered_evidence_digest(turn.gathered_evidence),
         format_context_digest(turn.context),
@@ -1956,6 +1978,7 @@ fn build_grounded_turn_prompt(
     recent_turns: &str,
     memory_prompt: &str,
     evidence: &EvidenceBundle,
+    render_capability: RenderCapability,
 ) -> String {
     format!(
         "You are Paddles, a local-first coding assistant operating inside a repository.\n\
@@ -1978,12 +2001,16 @@ Gathered repository evidence:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
-        final_answer_contract_prompt(true),
+        final_answer_contract_prompt(render_capability, true),
         format_gathered_evidence_digest(Some(evidence)),
     )
 }
 
-fn build_direct_turn_prompt(user_prompt: &str, memory_prompt: &str) -> String {
+fn build_direct_turn_prompt(
+    user_prompt: &str,
+    memory_prompt: &str,
+    render_capability: RenderCapability,
+) -> String {
     format!(
         "You are Paddles, a local-first coding assistant.\n\
 The user is making a conversational request that does not require workspace tools.\n\
@@ -1996,7 +2023,7 @@ Persistent operator memory:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
-        final_answer_contract_prompt(false),
+        final_answer_contract_prompt(render_capability, false),
     )
 }
 
@@ -2005,6 +2032,7 @@ fn build_planned_direct_prompt(
     recent_turns: &str,
     memory_prompt: &str,
     gathered_evidence: Option<&EvidenceBundle>,
+    render_capability: RenderCapability,
 ) -> String {
     format!(
         "You are Paddles, a local-first coding assistant.\n\
@@ -2025,12 +2053,16 @@ Planner evidence handoff:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
-        final_answer_contract_prompt(gathered_evidence.is_some()),
+        final_answer_contract_prompt(render_capability, gathered_evidence.is_some()),
         format_gathered_evidence_digest(gathered_evidence),
     )
 }
 
-fn build_direct_retry_prompt(user_prompt: &str, memory_prompt: &str) -> String {
+fn build_direct_retry_prompt(
+    user_prompt: &str,
+    memory_prompt: &str,
+    render_capability: RenderCapability,
+) -> String {
     format!(
         "Your last reply tried to call a workspace tool for a conversational message.\n\
 Use this final answer rendering contract:\n\
@@ -2041,7 +2073,7 @@ Persistent operator memory:\n\
 \n\
 Current user request:\n\
         {user_prompt}\n",
-        final_answer_contract_prompt(false),
+        final_answer_contract_prompt(render_capability, false),
     )
 }
 
@@ -2589,6 +2621,7 @@ fn build_grounded_retry_prompt(
     recent_turns: &str,
     memory_prompt: &str,
     evidence: &EvidenceBundle,
+    render_capability: RenderCapability,
 ) -> String {
     format!(
         "Your last reply was empty or tried to call a tool for a repository question.\n\
@@ -2609,7 +2642,7 @@ Gathered repository evidence:\n\
 \n\
 Current user request:\n\
 {user_prompt}\n",
-        final_answer_contract_prompt(true),
+        final_answer_contract_prompt(render_capability, true),
         format_gathered_evidence_digest(Some(evidence)),
     )
 }
@@ -2647,6 +2680,7 @@ fn build_tool_follow_up_prompt(
     tool_name: &str,
     summary: &str,
     memory_prompt: &str,
+    render_capability: RenderCapability,
 ) -> String {
     format!(
         "Persistent operator memory:\n\
@@ -2662,7 +2696,7 @@ Original user request:\n\
 If you need another tool, respond with ONLY one JSON tool call.\n\
 Otherwise respond with ONLY one JSON final answer object using this rendering contract:\n\
 {}",
-        final_answer_contract_prompt(false),
+        final_answer_contract_prompt(render_capability, false),
     )
 }
 

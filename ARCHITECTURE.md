@@ -27,7 +27,7 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 ### Act 3: Synthesis
 
-**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. Final answers flow through a constrained render-envelope contract (`paragraph`, `bullet_list`, `code_block`, `citations`) before the UI projects them into transcript output.
+**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles resolves a provider/model-specific render capability and then uses the strictest supported transport for final answers — native JSON schema or tool-call structure when available, prompt-enveloped JSON when not. Final answers still normalize through the same constrained render-envelope contract (`paragraph`, `bullet_list`, `code_block`, `citations`) before the UI projects them into transcript output.
 
 ### Visibility Throughout
 

@@ -8,11 +8,13 @@ use crate::domain::ports::{
     ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
 };
 use crate::infrastructure::rendering::{
+    ANTHROPIC_RENDER_TOOL_NAME, RenderCapability, assistant_response_json_schema,
     ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
 };
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -35,6 +37,7 @@ pub struct HttpProviderAdapter {
     base_url: String,
     model_id: String,
     format: ApiFormat,
+    render_capability: RenderCapability,
     verbose: AtomicU8,
     turn_history: Mutex<Vec<String>>,
 }
@@ -46,6 +49,7 @@ impl HttpProviderAdapter {
         api_key: impl Into<String>,
         base_url: impl Into<String>,
         format: ApiFormat,
+        render_capability: RenderCapability,
     ) -> Self {
         Self {
             workspace_root: workspace_root.into(),
@@ -54,15 +58,10 @@ impl HttpProviderAdapter {
             base_url: base_url.into(),
             model_id: model_id.into(),
             format,
+            render_capability,
             verbose: AtomicU8::new(0),
             turn_history: Mutex::new(Vec::new()),
         }
-    }
-
-    fn send_blocking(&self, system: &str, user: &str) -> Result<String> {
-        let rt = tokio::runtime::Handle::try_current()
-            .map_err(|_| anyhow!("no tokio runtime for HTTP provider"))?;
-        tokio::task::block_in_place(|| rt.block_on(self.send_async(system, user)))
     }
 
     async fn send_async(&self, system: &str, user: &str) -> Result<String> {
@@ -95,6 +94,42 @@ impl HttpProviderAdapter {
         Ok(response)
     }
 
+    fn send_structured_answer_blocking(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+    ) -> Result<String> {
+        let rt = tokio::runtime::Handle::try_current()
+            .map_err(|_| anyhow!("no tokio runtime for HTTP provider"))?;
+        tokio::task::block_in_place(|| {
+            rt.block_on(self.send_structured_answer_async(system, user, require_citations))
+        })
+    }
+
+    async fn send_structured_answer_async(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+    ) -> Result<String> {
+        match self.render_capability {
+            RenderCapability::OpenAiJsonSchema => {
+                self.send_openai_structured_answer(system, user, require_citations)
+                    .await
+            }
+            RenderCapability::AnthropicToolUse => {
+                self.send_anthropic_structured_answer(system, user, require_citations)
+                    .await
+            }
+            RenderCapability::GeminiJsonSchema => {
+                self.send_gemini_structured_answer(system, user, require_citations)
+                    .await
+            }
+            RenderCapability::PromptEnvelope => self.send_async(system, user).await,
+        }
+    }
+
     async fn send_openai(&self, system: &str, user: &str) -> Result<String> {
         let url = format!(
             "{}/v1/chat/completions",
@@ -107,6 +142,56 @@ impl HttpProviderAdapter {
                 { "role": "user", "content": user },
             ],
             "max_tokens": 4096,
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            bail!("OpenAI API error {status}: {text}");
+        }
+
+        let parsed: OpenAiResponse = serde_json::from_str(&text)?;
+        parsed
+            .choices
+            .first()
+            .and_then(|c| c.message.content.clone())
+            .ok_or_else(|| anyhow!("empty OpenAI response"))
+    }
+
+    async fn send_openai_structured_answer(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let body = json!({
+            "model": self.model_id,
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": user },
+            ],
+            "max_tokens": 4096,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "assistant_response",
+                    "strict": true,
+                    "schema": assistant_response_json_schema(require_citations),
+                }
+            }
         });
 
         let resp = self
@@ -167,6 +252,65 @@ impl HttpProviderAdapter {
             .ok_or_else(|| anyhow!("empty Anthropic response"))
     }
 
+    async fn send_anthropic_structured_answer(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+    ) -> Result<String> {
+        let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let body = json!({
+            "model": self.model_id,
+            "max_tokens": 4096,
+            "system": system,
+            "messages": [
+                { "role": "user", "content": user },
+            ],
+            "tools": [json!({
+                "name": ANTHROPIC_RENDER_TOOL_NAME,
+                "description": "Return the final answer as structured render blocks for the Paddles transcript. Use it exactly once per response and include only the content needed for the final rendered answer.",
+                "input_schema": assistant_response_json_schema(require_citations),
+                "strict": true
+            })],
+            "tool_choice": {
+                "type": "tool",
+                "name": ANTHROPIC_RENDER_TOOL_NAME
+            }
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            bail!("Anthropic API error {status}: {text}");
+        }
+
+        let parsed: AnthropicResponse = serde_json::from_str(&text)?;
+        if let Some(input) = parsed.content.iter().find_map(|block| {
+            (block.kind.as_deref() == Some("tool_use")
+                && block.name.as_deref() == Some(ANTHROPIC_RENDER_TOOL_NAME))
+            .then(|| block.input.clone())
+            .flatten()
+        }) {
+            return Ok(input.to_string());
+        }
+
+        parsed
+            .content
+            .iter()
+            .find_map(|block| block.text.clone())
+            .ok_or_else(|| anyhow!("empty Anthropic response"))
+    }
+
     async fn send_gemini(&self, system: &str, user: &str) -> Result<String> {
         let url = format!(
             "{}/v1beta/models/{}:generateContent?key={}",
@@ -177,6 +321,50 @@ impl HttpProviderAdapter {
         let body = serde_json::json!({
             "system_instruction": { "parts": [{ "text": system }] },
             "contents": [{ "parts": [{ "text": user }] }],
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            bail!("Gemini API error {status}: {text}");
+        }
+
+        let parsed: GeminiResponse = serde_json::from_str(&text)?;
+        parsed
+            .candidates
+            .and_then(|c| c.first().cloned())
+            .and_then(|c| c.content.parts.first().cloned())
+            .and_then(|p| p.text)
+            .ok_or_else(|| anyhow!("empty Gemini response"))
+    }
+
+    async fn send_gemini_structured_answer(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/v1beta/models/{}:generateContent?key={}",
+            self.base_url.trim_end_matches('/'),
+            self.model_id,
+            self.api_key
+        );
+        let body = json!({
+            "system_instruction": { "parts": [{ "text": system }] },
+            "contents": [{ "parts": [{ "text": user }] }],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": assistant_response_json_schema(require_citations),
+            }
         });
 
         let resp = self
@@ -240,7 +428,7 @@ Respond ONLY with the JSON object, no prose.
     fn build_answer_system_prompt(&self, require_citations: bool) -> String {
         format!(
             "You are Paddles, a helpful AI assistant. Provide concise, accurate answers.\n\n{}",
-            final_answer_contract_prompt(require_citations)
+            final_answer_contract_prompt(self.render_capability, require_citations)
         )
     }
 
@@ -430,7 +618,11 @@ impl SynthesizerEngine for HttpProviderAdapter {
             }
         }
 
-        let mut response = normalize_assistant_response(&self.send_blocking(&system, &user_msg)?);
+        let mut response = normalize_assistant_response(&self.send_structured_answer_blocking(
+            &system,
+            &user_msg,
+            gathered_evidence.is_some(),
+        )?);
         let citations = gathered_evidence.map(citation_sources).unwrap_or_default();
         response = ensure_citation_section(&response, &citations);
 
@@ -599,7 +791,13 @@ struct AnthropicResponse {
 
 #[derive(Deserialize)]
 struct AnthropicBlock {
+    #[serde(rename = "type", default)]
+    kind: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
     text: Option<String>,
+    #[serde(default)]
+    input: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -689,6 +887,7 @@ mod tests {
     use crate::domain::model::{TurnEvent, TurnEventSink};
     use crate::domain::ports::{ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine};
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
+    use crate::infrastructure::rendering::{ANTHROPIC_RENDER_TOOL_NAME, RenderCapability};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use axum::{
@@ -898,6 +1097,7 @@ mod tests {
                     synth_api_key.clone(),
                     synth_base_url.clone(),
                     format,
+                    render_capability_for(format),
                 )) as Arc<dyn SynthesizerEngine>)
             });
 
@@ -911,6 +1111,7 @@ mod tests {
                     planner_api_key.clone(),
                     planner_base_url.clone(),
                     format,
+                    render_capability_for(format),
                 ));
                 Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
             });
@@ -947,7 +1148,7 @@ mod tests {
             },
             MockResponse {
                 status: StatusCode::OK,
-                body: provider_response(format, final_answer),
+                body: final_answer_response(format, final_answer),
             },
         ])
         .await;
@@ -974,11 +1175,54 @@ mod tests {
         (server.recorded_requests(), sink.recorded(), response)
     }
 
+    fn render_capability_for(format: ApiFormat) -> RenderCapability {
+        match format {
+            ApiFormat::OpenAi => RenderCapability::OpenAiJsonSchema,
+            ApiFormat::Anthropic => RenderCapability::AnthropicToolUse,
+            ApiFormat::Gemini => RenderCapability::GeminiJsonSchema,
+        }
+    }
+
+    fn structured_answer_json(text: &str) -> String {
+        json!({
+            "render_types": ["paragraph"],
+            "blocks": [
+                { "type": "paragraph", "text": text }
+            ]
+        })
+        .to_string()
+    }
+
+    fn final_answer_response(format: ApiFormat, content: &str) -> String {
+        match format {
+            ApiFormat::OpenAi | ApiFormat::Gemini => provider_response(format, content),
+            ApiFormat::Anthropic => {
+                let input: Value =
+                    serde_json::from_str(content).expect("structured final answer json");
+                json!({
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_test",
+                            "name": ANTHROPIC_RENDER_TOOL_NAME,
+                            "input": input
+                        }
+                    ]
+                })
+                .to_string()
+            }
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn openai_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "gpt-4o-mini";
-        let (requests, events, response) =
-            run_mocked_turn(ApiFormat::OpenAi, model_id, "Mocked final answer.").await;
+        let (requests, events, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            model_id,
+            &structured_answer_json("Mocked final answer."),
+        )
+        .await;
 
         assert_eq!(response, "Mocked final answer.");
         assert_eq!(requests.len(), 2);
@@ -1007,6 +1251,18 @@ mod tests {
         assert!(synth_system.contains("You are Paddles, a helpful AI assistant."));
         assert!(synth_system.contains("Final answer rendering contract"));
         assert!(synth_system.contains("paragraph, bullet_list, code_block, citations"));
+        assert_eq!(
+            requests[1].body["response_format"]["type"].as_str(),
+            Some("json_schema")
+        );
+        assert_eq!(
+            requests[1].body["response_format"]["json_schema"]["name"].as_str(),
+            Some("assistant_response")
+        );
+        assert_eq!(
+            requests[1].body["response_format"]["json_schema"]["strict"].as_bool(),
+            Some(true)
+        );
         assert!(
             requests[1].body["messages"][1]["content"]
                 .as_str()
@@ -1034,8 +1290,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn anthropic_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "claude-sonnet-4-20250514";
-        let (requests, events, response) =
-            run_mocked_turn(ApiFormat::Anthropic, model_id, "Mocked final answer.").await;
+        let (requests, events, response) = run_mocked_turn(
+            ApiFormat::Anthropic,
+            model_id,
+            &structured_answer_json("Mocked final answer."),
+        )
+        .await;
 
         assert_eq!(response, "Mocked final answer.");
         assert_eq!(requests.len(), 2);
@@ -1070,6 +1330,19 @@ mod tests {
             .expect("synth system prompt");
         assert!(synth_system.contains("You are Paddles, a helpful AI assistant."));
         assert!(synth_system.contains("Final answer rendering contract"));
+        assert_eq!(
+            requests[1].body["tool_choice"]["type"].as_str(),
+            Some("tool")
+        );
+        assert_eq!(
+            requests[1].body["tool_choice"]["name"].as_str(),
+            Some(ANTHROPIC_RENDER_TOOL_NAME)
+        );
+        assert_eq!(
+            requests[1].body["tools"][0]["name"].as_str(),
+            Some(ANTHROPIC_RENDER_TOOL_NAME)
+        );
+        assert_eq!(requests[1].body["tools"][0]["strict"].as_bool(), Some(true));
         assert!(
             requests[1].body["messages"][0]["content"]
                 .as_str()
@@ -1085,8 +1358,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn gemini_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "gemini-2.5-flash";
-        let (requests, events, response) =
-            run_mocked_turn(ApiFormat::Gemini, model_id, "Mocked final answer.").await;
+        let (requests, events, response) = run_mocked_turn(
+            ApiFormat::Gemini,
+            model_id,
+            &structured_answer_json("Mocked final answer."),
+        )
+        .await;
 
         assert_eq!(response, "Mocked final answer.");
         assert_eq!(requests.len(), 2);
@@ -1115,6 +1392,14 @@ mod tests {
             .expect("synth system prompt");
         assert!(synth_system.contains("You are Paddles, a helpful AI assistant."));
         assert!(synth_system.contains("Final answer rendering contract"));
+        assert_eq!(
+            requests[1].body["generationConfig"]["responseMimeType"].as_str(),
+            Some("application/json")
+        );
+        assert_eq!(
+            requests[1].body["generationConfig"]["responseSchema"]["type"].as_str(),
+            Some("object")
+        );
         assert!(
             requests[1].body["contents"][0]["parts"][0]["text"]
                 .as_str()

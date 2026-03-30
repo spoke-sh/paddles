@@ -25,6 +25,7 @@ use paddles::infrastructure::cli::interactive_tui::{
 };
 use paddles::infrastructure::config::{PaddlesConfig, normalize_provider_model_alias};
 use paddles::infrastructure::credentials::{ApiKeySource, CredentialStore};
+use paddles::infrastructure::rendering::RenderCapability;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 enum ModelProvider {
@@ -166,6 +167,7 @@ async fn main() -> Result<()> {
         }
         normalized
     });
+    let render_capability = RenderCapability::resolve(provider_name, &model);
 
     let gatherer_provider =
         cli.gatherer_provider
@@ -247,8 +249,9 @@ async fn main() -> Result<()> {
     let api_key_shared: Arc<RwLock<String>> = Arc::new(RwLock::new(resolved_api_key.value));
 
     let synthesizer_factory: Box<paddles::application::SynthesizerFactory> = match provider {
-        ModelProvider::Sift => Box::new(|workspace: &Path, model_id: &str| {
-            let engine = SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?;
+        ModelProvider::Sift => Box::new(move |workspace: &Path, model_id: &str| {
+            let engine =
+                SiftAgentAdapter::new(workspace.to_path_buf(), model_id, render_capability)?;
             Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
         }),
         _ => {
@@ -265,6 +268,7 @@ async fn main() -> Result<()> {
                     current_key,
                     base_url.clone(),
                     format,
+                    render_capability,
                 );
                 Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
             })
@@ -272,8 +276,12 @@ async fn main() -> Result<()> {
     };
 
     let planner_factory: Box<paddles::application::PlannerFactory> = match provider {
-        ModelProvider::Sift => Box::new(|workspace: &Path, model_id: &str| {
-            let engine = Arc::new(SiftAgentAdapter::new(workspace.to_path_buf(), model_id)?);
+        ModelProvider::Sift => Box::new(move |workspace: &Path, model_id: &str| {
+            let engine = Arc::new(SiftAgentAdapter::new(
+                workspace.to_path_buf(),
+                model_id,
+                render_capability,
+            )?);
             let adapter = SiftPlannerAdapter::new(engine);
             Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
         }),
@@ -289,6 +297,7 @@ async fn main() -> Result<()> {
                     current_key,
                     base_url.clone(),
                     format,
+                    render_capability,
                 ));
                 let adapter = HttpPlannerAdapter::new(engine);
                 Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
