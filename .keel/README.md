@@ -217,6 +217,20 @@
 |--------|--------|
 | [Search Progress Implementation](epics/VFNyZ12IX/voyages/VFNyo7ahu/) | done |
 
+### [Planner Loop Reasoning Visibility](epics/VFOiwHCXn/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Planner Reasoning Events And TUI Rendering](epics/VFOiwHCXn/voyages/VFOjDg7Zm/) | planned |
+
+### [Transit-Native Context Addressing](epics/VFOmKssE5/) (draft)
+
+### [Recursive Self-Assessing Compaction](epics/VFOmN3n4E/) (draft)
+
+### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (draft)
+
+### [Unbounded Context Tier Model](epics/VFOmY0WHC/) (draft)
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |

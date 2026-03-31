@@ -18,3 +18,21 @@
 - **Compaction Design Direction**: Current "compaction" is purely mechanical — fixed char limits, no awareness of relevance or staleness. Recursive self-assessing compaction would treat context evaluation as a planner task: the system uses a bounded evidence-gathering pass over its own context to decide what to compact, promote to a higher tier, or discard. A compacted summary becomes a new artifact envelope that can itself be compacted later — compaction is not a terminal operation but a recursive one.
 
 - **Mission Goals Defined**: Decomposed into five goals: (MG-01) document the context topology and its seams, (MG-02) transit-native addressing so components can find each other, (MG-03) recursive self-assessing compaction, (MG-04) context pressure as a capability signal, (MG-05) formalize the unbounded tier model with traversal semantics.
+
+## 2026-03-30
+
+### Sealing move: Mission Activation
+
+- **Epic Decomposition**: Created four new epics to cover MG-02 through MG-05, each attached to the mission with board verification targets in the charter:
+  - VFOmKssE5 — Transit-Native Context Addressing (MG-02)
+  - VFOmN3n4E — Recursive Self-Assessing Compaction (MG-03)
+  - VFOmVwP8l — Context Pressure And Relevance Signals (MG-04)
+  - VFOmY0WHC — Unbounded Context Tier Model (MG-05)
+
+- **Existing Epic Alignment**: VFOiwHCXn (Planner Loop Reasoning Visibility) retained as a supporting epic — its voyage VFOjDg7Zm was planned with 5 stories moved to backlog, making it the first actionable workstream.
+
+- **SRS Scope Realignment**: Fixed scope ID drift in VFOjDg7Zm/SRS.md where the SRS had diverged from PRD numbering (SCOPE-06 contradiction, SCOPE-09 unknown reference). Realigned to match PRD's canonical SCOPE-01 through SCOPE-08.
+
+- **Story Acceptance Criteria**: Filled in placeholder acceptance criteria for stories VFOkHHDwz, VFOkHIDzL, VFOkHJB0P, VFOkHKC1D with proper SRS traceability references.
+
+- **Mission Activated**: All activation gates satisfied — at least one planned voyage with actionable work, all goal verification targets resolved to real board entities.

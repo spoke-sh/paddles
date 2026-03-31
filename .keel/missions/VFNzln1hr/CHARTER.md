@@ -7,10 +7,10 @@ Archetype: Strategic
 | ID | Description | Verification |
 |----|-------------|--------------|
 | MG-01 | Document and formalize the context topology: how subcontext components (evidence budgets, artifact envelopes, thread summaries, operator memory, planner loop state) discover, address, and communicate with each other today, and where the seams and blind spots are. | manual: foundational doc reviewed and accepted |
-| MG-02 | Establish transit-native context addressing so that any context component can navigate to related context through transit lineage (streams, branches, merge records) rather than relying solely on in-memory structural wiring and factory-time assembly. | board: pending |
-| MG-03 | Design recursive self-assessing compaction where the system evaluates its own context state and decides what to compact, promote, archive, or surface, using the same bounded planner/evidence mechanisms it uses for workspace tasks. | board: pending |
-| MG-04 | Model context pressure, staleness, and relevance decay as first-class signals within the constraints and capabilities framework, so the system can report and respond to context budget exhaustion the same way it handles planner budget exhaustion. | board: pending |
-| MG-05 | Formalize the unbounded context tier model: inline (truncated artifacts) to transit streams to sift indexes to filesystem to beyond, with traversal and resolution semantics so the system can reach any depth on demand without holding everything in working memory. | board: pending |
+| MG-02 | Establish transit-native context addressing so that any context component can navigate to related context through transit lineage (streams, branches, merge records) rather than relying solely on in-memory structural wiring and factory-time assembly. | board: VFOmKssE5 |
+| MG-03 | Design recursive self-assessing compaction where the system evaluates its own context state and decides what to compact, promote, archive, or surface, using the same bounded planner/evidence mechanisms it uses for workspace tasks. | board: VFOmN3n4E |
+| MG-04 | Model context pressure, staleness, and relevance decay as first-class signals within the constraints and capabilities framework, so the system can report and respond to context budget exhaustion the same way it handles planner budget exhaustion. | board: VFOmVwP8l |
+| MG-05 | Formalize the unbounded context tier model: inline (truncated artifacts) to transit streams to sift indexes to filesystem to beyond, with traversal and resolution semantics so the system can reach any depth on demand without holding everything in working memory. | board: VFOmY0WHC |
 
 ## Constraints
 
