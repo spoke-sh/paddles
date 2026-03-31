@@ -162,7 +162,12 @@ fn handle_key_event(
     _tx: UnboundedSender<UiMessage>,
 ) -> bool {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
-        return true;
+        if app.input.is_empty() {
+            return true;
+        }
+        app.input.clear();
+        app.cursor_pos = 0;
+        return false;
     }
 
     match key.code {
