@@ -31,7 +31,7 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page.
+**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, context pressure, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
@@ -135,8 +135,11 @@ The target architecture is implemented across these modules:
 | **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
 | **Recorder Adapters** | [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs) | Noop, in-memory, embedded transit-core |
 | **Thread Replay** | [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs) | Replay/projection layer for conversation traces |
-| **Conversation Crate** | [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs) | Shared conversation/thread/session primitives |
-| **Transcript TUI** | [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs) | Default Codex-style action stream |
+| **Context Quality** | [src/domain/model/context_quality.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/context_quality.rs) | ContextPressure, PressureTracker, PressureLevel types |
+| **Context Resolution** | [src/domain/ports/context_resolution.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/context_resolution.rs) | ContextResolver port for cross-tier locator resolution |
+| **Transit Resolver** | [src/infrastructure/adapters/transit_resolver.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/transit_resolver.rs) | TransitContextResolver — inline, transit, filesystem dispatch |
+| **Conversation Crate** | [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs) | ContextTier, ContextLocator, ArtifactEnvelope, conversation primitives |
+| **Transcript TUI** | [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs) | Codex-style action stream with in-flight silence indicators |
 
 ### How The Pieces Fit Together
 
@@ -144,14 +147,15 @@ The runtime follows the backbone narrative from above:
 
 1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid initial replies get one constrained re-decision pass before the controller fails closed.
 2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode and strategy into the gatherer boundary. The `sift-autonomous` gatherer runs bounded graph-mode retrieval, preserving episode/frontier/branch state as typed metadata.
-3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind logical ids with optional locators.
-4. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
+3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
+4. **Context quality** — a `PressureTracker` accumulates truncation events during context assembly and emits `ContextPressure` as a turn event when pressure is non-nominal.
+5. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
 
 ### Growing Edges
 
-- **Unified resource graph** — planner search/refine delegates through the configured gatherer; a richer resource graph will strengthen this
+- **Sift-tier locator resolution** — cross-tier resolution covers inline, transit, and filesystem today; sift-tier resolution awaits sift API changes
+- **Automatic tier promotion/demotion** — content moves between tiers manually; automatic promotion policies are future work
 - **Default recorder policy** — embedded transit-core is available; the default runtime uses noop until the policy slice lands
-- **Artifact store promotion** — the contract supports external artifact refs; a promotion policy will formalize this
 - **Context-1 integration** — available as an explicit experimental boundary for opt-in use
 
 ## Recorder Boundary
@@ -166,6 +170,39 @@ The recorder path delivers storage-neutral trace durability:
 6. Interactive thread split/merge records flow through the same recorder path, making thread structure part of the durable trace
 
 This design keeps the domain storage-neutral while providing lineage durable enough for replay, branch comparison, and graph-trace analysis.
+
+## Context Architecture
+
+Context in Paddles spans four tiers with increasing depth and decreasing immediacy. Each tier has explicit boundaries, typed addressing, and lazy cross-tier resolution.
+
+### Four-Tier Context Model
+
+| Tier | Boundary | What lives here | Access |
+|------|----------|----------------|--------|
+| **Inline** | Character-limited content in working memory | Truncated artifact excerpts in `ArtifactEnvelope.inline_content` | Direct read |
+| **Transit** | Full records in durable streams | Complete trace records keyed by task and record id | Replay via `TransitContextResolver` |
+| **Sift** | Indexed evidence in retrieval indexes | Ranked retrieval results from autonomous search | Query-based (future) |
+| **Filesystem** | Workspace files on disk | Source files, configs, project artifacts | `tokio::fs::read_to_string` |
+
+### Transit-Native Context Addressing
+
+Every `ArtifactEnvelope` carries an optional typed `ContextLocator` that encodes which tier holds the full content and how to reach it. When inline content is truncated, the locator points to the full record in transit or on disk. Consumers call `resolver.resolve(&locator)` to retrieve full content on demand — resolution is lazy, pull-based, and never eagerly loads deeper tiers.
+
+Resolution follows a local-first ordering: inline content returns immediately, transit replays local streams, filesystem reads local disk. When a tier is unavailable or a record is missing, resolution fails closed with an explicit error naming the tier and locator details.
+
+### Recursive Self-Assessing Compaction
+
+The planner can evaluate its own accumulated context state and produce a structured compaction plan. A `CompactionEngine` walks the planner's retained evidence, evaluates relevance against the current query, and produces a `CompactionPlan` that prunes low-value artifacts while preserving addressable locators to the pruned content. This keeps the working context tight without losing depth — pruned artifacts remain reachable through their transit locators.
+
+### Context Pressure Signals
+
+Context budget exhaustion is modeled as a first-class capability signal through `ContextPressure`. A `PressureTracker` accumulates truncation events during context assembly — memory documents exceeding the 12k character cap, truncated artifact envelopes, trimmed thread summaries. The tracker computes a `PressureLevel` (Low / Medium / High / Critical) from the count of truncation events and emits a `TurnEvent::ContextPressure` when pressure is non-nominal.
+
+These signals are informational — they surface context degradation in the turn event stream without altering routing or synthesis behavior. The TUI renders pressure events at verbose≥1.
+
+### In-Flight Visibility
+
+When a turn step takes longer than 2 seconds with no new event in the transcript, the TUI inserts a contextual in-flight row in a muted style — "Planning...", "Synthesizing...", "Searching...", etc. — derived from the last completed event. This prevents the transcript from appearing stalled during long model calls. The row stays in history as a marker of the gap.
 
 ## Current Backbone Status
 

@@ -170,15 +170,20 @@ The recursive harness runs as a bounded local-first runtime:
 - **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary with noop, in-memory, and embedded `transit-core` adapters
 - **Artifact envelopes** — prompts, tool I/O, evidence bundles, planner traces, and responses sit behind logical refs, ready for external storage when needed
 - **Threaded conversations** — interactive sessions keep one durable root task with model-driven steering-thread decisions, structured thread candidates, explicit merge-back records, and full replay views
+- **Four-tier context model** — context spans Inline, Transit, Sift, and Filesystem tiers with typed `ContextLocator` addressing and lazy cross-tier resolution through a `ContextResolver` port
+- **Transit-native addressing** — truncated `ArtifactEnvelope` content carries typed locators to full records in transit or on disk, resolvable on demand without re-searching
+- **Recursive self-assessing compaction** — the planner evaluates its own retained evidence for relevance and produces structured compaction plans that prune low-value artifacts while preserving locators for depth
+- **Context pressure signals** — a `PressureTracker` accumulates truncation events during context assembly and emits `ContextPressure` turn events so context degradation is visible in the event stream
+- **In-flight visibility** — the TUI inserts contextual "Planning...", "Synthesizing...", etc. rows after 2s of silence between events, so long model calls don't look stalled
 - **Shared conversation primitives** — an internal workspace crate ([crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)) cleanly separates conversation/thread/session types from the main binary
 
 ### Growing Edges
 
 A few areas are still maturing:
 
-- **Unified resource graph** — planner `search`/`refine` currently delegates through the configured gatherer backend; a richer unified resource graph will strengthen this path
+- **Sift-tier locator resolution** — cross-tier resolution covers inline, transit, and filesystem tiers; sift-tier resolution awaits sift API changes
+- **Automatic tier promotion** — content moves between tiers through explicit locators; automatic promotion/demotion policies are future work
 - **Default recording policy** — embedded `transit-core` recording is available through the recorder boundary; the default runtime still uses noop until the policy slice lands
-- **Artifact store promotion** — graph-mode gatherer traces use inline envelopes today; the contract supports external artifact refs when a promotion policy is ready
 - **Context-1 integration** — `context-1` remains an explicit experimental boundary, available for opt-in use
 - **Concurrent threading** — auto-threading is checkpoint-bounded and sequential today; true concurrent sibling generation is a future capability
 
