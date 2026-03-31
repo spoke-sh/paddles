@@ -39,16 +39,11 @@
 
 ## 2026-03-30
 
-### Sealing move: Planner Loop Reasoning Visibility Epic Completed
+### Sealing move: Remaining Voyages Planned
 
-- **Epic VFOiwHCXn Delivered**: All 5 stories implemented, verified, and accepted. Voyage VFOjDg7Zm and epic auto-completed.
-
-- **Implementation Summary**:
-  - Added `TurnEvent::PlannerStepProgress` variant with step_number, step_limit, action, query, evidence_count (min_verbosity=0, always visible)
-  - Emitted from `execute_recursive_planner_loop` after action selection, before execution
-  - TUI in-place rendering via independent `planner_progress_row` tracker (coexists with search progress)
-  - Enriched verbose=1 PlannerActionSelected rendering: compact "Planner step N: action" title with collapsed rationale
-  - Expanded verbose=2 PlannerSummary with graph topology (node_count, edge_count, retained_artifact_count)
-  - Added `PlannerAction::target_query()` to extract query/command target from any action variant
-
-- **Remaining Work**: 4 draft epics (MG-02 through MG-05) need PRD authoring, voyage decomposition, and implementation. MG-01 foundational doc needs authoring and human review before implementation epics proceed (per charter YIELD rule).
+- **Voyage Decomposition Complete**: Decomposed the four implementation epics (MG-02 through MG-05) into actionable voyages and stories.
+- **Epic VFOmKssE5 (Transit-Native Addressing)**: Planned voyage `VFOvGdksF` with 4 stories (Locator types, Transit resolver, Artifact envelope update, Planner wiring).
+- **Epic VFOmN3n4E (Recursive Compaction)**: Planned voyage `VFOvI9PzB` with 4 stories (Compaction domain, Assessment engine, Artifact compaction, Composability verification).
+- **Epic VFOmVwP8l (Context Pressure)**: Planned voyage `VFOvJSU8h` with 4 stories (Pressure types, Instrumentation, TurnEvents, TUI rendering).
+- **Epic VFOmY0WHC (Unbounded Context)**: Planned voyage `VFOvKhUFc` with 4 stories (Tier docs, Tier metadata, Cross-tier resolution, Fail-closed degradation).
+- **Ready for Implementation**: All foundational PRDs, voyages, and stories are drafted and linked to the mission board.

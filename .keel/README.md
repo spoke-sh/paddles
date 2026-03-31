@@ -225,11 +225,27 @@
 
 ### [Transit-Native Context Addressing](epics/VFOmKssE5/) (draft)
 
+| Voyage | Status |
+|--------|--------|
+| [Context Locator And Transit Resolution](epics/VFOmKssE5/voyages/VFOvGdksF/) | draft |
+
 ### [Recursive Self-Assessing Compaction](epics/VFOmN3n4E/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Bounded Context Self-Assessment](epics/VFOmN3n4E/voyages/VFOvI9PzB/) | draft |
 
 ### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (draft)
 
+| Voyage | Status |
+|--------|--------|
+| [Context Pressure Tracking And Events](epics/VFOmVwP8l/voyages/VFOvJSU8h/) | draft |
+
 ### [Unbounded Context Tier Model](epics/VFOmY0WHC/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Tier Model And Cross-Tier Locator Resolution](epics/VFOmY0WHC/voyages/VFOvKhUFc/) | draft |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
