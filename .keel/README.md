@@ -8,6 +8,7 @@
 | Bearing | Status | Evidence | Assessment | Readiness | EV | Laid |
 |---------|--------|----------|------------|-----------|----|------|
 | [HTTP API Design For Paddles](bearings/VFKApee25/) | laid | ✓ | ✓ | decision-ready | 10.31 | ✓ |
+| [Adaptive Interpretation Context Refinement](bearings/VFUNJz9zT/) | exploring | ✓ | ✓ | repair citations | - | - |
 
 ## Epics
 
