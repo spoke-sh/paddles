@@ -169,6 +169,7 @@ fn handle_key_event(
         KeyCode::Esc => {
             if matches!(app.input_mode, InputMode::MaskedKey { .. }) {
                 app.input.clear();
+                app.cursor_pos = 0;
                 app.input_mode = InputMode::Normal;
                 app.push_event("Login cancelled", "Returned to normal input.");
                 false
@@ -181,24 +182,111 @@ fn handle_key_event(
             false
         }
         KeyCode::Backspace => {
-            app.input.pop();
+            if app.cursor_pos > 0 {
+                let byte_pos = app
+                    .input
+                    .char_indices()
+                    .nth(app.cursor_pos - 1)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                let end_byte = app
+                    .input
+                    .char_indices()
+                    .nth(app.cursor_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(app.input.len());
+                app.input.replace_range(byte_pos..end_byte, "");
+                app.cursor_pos -= 1;
+            }
+            false
+        }
+        KeyCode::Delete => {
+            let char_count = app.input.chars().count();
+            if app.cursor_pos < char_count {
+                let byte_pos = app
+                    .input
+                    .char_indices()
+                    .nth(app.cursor_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(app.input.len());
+                let end_byte = app
+                    .input
+                    .char_indices()
+                    .nth(app.cursor_pos + 1)
+                    .map(|(i, _)| i)
+                    .unwrap_or(app.input.len());
+                app.input.replace_range(byte_pos..end_byte, "");
+            }
+            false
+        }
+        KeyCode::Left => {
+            if app.cursor_pos > 0 {
+                app.cursor_pos -= 1;
+            }
+            false
+        }
+        KeyCode::Right => {
+            let char_count = app.input.chars().count();
+            if app.cursor_pos < char_count {
+                app.cursor_pos += 1;
+            }
+            false
+        }
+        KeyCode::Home => {
+            app.cursor_pos = 0;
+            false
+        }
+        KeyCode::End => {
+            app.cursor_pos = app.input.chars().count();
             false
         }
         KeyCode::Up => {
-            app.history_back();
+            if !app.cursor_up() && !app.input.contains('\n') {
+                app.history_back();
+            }
             false
         }
         KeyCode::Down => {
-            app.history_forward();
+            if !app.cursor_down() && !app.input.contains('\n') {
+                app.history_forward();
+            }
             false
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.input.clear();
+            app.cursor_pos = 0;
+            false
+        }
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.cursor_pos = 0;
+            false
+        }
+        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.cursor_pos = app.input.chars().count();
+            false
+        }
+        KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let byte_pos = app
+                .input
+                .char_indices()
+                .nth(app.cursor_pos)
+                .map(|(i, _)| i)
+                .unwrap_or(app.input.len());
+            app.input.insert(byte_pos, '\n');
+            app.cursor_pos += 1;
+            app.history_cursor = None;
             false
         }
         KeyCode::Char(ch) => {
             if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                app.input.push(ch);
+                let byte_pos = app
+                    .input
+                    .char_indices()
+                    .nth(app.cursor_pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(app.input.len());
+                app.input.insert(byte_pos, ch);
+                app.cursor_pos += 1;
                 app.history_cursor = None;
             }
             false
@@ -524,6 +612,7 @@ struct InteractiveApp {
     step_timing: StepTimingReservoir,
     step_timing_path: PathBuf,
     verbose: u8,
+    cursor_pos: usize,
     prompt_history: Vec<String>,
     history_cursor: Option<usize>,
     history_draft: String,
@@ -604,6 +693,7 @@ impl InteractiveApp {
             step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
             step_timing_path: step_timing_cache_path(),
             verbose,
+            cursor_pos: 0,
             prompt_history: Vec::new(),
             history_cursor: None,
             history_draft: String::new(),
@@ -624,6 +714,7 @@ impl InteractiveApp {
         };
         self.history_cursor = Some(index);
         self.input = self.prompt_history[index].clone();
+        self.cursor_pos = self.input.chars().count();
     }
 
     fn history_forward(&mut self) {
@@ -637,6 +728,62 @@ impl InteractiveApp {
             self.history_cursor = None;
             self.input = self.history_draft.clone();
         }
+        self.cursor_pos = self.input.chars().count();
+    }
+
+    /// Returns (line_index, column, line_start_char_offset, line_char_len) for the cursor.
+    fn cursor_line_info(&self) -> (usize, usize, usize, usize) {
+        let mut offset = 0;
+        for (i, line) in self.input.split('\n').enumerate() {
+            let line_len = line.chars().count();
+            if self.cursor_pos <= offset + line_len {
+                return (i, self.cursor_pos - offset, offset, line_len);
+            }
+            offset += line_len + 1; // +1 for the newline
+        }
+        // cursor is at the very end
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        let last = lines.len().saturating_sub(1);
+        let last_len = lines.last().map(|l| l.chars().count()).unwrap_or(0);
+        (
+            last,
+            last_len,
+            self.input.chars().count() - last_len,
+            last_len,
+        )
+    }
+
+    /// Move cursor up one line, preserving column. Returns true if it moved.
+    fn cursor_up(&mut self) -> bool {
+        let (line_idx, col, _, _) = self.cursor_line_info();
+        if line_idx == 0 {
+            return false;
+        }
+        // Find the previous line
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        let prev_line_len = lines[line_idx - 1].chars().count();
+        let prev_line_start: usize = lines[..line_idx - 1]
+            .iter()
+            .map(|l| l.chars().count() + 1)
+            .sum();
+        self.cursor_pos = prev_line_start + col.min(prev_line_len);
+        true
+    }
+
+    /// Move cursor down one line, preserving column. Returns true if it moved.
+    fn cursor_down(&mut self) -> bool {
+        let (line_idx, col, _, _) = self.cursor_line_info();
+        let lines: Vec<&str> = self.input.split('\n').collect();
+        if line_idx + 1 >= lines.len() {
+            return false;
+        }
+        let next_line_len = lines[line_idx + 1].chars().count();
+        let next_line_start: usize = lines[..line_idx + 1]
+            .iter()
+            .map(|l| l.chars().count() + 1)
+            .sum();
+        self.cursor_pos = next_line_start + col.min(next_line_len);
+        true
     }
 
     fn submit_prompt(&mut self) {
@@ -648,6 +795,7 @@ impl InteractiveApp {
         self.history_cursor = None;
         self.history_draft.clear();
         self.input.clear();
+        self.cursor_pos = 0;
 
         // Handle masked key submission.
         if let InputMode::MaskedKey { ref provider } = self.input_mode {
@@ -897,7 +1045,7 @@ impl InteractiveApp {
 
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let input_height = self.input_area_height();
+        let input_height = self.input_area_height(area.width);
         let activity_height = u16::from(self.busy && !self.is_masked_input());
         let fixed_bottom = input_height + activity_height + 1;
         let transcript_height = self.live_tail_height(
@@ -998,7 +1146,12 @@ impl InteractiveApp {
         let is_masked = self.is_masked_input();
         let (text, style) = self.input_display_line(is_masked);
 
-        Paragraph::new(Line::from(Span::styled(text, style)))
+        let lines: Vec<Line<'static>> = text
+            .split('\n')
+            .map(|line| Line::from(Span::styled(line.to_string(), style)))
+            .collect();
+
+        Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
                     .title(" Prompt ")
@@ -1053,13 +1206,37 @@ impl InteractiveApp {
     }
 
     fn cursor_position(&self, area: Rect) -> (u16, u16) {
-        let x = area.x.saturating_add(1 + self.input.chars().count() as u16);
-        let y = area.y.saturating_add(1);
+        let inner_width = area.width.saturating_sub(2).max(1) as usize;
+        // Take only the text up to the cursor position.
+        let text_to_cursor: String = self.input.chars().take(self.cursor_pos).collect();
+
+        let mut row = 0u16;
+        let mut col = 0usize;
+        for (i, line) in text_to_cursor.split('\n').enumerate() {
+            if i > 0 {
+                row += 1;
+            }
+            let char_count = line.chars().count();
+            row += (char_count / inner_width) as u16;
+            col = char_count % inner_width;
+        }
+
+        let x = area.x.saturating_add(1 + col as u16);
+        let y = area.y.saturating_add(1 + row);
         (x.min(area.right().saturating_sub(1)), y)
     }
 
-    fn input_area_height(&self) -> u16 {
-        1 + 2 // input line + top/bottom border
+    fn input_area_height(&self, width: u16) -> u16 {
+        let inner_width = width.saturating_sub(2).max(1) as usize;
+        let content_lines = if self.input.is_empty() {
+            1
+        } else {
+            self.input
+                .split('\n')
+                .map(|line| wrapped_line_count(line, inner_width).max(1))
+                .sum()
+        };
+        (content_lines as u16) + 2 // content + top/bottom border
     }
 
     fn live_tail_height(&self, width: usize, max_height: usize) -> u16 {
