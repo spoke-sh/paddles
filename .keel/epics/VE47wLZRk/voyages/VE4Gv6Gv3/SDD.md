@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-Transitioning from a mock simulation to a direct integration with the `wonopcode-core` crate.
+Transitioning from a mock simulation to a direct integration with the `legacy-core` crate.
 
 ## Components
 
@@ -14,8 +14,8 @@ Transitioning from a mock simulation to a direct integration with the `wonopcode
 
 ## Data Flows
 
-1. `main.rs` initializes `wonopcode_core::Instance`.
-2. `main.rs` creates a new `wonopcode_core::Session`.
+1. `main.rs` initializes `legacy_core::Instance`.
+2. `main.rs` creates a new `legacy_core::Session`.
 3. `main.rs` constructs a `PromptLoop`.
 4. The user prompt is passed to `PromptLoop::run`.
 5. The result is printed to the terminal.

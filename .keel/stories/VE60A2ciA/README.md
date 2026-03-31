@@ -17,7 +17,7 @@ completed_at: 2026-03-16T21:41:48
 
 ## Summary
 
-Wrap `sift::GenerativeModel` into `wonopcode_provider::LanguageModel` for use in the `PromptLoop`.
+Wrap `sift::GenerativeModel` into `legacy_provider::LanguageModel` for use in the `PromptLoop`.
 
 ## Acceptance Criteria
 

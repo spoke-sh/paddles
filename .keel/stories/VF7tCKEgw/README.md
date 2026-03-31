@@ -19,10 +19,10 @@ completed_at: 2026-03-27T23:10:53
 
 ## Summary
 
-Replace the wonopcode-owned prompt loop with a Paddles-managed Sift session
+Replace the legacy-engine-owned prompt loop with a Paddles-managed Sift session
 controller that owns conversational state and retained context.
 
 ## Acceptance Criteria
 
-- [x] `MechSuitService` executes prompts through a Sift session controller rather than `wonopcode_core::PromptLoop` and `Instance`. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] `MechSuitService` executes prompts through a Sift session controller rather than `legacy_core::PromptLoop` and `Instance`. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
 - [x] Prompt turns retain prior agent turns and bounded workspace evidence through Sift context state. [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end, proof: ac-2.log-->

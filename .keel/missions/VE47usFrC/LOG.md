@@ -14,7 +14,7 @@
 
 ### Sealing move: Complete Chord Integration Epic
 
-- **Story Completion**: Completed and accepted story `VE485S98P` ("Wire Wonopcode Into Main").
+- **Story Completion**: Completed and accepted story `VE485S98P` ("Wire Legacy Engine Into Main").
 - **Capability Verification**: Implemented, verified, and accepted story `VE48AsLMk` ("Verify Chord File Modification").
 - **Voyage Finalization**: Auto-completed voyage `VE47zV8lt` ("Chord Wiring").
 - **Epic Finalization**: Finalized epic `VE47wLZRk` ("Foundational Chord Integration").
@@ -22,7 +22,7 @@
 
 ### Sealing move: Realize Real Chord Integration
 
-- **Technical Realization**: Integrated `wonopcode-core` crate directly, replacing placeholder simulations.
+- **Technical Realization**: Integrated `legacy-core` crate directly, replacing placeholder simulations.
 - **Build Stabilization**: Updated `flake.nix` with `openssl` and `pkg-config` to resolve compilation errors.
 - **Voyage Completion**: Completed voyage `VE4Gv6Gv3` ("Real Chord Integration").
 - **Mission Achievement**: Marked mission `VE47usFrC` as achieved.

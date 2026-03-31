@@ -2,13 +2,13 @@
 
 ## Problem Statement
 
-The paddles assistant lacks its primary 'chord' capabilities for agentic coding tasks. Currently, the `paddles` binary is a thin wrapper that doesn't utilize the `wonopcode` crate's capabilities, which are essential for its role as a "mech suit" for AI assistants.
+The paddles assistant lacks its primary 'chord' capabilities for agentic coding tasks. Currently, the `paddles` binary is a thin wrapper that doesn't utilize the `legacy-engine` crate's capabilities, which are essential for its role as a "mech suit" for AI assistants.
 
 ## Goals & Objectives
 
 | ID | Goal | Success Metric | Target |
 |----|------|----------------|--------|
-| GOAL-01 | Integrate `wonopcode` (chord) into the paddles CLI. | `paddles --prompt` executes a chord-powered task. | 100% |
+| GOAL-01 | Integrate `legacy-engine` (chord) into the paddles CLI. | `paddles --prompt` executes a chord-powered task. | 100% |
 | GOAL-02 | Establish foundational agentic coding workflow. | Chord can successfully modify a file in a controlled test. | 100% |
 
 ## Users
@@ -21,10 +21,10 @@ The paddles assistant lacks its primary 'chord' capabilities for agentic coding 
 
 ### In Scope
 
-- [SCOPE-01] Wiring `wonopcode` into `src/main.rs`.
+- [SCOPE-01] Wiring `legacy-engine` into `src/main.rs`.
 - [SCOPE-02] Basic prompt handling via chord.
 - [SCOPE-03] Verification test for a simple chord-driven file modification.
-- [SCOPE-06] Integration of `wonopcode-core` `Instance` and `PromptLoop`.
+- [SCOPE-06] Integration of `legacy-core` `Instance` and `PromptLoop`.
 - [SCOPE-07] Successful compilation with real dependencies.
 - [SCOPE-08] Execution of a real agentic prompt via the CLI.
 
@@ -32,7 +32,7 @@ The paddles assistant lacks its primary 'chord' capabilities for agentic coding 
 
 - [SCOPE-04] Advanced multi-step reasoning or complex tool use.
 - [SCOPE-05] Integration with `sift` for advanced retrieval (future epic).
-- [SCOPE-09] Advanced TUI features from `wonopcode`.
+- [SCOPE-09] Advanced TUI features from `legacy-engine`.
 
 ## Requirements
 
@@ -63,7 +63,7 @@ The paddles assistant lacks its primary 'chord' capabilities for agentic coding 
 
 | Assumption | Rationale |
 |------------|-----------|
-| A-01 | The `wonopcode-core` API is stable enough for initial wiring. | Necessary for building against the crate. |
+| A-01 | The `legacy-core` API is stable enough for initial wiring. | Necessary for building against the crate. |
 
 ## Open Questions & Risks
 
@@ -74,6 +74,6 @@ The paddles assistant lacks its primary 'chord' capabilities for agentic coding 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] `paddles --prompt "test"` initiates a `wonopcode` session.
+- [ ] `paddles --prompt "test"` initiates a `legacy-engine` session.
 - [ ] The system compiles and runs without mock simulations.
 <!-- END SUCCESS_CRITERIA -->

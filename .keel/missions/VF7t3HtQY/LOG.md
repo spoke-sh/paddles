@@ -5,12 +5,12 @@
 
 ## 2026-03-27T19:45:00Z
 
-- Created mission `VF7t3HtQY` to cut Paddles over from wonopcode-owned runtime orchestration to a Sift-native controller with retained context and local tools.
+- Created mission `VF7t3HtQY` to cut Paddles over from legacy-engine-owned runtime orchestration to a Sift-native controller with retained context and local tools.
 - Decomposed the mission into epic `VF7t633ux`, voyage `VF7tAvs7B`, and three execution stories covering controller cutover, local tool surface, and dependency/documentation cleanup.
 
 ## 2026-03-28T03:28:03Z
 
-- Replaced the wonopcode prompt loop in `MechSuitService` with the new `SiftAgentAdapter` session controller and removed wonopcode runtime dependencies from the application entry path.
+- Replaced the legacy-engine prompt loop in `MechSuitService` with the new `SiftAgentAdapter` session controller and removed legacy-engine runtime dependencies from the application entry path.
 - Hardened the local tool surface by rejecting symlink escapes and surfacing non-zero `shell` and `apply_patch` exits as recoverable tool failures, then added regression coverage for both cases.
 - Recorded proof for story `VF7tCKEgw` and submitted it for human verification.
 

@@ -1,12 +1,12 @@
 # Sift-Native Runtime Cutover - Software Design Description
 
-> Replace wonopcode-owned core orchestration with a Sift-backed controller that supports retained context and immediate local tool execution.
+> Replace legacy-engine-owned core orchestration with a Sift-backed controller that supports retained context and immediate local tool execution.
 
 **SRS:** [SRS.md](SRS.md)
 
 ## Overview
 
-This voyage replaces the wonopcode-owned prompt loop with a Paddles-managed
+This voyage replaces the legacy-engine-owned prompt loop with a Paddles-managed
 runtime that combines:
 
 - a Sift-backed local generative conversation
@@ -54,7 +54,7 @@ loop, or presentation-heavy streaming/TUI work.
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Runtime owner | Paddles owns the turn loop and tool execution | Removes wonopcode from the core execution boundary |
+| Runtime owner | Paddles owns the turn loop and tool execution | Removes legacy-engine from the core execution boundary |
 | Retrieval plan | Use Sift context assembly with an explicit lexical plan for controller/tool context | Avoids hidden dense-model/network requirements on prompt execution |
 | Tool protocol | Single JSON tool call per assistant step | Keeps the first cut simple and inspectable |
 | State retention | Store tool outputs and turns as Sift local context plus bounded retained artifacts | Makes previous work searchable and bounded across turns |
@@ -68,7 +68,7 @@ The runtime is split into:
 - local tool executor: search, file, shell, edit, and diff operations
 - `main.rs`: CLI-only presentation loop
 
-wonopcode crates no longer own runtime state or tool execution.
+legacy-engine crates no longer own runtime state or tool execution.
 
 ## Components
 

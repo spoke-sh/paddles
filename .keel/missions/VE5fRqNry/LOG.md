@@ -12,8 +12,8 @@
 
 ### Sealing move: Implement Real Agentic Loop
 
-- **Technical Realization**: Integrated real `wonopcode_core::PromptLoop` into `main.rs`.
+- **Technical Realization**: Integrated real `legacy_core::PromptLoop` into `main.rs`.
 - **Local Provider**: Implemented `CandleProvider` in `paddles` to satisfy `LanguageModel` trait using local execution metaphor.
-- **Dependency Management**: Updated `Cargo.toml` with `wonopcode-provider`, `wonopcode-tools`, `async-trait`, and `futures`.
+- **Dependency Management**: Updated `Cargo.toml` with `legacy-provider`, `legacy-tools`, `async-trait`, and `futures`.
 - **Verification**: Successfully executed `paddles --prompt` showing real loop orchestration.
 - **Finalization**: Completed all stories in `VE5fbHOVp`, auto-completing voyage and epic `VE5fVmIs3`.

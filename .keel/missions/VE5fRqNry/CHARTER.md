@@ -11,10 +11,10 @@ Archetype: Strategic
 
 ## Constraints
 
-- Must use `wonopcode-core` primitives (`Instance`, `PromptLoop`).
+- Must use `legacy-core` primitives (`Instance`, `PromptLoop`).
 - Must maintain 100% board integrity.
 
 ## Halting Rules
 
 - HALT when `PromptLoop` is executing and verified.
-- YIELD if the `wonopcode-core` API remains too opaque for safe wiring.
+- YIELD if the `legacy-core` API remains too opaque for safe wiring.

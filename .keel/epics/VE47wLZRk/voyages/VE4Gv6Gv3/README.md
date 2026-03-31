@@ -12,7 +12,7 @@ completed_at: 2026-03-16T14:27:29
 
 # Real Chord Integration
 
-> Actually wire the real wonopcode core engine into paddles.
+> Actually wire the real legacy-engine core engine into paddles.
 
 ## Documents
 

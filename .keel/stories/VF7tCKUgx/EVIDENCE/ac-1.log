@@ -17,7 +17,7 @@ files: [".keel/stories/VF7tCKUgx/EVIDENCE/ac1-local-tool-surface.md"]
   - shell commands
   - git diff
   - patch application
-- These tools are executed directly in `SiftAgentAdapter::execute_tool` without wonopcode tool plumbing.
+- These tools are executed directly in `SiftAgentAdapter::execute_tool` without legacy-engine tool plumbing.
 - `cargo test` covers representative tool behavior, including:
   - `search_tool_uses_sift_context_assembly`
   - `shell_tool_returns_error_on_non_zero_exit`

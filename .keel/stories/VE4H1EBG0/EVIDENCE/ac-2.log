@@ -2,4 +2,4 @@
 recorded_at: 2026-03-16T14:27:11.832877790-07:00
 mode: manual
 ---
-CLI successfully instantiates wonopcode_core::Instance and Session during execution.
+CLI successfully instantiates legacy_core::Instance and Session during execution.

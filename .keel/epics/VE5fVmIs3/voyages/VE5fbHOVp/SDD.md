@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-Wiring the `PromptLoop` from `wonopcode-core` into `paddles` CLI.
+Wiring the `PromptLoop` from `legacy-core` into `paddles` CLI.
 
 ## Components
 

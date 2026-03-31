@@ -15,11 +15,11 @@
 - **Status:** done
 
 #### Summary
-Replace the wonopcode-owned prompt loop with a Paddles-managed Sift session
+Replace the legacy-engine-owned prompt loop with a Paddles-managed Sift session
 controller that owns conversational state and retained context.
 
 #### Acceptance Criteria
-- [x] `MechSuitService` executes prompts through a Sift session controller rather than `wonopcode_core::PromptLoop` and `Instance`. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] `MechSuitService` executes prompts through a Sift session controller rather than `legacy_core::PromptLoop` and `Instance`. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
 - [x] Prompt turns retain prior agent turns and bounded workspace evidence through Sift context state. [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end, proof: ac-2.log-->
 
 #### Verified Evidence
@@ -34,7 +34,7 @@ controller that owns conversational state and retained context.
 
 #### Summary
 Add the initial local coding tool surface so the Sift-native runtime can inspect,
-search, and mutate a workspace without depending on wonopcode tool plumbing.
+search, and mutate a workspace without depending on legacy-engine tool plumbing.
 
 #### Acceptance Criteria
 - [x] The runtime exposes immediate local tools for search, file operations, shell commands, and edit/diff operations. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end, proof: ac-1.log-->
@@ -52,11 +52,11 @@ search, and mutate a workspace without depending on wonopcode tool plumbing.
 
 #### Summary
 Cut the CLI and repository boundary over to the new Sift-native runtime,
-removing wonopcode from core execution and updating the authored docs.
+removing legacy-engine from core execution and updating the authored docs.
 
 #### Acceptance Criteria
 - [x] Single-prompt and interactive CLI flows remain operational after the cutover. [SRS-05/AC-01] <!-- verify: manual, SRS-05:start:end, proof: ac-1.log-->
-- [x] wonopcode-core/provider/tools are removed from core runtime modules and Cargo runtime dependencies. [SRS-NFR-01/AC-01] <!-- verify: manual, SRS-NFR-01:start:end, proof: ac-2.log-->
+- [x] legacy-core/provider/tools are removed from core runtime modules and Cargo runtime dependencies. [SRS-NFR-01/AC-01] <!-- verify: manual, SRS-NFR-01:start:end, proof: ac-2.log-->
 - [x] Verbose output exposes context assembly and tool execution clearly enough to debug the controller. [SRS-NFR-02/AC-01] <!-- verify: manual, SRS-NFR-02:start:end, proof: ac-3.log-->
 
 #### Verified Evidence

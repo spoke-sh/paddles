@@ -2,22 +2,22 @@
 
 ## Architecture Overview
 
-Integrating `wonopcode` (chord) as the core execution engine for the `paddles` CLI.
+Integrating `legacy-engine` (chord) as the core execution engine for the `paddles` CLI.
 
 ## Components
 
 | Component | Responsibility | Interface |
 |-----------|----------------|-----------|
 | `src/main.rs` | CLI entry, prompt parsing, delegating to chord | `main()` |
-| `wonopcode` | Agentic coding engine | `Engine::run()` (TBD) |
+| `legacy-engine` | Agentic coding engine | `Engine::run()` (TBD) |
 
 ## Data Flows
 
 1. User provides `--prompt "message"`.
 2. `main.rs` parses prompt.
-3. `main.rs` initializes `wonopcode` engine.
-4. `main.rs` passes prompt to `wonopcode`.
-5. `wonopcode` executes (read/write files as needed).
+3. `main.rs` initializes `legacy-engine` engine.
+4. `main.rs` passes prompt to `legacy-engine`.
+5. `legacy-engine` executes (read/write files as needed).
 6. Result/logs output to user.
 
 ## Design Decisions
@@ -28,5 +28,5 @@ Integrating `wonopcode` (chord) as the core execution engine for the `paddles` C
 
 ## Verification Strategy
 
-- Story-level tests for `wonopcode` integration.
+- Story-level tests for `legacy-engine` integration.
 - Manual verification of `--prompt` output.

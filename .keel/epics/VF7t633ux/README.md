@@ -10,7 +10,7 @@ mission: VF7t3HtQY
 
 # Sift Controller Migration
 
-> Paddles core execution is still owned by wonopcode rather than a Sift-backed local controller, which prevents local tool calling and searchable retained context from being first-class runtime concepts.
+> Paddles core execution is still owned by legacy-engine rather than a Sift-backed local controller, which prevents local tool calling and searchable retained context from being first-class runtime concepts.
 
 ## Documents
 

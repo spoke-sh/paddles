@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-The current `paddles` implementation uses placeholders for the agentic loop instead of the real `PromptLoop` from `wonopcode-core`. This prevents the "mech suit" from actually performing agentic tasks.
+The current `paddles` implementation uses placeholders for the agentic loop instead of the real `PromptLoop` from `legacy-core`. This prevents the "mech suit" from actually performing agentic tasks.
 
 ## Goals & Objectives
 
@@ -58,7 +58,7 @@ The current `paddles` implementation uses placeholders for the agentic loop inst
 
 | Assumption | Rationale |
 |------------|-----------|
-| A-01 | `wonopcode-core` APIs are sufficiently public for this integration. | Needed for direct construction. |
+| A-01 | `legacy-core` APIs are sufficiently public for this integration. | Needed for direct construction. |
 
 ## Open Questions & Risks
 

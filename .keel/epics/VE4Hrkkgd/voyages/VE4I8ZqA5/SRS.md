@@ -15,7 +15,7 @@ Goal: Implement initial credit assignment and configuration loading for environm
 
 ### Out of scope
 
-- [SCOPE-04] Deep token-level credit integration into `wonopcode-core` internals.
+- [SCOPE-04] Deep token-level credit integration into `legacy-core` internals.
 - [SCOPE-05] Dynamic mid-session modification of foundational weights.
 
 ## Functional Requirements

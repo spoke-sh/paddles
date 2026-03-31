@@ -14,7 +14,7 @@ completed_at: 2026-03-27T23:14:32
 
 # Sift-Native Runtime Cutover
 
-> Replace wonopcode-owned core orchestration with a Sift-backed controller that supports retained context and immediate local tool execution.
+> Replace legacy-engine-owned core orchestration with a Sift-backed controller that supports retained context and immediate local tool execution.
 
 ## Documents
 

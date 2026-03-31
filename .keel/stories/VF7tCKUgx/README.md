@@ -20,7 +20,7 @@ completed_at: 2026-03-27T23:12:36
 ## Summary
 
 Add the initial local coding tool surface so the Sift-native runtime can inspect,
-search, and mutate a workspace without depending on wonopcode tool plumbing.
+search, and mutate a workspace without depending on legacy-engine tool plumbing.
 
 ## Acceptance Criteria
 

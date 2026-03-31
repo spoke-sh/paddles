@@ -48,15 +48,6 @@
               "candle-transformers-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
               "candle-kernels-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
               "candle-ug-0.9.2" = "sha256-GeU7yc4vqN0hy3tJAq0LDhwnpO4XDeVVmxaBchKWkWg=";
-              "wonopcode-core-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-provider-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-tools-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-storage-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-util-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-snapshot-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-lsp-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-mcp-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
-              "wonopcode-sandbox-0.1.2" = "sha256-rlG+UKI9O4fu39GcCK03pRSbx8YmSjGVlZG6WIUcbuU=";
             };
           };
           nativeBuildInputs = [ pkgs.pkg-config ] ++ pkgs.lib.optionals isLinux [ pkgs.cudatoolkit ];

@@ -6,14 +6,14 @@ Archetype: Strategic
 
 | ID | Description | Verification |
 |----|-------------|--------------|
-| MG-01 | Replace wonopcode-owned core orchestration with a Paddles-controlled Sift runtime that retains turns, tool outputs, and bounded workspace evidence as first-class state. | board: VF7t633ux |
+| MG-01 | Replace legacy-engine-owned core orchestration with a Paddles-controlled Sift runtime that retains turns, tool outputs, and bounded workspace evidence as first-class state. | board: VF7t633ux |
 
 ## Constraints
 
 - Preserve the boot sequence contract and existing single-prompt plus interactive CLI entrypoints.
 - Keep the execution path local-first: no new network dependency may be introduced for prompt handling or tool execution.
 - Make common local tools simple to invoke through the runtime contract, with immediate support for search, file, shell, and edit/diff operations.
-- Cut over hard: remove wonopcode-core/provider/tools from core runtime modules in the same implementation slice rather than dual-running both controllers.
+- Cut over hard: remove legacy-core/provider/tools from core runtime modules in the same implementation slice rather than dual-running both controllers.
 
 ## Halting Rules
 

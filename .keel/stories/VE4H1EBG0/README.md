@@ -17,10 +17,10 @@ completed_at: 2026-03-16T14:27:29
 
 ## Summary
 
-This story involves the actual technical wiring of the `wonopcode-core` engine into the `paddles` CLI, replacing the placeholder simulation.
+This story involves the actual technical wiring of the `legacy-core` engine into the `paddles` CLI, replacing the placeholder simulation.
 
 ## Acceptance Criteria
 
-- [x] Project builds with real `wonopcode-core` and `openssl`. [SRS-NFR-02/AC-01] <!-- verify: manual, SRS-NFR-02:start:end -->
+- [x] Project builds with real `legacy-core` and `openssl`. [SRS-NFR-02/AC-01] <!-- verify: manual, SRS-NFR-02:start:end -->
 - [x] CLI successfully instantiates `Instance` and `Session`. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
 - [x] CLI executes a real `PromptLoop`. [SRS-04/AC-01] <!-- verify: manual, SRS-04:start:end -->

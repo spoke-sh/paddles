@@ -10,12 +10,12 @@
 **Progress:** 2/2 stories complete
 
 ## Implementation Narrative
-### Wire Wonopcode Into Main
+### Wire Legacy Engine Into Main
 - **ID:** VE485S98P
 - **Status:** done
 
 #### Summary
-This story involves wiring the `wonopcode` (chord) engine into the `paddles` CLI main entry point.
+This story involves wiring the `legacy-engine` (chord) engine into the `paddles` CLI main entry point.
 
 #### Acceptance Criteria
 - [x] Sample functional requirement [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->

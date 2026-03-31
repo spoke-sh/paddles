@@ -56,7 +56,7 @@ Users currently have to provide a single prompt via CLI arguments. To build capa
 
 | Assumption | Rationale |
 |------------|-----------|
-| A-01 | `wonopcode-core::PromptLoop` handles session persistence correctly. | Required for multi-turn. |
+| A-01 | `legacy-core::PromptLoop` handles session persistence correctly. | Required for multi-turn. |
 
 ## Open Questions & Risks
 

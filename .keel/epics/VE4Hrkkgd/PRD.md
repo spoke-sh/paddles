@@ -32,7 +32,7 @@ The system needs a foundational credit and inheritance mechanism to allow enviro
 
 ### Out of Scope
 
-- [SCOPE-04] Deep token-level credit integration into `wonopcode-core` internals.
+- [SCOPE-04] Deep token-level credit integration into `legacy-core` internals.
 - [SCOPE-05] Dynamic mid-session modification of foundational weights.
 
 ## Requirements

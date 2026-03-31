@@ -12,7 +12,7 @@ completed_at: 2026-03-16T14:09:28
 
 # Chord Wiring
 
-> Successfully wire wonopcode (chord) into paddles main.
+> Successfully wire legacy-engine (chord) into paddles main.
 
 ## Documents
 
@@ -32,6 +32,6 @@ completed_at: 2026-03-16T14:09:28
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Wire Wonopcode Into Main](../../../../stories/VE485S98P/README.md) | feat | done |
+| [Wire Legacy Engine Into Main](../../../../stories/VE485S98P/README.md) | feat | done |
 | [Verify Chord File Modification](../../../../stories/VE48AsLMk/README.md) | feat | done |
 <!-- END GENERATED -->

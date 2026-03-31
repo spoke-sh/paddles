@@ -30,7 +30,7 @@ Use `sift::internal` components to handle model asset acquisition.
 - **Status:** done
 
 #### Summary
-Wrap `sift::GenerativeModel` into `wonopcode_provider::LanguageModel` for use in the `PromptLoop`.
+Wrap `sift::GenerativeModel` into `legacy_provider::LanguageModel` for use in the `PromptLoop`.
 
 #### Acceptance Criteria
 - [x] `SiftInferenceAdapter` implements `InferenceEngine` by wrapping `sift`. [SRS-27/AC-01] <!-- verify: manual, SRS-27:start:end -->

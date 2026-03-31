@@ -8,7 +8,7 @@ mission: VE5fRqNry
 
 # Agentic Loop Wiring
 
-> The current paddles implementation uses placeholders for the agentic loop instead of the real PromptLoop from wonopcode-core.
+> The current paddles implementation uses placeholders for the agentic loop instead of the real PromptLoop from legacy-core.
 
 ## Documents
 

@@ -3,13 +3,13 @@
 ## Summary
 
 Epic: VE47wLZRk
-Goal: Successfully wire wonopcode (chord) into paddles main.
+Goal: Successfully wire legacy-engine (chord) into paddles main.
 
 ## Scope
 
 ### In scope
 
-- [SCOPE-01] Wiring `wonopcode` into `src/main.rs`.
+- [SCOPE-01] Wiring `legacy-engine` into `src/main.rs`.
 - [SCOPE-02] Basic prompt handling via chord.
 - [SCOPE-03] Verification test for a simple chord-driven file modification.
 

@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-Introducing a `BootContext` structure that orchestrates the initial loading of inherited credits, foundational weights, and constitutional bounds before passing control to the Wonopcode Engine.
+Introducing a `BootContext` structure that orchestrates the initial loading of inherited credits, foundational weights, and constitutional bounds before passing control to the runtime engine.
 
 ## Components
 

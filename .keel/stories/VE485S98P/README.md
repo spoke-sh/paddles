@@ -1,6 +1,6 @@
 ---
 id: VE485S98P
-title: Wire Wonopcode Into Main
+title: Wire Legacy Engine Into Main
 type: feat
 status: done
 created_at: 2026-03-16T13:49:55
@@ -13,11 +13,11 @@ submitted_at: 2026-03-16T14:05:04
 completed_at: 2026-03-16T14:08:39
 ---
 
-# Wire Wonopcode Into Main
+# Wire Legacy Engine Into Main
 
 ## Summary
 
-This story involves wiring the `wonopcode` (chord) engine into the `paddles` CLI main entry point.
+This story involves wiring the `legacy-engine` (chord) engine into the `paddles` CLI main entry point.
 
 ## Acceptance Criteria
 

@@ -12,7 +12,7 @@ Archetype: Strategic
 ## Constraints
 
 - Must maintain existing non-interactive `--prompt` capability.
-- Must use `wonopcode-core` for the underlying agentic loop.
+- Must use `legacy-core` for the underlying agentic loop.
 
 ## Halting Rules
 
