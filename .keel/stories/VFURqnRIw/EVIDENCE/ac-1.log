@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-31T16:33:58.953457676-07:00
+mode: manual
+---
+Added RefinementApplied turn event model variant and emit/render plumbing in both console trace formatting and interactive TUI.

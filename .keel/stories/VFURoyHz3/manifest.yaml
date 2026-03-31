@@ -1,0 +1,6 @@
+id: VFURoyHz3
+git_sha: 7843649306684c2abbf87a7c9419e8bbf8a0c6b4
+evidence:
+  EVIDENCE/ac-1.log: 4ac01b68c01ffc104e373432b623ce819223572f7de5fbe219670ba5dd61667d
+  ? EVIDENCE/llm-judge-execute-mid-loop-refinement-when-a-configured-trigger-fires-and-update-interpretation-context-while-preserving-active-turn-safety-invariants.txt
+  : 07da03000ed420404c3e1aceedc1fc4e8c3e731b98a0165f71fcb22a85762303

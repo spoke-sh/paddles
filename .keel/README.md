@@ -254,9 +254,9 @@
 |--------|--------|
 | [Bearing Validation](epics/VFKApee25/voyages/VFMGQ1isG/) | done |
 
-### [Adaptive Interpretation Context Refinement](epics/VFUNJz9zT/) (active)
+### [Adaptive Interpretation Context Refinement](epics/VFUNJz9zT/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | in-progress |
+| [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | done |
 

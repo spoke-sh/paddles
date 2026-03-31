@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-31T16:33:58.927246870-07:00
+mode: manual
+---
+Implemented stable IDs and policy defaults for RefinementTrigger/RefinementPolicy types in domain model and wired defaults/propagation in runtime lanes.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-31T16:33:58.966526017-07:00
+mode: manual
+---
+Added cooldown and oscillation guardrails for mid-loop refinement to limit frequency and avoid immediate context churn.

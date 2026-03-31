@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFURnK5iu
-status: in-progress
+status: done
 created_at: 2026-03-31T16:20:10
-updated_at: 2026-03-31T16:29:50
+updated_at: 2026-03-31T16:34:39
 # authored
 title: Add RefinementTrigger And RefinementPolicy Types
 type: feat
@@ -11,6 +11,8 @@ operator-signal:
 scope: VFUNJz9zT/VFURjeU0t
 index: 1
 started_at: 2026-03-31T16:29:50
+submitted_at: 2026-03-31T16:34:31
+completed_at: 2026-03-31T16:34:39
 ---
 
 # Add RefinementTrigger And RefinementPolicy Types
@@ -21,4 +23,4 @@ Define refinement primitives (`RefinementTrigger` and `RefinementPolicy`) with s
 
 ## Acceptance Criteria
 
-- [ ] Add domain types for trigger/policy-driven refinement including trigger source, thresholds, and policy metadata consumed by the planner loop. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
+- [x] Add domain types for trigger/policy-driven refinement including trigger source, thresholds, and policy metadata consumed by the planner loop. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->

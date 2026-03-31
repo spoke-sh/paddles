@@ -1,0 +1,137 @@
+LLM Judge Transcript
+Story: VFURoyHz3
+Criterion: Execute mid-loop refinement when a configured trigger fires and update interpretation context while preserving active turn safety invariants.
+
+Diff:
+diff --git a/.keel/stories/VFURnK5iu/EVIDENCE/ac-1.log b/.keel/stories/VFURnK5iu/EVIDENCE/ac-1.log
+new file mode 100644
+index 0000000..39e83f1
+--- /dev/null
++++ b/.keel/stories/VFURnK5iu/EVIDENCE/ac-1.log
+@@ -0,0 +1,5 @@
++---
++recorded_at: 2026-03-31T16:33:58.927246870-07:00
++mode: manual
++---
++Implemented stable IDs and policy defaults for RefinementTrigger/RefinementPolicy types in domain model and wired defaults/propagation in runtime lanes.
+\ No newline at end of file
+diff --git a/.keel/stories/VFURnK5iu/README.md b/.keel/stories/VFURnK5iu/README.md
+index ce8e262..18f8bfe 100644
+--- a/.keel/stories/VFURnK5iu/README.md
++++ b/.keel/stories/VFURnK5iu/README.md
+@@ -21,4 +21,4 @@ Define refinement primitives (`RefinementTrigger` and `RefinementPolicy`) with s
+ 
+ ## Acceptance Criteria
+ 
+-- [ ] Add domain types for trigger/policy-driven refinement including trigger source, thresholds, and policy metadata consumed by the planner loop. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
++- [ ] Add domain types for trigger/policy-driven refinement including trigger source, thresholds, and policy metadata consumed by the planner loop. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+diff --git a/.keel/stories/VFURnK5iu/manifest.yaml b/.keel/stories/VFURnK5iu/manifest.yaml
+new file mode 100644
+index 0000000..77222f3
+--- /dev/null
++++ b/.keel/stories/VFURnK5iu/manifest.yaml
+@@ -0,0 +1,4 @@
++id: VFURnK5iu
++git_sha: 7843649306684c2abbf87a7c9419e8bbf8a0c6b4
++evidence:
++  EVIDENCE/ac-1.log: 33ff10260696d585e57d20c06791c25a10e31173a2fe10a37cc62e4520019591
+diff --git a/.keel/stories/VFURoyHz3/EVIDENCE/ac-1.log b/.keel/stories/VFURoyHz3/EVIDENCE/ac-1.log
+new file mode 100644
+index 0000000..f6fbcaa
+--- /dev/null
++++ b/.keel/stories/VFURoyHz3/EVIDENCE/ac-1.log
+@@ -0,0 +1,5 @@
++---
++recorded_at: 2026-03-31T16:33:58.938537317-07:00
++mode: manual
++---
++Implemented mid-loop refinement trigger gating and context re-derivation in planner loop with fail-closed behavior on context update failures.
+\ No newline at end of file
+diff --git a/.keel/stories/VFURoyHz3/README.md b/.keel/stories/VFURoyHz3/README.md
+index ecdb990..11a9c6a 100644
+--- a/.keel/stories/VFURoyHz3/README.md
++++ b/.keel/stories/VFURoyHz3/README.md
+@@ -21,4 +21,4 @@ Run a refinement evaluation path during a live planner pass and apply interpreta
+ 
+ ## Acceptance Criteria
+ 
+-- [ ] Execute mid-loop refinement when a configured trigger fires and update interpretation context while preserving active turn safety invariants. [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end -->
++- [ ] Execute mid-loop refinement when a configured trigger fires and update interpretation context while preserving active turn safety invariants. [SRS-02/AC-01] <!-- verify: manual, SRS-02:start:end, proof: ac-1.log-->
+diff --git a/.keel/stories/VFURoyHz3/manifest.yaml b/.keel/stories/VFURoyHz3/manifest.yaml
+new file mode 100644
+index 0000000..3ecc989
+--- /dev/null
++++ b/.keel/stories/VFURoyHz3/manifest.yaml
+@@ -0,0 +1,4 @@
++id: VFURoyHz3
++git_sha: 7843649306684c2abbf87a7c9419e8bbf8a0c6b4
++evidence:
++  EVIDENCE/ac-1.log: 41c7632143c454c540b7fb592d38c269330f5c4bb79497b79a70caad0cb06856
+diff --git a/.keel/stories/VFURqnRIw/EVIDENCE/ac-1.log b/.keel/stories/VFURqnRIw/EVIDENCE/ac-1.log
+new file mode 100644
+index 0000000..d6ab999
+--- /dev/null
++++ b/.keel/stories/VFURqnRIw/EVIDENCE/ac-1.log
+@@ -0,0 +1,5 @@
++---
++recorded_at: 2026-03-31T16:33:58.953457676-07:00
++mode: manual
++---
++Added RefinementApplied turn event model variant and emit/render plumbing in both console trace formatting and interactive TUI.
+\ No newline at end of file
+diff --git a/.keel/stories/VFURqnRIw/README.md b/.keel/stories/VFURqnRIw/README.md
+index 37990c3..dbf292d 100644
+--- a/.keel/stories/VFURqnRIw/README.md
++++ b/.keel/stories/VFURqnRIw/README.md
+@@ -21,4 +21,4 @@ Emit a trace-level `RefinementApplied` event when a refinement is accepted so ex
+ 
+ ## Acceptance Criteria
+ 
+-- [ ] Emit `RefinementApplied` as a structured turn event and stream it through trace output with the refinement reason and updated context summary. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end -->
++- [ ] Emit `RefinementApplied` as a structured turn event and stream it through trace output with the refinement reason and updated context summary. [SRS-03/AC-01] <!-- verify: manual, SRS-03:start:end, proof: ac-1.log-->
+diff --git a/.keel/stories/VFURqnRIw/manifest.yaml b/.keel/stories/VFURqnRIw/manifest.yaml
+new file mode 100644
+index 0000000..9a97dd5
+--- /dev/null
++++ b/.keel/stories/VFURqnRIw/manifest.yaml
+@@ -0,0 +1,4 @@
++id: VFURqnRIw
++git_sha: 7843649306684c2abbf87a7c9419e8bbf8a0c6b4
++evidence:
++  EVIDENCE/ac-1.log: c13b50b709a50957b5e9e13621674987020fdc6f002a16bf62c1be34a340bcd3
+diff --git a/.keel/stories/VFURsk7Xz/EVIDENCE/ac-1.log b/.keel/stories/VFURsk7Xz/EVIDENCE/ac-1.log
+new file mode 100644
+index 0000000..c800b8a
+--- /dev/null
++++ b/.keel/stories/VFURsk7Xz/EVIDENCE/ac-1.log
+@@ -0,0 +1,5 @@
++---
++recorded_at: 2026-03-31T16:33:58.966526017-07:00
++mode: manual
++---
++Added cooldown and oscillation guardrails for mid-loop refinement to limit frequency and avoid immediate context churn.
+\ No newline at end of file
+diff --git a/.keel/stories/VFURsk7Xz/README.md b/.keel/stories/VFURsk7Xz/README.md
+index 91a3128..aa0bcf1 100644
+--- a/.keel/stories/VFURsk7Xz/README.md
++++ b/.keel/stories/VFURsk7Xz/README.md
+@@ -21,4 +21,4 @@ Add cooldown windows and oscillation guardrails for refinements to prevent repea
+ 
+ ## Acceptance Criteria
+ 
+-- [ ] Apply cooldown and oscillation-avoidance checks so repeated refinements are bounded, deterministic, and skip when policy stability would be degraded. [SRS-04/AC-01] <!-- verify: manual, SRS-04:start:end -->
++- [ ] Apply cooldown and oscillation-avoidance checks so repeated refinements are bounded, deterministic, and skip when policy stability would be degraded. [SRS-04/AC-01] <!-- verify: manual, SRS-04:start:end, proof: ac-1.log-->
+diff --git a/.keel/stories/VFURsk7Xz/manifest.yaml b/.keel/stories/VFURsk7Xz/manifest.yaml
+new file mode 100644
+index 0000000..20f3135
+--- /dev/null
++++ b/.keel/stories/VFURsk7Xz/manifest.yaml
+@@ -0,0 +1,4 @@
++id: VFURsk7Xz
++git_sha: 7843649306684c2abbf87a7c9419e8bbf8a0c6b4
++evidence:
++  EVIDENCE/ac-1.log: a3014ddeb6748435830df82777aef97e678f6cb0056902ca58bef0f358b67eb6
+
+
+Result: PASS
+Signature: <KEEL-JUDGE-SIG>

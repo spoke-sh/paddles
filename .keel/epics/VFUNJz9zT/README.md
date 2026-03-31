@@ -21,8 +21,8 @@ mission: VFUPMh0vu
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Evidence-Threshold Context Refinement](voyages/VFURjeU0t/) | in-progress | 0/4 |
+| [Evidence-Threshold Context Refinement](voyages/VFURjeU0t/) | done | 4/4 |
 <!-- END GENERATED -->
