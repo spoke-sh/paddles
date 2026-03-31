@@ -294,6 +294,8 @@ enum TranscriptRowKind {
     User,
     Assistant,
     Event,
+    /// A started event that only materialized because the operation took >2s.
+    InFlightEvent,
     Error,
 }
 
@@ -452,6 +454,52 @@ impl PendingReveal {
     }
 }
 
+/// After this duration of silence during a busy turn, an in-flight row appears.
+const IN_FLIGHT_SILENCE_THRESHOLD: Duration = Duration::from_secs(2);
+
+/// Infer what the system is currently doing based on the last completed event.
+fn in_flight_label(last_event: &TurnEvent) -> &'static str {
+    match last_event {
+        // After capability checks → planner or gatherer is about to run.
+        TurnEvent::PlannerCapability { .. } => "Planning",
+        TurnEvent::GathererCapability { .. } => "Gathering evidence",
+
+        // After classification/interpretation → routing next.
+        TurnEvent::IntentClassified { .. } | TurnEvent::InterpretationContext { .. } => "Routing",
+        TurnEvent::GuidanceGraphExpanded { .. } => "Interpreting",
+
+        // After route selected → depends on the route, but synthesis or planning follows.
+        TurnEvent::RouteSelected { .. } => "Synthesizing",
+
+        // Planner is running or just finished a step.
+        TurnEvent::PlannerActionSelected { .. } | TurnEvent::PlannerStepProgress { .. } => {
+            "Planning"
+        }
+
+        // After planner summary → synthesis follows.
+        TurnEvent::PlannerSummary { .. } => "Synthesizing",
+
+        // Gathering evidence.
+        TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. } => "Searching",
+
+        // Context assembly → model is about to think.
+        TurnEvent::ContextAssembly { .. } | TurnEvent::ContextPressure { .. } => "Thinking",
+
+        // Tool is running.
+        TurnEvent::ToolCalled { .. } => "Running tool",
+        TurnEvent::ToolFinished { .. } => "Thinking",
+
+        // Threading.
+        TurnEvent::ThreadCandidateCaptured { .. }
+        | TurnEvent::ThreadDecisionApplied { .. }
+        | TurnEvent::ThreadMerged { .. } => "Threading",
+
+        // Fallback / synthesis.
+        TurnEvent::Fallback { .. } => "Recovering",
+        TurnEvent::SynthesisReady { .. } => "Rendering",
+    }
+}
+
 struct InteractiveApp {
     model_label: String,
     palette: Palette,
@@ -471,6 +519,8 @@ struct InteractiveApp {
     flushed_row_count: usize,
     search_progress_row: Option<usize>,
     planner_progress_row: Option<usize>,
+    last_event: Option<(TurnEvent, Instant)>,
+    emitted_in_flight: bool,
     step_timing: StepTimingReservoir,
     step_timing_path: PathBuf,
     verbose: u8,
@@ -549,6 +599,8 @@ impl InteractiveApp {
             flushed_row_count: 0,
             search_progress_row: None,
             planner_progress_row: None,
+            last_event: None,
+            emitted_in_flight: false,
             step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
             step_timing_path: step_timing_cache_path(),
             verbose,
@@ -728,6 +780,9 @@ impl InteractiveApp {
                 let is_search_progress = matches!(event, TurnEvent::GathererSearchProgress { .. });
                 let is_planner_progress = matches!(event, TurnEvent::PlannerStepProgress { .. });
 
+                self.last_event = Some((event.clone(), occurred_at));
+                self.emitted_in_flight = false;
+
                 if self.should_show_event(&event, pace, is_first_step) {
                     let row = format_turn_event_row(event, self.verbose);
                     let row = if let Some(timing) = self.active_turn_timing.as_mut() {
@@ -777,6 +832,8 @@ impl InteractiveApp {
             } => {
                 self.search_progress_row = None;
                 self.planner_progress_row = None;
+                self.last_event = None;
+                self.emitted_in_flight = false;
                 match result {
                     Ok(response) => {
                         let row_index = self.rows.len();
@@ -806,6 +863,24 @@ impl InteractiveApp {
 
     fn tick(&mut self) {
         self.spinner_index = (self.spinner_index + 1) % SPINNER_FRAMES.len();
+
+        // After IN_FLIGHT_SILENCE_THRESHOLD of silence during a busy turn,
+        // insert a muted "working" row so the transcript doesn't look stalled.
+        if self.busy
+            && !self.emitted_in_flight
+            && let Some((ref event, last_at)) = self.last_event
+        {
+            let silence = Instant::now().duration_since(last_at);
+            if silence >= IN_FLIGHT_SILENCE_THRESHOLD {
+                let label = in_flight_label(event);
+                self.rows.push(TranscriptRow::new(
+                    TranscriptRowKind::InFlightEvent,
+                    format!("• {label}..."),
+                    "",
+                ));
+                self.emitted_in_flight = true;
+            }
+        }
 
         if let Some(pending) = &mut self.pending_reveal {
             let finished = pending.advance();
@@ -1117,6 +1192,7 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         TranscriptRowKind::User => (palette.user_header, palette.user_body),
         TranscriptRowKind::Assistant => (palette.assistant_header, palette.assistant_body),
         TranscriptRowKind::Event => (palette.event_header, palette.event_body),
+        TranscriptRowKind::InFlightEvent => (palette.in_flight_header, palette.in_flight_body),
         TranscriptRowKind::Error => (palette.error_header, palette.error_body),
     };
 
@@ -1589,6 +1665,8 @@ struct Palette {
     assistant_body: Style,
     event_header: Style,
     event_body: Style,
+    in_flight_header: Style,
+    in_flight_body: Style,
     error_header: Style,
     error_body: Style,
     input_label: Style,
@@ -1615,6 +1693,8 @@ fn detect_palette() -> Palette {
             assistant_body: Style::default().fg(Color::Rgb(24, 33, 45)),
             event_header: Style::default().fg(Color::Rgb(138, 87, 0)),
             event_body: Style::default().fg(Color::Rgb(72, 77, 84)),
+            in_flight_header: Style::default().fg(Color::Rgb(168, 126, 40)),
+            in_flight_body: Style::default().fg(Color::Rgb(120, 124, 130)),
             error_header: Style::default().fg(Color::Rgb(173, 38, 45)),
             error_body: Style::default().fg(Color::Rgb(99, 39, 44)),
             input_label: Style::default().fg(Color::Rgb(24, 63, 115)),
@@ -1639,6 +1719,8 @@ fn detect_palette() -> Palette {
             assistant_body: Style::default().fg(Color::Rgb(234, 240, 247)),
             event_header: Style::default().fg(Color::Rgb(255, 202, 92)),
             event_body: Style::default().fg(Color::Rgb(182, 191, 204)),
+            in_flight_header: Style::default().fg(Color::Rgb(200, 170, 80)),
+            in_flight_body: Style::default().fg(Color::Rgb(130, 140, 155)),
             error_header: Style::default().fg(Color::Rgb(255, 122, 132)),
             error_body: Style::default().fg(Color::Rgb(238, 183, 190)),
             input_label: Style::default().fg(Color::Rgb(125, 194, 255)),
@@ -2137,5 +2219,133 @@ mod tests {
                 pace: Pace::Normal,
             })
         );
+    }
+
+    #[test]
+    fn in_flight_row_shows_contextual_label() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        let rows_before = app.rows.len();
+
+        // Simulate: planner capability just completed, now silence for >2s.
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+        app.last_event = Some((
+            TurnEvent::PlannerCapability {
+                provider: "kimi".to_string(),
+                capability: "available".to_string(),
+            },
+            Instant::now() - Duration::from_secs(3),
+        ));
+
+        app.tick();
+        assert_eq!(app.rows.len(), rows_before + 1);
+        let row = app.rows.last().expect("in-flight row");
+        assert_eq!(row.kind, TranscriptRowKind::InFlightEvent);
+        assert_eq!(row.header, "• Planning...");
+        assert!(app.emitted_in_flight);
+
+        // Further ticks should NOT insert more rows.
+        app.tick();
+        assert_eq!(app.rows.len(), rows_before + 1);
+    }
+
+    #[test]
+    fn in_flight_row_says_synthesizing_after_planner_summary() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+        app.last_event = Some((
+            TurnEvent::PlannerSummary {
+                strategy: "direct".to_string(),
+                mode: "single".to_string(),
+                turns: 1,
+                steps: 1,
+                stop_reason: None,
+                active_branch_id: None,
+                branch_count: None,
+                frontier_count: None,
+                node_count: None,
+                edge_count: None,
+                retained_artifact_count: None,
+            },
+            Instant::now() - Duration::from_secs(3),
+        ));
+
+        app.tick();
+        let row = app.rows.last().expect("in-flight row");
+        assert_eq!(row.header, "• Synthesizing...");
+    }
+
+    #[test]
+    fn in_flight_row_not_emitted_for_quick_events() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        let rows_before = app.rows.len();
+
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+        app.last_event = Some((
+            TurnEvent::RouteSelected {
+                summary: "direct".to_string(),
+            },
+            Instant::now(),
+        ));
+
+        app.tick();
+        assert_eq!(app.rows.len(), rows_before);
+        assert!(!app.emitted_in_flight);
+    }
+
+    #[test]
+    fn new_event_resets_in_flight_flag() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+        app.emitted_in_flight = true;
+
+        app.handle_message(super::UiMessage::TurnEvent {
+            event: TurnEvent::RouteSelected {
+                summary: "direct".to_string(),
+            },
+            occurred_at: Instant::now(),
+        });
+        assert!(!app.emitted_in_flight);
+        assert!(app.last_event.is_some());
     }
 }
