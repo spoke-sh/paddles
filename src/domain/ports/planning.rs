@@ -340,6 +340,25 @@ impl PlannerAction {
         }
     }
 
+    pub fn target_query(&self) -> Option<String> {
+        match self {
+            Self::Workspace { action } => match action {
+                WorkspaceAction::Search { query, .. } => Some(query.clone()),
+                WorkspaceAction::Read { path } => Some(path.clone()),
+                WorkspaceAction::Inspect { command } => Some(command.clone()),
+                WorkspaceAction::Shell { command } => Some(command.clone()),
+                WorkspaceAction::ListFiles { pattern } => pattern.clone(),
+                WorkspaceAction::Diff { path } => path.clone(),
+                WorkspaceAction::WriteFile { path, .. } => Some(path.clone()),
+                WorkspaceAction::ReplaceInFile { path, .. } => Some(path.clone()),
+                WorkspaceAction::ApplyPatch { .. } => None,
+            },
+            Self::Refine { query, .. } => Some(query.clone()),
+            Self::Branch { branches, .. } => Some(branches.join(" | ")),
+            Self::Stop { reason } => Some(reason.clone()),
+        }
+    }
+
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Stop { .. })
     }

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:14:02.470988454-07:00
+mode: manual
+---
+render_turn_event in application/mod.rs and format_turn_event_row in interactive_tui.rs both handle PlannerStepProgress

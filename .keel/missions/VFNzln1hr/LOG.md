@@ -36,3 +36,19 @@
 - **Story Acceptance Criteria**: Filled in placeholder acceptance criteria for stories VFOkHHDwz, VFOkHIDzL, VFOkHJB0P, VFOkHKC1D with proper SRS traceability references.
 
 - **Mission Activated**: All activation gates satisfied — at least one planned voyage with actionable work, all goal verification targets resolved to real board entities.
+
+## 2026-03-30
+
+### Sealing move: Planner Loop Reasoning Visibility Epic Completed
+
+- **Epic VFOiwHCXn Delivered**: All 5 stories implemented, verified, and accepted. Voyage VFOjDg7Zm and epic auto-completed.
+
+- **Implementation Summary**:
+  - Added `TurnEvent::PlannerStepProgress` variant with step_number, step_limit, action, query, evidence_count (min_verbosity=0, always visible)
+  - Emitted from `execute_recursive_planner_loop` after action selection, before execution
+  - TUI in-place rendering via independent `planner_progress_row` tracker (coexists with search progress)
+  - Enriched verbose=1 PlannerActionSelected rendering: compact "Planner step N: action" title with collapsed rationale
+  - Expanded verbose=2 PlannerSummary with graph topology (node_count, edge_count, retained_artifact_count)
+  - Added `PlannerAction::target_query()` to extract query/command target from any action variant
+
+- **Remaining Work**: 4 draft epics (MG-02 through MG-05) need PRD authoring, voyage decomposition, and implementation. MG-01 foundational doc needs authoring and human review before implementation epics proceed (per charter YIELD rule).

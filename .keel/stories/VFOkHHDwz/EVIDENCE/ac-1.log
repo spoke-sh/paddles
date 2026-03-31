@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:16:12.164162702-07:00
+mode: manual
+---
+PlannerStepProgress emitted at the start of each planner loop iteration after decision selection, before execution — see application/mod.rs execute_recursive_planner_loop

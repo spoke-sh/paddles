@@ -671,8 +671,8 @@ fn render_turn_event(event: &TurnEvent) -> String {
             action,
             rationale,
         } => format!(
-            "• Selected planner action\n  └ step {sequence}: {}\n    Rationale: {}",
-            trim_event_detail(action, 2),
+            "• Planner step {sequence}: {}\n  └ Rationale: {}",
+            trim_event_detail(action, 1),
             trim_event_detail(rationale, 2)
         ),
         TurnEvent::ThreadCandidateCaptured {
@@ -733,19 +733,25 @@ fn render_turn_event(event: &TurnEvent) -> String {
             active_branch_id,
             branch_count,
             frontier_count,
-        } => format!(
-            "• Reviewed planner trace\n  └ strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}, active={}, branches={}, frontier={}",
-            stop_reason.as_deref().unwrap_or("none"),
-            active_branch_id.as_deref().unwrap_or("none"),
-            branch_count
-                .map(|value| value.to_string())
-                .as_deref()
-                .unwrap_or("n/a"),
-            frontier_count
-                .map(|value| value.to_string())
-                .as_deref()
-                .unwrap_or("n/a"),
-        ),
+            node_count,
+            edge_count,
+            retained_artifact_count,
+        } => {
+            let opt = |v: &Option<usize>| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            };
+            format!(
+                "• Reviewed planner trace\n  └ strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}, active={}, branches={}, frontier={}, nodes={}, edges={}, retained={}",
+                stop_reason.as_deref().unwrap_or("none"),
+                active_branch_id.as_deref().unwrap_or("none"),
+                opt(branch_count),
+                opt(frontier_count),
+                opt(node_count),
+                opt(edge_count),
+                opt(retained_artifact_count),
+            )
+        }
         TurnEvent::ContextAssembly {
             label,
             hits,
@@ -774,6 +780,19 @@ fn render_turn_event(event: &TurnEvent) -> String {
         ),
         TurnEvent::Fallback { stage, reason } => {
             format!("• Fell back\n  └ {stage}: {}", trim_event_detail(reason, 3))
+        }
+        TurnEvent::PlannerStepProgress {
+            step_number,
+            step_limit,
+            action,
+            query,
+            evidence_count,
+        } => {
+            let q = query
+                .as_deref()
+                .map(|q| format!(" — {}", trim_event_detail(q, 1)))
+                .unwrap_or_default();
+            format!("• Step {step_number}/{step_limit}: {action}{q} [{evidence_count} evidence]")
         }
         TurnEvent::GathererSearchProgress {
             phase,
@@ -1312,6 +1331,14 @@ impl MechSuitService {
                 decision
             };
 
+            trace.emit(TurnEvent::PlannerStepProgress {
+                step_number: sequence,
+                step_limit: budget.max_steps,
+                action: decision.action.summary(),
+                query: decision.action.target_query(),
+                evidence_count: loop_state.evidence_items.len(),
+            });
+
             let outcome = match &decision.action {
                 PlannerAction::Workspace { action } => match action {
                     WorkspaceAction::Search {
@@ -1649,6 +1676,20 @@ impl MechSuitService {
                 .as_ref()
                 .and_then(|planner| planner.graph_episode.as_ref())
                 .map(|graph| graph.frontier.len()),
+            node_count: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .and_then(|planner| planner.graph_episode.as_ref())
+                .map(|graph| graph.nodes.len()),
+            edge_count: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .and_then(|planner| planner.graph_episode.as_ref())
+                .map(|graph| graph.edges.len()),
+            retained_artifact_count: loop_state
+                .latest_gatherer_trace
+                .as_ref()
+                .map(|planner| planner.retained_artifacts.len()),
         });
 
         if !used_workspace_resources && planner_stopped_without_resource_use(&loop_state) {
@@ -1793,6 +1834,15 @@ fn planner_summary_event(planner: &PlannerTraceMetadata) -> TurnEvent {
             .graph_episode
             .as_ref()
             .map(|graph| graph.frontier.len()),
+        node_count: planner
+            .graph_episode
+            .as_ref()
+            .map(|graph| graph.nodes.len()),
+        edge_count: planner
+            .graph_episode
+            .as_ref()
+            .map(|graph| graph.edges.len()),
+        retained_artifact_count: Some(planner.retained_artifacts.len()),
     }
 }
 

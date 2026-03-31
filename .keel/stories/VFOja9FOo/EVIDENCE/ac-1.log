@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:14:00.375024882-07:00
+mode: manual
+---
+TurnEvent::PlannerStepProgress variant added in src/domain/model/turns.rs with step_number, step_limit, action, query, and evidence_count fields

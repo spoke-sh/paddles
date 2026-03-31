@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:17:57.229029562-07:00
+mode: manual
+---
+Planner step progress and search progress use independent row tracking — planner_progress_row and search_progress_row are separate Option<usize> fields

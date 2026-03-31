@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:18:00.027020268-07:00
+mode: manual
+---
+Only one planner_progress_row tracked at a time — replaced in-place on each PlannerStepProgress, cleared on TurnFinished

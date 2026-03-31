@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:19:11.008462152-07:00
+mode: manual
+---
+PlannerStepProgress includes evidence_count and step_number/step_limit for budget rendering at all verbosity levels

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:17:56.113998413-07:00
+mode: manual
+---
+TUI renders PlannerStepProgress in-place using planner_progress_row field, replacing previous progress row on each new step — same pattern as search_progress_row

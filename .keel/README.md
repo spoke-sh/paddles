@@ -217,11 +217,11 @@
 |--------|--------|
 | [Search Progress Implementation](epics/VFNyZ12IX/voyages/VFNyo7ahu/) | done |
 
-### [Planner Loop Reasoning Visibility](epics/VFOiwHCXn/) (active)
+### [Planner Loop Reasoning Visibility](epics/VFOiwHCXn/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Planner Reasoning Events And TUI Rendering](epics/VFOiwHCXn/voyages/VFOjDg7Zm/) | planned |
+| [Planner Reasoning Events And TUI Rendering](epics/VFOiwHCXn/voyages/VFOjDg7Zm/) | done |
 
 ### [Transit-Native Context Addressing](epics/VFOmKssE5/) (draft)
 

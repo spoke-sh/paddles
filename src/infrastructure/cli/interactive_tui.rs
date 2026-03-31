@@ -470,6 +470,7 @@ struct InteractiveApp {
     active_turn_timing: Option<ActiveTurnTiming>,
     flushed_row_count: usize,
     search_progress_row: Option<usize>,
+    planner_progress_row: Option<usize>,
     step_timing: StepTimingReservoir,
     step_timing_path: PathBuf,
     verbose: u8,
@@ -547,6 +548,7 @@ impl InteractiveApp {
             active_turn_timing: None,
             flushed_row_count: 0,
             search_progress_row: None,
+            planner_progress_row: None,
             step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
             step_timing_path: step_timing_cache_path(),
             verbose,
@@ -724,6 +726,7 @@ impl InteractiveApp {
                     .unwrap_or(Pace::Normal);
 
                 let is_search_progress = matches!(event, TurnEvent::GathererSearchProgress { .. });
+                let is_planner_progress = matches!(event, TurnEvent::PlannerStepProgress { .. });
 
                 if self.should_show_event(&event, pace, is_first_step) {
                     let row = format_turn_event_row(event, self.verbose);
@@ -733,8 +736,21 @@ impl InteractiveApp {
                         row
                     };
 
-                    if is_search_progress {
-                        // Replace existing progress row in-place instead of accumulating.
+                    if is_planner_progress {
+                        // Replace existing planner progress row in-place.
+                        if let Some(idx) = self.planner_progress_row {
+                            if idx < self.rows.len() {
+                                self.rows[idx] = row;
+                            } else {
+                                self.planner_progress_row = Some(self.rows.len());
+                                self.rows.push(row);
+                            }
+                        } else {
+                            self.planner_progress_row = Some(self.rows.len());
+                            self.rows.push(row);
+                        }
+                    } else if is_search_progress {
+                        // Replace existing search progress row in-place.
                         if let Some(idx) = self.search_progress_row {
                             if idx < self.rows.len() {
                                 self.rows[idx] = row;
@@ -747,7 +763,7 @@ impl InteractiveApp {
                             self.rows.push(row);
                         }
                     } else {
-                        // Any non-progress event supersedes the progress row.
+                        // Any non-progress event supersedes the search progress row.
                         self.search_progress_row = None;
                         self.rows.push(row);
                     }
@@ -760,6 +776,7 @@ impl InteractiveApp {
                 occurred_at,
             } => {
                 self.search_progress_row = None;
+                self.planner_progress_row = None;
                 match result {
                     Ok(response) => {
                         let row_index = self.rows.len();
@@ -1290,15 +1307,14 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             sequence,
             action,
             rationale,
-        } => TranscriptRow::new(
-            TranscriptRowKind::Event,
-            "• Selected planner action",
-            format!(
-                "step {sequence}: {}\nRationale: {}",
-                collapse_event_details(&action, EVENT_DETAIL_LINE_LIMIT),
-                collapse_event_details(&rationale, EVENT_DETAIL_LINE_LIMIT)
-            ),
-        ),
+        } => {
+            let title = format!(
+                "• Planner step {sequence}: {}",
+                collapse_event_details(&action, 1)
+            );
+            let content = format!("Rationale: {}", collapse_event_details(&rationale, 2));
+            TranscriptRow::new(TranscriptRowKind::Event, title, content)
+        }
         TurnEvent::ThreadCandidateCaptured {
             candidate_id,
             active_thread,
@@ -1348,6 +1364,24 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
                 )
             ),
         ),
+        TurnEvent::PlannerStepProgress {
+            step_number,
+            step_limit,
+            action,
+            query,
+            evidence_count,
+        } => {
+            let q = query
+                .map(|q| format!(" — {}", collapse_event_details(&q, 1)))
+                .unwrap_or_default();
+            let title = format!("• Step {step_number}/{step_limit}: {action}{q}");
+            let content = if verbose >= 1 {
+                format!("{evidence_count} evidence items")
+            } else {
+                String::new()
+            };
+            TranscriptRow::new(TranscriptRowKind::Event, title, content)
+        }
         TurnEvent::GathererSearchProgress {
             phase,
             elapsed_seconds,
@@ -1389,23 +1423,35 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             active_branch_id,
             branch_count,
             frontier_count,
-        } => TranscriptRow::new(
-            TranscriptRowKind::Event,
-            "• Reviewed planner trace",
-            format!(
-                "strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}, active={}, branches={}, frontier={}",
+            node_count,
+            edge_count,
+            retained_artifact_count,
+        } => {
+            let opt = |v: Option<usize>| {
+                v.map(|n| n.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            };
+            let mut content = format!(
+                "strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}",
                 stop_reason.as_deref().unwrap_or("none"),
-                active_branch_id.as_deref().unwrap_or("none"),
-                branch_count
-                    .map(|value| value.to_string())
-                    .as_deref()
-                    .unwrap_or("n/a"),
-                frontier_count
-                    .map(|value| value.to_string())
-                    .as_deref()
-                    .unwrap_or("n/a"),
-            ),
-        ),
+            );
+            if verbose >= 2 {
+                content.push_str(&format!(
+                    "\nGraph: nodes={}, edges={}, branches={}, frontier={}, active={}, retained={}",
+                    opt(node_count),
+                    opt(edge_count),
+                    opt(branch_count),
+                    opt(frontier_count),
+                    active_branch_id.as_deref().unwrap_or("none"),
+                    opt(retained_artifact_count),
+                ));
+            }
+            TranscriptRow::new(
+                TranscriptRowKind::Event,
+                "• Reviewed planner trace",
+                content,
+            )
+        }
         TurnEvent::ContextAssembly {
             label,
             hits,

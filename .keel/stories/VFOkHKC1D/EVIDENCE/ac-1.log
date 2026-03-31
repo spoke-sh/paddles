@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:21:13.298191784-07:00
+mode: manual
+---
+PlannerSummary now includes node_count, edge_count, and retained_artifact_count fields. At verbose=2, TUI renders a Graph line with all topology details including nodes, edges, branches, frontier, active branch, and retained artifacts.

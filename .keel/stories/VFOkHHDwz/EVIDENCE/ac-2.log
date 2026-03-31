@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:16:14.585907081-07:00
+mode: manual
+---
+Event carries step_number (sequence), step_limit (budget.max_steps), action (decision.action.summary()), query (decision.action.target_query()), and evidence_count (loop_state.evidence_items.len())

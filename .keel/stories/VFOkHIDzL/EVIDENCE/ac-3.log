@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-30T17:17:59.730930670-07:00
+mode: manual
+---
+format_turn_event_row renders PlannerStepProgress as 'Step N/M: action — query' title at verbose=0

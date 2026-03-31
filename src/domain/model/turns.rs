@@ -88,6 +88,13 @@ pub enum TurnEvent {
         mode: String,
         summary: Option<String>,
     },
+    PlannerStepProgress {
+        step_number: usize,
+        step_limit: usize,
+        action: String,
+        query: Option<String>,
+        evidence_count: usize,
+    },
     GathererSearchProgress {
         phase: String,
         elapsed_seconds: u64,
@@ -107,6 +114,9 @@ pub enum TurnEvent {
         active_branch_id: Option<String>,
         branch_count: Option<usize>,
         frontier_count: Option<usize>,
+        node_count: Option<usize>,
+        edge_count: Option<usize>,
+        retained_artifact_count: Option<usize>,
     },
     ContextAssembly {
         label: String,
@@ -148,6 +158,7 @@ impl TurnEvent {
             Self::ThreadCandidateCaptured { .. } => "thread_candidate_captured",
             Self::ThreadDecisionApplied { .. } => "thread_decision_applied",
             Self::ThreadMerged { .. } => "thread_merged",
+            Self::PlannerStepProgress { .. } => "planner_step_progress",
             Self::GathererSearchProgress { .. } => "gatherer_search_progress",
             Self::GathererSummary { .. } => "gatherer_summary",
             Self::PlannerSummary { .. } => "planner_summary",
@@ -163,7 +174,8 @@ impl TurnEvent {
     /// Pace classification can promote events below their inherent level.
     pub fn min_verbosity(&self) -> u8 {
         match self {
-            Self::GathererSearchProgress { .. }
+            Self::PlannerStepProgress { .. }
+            | Self::GathererSearchProgress { .. }
             | Self::ToolCalled { .. }
             | Self::ToolFinished { .. }
             | Self::Fallback { .. }
