@@ -21,6 +21,33 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 const MAX_CITATIONS: usize = 4;
+const MAX_RETRIES: u32 = 3;
+const RETRY_BASE_DELAY_MS: u64 = 2000;
+
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+/// Check an HTTP response, retrying the request on transient 429/5xx errors.
+async fn send_with_retry(
+    provider: &str,
+    build_request: impl Fn() -> reqwest::RequestBuilder,
+) -> Result<String> {
+    for attempt in 0..=MAX_RETRIES {
+        let resp = build_request().send().await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if status.is_success() {
+            return Ok(text);
+        }
+        if !is_retryable_status(status) || attempt == MAX_RETRIES {
+            bail!("{provider} API error {status}: {text}");
+        }
+        let delay = RETRY_BASE_DELAY_MS * 2u64.pow(attempt);
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+    }
+    unreachable!()
+}
 
 /// Which HTTP API format to use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,20 +172,15 @@ impl HttpProviderAdapter {
             "max_tokens": 4096,
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            bail!("OpenAI API error {status}: {text}");
-        }
+        let api_key = self.api_key.clone();
+        let text = send_with_retry("OpenAI", || {
+            self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
 
         let parsed: OpenAiResponse = serde_json::from_str(&text)?;
         parsed
@@ -195,20 +217,15 @@ impl HttpProviderAdapter {
             }
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            bail!("OpenAI API error {status}: {text}");
-        }
+        let api_key = self.api_key.clone();
+        let text = send_with_retry("OpenAI", || {
+            self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
 
         let parsed: OpenAiResponse = serde_json::from_str(&text)?;
         parsed
@@ -229,21 +246,16 @@ impl HttpProviderAdapter {
             ],
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            bail!("Anthropic API error {status}: {text}");
-        }
+        let api_key = self.api_key.clone();
+        let text = send_with_retry("Anthropic", || {
+            self.client
+                .post(&url)
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
 
         let parsed: AnthropicResponse = serde_json::from_str(&text)?;
         parsed
@@ -279,21 +291,16 @@ impl HttpProviderAdapter {
             }
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            bail!("Anthropic API error {status}: {text}");
-        }
+        let api_key = self.api_key.clone();
+        let text = send_with_retry("Anthropic", || {
+            self.client
+                .post(&url)
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
 
         let parsed: AnthropicResponse = serde_json::from_str(&text)?;
         if let Some(input) = parsed.content.iter().find_map(|block| {
@@ -324,19 +331,13 @@ impl HttpProviderAdapter {
             "contents": [{ "parts": [{ "text": user }] }],
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            bail!("Gemini API error {status}: {text}");
-        }
+        let text = send_with_retry("Gemini", || {
+            self.client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
 
         let parsed: GeminiResponse = serde_json::from_str(&text)?;
         parsed
@@ -368,19 +369,13 @@ impl HttpProviderAdapter {
             }
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = resp.status();
-        let text = resp.text().await?;
-        if !status.is_success() {
-            bail!("Gemini API error {status}: {text}");
-        }
+        let text = send_with_retry("Gemini", || {
+            self.client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
 
         let parsed: GeminiResponse = serde_json::from_str(&text)?;
         parsed
@@ -1500,5 +1495,63 @@ mod tests {
         let rendered = format!("{err:#}");
         assert!(rendered.contains("OpenAI API error 404 Not Found"));
         assert!(rendered.contains("Not found the model kimi-2.5 or Permission denied"));
+    }
+
+    #[test]
+    fn retryable_status_identifies_429_and_5xx() {
+        assert!(super::is_retryable_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(super::is_retryable_status(
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(super::is_retryable_status(StatusCode::BAD_GATEWAY));
+        assert!(super::is_retryable_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(super::is_retryable_status(StatusCode::GATEWAY_TIMEOUT));
+
+        assert!(!super::is_retryable_status(StatusCode::OK));
+        assert!(!super::is_retryable_status(StatusCode::BAD_REQUEST));
+        assert!(!super::is_retryable_status(StatusCode::UNAUTHORIZED));
+        assert!(!super::is_retryable_status(StatusCode::NOT_FOUND));
+    }
+
+    #[tokio::test]
+    async fn send_with_retry_retries_on_429_then_succeeds() {
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                body: "rate limited".to_string(),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: r#"{"ok": true}"#.to_string(),
+            },
+        ])
+        .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/test", server.base_url);
+        let result = super::send_with_retry("Test", || client.post(&url)).await;
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), r#"{"ok": true}"#);
+        assert_eq!(server.recorded_requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn send_with_retry_fails_immediately_on_non_retryable_status() {
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::UNAUTHORIZED,
+            body: "unauthorized".to_string(),
+        }])
+        .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/test", server.base_url);
+        let result = super::send_with_retry("Test", || client.post(&url)).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("401"));
+        assert!(err.contains("unauthorized"));
+        assert_eq!(server.recorded_requests().len(), 1);
     }
 }

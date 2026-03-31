@@ -63,6 +63,27 @@ the orient/inspect half of the loop:
 4. Run `keel flow --scene`.
 5. Run `keel doctor`.
 
+## Development Workflow: TDD (Red/Green/Refactor)
+
+All code changes in this repository follow test-driven development:
+
+1. **Red** — Write a failing test that describes the expected behavior before
+   writing the implementation. The test suite must fail for the right reason.
+2. **Green** — Write the minimum implementation to make the failing test pass.
+   Do not add untested behavior.
+3. **Refactor** — Clean up the implementation while keeping all tests green.
+   Remove duplication, improve naming, simplify structure.
+
+Apply this cycle at every level: unit tests for domain logic, integration tests
+for adapter behavior, and TUI tests for rendering contracts.
+
+When fixing a bug, write a test that reproduces the bug first (red), then fix
+it (green). This prevents regressions and documents the failure mode.
+
+When adding a feature, write acceptance-level tests for the expected behavior
+before implementing. The test names should describe what the system does, not
+how it does it.
+
 ## Working Rules
 
 - Use the raw `keel` CLI directly.

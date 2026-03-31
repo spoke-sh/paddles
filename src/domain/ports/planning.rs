@@ -93,10 +93,10 @@ pub struct PlannerBudget {
 impl Default for PlannerBudget {
     fn default() -> Self {
         Self {
-            max_steps: 6,
+            max_steps: 12,
             max_branch_factor: 3,
-            max_evidence_items: 8,
-            max_reads: 3,
+            max_evidence_items: 12,
+            max_reads: 6,
             max_inspects: 6,
         }
     }
@@ -447,9 +447,9 @@ mod tests {
     #[test]
     fn planner_budget_has_bounded_defaults() {
         let budget = PlannerBudget::default();
-        assert_eq!(budget.max_steps, 6);
+        assert_eq!(budget.max_steps, 12);
         assert_eq!(budget.max_branch_factor, 3);
-        assert_eq!(budget.max_evidence_items, 8);
+        assert_eq!(budget.max_evidence_items, 12);
         assert_eq!(budget.max_inspects, 6);
     }
 

@@ -1466,20 +1466,25 @@ impl MechSuitService {
                             stop_reason = Some("inspect-budget-exhausted".to_string());
                             "planner inspect budget exhausted".to_string()
                         } else {
-                            let output =
-                                run_planner_inspect_command(&self.workspace_root, command)?;
-                            append_evidence_item(
-                                &mut loop_state.evidence_items,
-                                EvidenceItem {
-                                    source: format!("command: {command}"),
-                                    snippet: trim_for_planner(&output, 800),
-                                    rationale: decision.rationale.clone(),
-                                    rank: 0,
-                                },
-                                budget.max_evidence_items,
-                            );
-                            used_workspace_resources = true;
-                            format!("inspected {command}")
+                            match run_planner_inspect_command(&self.workspace_root, command) {
+                                Ok(output) => {
+                                    append_evidence_item(
+                                        &mut loop_state.evidence_items,
+                                        EvidenceItem {
+                                            source: format!("command: {command}"),
+                                            snippet: trim_for_planner(&output, 800),
+                                            rationale: decision.rationale.clone(),
+                                            rank: 0,
+                                        },
+                                        budget.max_evidence_items,
+                                    );
+                                    used_workspace_resources = true;
+                                    format!("inspected {command}")
+                                }
+                                Err(err) => {
+                                    format!("inspect failed: {err:#}")
+                                }
+                            }
                         }
                     }
                     WorkspaceAction::Read { .. }
@@ -3116,5 +3121,28 @@ mod tests {
             compacted[0].locator,
             Some(ContextLocator::Transit { .. })
         ));
+    }
+
+    #[test]
+    fn validate_inspect_rejects_chained_commands() {
+        assert!(super::validate_inspect_command("ls && rm -rf /").is_err());
+        assert!(super::validate_inspect_command("cat file; echo done").is_err());
+        assert!(super::validate_inspect_command("echo > /tmp/out").is_err());
+        assert!(super::validate_inspect_command("cat < /etc/passwd").is_err());
+        assert!(super::validate_inspect_command("true || false").is_err());
+    }
+
+    #[test]
+    fn validate_inspect_allows_safe_read_only_commands() {
+        assert!(super::validate_inspect_command("git status").is_ok());
+        assert!(super::validate_inspect_command("git remote get-url origin").is_ok());
+        assert!(super::validate_inspect_command("ls -la").is_ok());
+        assert!(super::validate_inspect_command("cat README.md").is_ok());
+    }
+
+    #[test]
+    fn validate_inspect_rejects_empty_commands() {
+        assert!(super::validate_inspect_command("").is_err());
+        assert!(super::validate_inspect_command("   ").is_err());
     }
 }

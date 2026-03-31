@@ -2491,7 +2491,7 @@ Rules:\n\
 - Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
-- Use write_file, replace_in_file, or apply_patch only when the requested next step is an explicit workspace edit.\n\
+- When the user requests a code change, you MUST use write_file, replace_in_file, or apply_patch to make the edit — never describe the edit for the user to apply manually.\n\
 - Search, list_files, read, inspect, shell, diff, refine, or branch when more workspace evidence or action is needed.\n\
 - Stop when the turn should not recurse further before synthesis.\n\
 - Never answer the user directly here.\n\
