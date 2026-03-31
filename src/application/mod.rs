@@ -757,6 +757,15 @@ fn render_turn_event(event: &TurnEvent) -> String {
                 opt(retained_artifact_count),
             )
         }
+        TurnEvent::RefinementApplied {
+            reason,
+            before_summary,
+            after_summary,
+        } => format!(
+            "• Applied interpretation refinement\n  └ {reason}\n  └ before: {}\n  └ after: {}",
+            trim_event_detail(before_summary, 1),
+            trim_event_detail(after_summary, 1)
+        ),
         TurnEvent::ContextAssembly {
             label,
             hits,
@@ -1695,13 +1704,12 @@ impl MechSuitService {
             }
 
             if stop_reason.is_none() && !matches!(decision.action, PlannerAction::Stop { .. }) {
-                let should_refine = self.should_apply_mid_loop_refinement(
+                let refinement_reason = self.mid_loop_refinement_reason(
                     sequence,
                     &loop_state,
                     steps_without_new_evidence,
-                    &context.interpretation,
                 );
-                if should_refine
+                if let Some(refinement_reason) = refinement_reason
                     && let Some(updated_context) = self
                         .derive_mid_loop_interpretation_context(
                             prompt,
@@ -1713,9 +1721,16 @@ impl MechSuitService {
                         .await
                     && updated_context != context.interpretation
                 {
+                    let before_summary = context.interpretation.summary.clone();
+                    let after_summary = updated_context.summary.clone();
                     loop_state.refinement_count += 1;
                     loop_state.last_refinement_step = Some(sequence);
                     context.interpretation = updated_context;
+                    trace.emit(TurnEvent::RefinementApplied {
+                        reason: refinement_reason,
+                        before_summary,
+                        after_summary,
+                    });
                 }
             }
 
@@ -1784,34 +1799,41 @@ impl MechSuitService {
         )))
     }
 
-    fn should_apply_mid_loop_refinement(
+    fn mid_loop_refinement_reason(
         &self,
         _sequence: usize,
         loop_state: &PlannerLoopState,
         steps_without_new_evidence: usize,
-        _interpretation: &InterpretationContext,
-    ) -> bool {
+    ) -> Option<String> {
         let policy = &loop_state.refinement_policy;
         if !policy.enabled {
-            return false;
+            return None;
         }
 
         if loop_state.refinement_count >= policy.max_refinements_per_turn {
-            return false;
+            return None;
         }
 
         if matches!(
             policy.trigger.source,
             crate::domain::ports::RefinementTriggerSource::Manual
         ) {
-            return false;
+            return None;
         }
 
         if loop_state.evidence_items.len() < policy.trigger.min_evidence_items {
-            return false;
+            return None;
         }
 
-        steps_without_new_evidence >= policy.trigger.min_steps_without_new_evidence
+        if steps_without_new_evidence >= policy.trigger.min_steps_without_new_evidence {
+            Some(format!(
+                "evidence-pressure ({} evidence items after {} quiet steps)",
+                loop_state.evidence_items.len(),
+                steps_without_new_evidence
+            ))
+        } else {
+            None
+        }
     }
 
     async fn derive_mid_loop_interpretation_context(

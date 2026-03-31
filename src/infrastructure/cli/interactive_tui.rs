@@ -579,6 +579,7 @@ fn in_flight_label(last_event: &TurnEvent) -> &'static str {
 
         // Context assembly → model is about to think.
         TurnEvent::ContextAssembly { .. } | TurnEvent::ContextPressure { .. } => "Thinking",
+        TurnEvent::RefinementApplied { .. } => "Applying refinement",
 
         // Tool is running.
         TurnEvent::ToolCalled { .. } => "Running tool",
@@ -1745,6 +1746,19 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             TranscriptRowKind::Event,
             format!("• Assembled workspace context ({label})"),
             format!("{hits} hit(s), retained {retained_artifacts}, pruned {pruned_artifacts}"),
+        ),
+        TurnEvent::RefinementApplied {
+            reason,
+            before_summary,
+            after_summary,
+        } => TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Applied interpretation refinement",
+            format!(
+                "{reason}\nbefore: {}\nafter: {}",
+                collapse_event_details(&before_summary, 2),
+                collapse_event_details(&after_summary, 2)
+            ),
         ),
         TurnEvent::ToolCalled {
             tool_name,

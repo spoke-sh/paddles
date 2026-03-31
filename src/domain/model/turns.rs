@@ -119,6 +119,11 @@ pub enum TurnEvent {
         edge_count: Option<usize>,
         retained_artifact_count: Option<usize>,
     },
+    RefinementApplied {
+        reason: String,
+        before_summary: String,
+        after_summary: String,
+    },
     ContextAssembly {
         label: String,
         hits: usize,
@@ -166,6 +171,7 @@ impl TurnEvent {
             Self::GathererSearchProgress { .. } => "gatherer_search_progress",
             Self::GathererSummary { .. } => "gatherer_summary",
             Self::PlannerSummary { .. } => "planner_summary",
+            Self::RefinementApplied { .. } => "refinement_applied",
             Self::ContextAssembly { .. } => "context_assembly",
             Self::ToolCalled { .. } => "tool_called",
             Self::ToolFinished { .. } => "tool_finished",
@@ -191,6 +197,7 @@ impl TurnEvent {
             | Self::PlannerSummary { .. }
             | Self::ContextAssembly { .. }
             | Self::ContextPressure { .. }
+            | Self::RefinementApplied { .. }
             | Self::ThreadDecisionApplied { .. }
             | Self::GuidanceGraphExpanded { .. }
             | Self::ThreadMerged { .. } => 1,
