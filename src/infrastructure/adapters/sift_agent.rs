@@ -4338,8 +4338,8 @@ mod tests {
         InterpretationDecisionFramework, InterpretationProcedure, InterpretationProcedureStep,
         InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
         PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
-        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-        WorkspaceAction,
+        PlannerTraceMetadata, PlannerTraceStep, RefinementPolicy, RetainedEvidence, RetrievalMode,
+        RetrievalStrategy, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
     use anyhow::{Result, anyhow};
@@ -5177,6 +5177,10 @@ mod tests {
             notes: vec![],
             pending_branches: vec![],
             latest_gatherer_trace: None,
+            refinement_count: 0,
+            last_refinement_step: None,
+            refinement_signatures: Vec::new(),
+            refinement_policy: RefinementPolicy::default(),
         });
 
         let decision = adapter
@@ -5250,6 +5254,10 @@ mod tests {
             notes: vec![],
             pending_branches: vec![],
             latest_gatherer_trace: None,
+            refinement_count: 0,
+            last_refinement_step: None,
+            refinement_signatures: Vec::new(),
+            refinement_policy: RefinementPolicy::default(),
         });
 
         let decision = adapter

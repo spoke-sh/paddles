@@ -258,5 +258,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | planned |
+| [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | in-progress |
 

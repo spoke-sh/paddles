@@ -10,6 +10,7 @@ pub use crate::domain::model::{
     TraceBranch, TraceBranchId, WorkspaceAction,
 };
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::domain::model::TurnEventSink;
@@ -51,6 +52,59 @@ pub trait RecursivePlanner: Send + Sync {
 pub enum PlannerCapability {
     Available,
     Unsupported { reason: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum RefinementTriggerSource {
+    #[default]
+    EvidencePressure,
+    StaleLoopState,
+    Manual,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefinementTrigger {
+    pub id: String,
+    pub source: RefinementTriggerSource,
+    pub min_evidence_items: usize,
+    pub min_steps_without_new_evidence: usize,
+}
+
+impl Default for RefinementTrigger {
+    fn default() -> Self {
+        Self {
+            id: "trigger:evidence-pressure-v1".to_string(),
+            source: RefinementTriggerSource::EvidencePressure,
+            min_evidence_items: 1,
+            min_steps_without_new_evidence: 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RefinementPolicy {
+    pub id: String,
+    pub enabled: bool,
+    pub trigger: RefinementTrigger,
+    pub max_refinements_per_turn: usize,
+    pub cooldown_steps: usize,
+    pub oscillation_signature_window: usize,
+    pub signature_history_limit: usize,
+}
+
+impl Default for RefinementPolicy {
+    fn default() -> Self {
+        Self {
+            id: "policy:context-refine-v1".to_string(),
+            enabled: true,
+            trigger: RefinementTrigger::default(),
+            max_refinements_per_turn: 1,
+            cooldown_steps: 2,
+            oscillation_signature_window: 3,
+            signature_history_limit: 6,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -199,6 +253,10 @@ pub struct PlannerLoopState {
     pub notes: Vec<String>,
     pub pending_branches: Vec<TraceBranch>,
     pub latest_gatherer_trace: Option<PlannerTraceMetadata>,
+    pub refinement_count: usize,
+    pub last_refinement_step: Option<usize>,
+    pub refinement_signatures: Vec<String>,
+    pub refinement_policy: RefinementPolicy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -390,7 +448,8 @@ mod tests {
     use super::{
         GuidanceCategory, InitialAction, InterpretationContext, InterpretationDecisionFramework,
         InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-        InterpretationToolHint, PlannerAction, PlannerBudget, RetrievalMode, RetrievalStrategy,
+        InterpretationToolHint, PlannerAction, PlannerBudget, PlannerLoopState, RefinementPolicy,
+        RefinementTrigger, RefinementTriggerSource, RetrievalMode, RetrievalStrategy,
         ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
@@ -467,6 +526,30 @@ mod tests {
         assert_eq!(action.label(), "search");
         assert!(action.summary().contains("memory reload"));
         assert!(!action.is_terminal());
+    }
+
+    #[test]
+    fn refinement_types_define_stable_defaults() {
+        let trigger = RefinementTrigger::default();
+        let policy = RefinementPolicy::default();
+
+        assert_eq!(trigger.id, "trigger:evidence-pressure-v1");
+        assert_eq!(trigger.source, RefinementTriggerSource::EvidencePressure);
+        assert_eq!(trigger.min_evidence_items, 1);
+        assert_eq!(trigger.min_steps_without_new_evidence, 2);
+        assert_eq!(policy.id, "policy:context-refine-v1");
+        assert!(policy.enabled);
+        assert!(policy.max_refinements_per_turn > 0);
+    }
+
+    #[test]
+    fn planner_loop_state_defaults_include_refinement_fields() {
+        let state = PlannerLoopState::default();
+
+        assert_eq!(state.refinement_count, 0);
+        assert!(state.last_refinement_step.is_none());
+        assert!(state.refinement_signatures.is_empty());
+        assert_eq!(state.refinement_policy, RefinementPolicy::default());
     }
 
     #[test]

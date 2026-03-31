@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFURnK5iu
-status: backlog
+status: in-progress
 created_at: 2026-03-31T16:20:10
-updated_at: 2026-03-31T16:24:51
+updated_at: 2026-03-31T16:29:50
 # authored
 title: Add RefinementTrigger And RefinementPolicy Types
 type: feat
 operator-signal:
 scope: VFUNJz9zT/VFURjeU0t
 index: 1
+started_at: 2026-03-31T16:29:50
 ---
 
 # Add RefinementTrigger And RefinementPolicy Types

@@ -24,7 +24,8 @@ pub use planning::{
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
     OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability,
     PlannerDecision as RecursivePlannerDecision, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest, WorkspaceAction,
+    PlannerStepRecord, RecursivePlanner, RefinementPolicy, RefinementTrigger,
+    RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use synthesis::{SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
