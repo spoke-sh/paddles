@@ -1487,6 +1487,18 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             "• Fell back",
             format!("{stage}: {reason}"),
         ),
+        TurnEvent::ContextPressure { pressure } => {
+            let factors: Vec<_> = pressure.factors.iter().map(|f| f.label()).collect();
+            TranscriptRow::new(
+                TranscriptRowKind::Event,
+                format!("• Context pressure: {}", pressure.level.label()),
+                format!(
+                    "{} truncation(s), factors: [{}]",
+                    pressure.truncation_count,
+                    factors.join(", ")
+                ),
+            )
+        }
         TurnEvent::SynthesisReady {
             grounded,
             citations,

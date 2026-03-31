@@ -1,7 +1,8 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
 use crate::domain::model::{
-    CompactionDecision, ConversationThreadRef, NullTurnEventSink, ThreadDecision, ThreadDecisionId,
-    ThreadDecisionKind, ThreadMergeMode, TurnEvent, TurnEventSink, TurnIntent,
+    CompactionDecision, ConversationThreadRef, NullTurnEventSink, PressureFactor, PressureTracker,
+    ThreadDecision, ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, TurnEvent,
+    TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     CompactionPlan, CompactionRequest, EvidenceBundle, GuidanceCategory, InitialAction,
@@ -1356,6 +1357,17 @@ impl SiftAgentAdapter {
             }
         }
         let memory_prompt = memory.render_for_prompt();
+
+        // Track context pressure from memory truncation.
+        let mut pressure_tracker = PressureTracker::new();
+        let mem_truncation_count = memory.truncation_count();
+        if mem_truncation_count > 0 {
+            pressure_tracker.record_many(PressureFactor::MemoryTruncated, mem_truncation_count);
+        }
+        let pressure = pressure_tracker.finish();
+        if !pressure.is_nominal() {
+            event_sink.emit(TurnEvent::ContextPressure { pressure });
+        }
 
         let mut state = self
             .state

@@ -765,6 +765,15 @@ fn render_turn_event(event: &TurnEvent) -> String {
         } => format!(
             "• Assembled workspace context ({label})\n  └ {hits} hit(s), retained {retained_artifacts}, pruned {pruned_artifacts}"
         ),
+        TurnEvent::ContextPressure { pressure } => {
+            let factors: Vec<_> = pressure.factors.iter().map(|f| f.label()).collect();
+            format!(
+                "• Context pressure: {}\n  └ {} truncation(s), factors: [{}]",
+                pressure.level.label(),
+                pressure.truncation_count,
+                factors.join(", ")
+            )
+        }
         TurnEvent::ToolCalled {
             tool_name,
             invocation,

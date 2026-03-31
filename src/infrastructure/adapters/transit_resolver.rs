@@ -139,6 +139,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fails_closed_for_missing_transit_record() {
+        let temp = tempdir().expect("tempdir");
+        let recorder = Arc::new(TransitTraceRecorder::open(temp.path()).expect("transit recorder"));
+        let resolver = TransitContextResolver::new(recorder);
+
+        let locator = ContextLocator::Transit {
+            task_id: TaskTraceId::new("nonexistent-task").expect("task id"),
+            record_id: TraceRecordId::new("nonexistent-record").expect("record id"),
+        };
+
+        let result = resolver.resolve(&locator).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn fails_closed_for_sift_tier() {
+        let temp = tempdir().expect("tempdir");
+        let recorder = Arc::new(TransitTraceRecorder::open(temp.path()).expect("transit recorder"));
+        let resolver = TransitContextResolver::new(recorder);
+
+        let locator = ContextLocator::Sift {
+            index_ref: "some-index".to_string(),
+        };
+
+        let result = resolver.resolve(&locator).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not yet implemented")
+        );
+    }
+
+    #[tokio::test]
+    async fn noop_resolver_fails_closed() {
+        let resolver = NoopContextResolver;
+        let locator = ContextLocator::Inline {
+            content: "test".to_string(),
+        };
+        let result = resolver.resolve(&locator).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn resolves_filesystem_locator() {
         let temp = tempdir().expect("tempdir");
         let recorder = Arc::new(TransitTraceRecorder::open(temp.path()).expect("transit recorder"));

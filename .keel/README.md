@@ -235,17 +235,17 @@
 |--------|--------|
 | [Bounded Context Self-Assessment](epics/VFOmN3n4E/voyages/VFOvI9PzB/) | done |
 
-### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (active)
+### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Context Pressure Tracking And Events](epics/VFOmVwP8l/voyages/VFOvJSU8h/) | in-progress |
+| [Context Pressure Tracking And Events](epics/VFOmVwP8l/voyages/VFOvJSU8h/) | done |
 
-### [Unbounded Context Tier Model](epics/VFOmY0WHC/) (active)
+### [Unbounded Context Tier Model](epics/VFOmY0WHC/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Tier Model And Cross-Tier Locator Resolution](epics/VFOmY0WHC/voyages/VFOvKhUFc/) | in-progress |
+| [Tier Model And Cross-Tier Locator Resolution](epics/VFOmY0WHC/voyages/VFOvKhUFc/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

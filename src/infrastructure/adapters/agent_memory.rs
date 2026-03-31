@@ -19,11 +19,22 @@ pub struct AgentMemory {
     warnings: Vec<String>,
 }
 
+impl AgentMemory {
+    pub fn is_truncated(&self) -> bool {
+        self.documents.iter().any(|d| d.truncated)
+    }
+
+    pub fn truncation_count(&self) -> usize {
+        self.documents.iter().filter(|d| d.truncated).count()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MemoryDocument {
     path: PathBuf,
     contents: String,
     kind: MemoryDocumentKind,
+    truncated: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,11 +78,8 @@ impl AgentMemory {
         ];
 
         for document in prompt_docs {
-            sections.push(format!(
-                "--- {} ---\n{}",
-                document.path.display(),
-                trim_memory_contents(&document.contents)
-            ));
+            let (content, _truncated) = trim_memory_contents(&document.contents);
+            sections.push(format!("--- {} ---\n{}", document.path.display(), content));
         }
 
         sections.join("\n\n")
@@ -202,10 +210,13 @@ fn load_memory_document(
         return Ok(None);
     }
 
+    let truncated = trimmed.chars().count() > MAX_MEMORY_FILE_CHARS;
+
     Ok(Some(MemoryDocument {
         path,
         contents: trimmed.to_string(),
         kind,
+        truncated,
     }))
 }
 
@@ -312,9 +323,9 @@ pub(crate) fn load_guidance_document(
     }))
 }
 
-fn trim_memory_contents(contents: &str) -> String {
+fn trim_memory_contents(contents: &str) -> (String, bool) {
     if contents.chars().count() <= MAX_MEMORY_FILE_CHARS {
-        return contents.to_string();
+        return (contents.to_string(), false);
     }
 
     let mut trimmed = contents
@@ -322,7 +333,7 @@ fn trim_memory_contents(contents: &str) -> String {
         .take(MAX_MEMORY_FILE_CHARS)
         .collect::<String>();
     trimmed.push_str("\n...[truncated]");
-    trimmed
+    (trimmed, true)
 }
 
 fn display_path(workspace_root: &Path, path: &Path) -> String {
@@ -340,7 +351,8 @@ fn fallback_excerpt(contents: &str) -> String {
         .take(8)
         .collect::<Vec<_>>()
         .join("\n");
-    trim_memory_contents(&excerpt)
+    let (trimmed, _) = trim_memory_contents(&excerpt);
+    trimmed
 }
 
 #[cfg(test)]
@@ -474,5 +486,47 @@ mod tests {
         );
         assert!(interpretation.tool_hints.is_empty());
         assert!(interpretation.decision_framework.procedures.is_empty());
+    }
+
+    #[test]
+    fn truncation_tracking_flags_oversized_documents() {
+        let sandbox = tempfile::tempdir().expect("sandbox");
+        let session_root = sandbox.path().join("workspace/project");
+        fs::create_dir_all(&session_root).expect("session root");
+
+        // Write a document that exceeds MAX_MEMORY_FILE_CHARS (12_000)
+        let oversized = "x".repeat(13_000);
+        fs::write(session_root.join("AGENTS.md"), &oversized).expect("agents");
+
+        let memory = AgentMemory::load_with_search_paths(
+            &session_root,
+            MemorySearchPaths {
+                system: None,
+                user: None,
+            },
+        );
+
+        assert!(memory.is_truncated());
+        assert_eq!(memory.truncation_count(), 1);
+    }
+
+    #[test]
+    fn truncation_tracking_nominal_for_small_documents() {
+        let sandbox = tempfile::tempdir().expect("sandbox");
+        let session_root = sandbox.path().join("workspace/project");
+        fs::create_dir_all(&session_root).expect("session root");
+
+        fs::write(session_root.join("AGENTS.md"), "short content").expect("agents");
+
+        let memory = AgentMemory::load_with_search_paths(
+            &session_root,
+            MemorySearchPaths {
+                system: None,
+                user: None,
+            },
+        );
+
+        assert!(!memory.is_truncated());
+        assert_eq!(memory.truncation_count(), 0);
     }
 }

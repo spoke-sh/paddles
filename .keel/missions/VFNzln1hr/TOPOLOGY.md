@@ -34,6 +34,30 @@ Compaction is currently performed using fixed character limits (e.g., 12k for `A
 ### 4. Context Pressure Blindness
 The system tracks `PlannerBudget` (steps, tool calls), but it has no first-class concept of "Context Budget". It cannot signal that it is under "context pressure" or decide to promote/archive components based on available token/char limits.
 
+## Context Tier Model
+
+The system accesses context through four tiers, each with distinct boundaries, storage characteristics, and traversal semantics.
+
+| Tier | Boundary | Storage | Access Pattern | Resolution |
+|------|----------|---------|----------------|------------|
+| **Inline** | Character-limited content embedded in working memory | `ArtifactEnvelope.inline_content` | Direct read, zero-cost | Identity (content is the value) |
+| **Transit** | Full trace records persisted in streams | `TransitTraceRecorder` streams keyed by `TaskTraceId` + `TraceRecordId` | Replay task stream, find record by ID | `TransitContextResolver::resolve(Transit { task_id, record_id })` |
+| **Sift** | Indexed evidence in retrieval indexes | Sift indexes (out of current scope) | Query-based retrieval | Not yet implemented; returns explicit error |
+| **Filesystem** | Workspace files on disk | Local filesystem at workspace root | Path-based read | `tokio::fs::read_to_string(path)` |
+
+### Tier Boundaries
+
+- **Inline → Transit**: Content exceeding the inline character limit is truncated with a `[truncated]` suffix. The `ArtifactEnvelope` carries a `ContextLocator::Transit` pointing to the full record in the transit stream.
+- **Transit → Filesystem**: Transit records may reference workspace file paths via `ContextLocator::Filesystem`. Resolution reads the file directly.
+- **Sift tier**: Reserved for future indexed retrieval. Resolution attempts return an explicit unsupported error.
+
+### Traversal Rules
+
+1. **Typed addressing**: Every `ContextLocator` variant encodes its target tier via `locator.tier() -> ContextTier`. Consumers route resolution through the `ContextResolver` trait.
+2. **Lazy pull-based resolution**: No tier eagerly loads content from a deeper tier. Resolution occurs only when a consumer calls `resolver.resolve(&locator)`.
+3. **Local-first ordering**: Inline content is returned directly. Transit replays local streams. Filesystem reads local disk. Remote tiers (sift) are attempted last.
+4. **Fail-closed degradation**: When a tier is unavailable or a record is missing, resolution returns an explicit `anyhow::Error` naming the tier and locator details. Consumers degrade to truncated inline content.
+
 ## Target Architecture Goals
 
 - **Transit-Native Addressing**: Move from structural wiring to addressable locators backed by transit lineage.

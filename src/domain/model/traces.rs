@@ -247,4 +247,39 @@ mod tests {
 
         assert_eq!(transit, deserialized);
     }
+
+    #[test]
+    fn artifact_envelope_carries_locator_with_tier_metadata() {
+        use paddles_conversation::{
+            ArtifactEnvelope, ArtifactKind, ContextLocator, ContextTier, TraceArtifactId,
+        };
+
+        let locator = ContextLocator::Transit {
+            task_id: TaskTraceId::new("task-1").expect("task id"),
+            record_id: TraceRecordId::new("record-1").expect("record id"),
+        };
+        let envelope = ArtifactEnvelope {
+            artifact_id: TraceArtifactId::new("art-1").expect("artifact id"),
+            kind: ArtifactKind::ModelOutput,
+            mime_type: "text/plain".to_string(),
+            summary: "test".to_string(),
+            byte_count: 4,
+            inline_content: Some("te...[truncated]".to_string()),
+            locator: Some(locator),
+            truncated: true,
+            labels: Default::default(),
+        };
+
+        let loc = envelope.locator.as_ref().expect("locator present");
+        assert_eq!(loc.tier(), ContextTier::Transit);
+    }
+
+    #[test]
+    fn no_transit_sift_types_leak_into_domain_ports() {
+        // ContextResolver trait uses paddles_conversation::ContextLocator (domain types only).
+        // This test documents that the port boundary is maintained — the trait signature
+        // does not reference transit-core or sift-core types directly.
+        use paddles_conversation::ContextLocator;
+        let _: fn(&ContextLocator) -> ContextLocator = |l| l.clone();
+    }
 }

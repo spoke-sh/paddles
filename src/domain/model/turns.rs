@@ -1,3 +1,4 @@
+use super::context_quality::ContextPressure;
 use super::interpretation::InterpretationContext;
 use serde::Serialize;
 use std::fmt;
@@ -138,6 +139,9 @@ pub enum TurnEvent {
         stage: String,
         reason: String,
     },
+    ContextPressure {
+        pressure: ContextPressure,
+    },
     SynthesisReady {
         grounded: bool,
         citations: Vec<String>,
@@ -166,6 +170,7 @@ impl TurnEvent {
             Self::ToolCalled { .. } => "tool_called",
             Self::ToolFinished { .. } => "tool_finished",
             Self::Fallback { .. } => "fallback",
+            Self::ContextPressure { .. } => "context_pressure",
             Self::SynthesisReady { .. } => "synthesis_ready",
         }
     }
@@ -185,6 +190,7 @@ impl TurnEvent {
             | Self::GathererSummary { .. }
             | Self::PlannerSummary { .. }
             | Self::ContextAssembly { .. }
+            | Self::ContextPressure { .. }
             | Self::ThreadDecisionApplied { .. }
             | Self::GuidanceGraphExpanded { .. }
             | Self::ThreadMerged { .. } => 1,

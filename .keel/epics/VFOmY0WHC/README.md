@@ -22,8 +22,8 @@ mission: VFNzln1hr
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Tier Model And Cross-Tier Locator Resolution](voyages/VFOvKhUFc/) | in-progress | 0/4 |
+| [Tier Model And Cross-Tier Locator Resolution](voyages/VFOvKhUFc/) | done | 4/4 |
 <!-- END GENERATED -->
