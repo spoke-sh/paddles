@@ -1324,11 +1324,13 @@ impl MechSuitService {
         initial_decision: Option<RecursivePlannerDecision>,
         trace: Arc<StructuredTurnTrace>,
     ) -> Result<Option<EvidenceBundle>> {
+        let mut context = context;
         let budget = PlannerBudget::default();
         let mut loop_state = PlannerLoopState::default();
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
         let mut pending_initial_decision = initial_decision;
+        let mut steps_without_new_evidence = 0usize;
         let gatherer_provider = context
             .prepared
             .gatherer
@@ -1337,6 +1339,7 @@ impl MechSuitService {
             .unwrap_or_else(|| "workspace".to_string());
 
         for sequence in 1..=budget.max_steps {
+            let evidence_count_before = loop_state.evidence_items.len();
             let decision = if let Some(decision) = pending_initial_decision.take() {
                 decision
             } else {
@@ -1684,6 +1687,38 @@ impl MechSuitService {
                 outcome: outcome.clone(),
             });
 
+            let evidence_count_after = loop_state.evidence_items.len();
+            if evidence_count_after > evidence_count_before {
+                steps_without_new_evidence = 0;
+            } else {
+                steps_without_new_evidence += 1;
+            }
+
+            if stop_reason.is_none() && !matches!(decision.action, PlannerAction::Stop { .. }) {
+                let should_refine = self.should_apply_mid_loop_refinement(
+                    sequence,
+                    &loop_state,
+                    steps_without_new_evidence,
+                    &context.interpretation,
+                );
+                if should_refine
+                    && let Some(updated_context) = self
+                        .derive_mid_loop_interpretation_context(
+                            prompt,
+                            &context,
+                            &loop_state,
+                            &evidence_count_before,
+                            &trace,
+                        )
+                        .await
+                    && updated_context != context.interpretation
+                {
+                    loop_state.refinement_count += 1;
+                    loop_state.last_refinement_step = Some(sequence);
+                    context.interpretation = updated_context;
+                }
+            }
+
             if let PlannerAction::Stop { .. } = decision.action {
                 break;
             }
@@ -1747,6 +1782,90 @@ impl MechSuitService {
             completed,
             &stop_reason,
         )))
+    }
+
+    fn should_apply_mid_loop_refinement(
+        &self,
+        _sequence: usize,
+        loop_state: &PlannerLoopState,
+        steps_without_new_evidence: usize,
+        _interpretation: &InterpretationContext,
+    ) -> bool {
+        let policy = &loop_state.refinement_policy;
+        if !policy.enabled {
+            return false;
+        }
+
+        if loop_state.refinement_count >= policy.max_refinements_per_turn {
+            return false;
+        }
+
+        if matches!(
+            policy.trigger.source,
+            crate::domain::ports::RefinementTriggerSource::Manual
+        ) {
+            return false;
+        }
+
+        if loop_state.evidence_items.len() < policy.trigger.min_evidence_items {
+            return false;
+        }
+
+        steps_without_new_evidence >= policy.trigger.min_steps_without_new_evidence
+    }
+
+    async fn derive_mid_loop_interpretation_context(
+        &self,
+        prompt: &str,
+        context: &PlannerLoopContext,
+        loop_state: &PlannerLoopState,
+        _evidence_count_before: &usize,
+        trace: &Arc<StructuredTurnTrace>,
+    ) -> Option<InterpretationContext> {
+        let mut documents = self
+            .operator_memory
+            .operator_memory_documents(&self.workspace_root);
+        documents.push(crate::domain::ports::OperatorMemoryDocument {
+            path: self.workspace_root.join(".paddles/refinement-context.md"),
+            source: "planner-loop-context".to_string(),
+            contents: format!(
+                "Interpretation context before refinement:\n{}",
+                context.interpretation.render()
+            ),
+        });
+
+        let evidence_snapshot = loop_state
+            .evidence_items
+            .iter()
+            .rev()
+            .take(3)
+            .map(|evidence| format!("{}: {}", evidence.source, evidence.snippet))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !evidence_snapshot.is_empty() {
+            documents.push(crate::domain::ports::OperatorMemoryDocument {
+                path: self.workspace_root.join(".paddles/refinement-evidence.md"),
+                source: "planner-loop-evidence".to_string(),
+                contents: format!("Recent evidence:\n{evidence_snapshot}"),
+            });
+        }
+
+        let request = InterpretationRequest::new(prompt, self.workspace_root.clone(), documents);
+        match context
+            .planner_engine
+            .derive_interpretation_context(&request, trace.clone() as Arc<dyn TurnEventSink>)
+            .await
+        {
+            Ok(updated_context) => Some(updated_context),
+            Err(err) => {
+                if self.verbose.load(Ordering::Relaxed) >= 1 {
+                    println!(
+                        "[WARN] mid-loop refinement failed, keeping prior interpretation context: {err:#}"
+                    );
+                }
+                None
+            }
+        }
     }
 }
 

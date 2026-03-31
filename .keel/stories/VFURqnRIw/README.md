@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFURqnRIw
-status: backlog
+status: in-progress
 created_at: 2026-03-31T16:20:23
-updated_at: 2026-03-31T16:24:51
+updated_at: 2026-03-31T16:31:16
 # authored
 title: Emit RefinementApplied TurnEvent In Trace Stream
 type: feat
 operator-signal:
 scope: VFUNJz9zT/VFURjeU0t
 index: 3
+started_at: 2026-03-31T16:31:16
 ---
 
 # Emit RefinementApplied TurnEvent In Trace Stream

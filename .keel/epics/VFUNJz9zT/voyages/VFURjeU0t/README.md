@@ -32,7 +32,7 @@ started_at: 2026-03-31T16:29:50
 | Title | Type | Status |
 |-------|------|--------|
 | [Add RefinementTrigger And RefinementPolicy Types](../../../../stories/VFURnK5iu/README.md) | feat | in-progress |
-| [Implement Mid-Loop Interpretation Refinement](../../../../stories/VFURoyHz3/README.md) | feat | backlog |
-| [Emit RefinementApplied TurnEvent In Trace Stream](../../../../stories/VFURqnRIw/README.md) | feat | backlog |
-| [Add Refinement Cooldown And Oscillation Prevention](../../../../stories/VFURsk7Xz/README.md) | feat | backlog |
+| [Implement Mid-Loop Interpretation Refinement](../../../../stories/VFURoyHz3/README.md) | feat | in-progress |
+| [Emit RefinementApplied TurnEvent In Trace Stream](../../../../stories/VFURqnRIw/README.md) | feat | in-progress |
+| [Add Refinement Cooldown And Oscillation Prevention](../../../../stories/VFURsk7Xz/README.md) | feat | in-progress |
 <!-- END GENERATED -->

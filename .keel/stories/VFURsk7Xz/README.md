@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFURsk7Xz
-status: backlog
+status: in-progress
 created_at: 2026-03-31T16:20:30
-updated_at: 2026-03-31T16:24:51
+updated_at: 2026-03-31T16:31:16
 # authored
 title: Add Refinement Cooldown And Oscillation Prevention
 type: feat
 operator-signal:
 scope: VFUNJz9zT/VFURjeU0t
 index: 4
+started_at: 2026-03-31T16:31:16
 ---
 
 # Add Refinement Cooldown And Oscillation Prevention
