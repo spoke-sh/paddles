@@ -1405,6 +1405,9 @@ impl MechSuitService {
                                         )
                                         .await,
                                     );
+                                    gatherer.set_event_sink(Some(
+                                        trace.clone() as Arc<dyn TurnEventSink>
+                                    ));
                                     match gatherer.gather_context(&request).await {
                                         Ok(result) => {
                                             let bundle = result.evidence_bundle;
@@ -1588,6 +1591,8 @@ impl MechSuitService {
                                     )
                                     .await,
                                 );
+                                gatherer
+                                    .set_event_sink(Some(trace.clone() as Arc<dyn TurnEventSink>));
                                 match gatherer.gather_context(&request).await {
                                     Ok(result) => {
                                         let bundle = result.evidence_bundle;

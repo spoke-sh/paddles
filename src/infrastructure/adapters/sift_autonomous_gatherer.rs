@@ -25,7 +25,7 @@ pub struct SiftAutonomousGathererAdapter {
     sift: Arc<Sift>,
     verbose: AtomicU8,
     planner_profile: Option<String>,
-    event_sink: Option<Arc<dyn TurnEventSink>>,
+    event_sink: std::sync::Mutex<Option<Arc<dyn TurnEventSink>>>,
 }
 
 impl SiftAutonomousGathererAdapter {
@@ -35,13 +35,12 @@ impl SiftAutonomousGathererAdapter {
             sift: Arc::new(Sift::builder().build()),
             verbose: AtomicU8::new(0),
             planner_profile: None,
-            event_sink: None,
+            event_sink: std::sync::Mutex::new(None),
         }
     }
 
-    pub fn with_event_sink(mut self, sink: Arc<dyn TurnEventSink>) -> Self {
-        self.event_sink = Some(sink);
-        self
+    pub fn set_event_sink(&self, sink: Option<Arc<dyn TurnEventSink>>) {
+        *self.event_sink.lock().expect("event sink lock") = sink;
     }
 
     pub fn set_verbose(&self, level: u8) {
@@ -103,13 +102,17 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         GathererCapability::Available
     }
 
+    fn set_event_sink(&self, sink: Option<Arc<dyn TurnEventSink>>) {
+        *self.event_sink.lock().expect("event sink lock") = sink;
+    }
+
     async fn gather_context(
         &self,
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
         let search_request = self.build_search_request(request);
         let sift = Arc::clone(&self.sift);
-        let event_sink = self.event_sink.clone();
+        let event_sink = self.event_sink.lock().expect("event sink lock").clone();
 
         let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
 

@@ -14,6 +14,13 @@ pub trait ContextGatherer: Send + Sync {
         &self,
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error>;
+
+    /// Optionally wire a per-turn event sink for progress reporting.
+    fn set_event_sink(
+        &self,
+        _sink: Option<std::sync::Arc<dyn crate::domain::model::TurnEventSink>>,
+    ) {
+    }
 }
 
 /// Request sent to a context-gathering lane before final synthesis.
