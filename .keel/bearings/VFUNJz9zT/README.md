@@ -1,11 +1,13 @@
 ---
 # system-managed
 id: VFUNJz9zT
-status: exploring
+status: laid
 created_at: 2026-03-31T16:02:24
 # authored
 title: Adaptive Interpretation Context Refinement
 index: 2
+laid_at: 2026-03-31T16:10:23
+epic: VFUNJz9zT
 ---
 
 # Adaptive Interpretation Context Refinement

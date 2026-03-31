@@ -8,7 +8,7 @@
 | Bearing | Status | Evidence | Assessment | Readiness | EV | Laid |
 |---------|--------|----------|------------|-----------|----|------|
 | [HTTP API Design For Paddles](bearings/VFKApee25/) | laid | ✓ | ✓ | decision-ready | 10.31 | ✓ |
-| [Adaptive Interpretation Context Refinement](bearings/VFUNJz9zT/) | exploring | ✓ | ✓ | repair citations | - | - |
+| [Adaptive Interpretation Context Refinement](bearings/VFUNJz9zT/) | laid | ✓ | ✓ | decision-ready | 4.89 | ✓ |
 
 ## Epics
 
@@ -253,4 +253,10 @@
 | Voyage | Status |
 |--------|--------|
 | [Bearing Validation](epics/VFKApee25/voyages/VFMGQ1isG/) | done |
+
+### [Adaptive Interpretation Context Refinement](epics/VFUNJz9zT/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | planned |
 
