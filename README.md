@@ -1,7 +1,5 @@
 # Paddles: Recursive In-Context Planning Harness
 
-[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Nix Build](https://img.shields.io/badge/Nix-Build-informational)](https://nixos.org/guides/how-nix-works)
 [![Keel Board](https://img.shields.io/badge/Keel-Board-blue)](.keel/README.md)
 [![CI](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml)
 
