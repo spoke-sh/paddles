@@ -1,12 +1,14 @@
 ---
 # system-managed
 id: VFOvJSU8h
-status: draft
+status: in-progress
 epic: VFOmVwP8l
 created_at: 2026-03-30T17:39:47
 # authored
 title: Context Pressure Tracking And Events
 index: 1
+updated_at: 2026-03-30T18:52:53
+started_at: 2026-03-30T18:52:53
 ---
 
 # Context Pressure Tracking And Events

@@ -1,4 +1,5 @@
 mod context_gathering;
+mod context_resolution;
 mod operator_memory;
 mod planning;
 mod synthesis;
@@ -14,6 +15,7 @@ pub use context_gathering::{
     PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata,
     PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
 };
+pub use context_resolution::ContextResolver;
 pub use operator_memory::OperatorMemory;
 pub use planning::{
     GuidanceCategory, InitialAction, InitialActionDecision, InterpretationConflict,

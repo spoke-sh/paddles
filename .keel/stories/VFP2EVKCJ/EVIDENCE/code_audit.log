@@ -1,0 +1,1 @@
+TransitContextResolver implements resolve() by replaying on demand.

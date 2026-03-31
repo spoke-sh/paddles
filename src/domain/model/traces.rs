@@ -165,10 +165,7 @@ mod tests {
         );
 
         assert!(artifact.truncated);
-        assert_eq!(
-            artifact.locator.as_deref(),
-            Some("paddles-artifact://artifact-1")
-        );
+        assert_eq!(artifact.locator, None);
         assert!(
             artifact
                 .inline_content
@@ -207,5 +204,47 @@ mod tests {
             lineage.parent_record_id.as_ref().map(|id| id.as_str()),
             Some("record-1")
         );
+    }
+
+    #[test]
+    fn context_locator_reports_correct_tier() {
+        use paddles_conversation::{ContextLocator, ContextTier, TaskTraceId};
+        use std::path::PathBuf;
+
+        let inline = ContextLocator::Inline {
+            content: "test".to_string(),
+        };
+        assert_eq!(inline.tier(), ContextTier::Inline);
+
+        let transit = ContextLocator::Transit {
+            task_id: TaskTraceId::new("task-1").expect("task id"),
+            record_id: TraceRecordId::new("record-1").expect("record id"),
+        };
+        assert_eq!(transit.tier(), ContextTier::Transit);
+
+        let sift = ContextLocator::Sift {
+            index_ref: "sift-1".to_string(),
+        };
+        assert_eq!(sift.tier(), ContextTier::Sift);
+
+        let fs = ContextLocator::Filesystem {
+            path: PathBuf::from("src/lib.rs"),
+        };
+        assert_eq!(fs.tier(), ContextTier::Filesystem);
+    }
+
+    #[test]
+    fn context_locator_serializes_round_trip() {
+        use paddles_conversation::ContextLocator;
+
+        let transit = ContextLocator::Transit {
+            task_id: TaskTraceId::new("task-1").expect("task id"),
+            record_id: TraceRecordId::new("record-1").expect("record id"),
+        };
+
+        let serialized = serde_json::to_string(&transit).expect("serialize");
+        let deserialized: ContextLocator = serde_json::from_str(&serialized).expect("deserialize");
+
+        assert_eq!(transit, deserialized);
     }
 }

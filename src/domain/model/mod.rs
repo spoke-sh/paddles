@@ -10,10 +10,11 @@ pub use interpretation::{
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
 };
 pub use paddles_conversation::{
-    ArtifactEnvelope, ArtifactKind, ConversationThread, ConversationThreadRef,
-    ConversationThreadStatus, TaskTraceId, ThreadCandidate, ThreadCandidateId, ThreadDecision,
-    ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceArtifactId,
-    TraceBranchId, TraceCheckpointId, TraceRecordId, TurnTraceId,
+    ArtifactEnvelope, ArtifactKind, ContextLocator, ContextTier, ConversationThread,
+    ConversationThreadRef, ConversationThreadStatus, TaskTraceId, ThreadCandidate,
+    ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
+    TurnTraceId,
 };
 pub use threading::ConversationReplayView;
 pub use traces::{

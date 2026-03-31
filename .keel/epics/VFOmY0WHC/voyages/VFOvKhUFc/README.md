@@ -1,12 +1,14 @@
 ---
 # system-managed
 id: VFOvKhUFc
-status: draft
+status: in-progress
 epic: VFOmY0WHC
 created_at: 2026-03-30T17:39:51
 # authored
 title: Tier Model And Cross-Tier Locator Resolution
 index: 1
+updated_at: 2026-03-30T18:52:53
+started_at: 2026-03-30T18:52:53
 ---
 
 # Tier Model And Cross-Tier Locator Resolution

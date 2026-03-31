@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VFP2FH0Hj
-status: icebox
-created_at: 2026-03-30T18:07:19
-updated_at: 2026-03-30T18:07:19
+status: backlog
+created_at: 2026-03-30T18:07:22
+updated_at: 2026-03-30T18:52:53
 # authored
 title: Verify Recursive Compaction Composability
 type: feat
@@ -16,8 +16,8 @@ index: 4
 
 ## Summary
 
-Describe the goal and context of this story.
+Ensure that compacted output can be fed back into the compaction engine.
 
 ## Acceptance Criteria
 
-- [ ] Item 1 <!-- verify: manual, SRS-XX:start:end -->
+- [ ] Compacted output is valid for subsequent rounds [SRS-NFR-02/AC-01] <!-- verify: manual, SRS-NFR-02:start:end -->

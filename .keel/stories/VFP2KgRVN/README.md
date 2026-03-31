@@ -2,8 +2,8 @@
 # system-managed
 id: VFP2KgRVN
 status: icebox
-created_at: 2026-03-30T18:07:40
-updated_at: 2026-03-30T18:07:40
+created_at: 2026-03-30T18:07:28
+updated_at: 2026-03-30T18:54:01
 # authored
 title: Implement Cross-Tier Resolution Paths
 type: feat
@@ -16,8 +16,11 @@ index: 3
 
 ## Summary
 
-Describe the goal and context of this story.
+Implement cross-tier navigation.
 
 ## Acceptance Criteria
 
-- [ ] Item 1 <!-- verify: manual, SRS-XX:start:end -->
+- [ ] Inline-to-transit resolution [SRS-04/AC-01] <!-- verify: test, SRS-04:start:end -->
+- [ ] Transit-to-filesystem resolution [SRS-05/AC-01] <!-- verify: manual, SRS-05:start:end -->
+- [ ] Resolution is lazy [SRS-NFR-01/AC-01] <!-- verify: manual, SRS-NFR-01:start:end -->
+- [ ] Local tiers attempted first [SRS-NFR-03/AC-01] <!-- verify: manual, SRS-NFR-03:start:end -->

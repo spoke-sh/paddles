@@ -1,3 +1,6 @@
+use crate::infrastructure::adapters::TransitContextResolver;
+use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
+use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 pub use paddles_conversation::ConversationSession;
 
 use crate::domain::model::{
@@ -9,8 +12,8 @@ use crate::domain::model::{
     TraceTurnStarted, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherer, EvidenceBudget, EvidenceBundle, EvidenceItem,
-    GathererCapability, InitialAction, InitialActionDecision, InterpretationContext,
+    ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
+    EvidenceItem, GathererCapability, InitialAction, InitialActionDecision, InterpretationContext,
     InterpretationRequest, ModelPaths, ModelRegistry, NoopTraceRecorder, OperatorMemory,
     PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
     PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
@@ -183,6 +186,7 @@ struct PlannerLoopContext {
     planner_engine: Arc<dyn RecursivePlanner>,
     synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
+    resolver: Arc<dyn ContextResolver>,
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
 }
@@ -1120,6 +1124,18 @@ impl MechSuitService {
         let gathered_evidence = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
                 let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+
+                // Resolve context artifacts using a transit-backed resolver if available.
+                let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
+                    .trace_recorder
+                    .as_any()
+                    .downcast_ref::<TransitTraceRecorder>()
+                {
+                    Arc::new(TransitContextResolver::new(Arc::new(transit.clone())))
+                } else {
+                    Arc::new(NoopContextResolver)
+                };
+
                 self.execute_recursive_planner_loop(
                     prompt,
                     PlannerLoopContext {
@@ -1127,6 +1143,7 @@ impl MechSuitService {
                         planner_engine,
                         synthesizer_engine: Arc::clone(&synthesizer_engine),
                         gatherer,
+                        resolver,
                         interpretation: interpretation.clone(),
                         recent_turns,
                     },
@@ -1320,7 +1337,8 @@ impl MechSuitService {
                     budget.clone(),
                 )
                 .with_recent_turns(context.recent_turns.clone())
-                .with_loop_state(loop_state.clone());
+                .with_loop_state(loop_state.clone())
+                .with_resolver(context.resolver.clone());
                 let decision = context.planner_engine.select_next_action(&request).await?;
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence,
@@ -1368,11 +1386,15 @@ impl MechSuitService {
                                             .with_retrieval_strategy(*strategy)
                                             .with_step_limit(1),
                                     )
-                                    .with_prior_context(build_planner_prior_context(
-                                        &context.interpretation,
-                                        &context.recent_turns,
-                                        &loop_state,
-                                    ));
+                                    .with_prior_context(
+                                        build_planner_prior_context(
+                                            &context.interpretation,
+                                            &context.recent_turns,
+                                            &loop_state,
+                                            Some(context.resolver.clone()),
+                                        )
+                                        .await,
+                                    );
                                     match gatherer.gather_context(&request).await {
                                         Ok(result) => {
                                             let bundle = result.evidence_bundle;
@@ -1547,7 +1569,9 @@ impl MechSuitService {
                                         &context.interpretation,
                                         &context.recent_turns,
                                         &loop_state,
-                                    ),
+                                        Some(context.resolver.clone()),
+                                    )
+                                    .await,
                                 );
                                 match gatherer.gather_context(&request).await {
                                     Ok(result) => {
@@ -1846,10 +1870,11 @@ fn planner_summary_event(planner: &PlannerTraceMetadata) -> TurnEvent {
     }
 }
 
-fn build_planner_prior_context(
+async fn build_planner_prior_context(
     interpretation: &InterpretationContext,
     recent_turns: &[String],
     loop_state: &PlannerLoopState,
+    resolver: Option<Arc<dyn ContextResolver>>,
 ) -> Vec<String> {
     let mut prior = Vec::new();
     if !interpretation.is_empty() {
@@ -1868,6 +1893,44 @@ fn build_planner_prior_context(
             .iter()
             .map(|branch| format!("pending branch: {}", branch.summary())),
     );
+
+    // Pull context on demand for retained evidence from autonomous gatherers.
+    for artifact in &loop_state.evidence_items {
+        prior.push(format!(
+            "evidence ({}): {}",
+            artifact.source, artifact.snippet
+        ));
+    }
+
+    if let Some(trace) = &loop_state.latest_gatherer_trace {
+        for artifact in &trace.retained_artifacts {
+            if let Some(snippet) = &artifact.snippet {
+                prior.push(format!(
+                    "retained evidence ({}): {}",
+                    artifact.source, snippet
+                ));
+            } else if let (Some(resolver), Some(locator)) = (&resolver, &artifact.locator) {
+                // On-demand resolution of truncated artifacts.
+                if let Ok(content) = resolver.resolve(locator).await {
+                    prior.push(format!(
+                        "retained evidence (resolved from {}): {}",
+                        artifact.source, content
+                    ));
+                } else {
+                    prior.push(format!(
+                        "retained evidence ({}): [locator resolution failed]",
+                        artifact.source
+                    ));
+                }
+            } else {
+                prior.push(format!(
+                    "retained evidence ({}): [truncated, no locator available]",
+                    artifact.source
+                ));
+            }
+        }
+    }
+
     prior
 }
 
@@ -2041,6 +2104,7 @@ fn build_planner_evidence_bundle(
                 source: item.source.clone(),
                 snippet: Some(item.snippet.clone()),
                 rationale: Some(item.rationale.clone()),
+                locator: None,
             })
             .collect(),
         graph_episode: latest_gatherer_trace.and_then(|planner| planner.graph_episode),
@@ -2853,6 +2917,7 @@ mod tests {
                 source: "src/application/mod.rs".to_string(),
                 snippet: Some("Graph-mode gatherers feed the recursive harness.".to_string()),
                 rationale: Some("Retain the routing contract.".to_string()),
+                locator: None,
             }],
             graph_episode: Some(PlannerGraphEpisode {
                 root_node_id: Some("node-root".to_string()),
@@ -2874,6 +2939,7 @@ mod tests {
                                 "Graph-mode gatherers feed the recursive harness.".to_string(),
                             ),
                             rationale: Some("active branch evidence".to_string()),
+                            locator: None,
                         }],
                     },
                     PlannerGraphBranch {

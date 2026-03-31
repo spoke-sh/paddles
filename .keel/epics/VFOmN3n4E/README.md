@@ -25,5 +25,5 @@ mission: VFNzln1hr
 **Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Bounded Context Self-Assessment](voyages/VFOvI9PzB/) | draft | 0/4 |
+| [Bounded Context Self-Assessment](voyages/VFOvI9PzB/) | in-progress | 0/4 |
 <!-- END GENERATED -->

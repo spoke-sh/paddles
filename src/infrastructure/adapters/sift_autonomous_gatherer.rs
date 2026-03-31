@@ -404,6 +404,7 @@ fn map_graph_episode(episode: &sift::AutonomousGraphEpisodeState) -> PlannerGrap
                         source: artifact.path.clone(),
                         snippet: artifact.snippet.clone(),
                         rationale: artifact.rationale.clone(),
+                        locator: None,
                     })
                     .collect(),
             })
@@ -458,6 +459,7 @@ fn retained_evidence_from_response(response: &AutonomousSearchResponse) -> Vec<R
             source: artifact.path.clone(),
             snippet: artifact.snippet.clone(),
             rationale: artifact.rationale.clone(),
+            locator: None,
         })
         .collect()
 }

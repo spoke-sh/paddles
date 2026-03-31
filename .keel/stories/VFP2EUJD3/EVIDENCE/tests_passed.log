@@ -1,0 +1,15 @@
+
+running 5 tests
+test domain::model::traces::tests::artifact_envelope_uses_locator_when_truncated ... ok
+test domain::model::traces::tests::branch_summary_is_machine_readable_but_human_scannable ... ok
+test domain::model::traces::tests::context_locator_reports_correct_tier ... ok
+test domain::model::traces::tests::lineage_references_keep_task_turn_and_parent_record ... ok
+test domain::model::traces::tests::context_locator_serializes_round_trip ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 140 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

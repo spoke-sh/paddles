@@ -1,0 +1,21 @@
+pub enum ContextTier {
+impl ContextTier {
+pub enum ContextLocator {
+impl ContextLocator {
+    pub fn tier(&self) -> ContextTier {
+            Self::Inline { .. } => ContextTier::Inline,
+            Self::Transit { .. } => ContextTier::Transit,
+            Self::Sift { .. } => ContextTier::Sift,
+            Self::Filesystem { .. } => ContextTier::Filesystem,
+        use super::{ContextLocator, ContextTier};
+        let inline = ContextLocator::Inline {
+        assert_eq!(inline.tier(), ContextTier::Inline);
+        let transit = ContextLocator::Transit {
+        assert_eq!(transit.tier(), ContextTier::Transit);
+        let sift = ContextLocator::Sift {
+        assert_eq!(sift.tier(), ContextTier::Sift);
+        let fs = ContextLocator::Filesystem {
+        assert_eq!(fs.tier(), ContextTier::Filesystem);
+        use super::ContextLocator;
+        let transit = ContextLocator::Transit {
+        let deserialized: ContextLocator = serde_json::from_str(&serialized).expect("deserialize");

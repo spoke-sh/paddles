@@ -1,6 +1,7 @@
 use super::context_gathering::{
     EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy,
 };
+use super::context_resolution::ContextResolver;
 pub use crate::domain::model::{
     ConversationThread, GuidanceCategory, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
@@ -94,7 +95,7 @@ impl Default for PlannerBudget {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct PlannerRequest {
     pub user_prompt: String,
     pub workspace_root: PathBuf,
@@ -102,6 +103,7 @@ pub struct PlannerRequest {
     pub recent_turns: Vec<String>,
     pub loop_state: PlannerLoopState,
     pub budget: PlannerBudget,
+    pub resolver: Option<Arc<dyn ContextResolver>>,
 }
 
 impl PlannerRequest {
@@ -118,7 +120,13 @@ impl PlannerRequest {
             recent_turns: Vec::new(),
             loop_state: PlannerLoopState::default(),
             budget,
+            resolver: None,
         }
+    }
+
+    pub fn with_resolver(mut self, resolver: Arc<dyn ContextResolver>) -> Self {
+        self.resolver = Some(resolver);
+        self
     }
 
     pub fn with_recent_turns(mut self, recent_turns: Vec<String>) -> Self {

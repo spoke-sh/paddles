@@ -22,8 +22,8 @@ mission: VFNzln1hr
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Context Locator And Transit Resolution](voyages/VFOvGdksF/) | draft | 0/4 |
+| [Context Locator And Transit Resolution](voyages/VFOvGdksF/) | done | 4/4 |
 <!-- END GENERATED -->

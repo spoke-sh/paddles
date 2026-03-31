@@ -1,5 +1,6 @@
 use crate::domain::model::{TaskTraceId, TraceRecord, TraceReplay};
 use anyhow::Result;
+use std::any::Any;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TraceRecorderCapability {
@@ -8,6 +9,8 @@ pub enum TraceRecorderCapability {
 }
 
 pub trait TraceRecorder: Send + Sync {
+    fn as_any(&self) -> &dyn Any;
+
     fn capability(&self) -> TraceRecorderCapability;
 
     fn record(&self, record: TraceRecord) -> Result<()>;
@@ -23,6 +26,10 @@ pub trait TraceRecorder: Send + Sync {
 pub struct NoopTraceRecorder;
 
 impl TraceRecorder for NoopTraceRecorder {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn capability(&self) -> TraceRecorderCapability {
         TraceRecorderCapability::Available
     }

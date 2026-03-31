@@ -41,6 +41,53 @@ paddles_id!(ThreadCandidateId);
 paddles_id!(ThreadDecisionId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextTier {
+    Inline,
+    Transit,
+    Sift,
+    Filesystem,
+}
+
+impl ContextTier {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::Transit => "transit",
+            Self::Sift => "sift",
+            Self::Filesystem => "filesystem",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ContextLocator {
+    Inline {
+        content: String,
+    },
+    Transit {
+        task_id: TaskTraceId,
+        record_id: TraceRecordId,
+    },
+    Sift {
+        index_ref: String,
+    },
+    Filesystem {
+        path: std::path::PathBuf,
+    },
+}
+
+impl ContextLocator {
+    pub fn tier(&self) -> ContextTier {
+        match self {
+            Self::Inline { .. } => ContextTier::Inline,
+            Self::Transit { .. } => ContextTier::Transit,
+            Self::Sift { .. } => ContextTier::Sift,
+            Self::Filesystem { .. } => ContextTier::Filesystem,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArtifactKind {
     Prompt,
     Interpretation,
@@ -61,9 +108,27 @@ pub struct ArtifactEnvelope {
     pub summary: String,
     pub byte_count: usize,
     pub inline_content: Option<String>,
-    pub locator: Option<String>,
+    #[serde(deserialize_with = "deserialize_locator", default)]
+    pub locator: Option<ContextLocator>,
     pub truncated: bool,
     pub labels: std::collections::BTreeMap<String, String>,
+}
+
+fn deserialize_locator<'de, D>(deserializer: D) -> Result<Option<ContextLocator>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value: Option<serde_json::Value> = Deserialize::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(_s)) => {
+            // Backward compatibility for old paddles-artifact:// IDs.
+            // We can't resolve them yet without task_id, so treat as missing.
+            Ok(None)
+        }
+        Some(v) => serde_json::from_value(v).map_err(Error::custom),
+    }
 }
 
 impl ArtifactEnvelope {
@@ -85,7 +150,6 @@ impl ArtifactEnvelope {
         } else {
             Some(content.clone())
         };
-        let locator = truncated.then(|| format!("paddles-artifact://{}", artifact_id.as_str()));
 
         Self {
             artifact_id,
@@ -94,7 +158,7 @@ impl ArtifactEnvelope {
             summary: summary.into(),
             byte_count: content.len(),
             inline_content,
-            locator,
+            locator: None, // Will be set by recorder/orchestrator
             truncated,
             labels: std::collections::BTreeMap::new(),
         }

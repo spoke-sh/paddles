@@ -39,11 +39,11 @@
 
 ## 2026-03-30
 
-### Sealing move: Remaining Voyages Planned
+### Sealing move: Transit-Native Context Addressing Implemented (MG-02)
 
-- **Voyage Decomposition Complete**: Decomposed the four implementation epics (MG-02 through MG-05) into actionable voyages and stories.
-- **Epic VFOmKssE5 (Transit-Native Addressing)**: Planned voyage `VFOvGdksF` with 4 stories (Locator types, Transit resolver, Artifact envelope update, Planner wiring).
-- **Epic VFOmN3n4E (Recursive Compaction)**: Planned voyage `VFOvI9PzB` with 4 stories (Compaction domain, Assessment engine, Artifact compaction, Composability verification).
-- **Epic VFOmVwP8l (Context Pressure)**: Planned voyage `VFOvJSU8h` with 4 stories (Pressure types, Instrumentation, TurnEvents, TUI rendering).
-- **Epic VFOmY0WHC (Unbounded Context)**: Planned voyage `VFOvKhUFc` with 4 stories (Tier docs, Tier metadata, Cross-tier resolution, Fail-closed degradation).
-- **Ready for Implementation**: All foundational PRDs, voyages, and stories are drafted and linked to the mission board.
+- **Epic VFOmKssE5 Complete**: Successfully implemented the transit-native addressing scheme.
+- **ContextLocator & ContextTier**: Defined universal addressing types in `paddles-conversation` to enable cross-tier navigation.
+- **ContextResolver Port**: Established the `ContextResolver` domain port and its `TransitContextResolver` implementation.
+- **On-Demand Resolution**: Updated `ArtifactEnvelope` to carry typed locators and wired `build_planner_prior_context` to resolve truncated artifacts on demand via transit replays.
+- **Backward Compatibility**: Implemented a custom deserializer for `ArtifactEnvelope` to handle legacy string-based locators.
+- **Next Step**: Proceeding to MG-03 (Epic `VFOmN3n4E`) to implement recursive self-assessing compaction.

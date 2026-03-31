@@ -2,8 +2,8 @@
 # system-managed
 id: VFP2KfIU3
 status: icebox
-created_at: 2026-03-30T18:07:40
-updated_at: 2026-03-30T18:07:40
+created_at: 2026-03-30T18:07:28
+updated_at: 2026-03-30T18:54:01
 # authored
 title: Implement ContextLocator Tier Metadata
 type: feat
@@ -16,8 +16,10 @@ index: 2
 
 ## Summary
 
-Describe the goal and context of this story.
+Ensure locators carry tier metadata.
 
 ## Acceptance Criteria
 
-- [ ] Item 1 <!-- verify: manual, SRS-XX:start:end -->
+- [ ] ContextLocator includes tier field [SRS-02/AC-01] <!-- verify: test, SRS-02:start:end -->
+- [ ] ArtifactEnvelope carries ContextLocator with tier [SRS-03/AC-01] <!-- verify: test, SRS-03:start:end -->
+- [ ] No leakage of transit/sift types in ports [SRS-NFR-02/AC-01] <!-- verify: test, SRS-NFR-02:start:end -->

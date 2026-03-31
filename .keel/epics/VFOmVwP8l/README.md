@@ -25,5 +25,5 @@ mission: VFNzln1hr
 **Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Context Pressure Tracking And Events](voyages/VFOvJSU8h/) | draft | 0/4 |
+| [Context Pressure Tracking And Events](voyages/VFOvJSU8h/) | in-progress | 0/4 |
 <!-- END GENERATED -->

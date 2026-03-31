@@ -4,9 +4,10 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{TraceRecorder, TraceRecorderCapability};
 use anyhow::{Context, Result, anyhow, ensure};
+use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use transit_core::engine::{LocalEngine, LocalEngineConfig};
 use transit_core::kernel::{LineageMetadata, StreamId, StreamPosition};
 use transit_core::storage::LineageCheckpoint;
@@ -37,6 +38,10 @@ impl InMemoryTraceRecorder {
 }
 
 impl TraceRecorder for InMemoryTraceRecorder {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn capability(&self) -> TraceRecorderCapability {
         TraceRecorderCapability::Available
     }
@@ -75,21 +80,28 @@ impl TraceRecorder for InMemoryTraceRecorder {
     }
 }
 
+#[derive(Clone)]
 pub struct TransitTraceRecorder {
-    engine: LocalEngine,
-    state: Mutex<TransitRecorderState>,
+    pub(crate) engine: Arc<LocalEngine>,
+    pub(crate) state: Arc<Mutex<TransitRecorderState>>,
+}
+
+impl std::fmt::Debug for TransitTraceRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransitTraceRecorder").finish()
+    }
 }
 
 #[derive(Default)]
-struct TransitRecorderState {
-    tasks: HashMap<TaskTraceId, TransitTaskState>,
+pub(crate) struct TransitRecorderState {
+    pub(crate) tasks: HashMap<TaskTraceId, TransitTaskState>,
 }
 
-struct TransitTaskState {
-    root_stream: StreamId,
-    branch_streams: HashMap<TraceBranchId, StreamId>,
-    record_positions: HashMap<TraceRecordId, StreamPosition>,
-    checkpoints: HashMap<TraceCheckpointId, LineageCheckpoint>,
+pub(crate) struct TransitTaskState {
+    pub(crate) root_stream: StreamId,
+    pub(crate) branch_streams: HashMap<TraceBranchId, StreamId>,
+    pub(crate) record_positions: HashMap<TraceRecordId, StreamPosition>,
+    pub(crate) checkpoints: HashMap<TraceCheckpointId, LineageCheckpoint>,
 }
 
 impl TransitTraceRecorder {
@@ -97,8 +109,8 @@ impl TransitTraceRecorder {
         let engine = LocalEngine::open(LocalEngineConfig::new(data_dir.as_ref()))
             .context("open embedded transit engine")?;
         Ok(Self {
-            engine,
-            state: Mutex::new(TransitRecorderState::default()),
+            engine: Arc::new(engine),
+            state: Arc::new(Mutex::new(TransitRecorderState::default())),
         })
     }
 
@@ -239,6 +251,10 @@ impl TransitTraceRecorder {
 }
 
 impl TraceRecorder for TransitTraceRecorder {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn capability(&self) -> TraceRecorderCapability {
         TraceRecorderCapability::Available
     }
@@ -306,8 +322,9 @@ impl TraceRecorder for TransitTraceRecorder {
         let mut records = BTreeMap::<(u64, String), TraceRecord>::new();
         for stream_id in streams {
             for local_record in self.engine.replay(&stream_id)? {
-                let record: TraceRecord = serde_json::from_slice(local_record.payload())
-                    .context("deserialize transit trace record")?;
+                let record: TraceRecord =
+                    serde_json::from_slice::<TraceRecord>(local_record.payload())
+                        .context("deserialize transit trace record")?;
                 records.insert(
                     (record.sequence, record.record_id.as_str().to_string()),
                     record,

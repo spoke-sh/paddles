@@ -2,8 +2,8 @@
 # system-managed
 id: VFP2Ke8Sf
 status: icebox
-created_at: 2026-03-30T18:07:40
-updated_at: 2026-03-30T18:07:40
+created_at: 2026-03-30T18:07:28
+updated_at: 2026-03-30T18:54:01
 # authored
 title: Document Context Tier Boundaries And Rules
 type: docs
@@ -16,8 +16,8 @@ index: 1
 
 ## Summary
 
-Describe the goal and context of this story.
+Document the tier model.
 
 ## Acceptance Criteria
 
-- [ ] Item 1 <!-- verify: manual, SRS-XX:start:end -->
+- [ ] Formal tier model documentation [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->

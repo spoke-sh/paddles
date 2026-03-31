@@ -223,29 +223,29 @@
 |--------|--------|
 | [Planner Reasoning Events And TUI Rendering](epics/VFOiwHCXn/voyages/VFOjDg7Zm/) | done |
 
-### [Transit-Native Context Addressing](epics/VFOmKssE5/) (draft)
+### [Transit-Native Context Addressing](epics/VFOmKssE5/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Context Locator And Transit Resolution](epics/VFOmKssE5/voyages/VFOvGdksF/) | draft |
+| [Context Locator And Transit Resolution](epics/VFOmKssE5/voyages/VFOvGdksF/) | done |
 
-### [Recursive Self-Assessing Compaction](epics/VFOmN3n4E/) (draft)
-
-| Voyage | Status |
-|--------|--------|
-| [Bounded Context Self-Assessment](epics/VFOmN3n4E/voyages/VFOvI9PzB/) | draft |
-
-### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (draft)
+### [Recursive Self-Assessing Compaction](epics/VFOmN3n4E/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Context Pressure Tracking And Events](epics/VFOmVwP8l/voyages/VFOvJSU8h/) | draft |
+| [Bounded Context Self-Assessment](epics/VFOmN3n4E/voyages/VFOvI9PzB/) | in-progress |
 
-### [Unbounded Context Tier Model](epics/VFOmY0WHC/) (draft)
+### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Tier Model And Cross-Tier Locator Resolution](epics/VFOmY0WHC/voyages/VFOvKhUFc/) | draft |
+| [Context Pressure Tracking And Events](epics/VFOmVwP8l/voyages/VFOvJSU8h/) | in-progress |
+
+### [Unbounded Context Tier Model](epics/VFOmY0WHC/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Tier Model And Cross-Tier Locator Resolution](epics/VFOmY0WHC/voyages/VFOvKhUFc/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

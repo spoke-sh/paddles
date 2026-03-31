@@ -2,8 +2,8 @@
 # system-managed
 id: VFP2KheWh
 status: icebox
-created_at: 2026-03-30T18:07:40
-updated_at: 2026-03-30T18:07:40
+created_at: 2026-03-30T18:07:28
+updated_at: 2026-03-30T18:54:01
 # authored
 title: Implement Fail-Closed Tier Degradation
 type: feat
@@ -16,8 +16,8 @@ index: 4
 
 ## Summary
 
-Describe the goal and context of this story.
+Implement honest failure for tiers.
 
 ## Acceptance Criteria
 
-- [ ] Item 1 <!-- verify: manual, SRS-XX:start:end -->
+- [ ] explicit error with context when target tier unavailable [SRS-06/AC-01] <!-- verify: test, SRS-06:start:end -->

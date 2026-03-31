@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use paddles_conversation::ContextLocator;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -216,11 +217,12 @@ pub struct PlannerTraceStep {
 }
 
 /// Retained evidence summary surfaced from planner state.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RetainedEvidence {
     pub source: String,
     pub snippet: Option<String>,
     pub rationale: Option<String>,
+    pub locator: Option<ContextLocator>,
 }
 
 /// Stable branch status surfaced through graph-mode gatherer traces.
@@ -490,6 +492,7 @@ mod tests {
                         "PreparedRuntimeLanes keeps synthesizer and gatherer lanes.".into(),
                     ),
                     rationale: Some("Carry the runtime lane wiring into the next step.".into()),
+                    locator: None,
                 }],
                 graph_episode: None,
                 trace_artifact_ref: None,

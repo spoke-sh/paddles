@@ -4597,6 +4597,7 @@ mod tests {
                     "PreparedRuntimeLanes keeps synthesizer and gatherer lanes.".to_string(),
                 ),
                 rationale: Some("keep the runtime contract handy".to_string()),
+                locator: None,
             }],
             graph_episode: None,
             trace_artifact_ref: None,

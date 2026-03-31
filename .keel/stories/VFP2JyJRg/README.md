@@ -2,8 +2,8 @@
 # system-managed
 id: VFP2JyJRg
 status: icebox
-created_at: 2026-03-30T18:07:37
-updated_at: 2026-03-30T18:07:37
+created_at: 2026-03-30T18:07:28
+updated_at: 2026-03-30T18:54:01
 # authored
 title: Render Context Pressure In TUI Transcript
 type: feat
@@ -16,8 +16,8 @@ index: 4
 
 ## Summary
 
-Describe the goal and context of this story.
+Render the pressure in the TUI.
 
 ## Acceptance Criteria
 
-- [ ] Item 1 <!-- verify: manual, SRS-XX:start:end -->
+- [ ] format_turn_event_row renders pressure [SRS-07/AC-01] <!-- verify: manual, SRS-07:start:end -->
