@@ -1,0 +1,1 @@
+CompactionEngine outputs RetainedEvidence which is the same type it accepts as input, ensuring composability.

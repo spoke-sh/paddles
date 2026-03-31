@@ -3,10 +3,11 @@ use super::context_gathering::{
 };
 use super::context_resolution::ContextResolver;
 pub use crate::domain::model::{
-    ConversationThread, GuidanceCategory, InterpretationConflict, InterpretationContext,
-    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate,
-    ThreadDecision, TraceBranch, TraceBranchId, WorkspaceAction,
+    CompactionPlan, CompactionRequest, ConversationThread, GuidanceCategory,
+    InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
+    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate, ThreadDecision,
+    TraceBranch, TraceBranchId, WorkspaceAction,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -38,6 +39,12 @@ pub trait RecursivePlanner: Send + Sync {
         &self,
         request: &ThreadDecisionRequest,
     ) -> Result<ThreadDecision, anyhow::Error>;
+
+    /// Evaluate context artifacts for relevance and produce a compaction plan.
+    async fn assess_context_relevance(
+        &self,
+        request: &CompactionRequest,
+    ) -> Result<CompactionPlan, anyhow::Error>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,9 +1,11 @@
 use anyhow::Result;
 
+pub mod compaction;
 pub mod interpretation;
 pub mod threading;
 pub mod traces;
 pub mod turns;
+pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use interpretation::{
     GuidanceCategory, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,

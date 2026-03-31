@@ -18,13 +18,13 @@ pub use context_gathering::{
 pub use context_resolution::ContextResolver;
 pub use operator_memory::OperatorMemory;
 pub use planning::{
-    GuidanceCategory, InitialAction, InitialActionDecision, InterpretationConflict,
-    InterpretationContext, InterpretationCoverageConfidence, InterpretationDecisionFramework,
-    InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
-    PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest,
-    WorkspaceAction,
+    CompactionPlan, CompactionRequest, GuidanceCategory, InitialAction, InitialActionDecision,
+    InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
+    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
+    OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability,
+    PlannerDecision as RecursivePlannerDecision, PlannerLoopState, PlannerRequest,
+    PlannerStepRecord, RecursivePlanner, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use synthesis::{SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};

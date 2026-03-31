@@ -1,0 +1,12 @@
+
+running 2 tests
+test domain::model::compaction::tests::compaction_plan_serializes_round_trip ... ok
+test domain::model::compaction::tests::compaction_request_serializes_round_trip ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 147 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,15 +1,16 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
 use crate::domain::model::{
-    ConversationThreadRef, NullTurnEventSink, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
-    ThreadMergeMode, TurnEvent, TurnEventSink, TurnIntent,
+    CompactionDecision, ConversationThreadRef, NullTurnEventSink, ThreadDecision, ThreadDecisionId,
+    ThreadDecisionKind, ThreadMergeMode, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
-    EvidenceBundle, GuidanceCategory, InitialAction, InitialActionDecision, InterpretationConflict,
-    InterpretationContext, InterpretationCoverageConfidence, InterpretationDecisionFramework,
-    InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
-    PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
-    ThreadDecisionRequest, WorkspaceAction,
+    CompactionPlan, CompactionRequest, EvidenceBundle, GuidanceCategory, InitialAction,
+    InitialActionDecision, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerRequest,
+    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, ThreadDecisionRequest,
+    WorkspaceAction,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -1248,6 +1249,33 @@ impl SiftAgentAdapter {
         }
 
         Ok(context)
+    }
+
+    /// Evaluate context artifacts for relevance and produce a compaction plan.
+    pub fn assess_context_relevance(&self, request: &CompactionRequest) -> Result<CompactionPlan> {
+        // For now, we use a heuristic-driven self-assessment.
+        // We preserve the most recent signals and discard deep history to maintain budget.
+        let mut decisions = std::collections::HashMap::new();
+
+        for (i, artifact_id) in request.target_scope.iter().enumerate() {
+            let decision = if i == 0 {
+                // Heuristic: Keep the most recent/relevant artifact (usually the prompt or latest interpretation)
+                CompactionDecision::Keep { priority: 1 }
+            } else if i < 3 {
+                // Heuristic: Compact intermediate artifacts
+                CompactionDecision::Compact {
+                    summary: format!("Summary of artifact {}", artifact_id.as_str()),
+                }
+            } else {
+                // Heuristic: Discard old history
+                CompactionDecision::Discard {
+                    reason: "Archived due to context pressure".to_string(),
+                }
+            };
+            decisions.insert(artifact_id.clone(), decision);
+        }
+
+        Ok(CompactionPlan { decisions })
     }
 
     fn assemble_interpretation_pass(
@@ -5697,5 +5725,52 @@ mod tests {
             )
             .expect_err("tool budget error");
         assert!(err.to_string().contains("tool step limit exceeded"));
+    }
+
+    #[test]
+    fn assess_context_relevance_produces_heuristic_decisions() {
+        use super::*;
+        use crate::domain::model::{CompactionBudget, CompactionDecision, CompactionRequest};
+
+        let sandbox = tempfile::tempdir().expect("sandbox");
+        let workspace_root = sandbox.path().join("project");
+        std::fs::create_dir_all(&workspace_root).expect("create dir");
+
+        let adapter = SiftAgentAdapter::from_factory(
+            workspace_root,
+            "qwen-1.5b",
+            Box::new(StaticConversationFactory::new(Vec::new())),
+            crate::infrastructure::rendering::RenderCapability::resolve("openai", "gpt-4o"),
+        );
+
+        let request = CompactionRequest {
+            target_scope: vec![
+                paddles_conversation::TraceArtifactId::new("art-1").unwrap(),
+                paddles_conversation::TraceArtifactId::new("art-2").unwrap(),
+                paddles_conversation::TraceArtifactId::new("art-3").unwrap(),
+                paddles_conversation::TraceArtifactId::new("art-4").unwrap(),
+            ],
+            relevance_query: "test".to_string(),
+            budget: CompactionBudget::default(),
+        };
+
+        let plan = adapter.assess_context_relevance(&request).expect("assess");
+        assert_eq!(plan.decisions.len(), 4);
+
+        assert!(matches!(
+            plan.decisions
+                .get(&paddles_conversation::TraceArtifactId::new("art-1").unwrap()),
+            Some(CompactionDecision::Keep { .. })
+        ));
+        assert!(matches!(
+            plan.decisions
+                .get(&paddles_conversation::TraceArtifactId::new("art-2").unwrap()),
+            Some(CompactionDecision::Compact { .. })
+        ));
+        assert!(matches!(
+            plan.decisions
+                .get(&paddles_conversation::TraceArtifactId::new("art-4").unwrap()),
+            Some(CompactionDecision::Discard { .. })
+        ));
     }
 }

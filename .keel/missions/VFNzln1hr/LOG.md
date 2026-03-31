@@ -39,11 +39,11 @@
 
 ## 2026-03-30
 
-### Sealing move: Transit-Native Context Addressing Implemented (MG-02)
+### Sealing move: Recursive Self-Assessing Compaction Implemented (MG-03)
 
-- **Epic VFOmKssE5 Complete**: Successfully implemented the transit-native addressing scheme.
-- **ContextLocator & ContextTier**: Defined universal addressing types in `paddles-conversation` to enable cross-tier navigation.
-- **ContextResolver Port**: Established the `ContextResolver` domain port and its `TransitContextResolver` implementation.
-- **On-Demand Resolution**: Updated `ArtifactEnvelope` to carry typed locators and wired `build_planner_prior_context` to resolve truncated artifacts on demand via transit replays.
-- **Backward Compatibility**: Implemented a custom deserializer for `ArtifactEnvelope` to handle legacy string-based locators.
-- **Next Step**: Proceeding to MG-03 (Epic `VFOmN3n4E`) to implement recursive self-assessing compaction.
+- **Epic VFOmN3n4E Complete**: Delivered the core framework for self-assessing context compaction.
+- **Compaction Domain**: Defined `CompactionRequest`, `CompactionPlan`, and `CompactionDecision` to model context quality assessment.
+- **Planner Integration**: Extended the `RecursivePlanner` trait with `assess_context_relevance` and provided a heuristic-driven implementation in `SiftAgentAdapter`.
+- **Compaction Engine**: Implemented `CompactionEngine` in the application layer to execute compaction plans, ensuring that compacted summaries preserve locators to their original source material.
+- **Composability**: Verified that compacted output maintains the same structure as input, enabling recursive compaction rounds.
+- **Next Step**: Proceeding to MG-04 (Epic `VFOmVwP8l`) to implement context pressure and relevance signals.

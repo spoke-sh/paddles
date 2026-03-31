@@ -1,4 +1,4 @@
-use crate::domain::model::ThreadDecision;
+use crate::domain::model::{CompactionPlan, CompactionRequest, ThreadDecision};
 use crate::domain::ports::{
     InitialActionDecision, InterpretationContext, InterpretationRequest, PlannerCapability,
     PlannerRequest, RecursivePlanner, RecursivePlannerDecision, ThreadDecisionRequest,
@@ -52,5 +52,12 @@ impl RecursivePlanner for SiftPlannerAdapter {
         request: &ThreadDecisionRequest,
     ) -> Result<ThreadDecision, anyhow::Error> {
         self.engine.select_thread_decision(request)
+    }
+
+    async fn assess_context_relevance(
+        &self,
+        request: &CompactionRequest,
+    ) -> Result<CompactionPlan, anyhow::Error> {
+        self.engine.assess_context_relevance(request)
     }
 }

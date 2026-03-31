@@ -1,5 +1,6 @@
 use crate::domain::model::{
-    ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TurnEvent, TurnEventSink, TurnIntent,
+    CompactionDecision, CompactionPlan, CompactionRequest, ThreadDecision, ThreadDecisionId,
+    ThreadDecisionKind, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext,
@@ -767,6 +768,31 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
             merge_mode: None,
             merge_summary: None,
         })
+    }
+
+    async fn assess_context_relevance(
+        &self,
+        request: &CompactionRequest,
+    ) -> Result<CompactionPlan> {
+        // HTTP adapter uses heuristic-driven self-assessment for now.
+        let mut decisions = std::collections::HashMap::new();
+
+        for (i, artifact_id) in request.target_scope.iter().enumerate() {
+            let decision = if i == 0 {
+                CompactionDecision::Keep { priority: 1 }
+            } else if i < 3 {
+                CompactionDecision::Compact {
+                    summary: format!("Summary of artifact {}", artifact_id.as_str()),
+                }
+            } else {
+                CompactionDecision::Discard {
+                    reason: "Archived due to context pressure".to_string(),
+                }
+            };
+            decisions.insert(artifact_id.clone(), decision);
+        }
+
+        Ok(CompactionPlan { decisions })
     }
 }
 

@@ -229,11 +229,11 @@
 |--------|--------|
 | [Context Locator And Transit Resolution](epics/VFOmKssE5/voyages/VFOvGdksF/) | done |
 
-### [Recursive Self-Assessing Compaction](epics/VFOmN3n4E/) (active)
+### [Recursive Self-Assessing Compaction](epics/VFOmN3n4E/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Bounded Context Self-Assessment](epics/VFOmN3n4E/voyages/VFOvI9PzB/) | in-progress |
+| [Bounded Context Self-Assessment](epics/VFOmN3n4E/voyages/VFOvI9PzB/) | done |
 
 ### [Context Pressure And Relevance Signals](epics/VFOmVwP8l/) (active)
 

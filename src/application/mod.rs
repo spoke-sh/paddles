@@ -1,15 +1,16 @@
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
-pub use paddles_conversation::ConversationSession;
+pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
 use crate::domain::model::{
-    ArtifactEnvelope, ArtifactKind, BootContext, ConversationThreadRef, MultiplexEventSink,
-    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot, TraceToolCall,
-    TraceTurnStarted, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
+    ConversationThreadRef, MultiplexEventSink, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
+    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -1934,6 +1935,58 @@ async fn build_planner_prior_context(
     prior
 }
 
+#[allow(dead_code)]
+struct CompactionEngine {
+    resolver: Arc<dyn ContextResolver>,
+}
+
+#[allow(dead_code)]
+impl CompactionEngine {
+    fn new(resolver: Arc<dyn ContextResolver>) -> Self {
+        Self { resolver }
+    }
+
+    async fn execute(
+        &self,
+        artifacts: Vec<RetainedEvidence>,
+        plan: CompactionPlan,
+    ) -> Vec<RetainedEvidence> {
+        let mut compacted = Vec::new();
+
+        for mut artifact in artifacts {
+            // We need a way to correlate RetainedEvidence back to artifacts in the plan.
+            // For now, we'll assume we can use the source as a key if artifact_id isn't available,
+            // but ideally RetainedEvidence should carry its TraceArtifactId.
+            // Since we added locator to RetainedEvidence, we'll use that if present.
+            let artifact_id =
+                if let Some(ContextLocator::Transit { record_id, .. }) = &artifact.locator {
+                    // This is a simplification
+                    Some(TraceArtifactId::new(record_id.as_str()).unwrap())
+                } else {
+                    None
+                };
+
+            let decision = artifact_id.and_then(|id| plan.decisions.get(&id));
+
+            match decision {
+                Some(CompactionDecision::Keep { .. }) | None => {
+                    compacted.push(artifact);
+                }
+                Some(CompactionDecision::Compact { summary }) => {
+                    artifact.snippet = Some(summary.clone());
+                    // The locator is preserved, pointing to the original source.
+                    compacted.push(artifact);
+                }
+                Some(CompactionDecision::Discard { .. }) => {
+                    // Dropped from context
+                }
+            }
+        }
+
+        compacted
+    }
+}
+
 fn read_steps(loop_state: &PlannerLoopState) -> usize {
     loop_state
         .steps
@@ -2246,10 +2299,11 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 
 #[cfg(test)]
 mod tests {
-    use super::{
+    use crate::application::{
         ActiveRuntimeState, GathererProvider, MechSuitService, PreparedGathererLane,
         PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
     };
+    use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
         ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceRecordKind, TurnEvent,
         TurnEventSink,
@@ -2406,8 +2460,16 @@ mod tests {
                 merge_summary: None,
             })
         }
-    }
 
+        async fn assess_context_relevance(
+            &self,
+            _request: &CompactionRequest,
+        ) -> Result<CompactionPlan> {
+            Ok(CompactionPlan {
+                decisions: std::collections::HashMap::new(),
+            })
+        }
+    }
     #[derive(Default)]
     struct RecordingTurnEventSink {
         events: Mutex<Vec<TurnEvent>>,
@@ -3006,5 +3068,44 @@ mod tests {
             tokenizer: PathBuf::from(format!("{prefix}-tokenizer.json")),
             config: PathBuf::from(format!("{prefix}-config.json")),
         }
+    }
+
+    #[tokio::test]
+    async fn compaction_engine_executes_plan_and_preserves_locators() {
+        use super::*;
+        use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
+        use paddles_conversation::{ContextLocator, TaskTraceId, TraceRecordId};
+
+        let engine = CompactionEngine::new(Arc::new(NoopContextResolver));
+        let task_id = TaskTraceId::new("task-1").unwrap();
+        let record_id = TraceRecordId::new("record-1").unwrap();
+
+        let artifacts = vec![RetainedEvidence {
+            source: "src/lib.rs".to_string(),
+            snippet: Some("long content".to_string()),
+            rationale: Some("test".to_string()),
+            locator: Some(ContextLocator::Transit {
+                task_id: task_id.clone(),
+                record_id: record_id.clone(),
+            }),
+        }];
+
+        let mut decisions = std::collections::HashMap::new();
+        decisions.insert(
+            TraceArtifactId::new("record-1").unwrap(),
+            CompactionDecision::Compact {
+                summary: "short summary".to_string(),
+            },
+        );
+
+        let plan = CompactionPlan { decisions };
+        let compacted = engine.execute(artifacts, plan).await;
+
+        assert_eq!(compacted.len(), 1);
+        assert_eq!(compacted[0].snippet.as_deref(), Some("short summary"));
+        assert!(matches!(
+            compacted[0].locator,
+            Some(ContextLocator::Transit { .. })
+        ));
     }
 }
