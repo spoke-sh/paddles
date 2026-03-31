@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
 
 pub struct SiftAutonomousGathererAdapter {
     workspace_root: PathBuf,
@@ -114,24 +115,52 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         let sift = Arc::clone(&self.sift);
         let event_sink = self.event_sink.lock().expect("event sink lock").clone();
 
-        let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
+        let (heartbeat_tx, mut heartbeat_rx) =
+            tokio::sync::mpsc::unbounded_channel::<(u64, String)>();
 
-        // Heartbeat timer: sends elapsed seconds every 2s until search completes.
+        let search_preview = request.user_query.chars().take(96).collect::<String>();
+        let search_summary = format!(
+            "query: \"{}\" · mode={} · strategy={} · steps={} · target {} hit(s)",
+            search_preview,
+            request.planning.mode.label(),
+            request.planning.retrieval_strategy.label(),
+            request.planning.step_limit,
+            request.budget.max_items
+        );
+        let initial_search_detail = format!(
+            "{search_summary} · elapsed: 0s · eta: unknown · status: initializing gatherer"
+        );
+
+        if let Some(sink) = event_sink.as_ref() {
+            sink.emit(TurnEvent::GathererSearchProgress {
+                phase: "searching".to_string(),
+                elapsed_seconds: 0,
+                detail: Some(initial_search_detail),
+            });
+        }
+
+        // Heartbeat timer: sends an update every 60s after an initial 2s delay
+        // while search is in progress.
         // Runs as a separate tokio task so it doesn't block the spawn_blocking closure.
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let done_flag = Arc::clone(&done);
         let timer_handle = tokio::spawn(async move {
             let start = tokio::time::Instant::now();
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
-            interval.tick().await; // skip the immediate first tick
+            let mut delay = tokio::time::sleep(Duration::from_secs(2));
             loop {
-                interval.tick().await;
+                delay.await;
                 if done_flag.load(Ordering::Relaxed) {
                     break;
                 }
-                if heartbeat_tx.send(start.elapsed().as_secs()).is_err() {
+                let elapsed_seconds = start.elapsed().as_secs();
+                let detail = format!(
+                    "{} · elapsed: {}s · eta: unknown",
+                    search_summary, elapsed_seconds
+                );
+                if heartbeat_tx.send((elapsed_seconds, detail)).is_err() {
                     break;
                 }
+                delay = tokio::time::sleep(Duration::from_secs(60));
             }
         });
 
@@ -146,14 +175,14 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         let response = loop {
             tokio::select! {
                 biased;
-                elapsed = heartbeat_rx.recv() => {
-                    if let Some(elapsed_seconds) = elapsed
+                event = heartbeat_rx.recv() => {
+                    if let Some((elapsed_seconds, detail)) = event
                         && let Some(sink) = event_sink.as_ref()
                     {
                         sink.emit(TurnEvent::GathererSearchProgress {
                             phase: "searching".to_string(),
                             elapsed_seconds,
-                            detail: None,
+                            detail: Some(detail),
                         });
                     }
                 }

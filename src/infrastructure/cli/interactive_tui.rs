@@ -1113,10 +1113,16 @@ impl InteractiveApp {
 
     fn render_activity_indicator(&self) -> Paragraph<'static> {
         let spinner = SPINNER_FRAMES[self.spinner_index];
-        let label = match self.busy_phase {
-            BusyPhase::Thinking => "thinking",
-            BusyPhase::Rendering => "rendering",
-            _ => "working",
+        let label = match self.last_event.as_ref() {
+            Some((
+                TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. },
+                _,
+            )) => "searching",
+            _ => match self.busy_phase {
+                BusyPhase::Thinking => "thinking",
+                BusyPhase::Rendering => "rendering",
+                _ => "working",
+            },
         };
         let elapsed = self
             .active_turn_timing
