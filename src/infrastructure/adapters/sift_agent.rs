@@ -2486,7 +2486,7 @@ Allowed actions:\n\
 \n\
 Rules:\n\
 - Read the interpretation context before choosing.\n\
-- Answer when the synthesizer can reply directly without more workspace resources.\n\
+- Answer or stop as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
@@ -2641,7 +2641,8 @@ Rules:\n\
 - Use shell, diff, or edit actions when the requested next step is a concrete workspace action that should stay inside the planner loop.\n\
 - Refine when an earlier search needs a sharper query.\n\
 - Branch when the investigation should split into multiple subqueries.\n\
-- Stop when you already have enough evidence or when the question does not require workspace resources.\n\
+- Stop as soon as you have enough evidence to answer. Do not use remaining budget for redundant or confirmatory searches — efficiency matters more than thoroughness.\n\
+- When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly — never describe the edit for the user to apply manually.\n\
 - Never answer the user directly here.\n\
 - Inspect commands must stay read-only.\n\
 \n\

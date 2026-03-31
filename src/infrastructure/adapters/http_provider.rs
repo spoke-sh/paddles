@@ -415,7 +415,10 @@ You must respond with a single JSON object selecting your next action. Available
 {"action":"shell","command":"...","rationale":"..."}
 {"action":"stop","reason":"...","rationale":"..."}
 
-Respond ONLY with the JSON object, no prose.
+Rules:
+- Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
+- When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly.
+- Respond ONLY with the JSON object, no prose.
 "#,
         );
         system
@@ -728,7 +731,13 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         let system = self
             .engine
             .build_planner_system_prompt(&request.interpretation);
+        let steps_used = request.loop_state.steps.len();
+        let steps_remaining = request.budget.max_steps.saturating_sub(steps_used);
         let mut user = format!("User prompt: {}\n\n", request.user_prompt);
+        user.push_str(&format!(
+            "Budget: {steps_used}/{} steps used, {steps_remaining} remaining.\n\n",
+            request.budget.max_steps
+        ));
         if !request.loop_state.steps.is_empty() {
             user.push_str("## Previous steps\n");
             for step in &request.loop_state.steps {
@@ -740,7 +749,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 ));
             }
         }
-        user.push_str("\nSelect your next action. Respond with JSON only.");
+        user.push_str("\nSelect your next action. Choose \"answer\" or \"stop\" as soon as you have enough evidence — do not use remaining budget for redundant investigation. Respond with JSON only.");
 
         let response = self.engine.send_async(&system, &user).await?;
         self.engine.parse_planner_action(&response)
