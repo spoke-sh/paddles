@@ -1725,6 +1725,32 @@ impl MechSuitService {
                     let after_summary = updated_context.summary.clone();
                     loop_state.refinement_count += 1;
                     loop_state.last_refinement_step = Some(sequence);
+                    let refinement_signature =
+                        Self::mid_loop_refinement_signature(&updated_context);
+                    if !self.mid_loop_refinement_signature_is_stable(
+                        &loop_state.refinement_policy,
+                        &loop_state.refinement_signatures,
+                        &refinement_signature,
+                    ) {
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "refinement-guard".to_string(),
+                            reason:
+                                "oscillation guard prevented refinement to recently seen interpretation signature"
+                                    .to_string(),
+                        });
+                        continue;
+                    }
+                    loop_state
+                        .refinement_signatures
+                        .push(refinement_signature.clone());
+                    if loop_state.refinement_policy.signature_history_limit > 0 {
+                        let limit = loop_state.refinement_policy.signature_history_limit;
+                        if loop_state.refinement_signatures.len() > limit {
+                            let overflow =
+                                loop_state.refinement_signatures.len().saturating_sub(limit);
+                            loop_state.refinement_signatures.drain(0..overflow);
+                        }
+                    }
                     context.interpretation = updated_context;
                     trace.emit(TurnEvent::RefinementApplied {
                         reason: refinement_reason,
@@ -1801,7 +1827,7 @@ impl MechSuitService {
 
     fn mid_loop_refinement_reason(
         &self,
-        _sequence: usize,
+        sequence: usize,
         loop_state: &PlannerLoopState,
         steps_without_new_evidence: usize,
     ) -> Option<String> {
@@ -1812,6 +1838,13 @@ impl MechSuitService {
 
         if loop_state.refinement_count >= policy.max_refinements_per_turn {
             return None;
+        }
+
+        if let Some(last_refinement_step) = loop_state.last_refinement_step {
+            let steps_since_last_refinement = sequence.saturating_sub(last_refinement_step);
+            if steps_since_last_refinement <= policy.cooldown_steps {
+                return None;
+            }
         }
 
         if matches!(
@@ -1834,6 +1867,37 @@ impl MechSuitService {
         } else {
             None
         }
+    }
+
+    fn mid_loop_refinement_signature(context: &InterpretationContext) -> String {
+        let signature_summary: String = context.summary.chars().take(240).collect();
+        format!(
+            "{}::docs={}",
+            signature_summary.replace('\n', " "),
+            context.documents.len()
+        )
+    }
+
+    fn mid_loop_refinement_signature_is_stable(
+        &self,
+        policy: &crate::domain::ports::RefinementPolicy,
+        signatures: &[String],
+        signature: &str,
+    ) -> bool {
+        if policy.oscillation_signature_window == 0 {
+            return true;
+        }
+
+        let window = policy
+            .oscillation_signature_window
+            .min(policy.signature_history_limit.max(1));
+        let prior_recurrence = signatures
+            .iter()
+            .rev()
+            .take(window)
+            .filter(|entry| entry == &signature)
+            .count();
+        prior_recurrence == 0
     }
 
     async fn derive_mid_loop_interpretation_context(
