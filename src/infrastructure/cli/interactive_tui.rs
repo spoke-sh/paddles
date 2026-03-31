@@ -36,6 +36,8 @@ const ASSISTANT_REVEAL_STEP: usize = 24;
 const EVENT_DETAIL_LINE_LIMIT: usize = 8;
 const INLINE_VIEWPORT_MIN_HEIGHT: u16 = 5;
 const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 9;
+/// Max prose width for assistant responses (accounts for the 4-char body indent).
+const MAX_PROSE_WIDTH: usize = 96;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InteractiveFrontend {
@@ -995,7 +997,8 @@ impl InteractiveApp {
                             occurred_at,
                         );
                         self.rows.push(row);
-                        self.pending_reveal = Some(PendingReveal::new(row_index, response));
+                        let wrapped = soft_wrap_prose(&response, MAX_PROSE_WIDTH);
+                        self.pending_reveal = Some(PendingReveal::new(row_index, wrapped));
                         self.busy = true;
                         self.busy_phase = BusyPhase::Rendering;
                     }
@@ -1335,6 +1338,45 @@ fn flush_scrollback_rows<B: Backend>(
     }
 
     Ok(())
+}
+
+/// Soft-wrap prose at word boundaries to fit within `max_width`.
+/// Preserves existing newlines and does not break inside code blocks.
+fn soft_wrap_prose(text: &str, max_width: usize) -> String {
+    let max_width = max_width.max(20);
+    let mut result = String::with_capacity(text.len());
+    let mut in_code_block = false;
+
+    for line in text.split('\n') {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+        }
+        // Don't rewrap code blocks or short lines.
+        if in_code_block || line.len() <= max_width {
+            result.push_str(line);
+            continue;
+        }
+        // Word-wrap long prose lines.
+        let mut col = 0;
+        for word in line.split_whitespace() {
+            if col > 0 && col + 1 + word.len() > max_width {
+                result.push('\n');
+                col = 0;
+            }
+            if col > 0 {
+                result.push(' ');
+                col += 1;
+            }
+            result.push_str(word);
+            col += word.len();
+        }
+    }
+
+    result
 }
 
 fn trim_for_display(input: &str, limit: usize) -> String {
