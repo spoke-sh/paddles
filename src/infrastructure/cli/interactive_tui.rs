@@ -996,23 +996,9 @@ impl InteractiveApp {
 
     fn render_input(&self) -> Paragraph<'static> {
         let is_masked = self.is_masked_input();
-        let input_style = self.palette.input_text;
-        let input_text = self.input_display_text();
-        let (label, hint) = self.input_label_and_hint(is_masked);
-        let mut prompt_line = vec![Span::styled(
-            label,
-            self.palette.input_label.add_modifier(Modifier::BOLD),
-        )];
-        if !hint.is_empty() {
-            prompt_line.push(Span::raw(" "));
-            prompt_line.push(Span::styled(hint, self.palette.input_hint));
-        }
-        let lines = vec![
-            Line::from(prompt_line),
-            Line::from(Span::styled(input_text, input_style)),
-        ];
+        let (text, style) = self.input_display_line(is_masked);
 
-        Paragraph::new(Text::from(lines))
+        Paragraph::new(Line::from(Span::styled(text, style)))
             .block(
                 Block::default()
                     .title(" Prompt ")
@@ -1027,55 +1013,53 @@ impl InteractiveApp {
         matches!(self.input_mode, InputMode::MaskedKey { .. })
     }
 
-    fn input_display_text(&self) -> String {
-        if self.input.is_empty() {
-            if self.is_masked_input() {
-                "Paste or type your API key...".to_string()
+    fn input_display_line(&self, is_masked: bool) -> (String, Style) {
+        // Active input — show the typed text.
+        if !self.input.is_empty() {
+            let text = if is_masked {
+                "\u{2022}".repeat(self.input.chars().count())
             } else {
-                "Type a prompt...".to_string()
-            }
-        } else if self.is_masked_input() {
-            "\u{2022}".repeat(self.input.chars().count())
-        } else {
-            self.input.clone()
+                self.input.clone()
+            };
+            return (text, self.palette.input_text);
         }
+
+        // Empty input — show a contextual placeholder.
+        let placeholder = if is_masked {
+            "Paste or type your API key · Enter to save · Esc to cancel".to_string()
+        } else {
+            self.input_placeholder()
+        };
+        (placeholder, self.palette.input_hint)
     }
 
-    fn input_label_and_hint(&self, is_masked: bool) -> (String, String) {
-        if is_masked {
-            (
-                "API Key".to_string(),
-                "Enter to save · Esc to cancel".to_string(),
-            )
+    fn input_placeholder(&self) -> String {
+        let queue_hint = if self.queued_prompts.is_empty() {
+            None
         } else {
-            let queue_hint = if self.queued_prompts.is_empty() {
-                None
-            } else {
-                Some(format!("{} queued", self.queued_prompts.len()))
-            };
-            let turn_hint = if self.busy {
-                Some("Turn in progress".to_string())
-            } else {
-                None
-            };
-            let hint = match (turn_hint, queue_hint) {
-                (Some(turn), Some(queue)) => format!("{turn} • {queue}"),
-                (Some(turn), None) => turn,
-                (None, Some(queue)) => queue,
-                (None, None) => String::new(),
-            };
-            ("Prompt".to_string(), hint)
+            Some(format!("{} queued", self.queued_prompts.len()))
+        };
+        let turn_hint = if self.busy {
+            Some("Turn in progress")
+        } else {
+            None
+        };
+        match (turn_hint, queue_hint) {
+            (Some(turn), Some(queue)) => format!("{turn} · {queue}"),
+            (Some(turn), None) => turn.to_string(),
+            (None, Some(queue)) => format!("Type a prompt... · {queue}"),
+            (None, None) => "Type a prompt...".to_string(),
         }
     }
 
     fn cursor_position(&self, area: Rect) -> (u16, u16) {
         let x = area.x.saturating_add(1 + self.input.chars().count() as u16);
-        let y = area.y.saturating_add(2);
+        let y = area.y.saturating_add(1);
         (x.min(area.right().saturating_sub(1)), y)
     }
 
     fn input_area_height(&self) -> u16 {
-        2 + 2 // label + input + top/bottom border
+        1 + 2 // input line + top/bottom border
     }
 
     fn live_tail_height(&self, width: usize, max_height: usize) -> u16 {
@@ -1669,7 +1653,6 @@ struct Palette {
     in_flight_body: Style,
     error_header: Style,
     error_body: Style,
-    input_label: Style,
     input_text: Style,
     input_hint: Style,
     input_bg: Color,
@@ -1697,7 +1680,6 @@ fn detect_palette() -> Palette {
             in_flight_body: Style::default().fg(Color::Rgb(120, 124, 130)),
             error_header: Style::default().fg(Color::Rgb(173, 38, 45)),
             error_body: Style::default().fg(Color::Rgb(99, 39, 44)),
-            input_label: Style::default().fg(Color::Rgb(24, 63, 115)),
             input_text: Style::default().fg(Color::Rgb(35, 43, 54)),
             input_hint: Style::default().fg(Color::Rgb(109, 117, 129)),
             input_bg: prompt_bg,
@@ -1723,7 +1705,6 @@ fn detect_palette() -> Palette {
             in_flight_body: Style::default().fg(Color::Rgb(130, 140, 155)),
             error_header: Style::default().fg(Color::Rgb(255, 122, 132)),
             error_body: Style::default().fg(Color::Rgb(238, 183, 190)),
-            input_label: Style::default().fg(Color::Rgb(125, 194, 255)),
             input_text: Style::default().fg(Color::Rgb(236, 242, 250)),
             input_hint: Style::default().fg(Color::Rgb(145, 154, 168)),
             input_bg: prompt_bg,
@@ -1877,9 +1858,9 @@ mod tests {
         let _ = app.take_scrollback_rows();
 
         let buffer = render_buffer(&app, 80, 9);
-        // transcript (4 empty) + prompt box (4) + status bar (1) = 9
-        // Prompt box border with title starts at line 4.
-        assert!(buffer_line(&buffer, 4).contains("Prompt"));
+        // transcript (5 empty) + prompt box (3) + status bar (1) = 9
+        // Prompt box border with title starts at line 5.
+        assert!(buffer_line(&buffer, 5).contains("Prompt"));
     }
 
     #[test]
@@ -2073,9 +2054,8 @@ mod tests {
             2,
         );
 
-        let (label, hint) = app.input_label_and_hint(false);
-        assert_eq!(label, "Prompt");
-        assert!(hint.is_empty());
+        let placeholder = app.input_placeholder();
+        assert_eq!(placeholder, "Type a prompt...");
     }
 
     #[test]
@@ -2122,10 +2102,8 @@ mod tests {
         };
         app.input = "sk-secret-123".to_string();
 
-        assert_eq!(
-            app.input_display_text(),
-            "\u{2022}".repeat("sk-secret-123".chars().count())
-        );
+        let (text, _style) = app.input_display_line(true);
+        assert_eq!(text, "\u{2022}".repeat("sk-secret-123".chars().count()));
 
         app.submit_prompt();
 
