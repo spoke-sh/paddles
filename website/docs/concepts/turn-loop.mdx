@@ -1,0 +1,51 @@
+---
+title: Turn Loop
+sidebar_position: 1
+description: How every interaction flows from prompt through interpretation, planning, and synthesis.
+---
+
+# Turn Loop
+
+Every turn through Paddles follows the same arc: understand the context, investigate the workspace, and synthesize a grounded answer. The architecture exists to give small local models the structured support they need to produce answers that rival much larger models.
+
+## The Three Acts
+
+### Act 1: Interpretation
+
+Before any routing decision, the harness assembles the full picture.
+
+It loads `AGENTS.md` operator memory from system, user, and workspace scopes. A model-derived guidance subgraph discovers relevant procedures, tool hints, and project knowledge. Recent turns, retained evidence, and prior tool state complete the context.
+
+By the time the planner sees the prompt, it already knows the operator's priorities, the project's conventions, and the tools at its disposal.
+
+### Act 2: Recursive Planning
+
+The planner model evaluates the assembled context and selects its next bounded action: answer directly, search the workspace, read a file, inspect state, run a shell command, refine a query, branch into subqueries, or stop.
+
+A controller validates each action against schema and budget contracts, executes it safely, appends the output back into context, and loops. Each pass adds real evidence grounding the eventual answer in workspace reality.
+
+The loop continues until the planner determines it has enough evidence, the budget is met, or an explicit stop is reached.
+
+### Act 3: Synthesis
+
+A separate synthesizer model takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a distinct model call optimized for answer quality, grounded in the concrete evidence the planner gathered.
+
+## Why Separate Planning And Synthesis
+
+Three properties compound to raise effective model performance:
+
+1. **Interpretation arrives first.** Operator memory and project guidance shape the planner's priorities before it commits to any action.
+2. **Recursive evidence gathering earns the answer.** Instead of generating from memory alone, the planner iteratively reads, searches, and refines until it has concrete evidence.
+3. **Planning and synthesis are separate workloads.** The best recursive investigator may differ from the best answer composer. Separating them lets each be routed to the smallest capable model.
+
+## Visibility
+
+Every step of this process is surfaced through the TUI transcript or plain CLI output: interpretation assembly, planner action selection, gatherer work, tool calls, context pressure, fallback decisions, and synthesis.
+
+When a step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
+
+## What To Read Next
+
+- [Recursive Planning](./recursive-planning.mdx) — the planner loop in detail
+- [Context Tiers](./context-tiers.mdx) — how context spans multiple storage tiers
+- [Model Routing](./model-routing.mdx) — how planner and synthesizer roles are assigned

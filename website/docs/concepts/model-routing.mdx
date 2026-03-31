@@ -1,0 +1,59 @@
+---
+title: Model Routing
+sidebar_position: 5
+description: How Paddles routes planner and synthesizer workloads to different models.
+---
+
+# Model Routing
+
+Paddles separates the planner and synthesizer into distinct roles, each routable to a different model. This lets operators match each workload to the smallest model that excels at it.
+
+## Two Roles
+
+| Role | What it does | Optimized for |
+|------|-------------|---------------|
+| **Planner** | Recursive investigation: search, read, refine, branch | Tool use, multi-step reasoning, evidence gathering |
+| **Synthesizer** | Final answer from evidence bundle | Answer quality, grounding, citation |
+
+By default, both roles use the same model. The `--planner-model` flag overrides the planner independently.
+
+## Current Model Lanes
+
+| Model | Role | Notes |
+|-------|------|-------|
+| `qwen-1.5b` | Default synthesizer and planner | Lightweight, fast inference |
+| `qwen3.5-2b` | Opt-in planner or synthesizer | Heavier, better multi-step reasoning |
+| `qwen-coder-0.5b/1.5b/3b` | Coding-oriented variants | Optimized for code-heavy workloads |
+| `sift-autonomous` | Gatherer backend | Local graph-mode retrieval for search/refine actions |
+| `context-1` | Experimental boundary | Specialized planner/gatherer, fail-closed until ready |
+
+## Multi-Provider Support
+
+Paddles supports multiple HTTP API providers alongside local models:
+
+- **OpenAI-compatible** APIs
+- **Anthropic** API
+- **Gemini** API
+
+Each provider is accessed through the same synthesizer or planner contract. Credentials are managed per-provider through the TUI login flow or environment variables.
+
+## Routing In Practice
+
+A lightweight synthesizer with a heavier planner:
+
+```bash
+paddles --model qwen-1.5b --planner-model qwen3.5-2b
+```
+
+A remote synthesizer with a local planner:
+
+```bash
+paddles --model kimi-k2.5 --planner-model qwen3.5-2b
+```
+
+The harness degrades gracefully — if a remote provider is unavailable, the turn fails closed with a clear error rather than producing an ungrounded answer.
+
+## What To Read Next
+
+- [Turn Loop](./turn-loop.mdx) — where routing fits in the overall cycle
+- [Recursive Planning](./recursive-planning.mdx) — what the planner model actually does

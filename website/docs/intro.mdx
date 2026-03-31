@@ -1,0 +1,49 @@
+---
+title: Paddles, Explained
+sidebar_position: 1
+description: Understand what Paddles is, how it turns small local models into capable coding agents, and where to start reading.
+---
+
+# Paddles, Explained
+
+Paddles is a recursive in-context planning harness for local-first coding agents. It wraps small language models in a structured loop that lets them investigate a workspace iteratively instead of answering in one shot.
+
+The result: a 1.5B parameter model with bounded tools and recursive evidence gathering consistently outperforms the same model answering from memory alone.
+
+## What The Harness Does
+
+Paddles gives a small model three things it cannot provide for itself:
+
+- **Operator context** — project conventions, guidance, and priorities loaded from `AGENTS.md` memory files before the model sees the prompt
+- **Recursive investigation** — a bounded loop where the model searches, reads, refines, and branches until it has real evidence from the workspace
+- **Structured synthesis** — a separate synthesis step that produces a grounded answer from the accumulated evidence, not from the model's training data
+
+These are not plugins or prompt tricks. They are architectural commitments that change what a small model can accomplish.
+
+## How A Turn Works
+
+Every interaction follows the same cycle:
+
+1. **Interpret** — load operator memory, derive a guidance graph, assemble tool hints and procedures
+2. **Classify** — the model classifies the prompt as casual, direct, deterministic, or planned
+3. **Plan** — for planned turns, a recursive loop lets the model search, read, and refine until evidence is sufficient
+4. **Synthesize** — a separate model call produces the final answer from the evidence bundle
+5. **Record** — every step is captured as typed trace records with stable ids for replay
+
+The planner and synthesizer can be different models. The best recursive investigator is not always the best answer writer.
+
+## What To Read Next
+
+If you are brand new:
+
+1. [Install Paddles](./start-here/installation.mdx) and verify the CLI.
+2. [Run your first turn](./start-here/first-turn.mdx) in interactive mode.
+3. Read the concept pages when you want the model behind the architecture.
+
+If you want the architecture:
+
+1. [Turn Loop](./concepts/turn-loop.mdx) — the full cycle from prompt to answer
+2. [Recursive Planning](./concepts/recursive-planning.mdx) — how the planner loop works
+3. [Context Tiers](./concepts/context-tiers.mdx) — how context spans inline, transit, and filesystem
+4. [Context Pressure](./concepts/context-pressure.mdx) — how truncation is tracked and surfaced
+5. [Model Routing](./concepts/model-routing.mdx) — how planner and synthesizer roles are assigned

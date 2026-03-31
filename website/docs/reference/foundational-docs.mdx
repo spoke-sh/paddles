@@ -1,0 +1,46 @@
+---
+title: Foundational Documents
+sidebar_position: 1
+description: Reading order and purpose of the foundational markdown documents in the paddles repository.
+---
+
+# Foundational Documents
+
+The paddles repository contains a stack of markdown documents that define the project's architecture, philosophy, and operational commitments. This page explains the reading order and what each document covers.
+
+## Reading Order
+
+| Order | Document | What it covers |
+|-------|----------|----------------|
+| 1 | **AGENTS.md** | Operator guidance and the top-level working contract for agents |
+| 2 | **INSTRUCTIONS.md** | The canonical Keel turn loop and procedural checklists |
+| 3 | **README.md** | Backbone architecture narrative, current capabilities, and growing edges |
+| 4 | **CONSTITUTION.md** | Collaboration philosophy, environmental calibration, and core invariants |
+| 5 | **POLICY.md** | Operational commitments: boot invariants, zero drift, model routing, mission criteria |
+| 6 | **ARCHITECTURE.md** | Turn loop narrative, implementation map, context architecture, recorder boundary |
+| 7 | **PROTOCOL.md** | Communications protocol, message format, routing rules |
+| 8 | **CONFIGURATION.md** | Concrete lane and runtime configuration reference |
+
+## Supplementary References
+
+| Document | What it covers |
+|----------|----------------|
+| **CODE_WALKTHROUGH.md** | Source layout, key abstractions, data flows, where-to-look table |
+| **STAGE.md** | Visual philosophy for scene-based CLI output |
+| **RELEASE.md** | Versioning and release process |
+| **.keel/adrs/** | Binding architecture decision records |
+
+## Decision Hierarchy
+
+The reading order is not the decision hierarchy. When documents disagree:
+
+1. ADRs (binding decisions)
+2. CONSTITUTION (philosophy and invariants)
+3. POLICY (operational commitments)
+4. ARCHITECTURE (implementation contracts)
+5. Current planning artifacts (missions, epics, stories)
+
+## What To Read Next
+
+- [Turn Loop](../concepts/turn-loop.mdx) — the architectural narrative explained for newcomers
+- [Context Tiers](../concepts/context-tiers.mdx) — the four-tier context model

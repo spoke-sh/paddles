@@ -1,0 +1,44 @@
+---
+title: Installation
+sidebar_position: 1
+description: Install Paddles and verify the local runtime.
+---
+
+# Installation
+
+Paddles runs as a local-first binary. The recommended path uses Nix for reproducible builds.
+
+## Prerequisites
+
+- [Nix](https://nixos.org/download/) with flakes enabled
+- A workspace directory you want to use as the project root
+
+## Enter The Dev Shell
+
+```bash
+nix develop
+```
+
+This provides the Rust toolchain, model dependencies, and build tools.
+
+## Build And Test
+
+```bash
+just build
+just test
+just quality
+```
+
+`quality` runs `cargo fmt`, `cargo clippy`, the full test suite, and `keel health` in sequence. All four must pass before any commit lands.
+
+## Verify The Binary
+
+```bash
+paddles --help
+```
+
+You should see the CLI help with options for `--model`, `--planner-model`, `--prompt`, `--cuda`, and `--verbose`.
+
+## What To Read Next
+
+- [First Turn](./first-turn.mdx) — run your first interactive session

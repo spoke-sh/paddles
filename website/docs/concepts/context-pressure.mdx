@@ -1,0 +1,42 @@
+---
+title: Context Pressure
+sidebar_position: 4
+description: How Paddles tracks context degradation and surfaces it as a first-class signal.
+---
+
+# Context Pressure
+
+When context is truncated — an operator memory file exceeds 12k characters, an artifact is too large for inline storage, a thread summary is trimmed — the system loses signal. Paddles tracks these truncation events and surfaces them as a first-class capability signal.
+
+## How It Works
+
+A `PressureTracker` accumulates truncation events during context assembly for each turn. When the turn's context has been fully assembled, the tracker computes a `ContextPressure` value:
+
+- **Level** — Low, Medium, High, or Critical based on the number of truncation events
+- **Truncation count** — total number of individual truncation events
+- **Factors** — which sources were truncated (memory, artifacts, thread summaries, evidence budget)
+
+## Pressure Levels
+
+| Level | Truncation events | Meaning |
+|-------|-------------------|---------|
+| **Low** | 0 | No significant truncation |
+| **Medium** | 1-2 | Minor truncation, one or two sources affected |
+| **High** | 3-5 | Significant truncation across multiple sources |
+| **Critical** | 6+ | Severe context degradation |
+
+## What It Surfaces
+
+When pressure is non-nominal (anything above Low), the system emits a `ContextPressure` turn event. In the TUI, this appears as a trace step:
+
+```
+• Context pressure: medium
+  └ 2 truncation(s), factors: [memory-truncated, artifact-truncated]
+```
+
+The event is informational. It does not alter routing or synthesis behavior. Its purpose is to make context degradation visible so operators can understand when answers might be less grounded than usual.
+
+## What To Read Next
+
+- [Context Tiers](./context-tiers.mdx) — how content moves between tiers and gets truncated
+- [Turn Loop](./turn-loop.mdx) — where context assembly fits in the overall cycle

@@ -1,0 +1,54 @@
+---
+title: Context Tiers
+sidebar_position: 3
+description: How Paddles manages context across four tiers with typed addressing and lazy cross-tier resolution.
+---
+
+# Context Tiers
+
+Paddles has access to effectively unlimited context, but it cannot hold everything in working memory at once. The system manages this through four tiers with increasing depth and decreasing immediacy.
+
+## The Four Tiers
+
+| Tier | What lives here | Access |
+|------|----------------|--------|
+| **Inline** | Character-limited excerpts in working memory | Direct read, zero cost |
+| **Transit** | Full trace records in durable streams | Replay by task and record id |
+| **Sift** | Indexed evidence in retrieval indexes | Query-based retrieval (future) |
+| **Filesystem** | Workspace files on disk | Path-based file read |
+
+Think of these as concentric rings. Inline is the hottest, smallest cache. Transit holds the full history. Filesystem holds the authoritative source.
+
+## Typed Addressing
+
+When inline content is truncated, the artifact envelope carries a typed `ContextLocator` that says exactly where the full content lives:
+
+- `ContextLocator::Inline { content }` — the content itself
+- `ContextLocator::Transit { task_id, record_id }` — a specific record in a transit stream
+- `ContextLocator::Filesystem { path }` — a file on disk
+- `ContextLocator::Sift { index_ref }` — an indexed retrieval reference (future)
+
+Each locator encodes its target tier. Consumers do not need to guess where content lives.
+
+## Lazy Resolution
+
+Resolution is pull-based. No tier eagerly loads content from a deeper tier.
+
+When a consumer needs the full content behind a truncated artifact, it calls `resolver.resolve(&locator)`. The resolver dispatches based on the locator's tier:
+
+- **Inline** — returns the content directly
+- **Transit** — replays the task stream, finds the record, extracts the content
+- **Filesystem** — reads the file
+
+Resolution follows a local-first ordering. Inline returns immediately. Transit replays local streams. Filesystem reads local disk.
+
+## Fail-Closed Degradation
+
+When a tier is unavailable or a record is missing, resolution returns an explicit error naming the tier and the locator details. It does not silently fall back or return partial content.
+
+Consumers degrade honestly — they can use the truncated inline content as a fallback, but they know they are doing so.
+
+## What To Read Next
+
+- [Context Pressure](./context-pressure.mdx) — how truncation events are tracked and surfaced
+- [Recursive Planning](./recursive-planning.mdx) — how compaction keeps working context tight

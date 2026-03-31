@@ -1,0 +1,84 @@
+---
+title: First Turn
+sidebar_position: 2
+description: Run your first interactive session with Paddles and read the trace output.
+---
+
+# First Turn
+
+This page walks through a first interactive session so you can see the harness in action.
+
+## Start Interactive Mode
+
+```bash
+paddles --cuda
+```
+
+Or without CUDA acceleration:
+
+```bash
+paddles
+```
+
+The TUI opens with a prompt composer at the bottom and a transcript area above.
+
+## Ask A Question
+
+Type a question about the workspace and press Enter:
+
+```
+What does the planner loop do?
+```
+
+## Read The Trace
+
+The transcript shows each step as it happens:
+
+```
+• Classified · 0ms
+  └ planned
+
+• Checked planner capability · 120ms (+120ms)
+  └ qwen-1.5b: available
+
+• Planning...
+
+• Planner step 1: search · 3.2s (+3.1s)
+  └ Rationale: Looking for planner loop implementation
+
+• Planner step 2: read · 5.8s (+2.6s)
+  └ Rationale: Reading the recursive execution loop
+
+• Planner step 3: answer · 6.1s (+300ms)
+  └ Rationale: Evidence is sufficient
+
+• Synthesized grounded answer · 8.4s (+2.3s)
+  └ Sources: src/application/mod.rs, src/domain/ports/planning.rs
+```
+
+Each line is a real event from the harness — not decorative output. The planner searched the workspace, read relevant files, and decided it had enough evidence before synthesis.
+
+The muted "Planning..." row appeared because the planner step took more than two seconds. These in-flight indicators show what the harness is doing during long operations.
+
+## Use A Heavier Planner
+
+You can route the planner and synthesizer to different models:
+
+```bash
+paddles --model qwen-1.5b --planner-model qwen3.5-2b
+```
+
+The synthesizer stays lightweight while the planner uses a more capable model for investigation.
+
+## One-Shot Mode
+
+For scripts, use `--prompt` to skip the TUI:
+
+```bash
+paddles --prompt "Summarize the current runtime lanes"
+```
+
+## What To Read Next
+
+- [Turn Loop](../concepts/turn-loop.mdx) — understand the full cycle from prompt to answer
+- [Recursive Planning](../concepts/recursive-planning.mdx) — how the planner drives investigation
