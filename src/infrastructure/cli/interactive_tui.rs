@@ -1,5 +1,7 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
-use crate::domain::model::{ThreadCandidate, TurnEvent, TurnEventSink};
+use crate::domain::model::{
+    ThreadCandidate, TraceRecordKind, TraceReplay, TurnEvent, TurnEventSink,
+};
 use crate::infrastructure::credentials::CredentialStore;
 use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
 use anyhow::Result;
@@ -13,7 +15,7 @@ use ratatui::prelude::{Color, Line, Modifier, Span, Style, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use std::cmp;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -74,6 +76,7 @@ pub async fn run_interactive_tui(
 
     let (tx, mut rx) = unbounded_channel();
     let session = service.create_conversation_session();
+    service.register_event_observer(Arc::new(ExternalTranscriptSyncSink { tx: tx.clone() }));
     let mut app = InteractiveApp::new(
         model_label.into(),
         detect_palette(),
@@ -86,6 +89,11 @@ pub async fn run_interactive_tui(
 
     loop {
         drain_messages(&mut app, &mut rx);
+        if app.take_external_sync_request()
+            && let Ok(replays) = service.replay_all_traces()
+        {
+            app.sync_external_transcript(&replays);
+        }
         app.tick();
         if let Some(prompt) = app.dispatch_next_prompt() {
             dispatch_prompt(prompt, Arc::clone(&service), session.clone(), tx.clone());
@@ -327,6 +335,7 @@ enum UiMessage {
         event: TurnEvent,
         occurred_at: Instant,
     },
+    ExternalTranscriptSync,
     TurnFinished {
         result: std::result::Result<String, String>,
         occurred_at: Instant,
@@ -346,6 +355,10 @@ impl UiMessage {
             result,
             occurred_at: Instant::now(),
         }
+    }
+
+    fn external_transcript_sync() -> Self {
+        Self::ExternalTranscriptSync
     }
 }
 
@@ -382,6 +395,19 @@ struct InteractiveTurnEventSink {
 impl TurnEventSink for InteractiveTurnEventSink {
     fn emit(&self, event: TurnEvent) {
         let _ = self.tx.send(UiMessage::turn_event(event));
+    }
+}
+
+#[derive(Clone)]
+struct ExternalTranscriptSyncSink {
+    tx: UnboundedSender<UiMessage>,
+}
+
+impl TurnEventSink for ExternalTranscriptSyncSink {
+    fn emit(&self, event: TurnEvent) {
+        if matches!(event, TurnEvent::SynthesisReady { .. }) {
+            let _ = self.tx.send(UiMessage::external_transcript_sync());
+        }
     }
 }
 
@@ -625,6 +651,9 @@ struct InteractiveApp {
     prompt_history: Vec<String>,
     history_cursor: Option<usize>,
     history_draft: String,
+    current_task_id: String,
+    pending_external_sync: bool,
+    seen_external_record_ids: HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -674,6 +703,7 @@ impl InteractiveApp {
                  No API login required.",
             ),
         };
+        let current_task_id = session.task_id().as_str().to_string();
         Self {
             model_label,
             palette,
@@ -706,6 +736,9 @@ impl InteractiveApp {
             prompt_history: Vec::new(),
             history_cursor: None,
             history_draft: String::new(),
+            current_task_id,
+            pending_external_sync: false,
+            seen_external_record_ids: HashSet::new(),
         }
     }
 
@@ -893,6 +926,69 @@ impl InteractiveApp {
         self.dispatch_next_prompt_at(Instant::now())
     }
 
+    fn take_external_sync_request(&mut self) -> bool {
+        let pending = self.pending_external_sync;
+        self.pending_external_sync = false;
+        pending
+    }
+
+    fn sync_external_transcript(&mut self, replays: &[TraceReplay]) {
+        for replay in replays {
+            if replay.task_id.as_str() == self.current_task_id {
+                continue;
+            }
+            for record in &replay.records {
+                let record_id = record.record_id.as_str().to_string();
+                if self.seen_external_record_ids.contains(&record_id) {
+                    continue;
+                }
+                match &record.kind {
+                    TraceRecordKind::TaskRootStarted(root) => {
+                        if let Some(prompt) = root
+                            .prompt
+                            .inline_content
+                            .clone()
+                            .or_else(|| Some(root.prompt.summary.clone()))
+                        {
+                            self.rows.push(TranscriptRow::new(
+                                TranscriptRowKind::User,
+                                "Web",
+                                inline_multiline_text(&prompt),
+                            ));
+                        }
+                    }
+                    TraceRecordKind::TurnStarted(turn) => {
+                        if let Some(prompt) = turn
+                            .prompt
+                            .inline_content
+                            .clone()
+                            .or_else(|| Some(turn.prompt.summary.clone()))
+                        {
+                            self.rows.push(TranscriptRow::new(
+                                TranscriptRowKind::User,
+                                "Web",
+                                inline_multiline_text(&prompt),
+                            ));
+                        }
+                    }
+                    TraceRecordKind::CompletionCheckpoint(cp) => {
+                        if let Some(response) = cp.response.as_ref().and_then(|r| {
+                            r.inline_content.clone().or_else(|| Some(r.summary.clone()))
+                        }) {
+                            self.rows.push(TranscriptRow::new(
+                                TranscriptRowKind::Assistant,
+                                "Paddles",
+                                soft_wrap_prose(&response, MAX_PROSE_WIDTH),
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+                self.seen_external_record_ids.insert(record_id);
+            }
+        }
+    }
+
     fn dispatch_next_prompt_at(&mut self, started_at: Instant) -> Option<QueuedPrompt> {
         if self.busy {
             return None;
@@ -986,6 +1082,9 @@ impl InteractiveApp {
                 } else if let Some(timing) = self.active_turn_timing.as_mut() {
                     timing.mark_step(occurred_at, pace);
                 }
+            }
+            UiMessage::ExternalTranscriptSync => {
+                self.pending_external_sync = true;
             }
             UiMessage::TurnFinished {
                 result,

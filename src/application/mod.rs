@@ -940,6 +940,15 @@ impl MechSuitService {
             .push(observer);
     }
 
+    pub fn replay_all_traces(&self) -> Result<Vec<crate::domain::model::TraceReplay>> {
+        let mut task_ids = self.trace_recorder.task_ids();
+        task_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        task_ids
+            .iter()
+            .map(|id| self.trace_recorder.replay(id))
+            .collect()
+    }
+
     fn wrap_sink_with_observers(&self, sink: Arc<dyn TurnEventSink>) -> Arc<dyn TurnEventSink> {
         let observers = self
             .event_observers
