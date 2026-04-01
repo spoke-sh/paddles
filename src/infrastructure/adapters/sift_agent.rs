@@ -2098,6 +2098,7 @@ If you do not need a tool, respond with ONLY a single JSON final answer object u
 {}\n\
 \n\
 When the user asks you to inspect repository state, run a command, read a file, search the workspace, or apply a change, prefer a tool call over describing how they could do it themselves.\n\
+For `search.query`, return only the retrieval target terms. Do not prefix the query with tool verbs or instructions like `search`, `find`, `look for`, or `search for` unless those words are part of the literal text you need to match.\n\
 Examples:\n\
 - `show me the git status` -> {{\"tool\":\"shell\",\"command\":\"git status --short\"}}\n\
 - `open src/main.rs` -> {{\"tool\":\"read_file\",\"path\":\"src/main.rs\"}}\n\
@@ -2510,6 +2511,7 @@ Rules:\n\
 - Answer or stop as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
+- For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
 - When the user requests a code change, you MUST use write_file, replace_in_file, or apply_patch to make the edit — never describe the edit for the user to apply manually.\n\
@@ -2565,6 +2567,7 @@ Allowed actions:\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
 {}\n\
@@ -2613,6 +2616,8 @@ Allowed actions:\n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
+For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+\n\
 Interpretation context:\n\
 {}\n\
 \n\
@@ -2655,6 +2660,7 @@ Allowed actions:\n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
 - Choose retrieval mode and strategy explicitly when you search or refine.\n\
+- For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
 - Inspect when a read-only workspace command would clarify state.\n\
@@ -2717,6 +2723,7 @@ Allowed actions:\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
 {}\n\
@@ -2763,6 +2770,8 @@ Allowed actions:\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
+\n\
+For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
 {}\n\
