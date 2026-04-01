@@ -38,6 +38,7 @@ const INLINE_VIEWPORT_MIN_HEIGHT: u16 = 5;
 const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 9;
 /// Max prose width for assistant responses (accounts for the 4-char body indent).
 const MAX_PROSE_WIDTH: usize = 96;
+const MULTILINE_INLINE_SEPARATOR: &str = " ⏎ ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InteractiveFrontend {
@@ -799,6 +800,7 @@ impl InteractiveApp {
         if raw.is_empty() {
             return;
         }
+        let raw_display = inline_multiline_text(&raw);
         self.prompt_history.push(raw.clone());
         self.history_cursor = None;
         self.history_draft.clear();
@@ -842,8 +844,11 @@ impl InteractiveApp {
 
         // Normal prompt submission.
         let was_busy = self.busy || self.pending_reveal.is_some();
-        self.rows
-            .push(TranscriptRow::new(TranscriptRowKind::User, "You", &raw));
+        self.rows.push(TranscriptRow::new(
+            TranscriptRowKind::User,
+            "You",
+            &raw_display,
+        ));
         if was_busy || !self.queued_prompts.is_empty() {
             self.queued_prompts.push_back(QueuedPrompt::Steering(
                 self.session.capture_candidate(raw.clone()),
@@ -858,7 +863,7 @@ impl InteractiveApp {
                 "• Queued steering prompt",
                 format!(
                     "`{}` queued behind the active turn.",
-                    trim_for_display(&raw, 96)
+                    trim_for_display(&raw_display, 96)
                 ),
             ));
         }
@@ -1393,6 +1398,18 @@ fn trim_for_display(input: &str, limit: usize) -> String {
 
     let kept = input.chars().take(limit).collect::<String>();
     format!("{}...", kept.trim_end())
+}
+
+fn inline_multiline_text(input: &str) -> String {
+    let mut iter = input.lines();
+    let Some(first_line) = iter.next() else {
+        return String::new();
+    };
+    iter.fold(first_line.to_string(), |mut acc, line| {
+        acc.push_str(MULTILINE_INLINE_SEPARATOR);
+        acc.push_str(line);
+        acc
+    })
 }
 
 fn rendered_rows_height(rows: &[TranscriptRow], width: usize) -> usize {
@@ -1990,7 +2007,8 @@ mod tests {
         BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
         TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind,
         collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
-        inline_viewport_height_for_terminal, render_row_lines, select_interactive_frontend,
+        inline_multiline_text, inline_viewport_height_for_terminal, render_row_lines,
+        select_interactive_frontend,
     };
     use crate::application::ConversationSession;
     use crate::domain::model::{TaskTraceId, TurnEvent};
@@ -2581,5 +2599,31 @@ mod tests {
         });
         assert!(!app.emitted_in_flight);
         assert!(app.last_event.is_some());
+    }
+
+    #[test]
+    fn app_submits_multiline_prompt_as_inline_display_row() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "line one\nline two\nline three".to_string();
+        app.submit_prompt();
+
+        let last_row = app.rows.last().expect("user row exists");
+        assert_eq!(last_row.kind, TranscriptRowKind::User);
+        assert_eq!(last_row.content, "line one ⏎ line two ⏎ line three");
+    }
+
+    #[test]
+    fn inline_multiline_text_preserves_single_lines() {
+        assert_eq!(inline_multiline_text("single line"), "single line");
     }
 }
