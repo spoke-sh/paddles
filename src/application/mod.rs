@@ -1246,7 +1246,9 @@ impl MechSuitService {
         gatherer: Option<&Arc<dyn ContextGatherer>>,
         decision: &InitialActionDecision,
     ) -> Result<Option<InitialActionDecision>> {
-        if !decision.edit.known_edit {
+        if !decision.edit.known_edit
+            && !mutation_turn_requires_execution_pressure(prompt, interpretation)
+        {
             return Ok(None);
         }
 
@@ -1288,7 +1290,8 @@ impl MechSuitService {
                 "known edit turn; action produces information, so read `{best_path}` before broader planning"
             ),
             edit: crate::domain::ports::InitialEditInstruction {
-                known_edit: true,
+                known_edit: decision.edit.known_edit
+                    || mutation_turn_requires_execution_pressure(prompt, interpretation),
                 candidate_files: ranked_candidates,
             },
         }))
@@ -2360,6 +2363,7 @@ fn known_edit_bootstrap_candidates(
     prompt: &str,
     limit: usize,
 ) -> Vec<String> {
+    const MIN_EDIT_TARGET_SCORE: i32 = 60;
     let normalized_hints = hinted_paths
         .iter()
         .filter_map(|path| normalize_known_edit_candidate(workspace_root, path))
@@ -2389,6 +2393,7 @@ fn known_edit_bootstrap_candidates(
     });
     ranked
         .into_iter()
+        .filter(|(_, score)| *score >= MIN_EDIT_TARGET_SCORE)
         .take(limit)
         .map(|(path, _)| path)
         .collect()
@@ -2521,7 +2526,12 @@ fn coerce_execution_pressure_action(
 
     let path = likely_execution_pressure_targets(loop_state, workspace_root, 3)
         .into_iter()
-        .next()?;
+        .next()
+        .or_else(|| {
+            known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3)
+                .into_iter()
+                .next()
+        })?;
     Some(RecursivePlannerDecision {
         action: PlannerAction::Workspace {
             action: WorkspaceAction::Read { path: path.clone() },
@@ -3191,10 +3201,10 @@ mod tests {
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
         InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
         InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction, PlannerCapability,
-        PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerRequest,
-        PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision,
-        RetainedEvidence, RetrievalMode, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
-        WorkspaceAction,
+        PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState,
+        PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
+        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, SynthesizerEngine,
+        ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
@@ -4251,6 +4261,69 @@ mod tests {
     }
 
     #[test]
+    fn mutation_turn_bootstraps_to_a_file_read_even_without_model_edit_flag() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::write(
+            workspace.path().join("src/application/mod.rs"),
+            "fn planner_loop() {}\n",
+        )
+        .expect("write app file");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Answer,
+                "controller should answer directly if left alone",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "the file was enough".to_string(),
+                },
+                rationale: "stop after the read".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt("fix the planner loop")
+                .await
+                .expect("process prompt")
+        });
+
+        let executed_actions = synthesizer
+            .executed_actions
+            .lock()
+            .expect("executed actions lock");
+        assert!(matches!(
+            executed_actions.first(),
+            Some(WorkspaceAction::Read { path }) if path == "src/application/mod.rs"
+        ));
+    }
+
+    #[test]
     fn known_edit_bootstrap_uses_vector_evidence_to_pick_the_best_candidate() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("src")).expect("create src");
@@ -4335,6 +4408,42 @@ mod tests {
         assert!(matches!(
             executed_actions.first(),
             Some(WorkspaceAction::Read { path }) if path == "src/two.rs"
+        ));
+    }
+
+    #[test]
+    fn execution_pressure_falls_back_to_prompt_derived_file_candidates() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::write(
+            workspace.path().join("src/application/mod.rs"),
+            "fn planner_loop() {}\n",
+        )
+        .expect("write app file");
+
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "cargo test".to_string(),
+                },
+            },
+            rationale: "run a check first".to_string(),
+        };
+
+        let redirected = super::coerce_execution_pressure_action(
+            "fix the planner loop",
+            &InterpretationContext::default(),
+            &PlannerLoopState::default(),
+            &decision,
+            workspace.path(),
+        )
+        .expect("redirected decision");
+
+        assert!(matches!(
+            redirected.action,
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Read { path }
+            } if path == "src/application/mod.rs"
         ));
     }
 
