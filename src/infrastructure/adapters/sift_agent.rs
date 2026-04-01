@@ -6,7 +6,7 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     CompactionPlan, CompactionRequest, EvidenceBundle, GuidanceCategory, InitialAction,
-    InitialActionDecision, InterpretationConflict, InterpretationContext,
+    InitialActionDecision, InitialEditInstruction, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
     InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
@@ -193,8 +193,18 @@ enum PlannerActionEnvelope {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+struct InitialActionEnvelope {
+    #[serde(flatten)]
+    action: InitialActionVariantEnvelope,
+    #[serde(default)]
+    edit: Option<String>,
+    #[serde(default)]
+    candidate_files: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
-enum InitialActionEnvelope {
+enum InitialActionVariantEnvelope {
     Answer {
         rationale: String,
     },
@@ -2490,26 +2500,29 @@ fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
         "You are the top-level routing planner for Paddles.\n\
 Choose the NEXT bounded action for this turn after reading the interpretation context.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
+Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
 Rules:\n\
 - Read the interpretation context before choosing.\n\
 - Answer or stop as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
+- `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
+- `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 - Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
 - Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
@@ -2553,23 +2566,26 @@ fn build_initial_action_retry_prompt(request: &PlannerRequest) -> String {
     format!(
         "Your last top-level routing reply was empty or invalid.\n\
 Return ONLY one valid JSON initial action.\n\
+Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+`edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
+`candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
@@ -2603,25 +2619,28 @@ fn build_initial_action_redecision_prompt(request: &PlannerRequest, invalid_repl
 Make one final constrained routing decision.\n\
 If no workspace action is clearly justified by the interpretation context, return stop.\n\
 Return ONLY one valid JSON object.\n\
+Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
+`edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
+`candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
@@ -3728,12 +3747,14 @@ fn interpretation_context_from_envelope(
 }
 
 fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
-    let decision = match envelope {
-        InitialActionEnvelope::Answer { rationale } => InitialActionDecision {
+    let edit = initial_edit_instruction_from_envelope(&envelope)?;
+    let decision = match envelope.action {
+        InitialActionVariantEnvelope::Answer { rationale } => InitialActionDecision {
             action: InitialAction::Answer,
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::Search {
+        InitialActionVariantEnvelope::Search {
             query,
             mode,
             strategy,
@@ -3752,8 +3773,9 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::ListFiles { pattern, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::ListFiles { pattern, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::ListFiles {
                     pattern: pattern.and_then(|value| {
@@ -3763,32 +3785,36 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::Read { path, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Read { path, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::Read {
                     path: required_planner_field("path", path)?,
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::Inspect { command, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Inspect { command, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: required_planner_field("command", command)?,
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::Shell { command, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Shell { command, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::Shell {
                     command: required_planner_field("command", command)?,
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::Diff { path, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Diff { path, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::Diff {
                     path: path.and_then(|value| {
@@ -3798,8 +3824,9 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::WriteFile {
+        InitialActionVariantEnvelope::WriteFile {
             path,
             content,
             rationale,
@@ -3811,8 +3838,9 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::ReplaceInFile {
+        InitialActionVariantEnvelope::ReplaceInFile {
             path,
             old,
             new,
@@ -3828,16 +3856,18 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::ApplyPatch { patch, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::ApplyPatch { patch, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::ApplyPatch {
                     patch: required_planner_field("patch", patch)?,
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            edit,
         },
-        InitialActionEnvelope::Refine {
+        InitialActionVariantEnvelope::Refine {
             query,
             mode,
             strategy,
@@ -3856,9 +3886,10 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
+                edit,
             }
         }
-        InitialActionEnvelope::Branch {
+        InitialActionVariantEnvelope::Branch {
             branches,
             rationale,
         } => {
@@ -3876,17 +3907,58 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                     rationale: rationale.clone(),
                 },
                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
+                edit,
             }
         }
-        InitialActionEnvelope::Stop { reason, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Stop { reason, rationale } => InitialActionDecision {
             action: InitialAction::Stop {
                 reason: required_planner_field("reason", reason)?,
             },
             rationale: rationale.unwrap_or_else(|| "stop routing".to_string()),
+            edit,
         },
     };
 
     Ok(decision)
+}
+
+fn initial_edit_instruction_from_envelope(
+    envelope: &InitialActionEnvelope,
+) -> Result<InitialEditInstruction> {
+    let known_edit = envelope
+        .edit
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| match value {
+            "yes" | "true" => Ok(true),
+            "no" | "false" => Ok(false),
+            other => bail!("edit must be `yes` or `no`, got `{other}`"),
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let candidate_files = envelope
+        .candidate_files
+        .iter()
+        .map(|path| path.trim().replace('\\', "/"))
+        .filter(|path| !path.is_empty())
+        .fold(Vec::new(), |mut deduped, path| {
+            if !deduped.contains(&path) {
+                deduped.push(path);
+            }
+            deduped
+        })
+        .into_iter()
+        .take(3)
+        .collect::<Vec<_>>();
+    if known_edit && candidate_files.is_empty() {
+        bail!("candidate_files must contain at least one file when edit is `yes`");
+    }
+
+    Ok(InitialEditInstruction {
+        known_edit,
+        candidate_files,
+    })
 }
 
 fn planner_action_from_envelope(
@@ -4152,6 +4224,7 @@ fn fail_closed_initial_action(request: &PlannerRequest) -> InitialActionDecision
         },
         rationale: "controller failed closed after repeated invalid initial-action replies"
             .to_string(),
+        edit: InitialEditInstruction::default(),
     }
 }
 
@@ -5011,7 +5084,7 @@ mod tests {
             workspace.path(),
             "qwen-1.5b",
             Box::new(RecordingConversation::new(
-                r#"{"action":"answer","rationale":"no workspace resources needed"}"#,
+                r#"{"action":"answer","edit":"no","candidate_files":[],"rationale":"no workspace resources needed"}"#,
                 Arc::clone(&recorded_messages),
             )),
         );
@@ -5084,6 +5157,8 @@ mod tests {
         assert!(prompt.contains("Inspect (INSTRUCTIONS.md)"));
         assert!(prompt.contains("Recent turns"));
         assert!(prompt.contains("user: previous turn"));
+        assert!(prompt.contains("\"edit\":\"yes|no\""));
+        assert!(prompt.contains("\"candidate_files\":[\"path1\",\"path2\",\"path3\"]"));
     }
 
     #[test]
@@ -5175,7 +5250,7 @@ mod tests {
             Box::new(MockConversation::new(vec![
                 "not json".to_string(),
                 "still not json".to_string(),
-                r#"{"action":"inspect","command":"git status","rationale":"confirm the repository state after invalid replies"}"#.to_string(),
+                r#"{"action":"inspect","command":"git status","edit":"no","candidate_files":[],"rationale":"confirm the repository state after invalid replies"}"#.to_string(),
             ])),
         );
 
@@ -5265,7 +5340,7 @@ mod tests {
             Box::new(MockConversation::new(vec![
                 "not json".to_string(),
                 "still not json".to_string(),
-                r#"{"action":"inspect","command":"keel mission next","rationale":"read the current board demand after invalid replies"}"#.to_string(),
+                r#"{"action":"inspect","command":"keel mission next","edit":"no","candidate_files":[],"rationale":"read the current board demand after invalid replies"}"#.to_string(),
             ])),
         );
 

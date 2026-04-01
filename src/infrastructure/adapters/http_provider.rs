@@ -3,8 +3,8 @@ use crate::domain::model::{
     ThreadDecisionKind, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
-    EvidenceBundle, InitialAction, InitialActionDecision, InterpretationContext,
-    InterpretationRequest, PlannerAction, PlannerCapability, PlannerRequest,
+    EvidenceBundle, InitialAction, InitialActionDecision, InitialEditInstruction,
+    InterpretationContext, InterpretationRequest, PlannerAction, PlannerCapability, PlannerRequest,
     RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesizerEngine,
     ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
 };
@@ -715,11 +715,13 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 Ok(InitialActionDecision {
                     action,
                     rationale: decision.rationale,
+                    edit: InitialEditInstruction::default(),
                 })
             }
             Err(_) => Ok(InitialActionDecision {
                 action: InitialAction::Answer,
                 rationale: "failed to parse planner response, answering directly".to_string(),
+                edit: InitialEditInstruction::default(),
             }),
         }
     }

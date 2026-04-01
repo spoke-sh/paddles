@@ -19,12 +19,12 @@ pub use context_resolution::ContextResolver;
 pub use operator_memory::OperatorMemory;
 pub use planning::{
     CompactionPlan, CompactionRequest, GuidanceCategory, InitialAction, InitialActionDecision,
-    InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
-    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
-    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
-    OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability,
-    PlannerDecision as RecursivePlannerDecision, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, RecursivePlanner, RefinementPolicy, RefinementTrigger,
+    InitialEditInstruction, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerBudget,
+    PlannerCapability, PlannerDecision as RecursivePlannerDecision, PlannerLoopState,
+    PlannerRequest, PlannerStepRecord, RecursivePlanner, RefinementPolicy, RefinementTrigger,
     RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use synthesis::{SynthesizerEngine, WorkspaceActionResult};

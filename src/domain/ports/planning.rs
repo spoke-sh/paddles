@@ -363,6 +363,13 @@ impl InitialAction {
 pub struct InitialActionDecision {
     pub action: InitialAction,
     pub rationale: String,
+    pub edit: InitialEditInstruction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct InitialEditInstruction {
+    pub known_edit: bool,
+    pub candidate_files: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

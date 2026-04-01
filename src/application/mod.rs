@@ -18,13 +18,14 @@ use crate::domain::ports::{
     InterpretationRequest, ModelPaths, ModelRegistry, NoopTraceRecorder, OperatorMemory,
     PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
     PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, SynthesizerEngine,
-    ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+    SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -1126,7 +1127,36 @@ impl MechSuitService {
 
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
-                let decision = planner_engine.select_initial_action(&request).await?;
+                let mut decision = planner_engine.select_initial_action(&request).await?;
+                if let Some(bootstrapped) = self
+                    .bootstrap_known_edit_initial_action(
+                        prompt,
+                        &interpretation,
+                        &recent_turns,
+                        gatherer.as_ref(),
+                        &decision,
+                    )
+                    .await?
+                {
+                    let candidate_summary = if bootstrapped.edit.candidate_files.is_empty() {
+                        "no viable candidates discovered".to_string()
+                    } else {
+                        format!(
+                            "candidate files: {}",
+                            bootstrapped.edit.candidate_files.join(", ")
+                        )
+                    };
+                    trace.emit(TurnEvent::Fallback {
+                        stage: "known-edit-bootstrap".to_string(),
+                        reason: format!(
+                            "known edit turn bypassed initial `{}` and forced `{}`; {}",
+                            decision.action.summary(),
+                            bootstrapped.action.summary(),
+                            candidate_summary
+                        ),
+                    });
+                    decision = bootstrapped;
+                }
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence: 1,
                     action: decision.action.summary(),
@@ -1206,6 +1236,62 @@ impl MechSuitService {
             trace.record_completion(reply);
             session_for_reply.note_thread_reply(&thread_for_reply, &prompt, reply);
         })
+    }
+
+    async fn bootstrap_known_edit_initial_action(
+        &self,
+        prompt: &str,
+        interpretation: &InterpretationContext,
+        recent_turns: &[String],
+        gatherer: Option<&Arc<dyn ContextGatherer>>,
+        decision: &InitialActionDecision,
+    ) -> Result<Option<InitialActionDecision>> {
+        if !decision.edit.known_edit {
+            return Ok(None);
+        }
+
+        let candidates = known_edit_bootstrap_candidates(
+            &self.workspace_root,
+            &decision.edit.candidate_files,
+            prompt,
+            3,
+        );
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+
+        let ranked_candidates = if let Some(gatherer) = gatherer {
+            rerank_known_edit_candidates_with_vector_lookup(
+                gatherer,
+                &self.workspace_root,
+                prompt,
+                interpretation,
+                recent_turns,
+                &candidates,
+            )
+            .await
+        } else {
+            candidates.clone()
+        };
+
+        let best_path = ranked_candidates
+            .first()
+            .cloned()
+            .unwrap_or_else(|| candidates[0].clone());
+        Ok(Some(InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: best_path.clone(),
+                },
+            },
+            rationale: format!(
+                "known edit turn; action produces information, so read `{best_path}` before broader planning"
+            ),
+            edit: crate::domain::ports::InitialEditInstruction {
+                known_edit: true,
+                candidate_files: ranked_candidates,
+            },
+        }))
     }
 
     pub async fn process_thread_candidate_in_session_with_sink(
@@ -2039,7 +2125,11 @@ fn execution_plan_from_initial_action(
     prepared: &PreparedRuntimeLanes,
     decision: InitialActionDecision,
 ) -> PromptExecutionPlan {
-    let InitialActionDecision { action, rationale } = decision;
+    let InitialActionDecision {
+        action,
+        rationale,
+        edit: _,
+    } = decision;
     match action {
         InitialAction::Answer => PromptExecutionPlan {
             intent: TurnIntent::DirectResponse,
@@ -2264,6 +2354,123 @@ fn mutation_turn_requires_execution_pressure(
     })
 }
 
+fn known_edit_bootstrap_candidates(
+    workspace_root: &Path,
+    hinted_paths: &[String],
+    prompt: &str,
+    limit: usize,
+) -> Vec<String> {
+    let normalized_hints = hinted_paths
+        .iter()
+        .filter_map(|path| normalize_known_edit_candidate(workspace_root, path))
+        .collect::<Vec<_>>();
+    let tokens = known_edit_search_tokens(prompt, &normalized_hints);
+    let mut scored = HashMap::<String, i32>::new();
+
+    for (index, path) in normalized_hints.iter().enumerate() {
+        scored.insert(
+            path.clone(),
+            400 + score_execution_pressure_path(path) - index as i32 * 10,
+        );
+    }
+
+    visit_known_edit_candidates(
+        workspace_root,
+        workspace_root,
+        &tokens,
+        &normalized_hints,
+        &mut scored,
+        &mut 0,
+    );
+
+    let mut ranked = scored.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|(path_a, score_a), (path_b, score_b)| {
+        score_b.cmp(score_a).then_with(|| path_a.cmp(path_b))
+    });
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(path, _)| path)
+        .collect()
+}
+
+async fn rerank_known_edit_candidates_with_vector_lookup(
+    gatherer: &Arc<dyn ContextGatherer>,
+    workspace_root: &Path,
+    prompt: &str,
+    interpretation: &InterpretationContext,
+    recent_turns: &[String],
+    candidates: &[String],
+) -> Vec<String> {
+    if !matches!(gatherer.capability(), GathererCapability::Available) {
+        return candidates.to_vec();
+    }
+
+    let mut prior_context = Vec::new();
+    prior_context.push(format!(
+        "known-edit candidate files under review: {}",
+        candidates.join(", ")
+    ));
+    if !interpretation.is_empty() {
+        prior_context.push(interpretation.render());
+    }
+    prior_context.extend(recent_turns.iter().take(2).cloned());
+
+    let request = ContextGatherRequest::new(
+        prompt,
+        workspace_root.to_path_buf(),
+        "known-edit-bootstrap",
+        EvidenceBudget::default(),
+    )
+    .with_planning(
+        PlannerConfig::default()
+            .with_mode(RetrievalMode::Linear)
+            .with_retrieval_strategy(RetrievalStrategy::Vector)
+            .with_step_limit(1),
+    )
+    .with_prior_context(prior_context);
+
+    let Ok(result) = gatherer.gather_context(&request).await else {
+        return candidates.to_vec();
+    };
+
+    let Some(bundle) = result.evidence_bundle else {
+        return candidates.to_vec();
+    };
+
+    let mut scored = HashMap::<String, i32>::new();
+    for (index, path) in candidates.iter().enumerate() {
+        scored.insert(path.clone(), 300 - index as i32 * 10);
+    }
+
+    for item in &bundle.items {
+        let Some(path) = normalize_execution_pressure_source(&item.source, workspace_root) else {
+            continue;
+        };
+        if let Some(score) = scored.get_mut(&path) {
+            *score += 90 + evidence_rank_bonus(item.rank);
+        }
+    }
+
+    if let Some(trace) = &bundle.planner {
+        for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
+            let Some(path) = normalize_execution_pressure_source(&artifact.source, workspace_root)
+            else {
+                continue;
+            };
+            if let Some(score) = scored.get_mut(&path) {
+                *score += 60 - index as i32 * 5;
+            }
+        }
+    }
+
+    let mut ranked = scored.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|(path_a, score_a), (path_b, score_b)| {
+        score_b.cmp(score_a).then_with(|| path_a.cmp(path_b))
+    });
+    ranked.into_iter().map(|(path, _)| path).collect()
+}
+
 fn search_steps(loop_state: &PlannerLoopState) -> usize {
     loop_state
         .steps
@@ -2384,6 +2591,152 @@ fn likely_execution_pressure_targets(
         .take(limit)
         .map(|(path, _)| path)
         .collect()
+}
+
+fn normalize_known_edit_candidate(workspace_root: &Path, path: &str) -> Option<String> {
+    let normalized = normalize_execution_pressure_source(path, workspace_root)?;
+    workspace_root
+        .join(&normalized)
+        .is_file()
+        .then_some(normalized)
+}
+
+fn visit_known_edit_candidates(
+    dir: &Path,
+    workspace_root: &Path,
+    tokens: &[String],
+    normalized_hints: &[String],
+    scored: &mut HashMap<String, i32>,
+    visited_files: &mut usize,
+) {
+    if *visited_files >= 512 {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if *visited_files >= 512 {
+            break;
+        }
+
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+
+        if metadata.is_dir() {
+            if matches!(name.as_str(), ".git" | "target" | ".direnv") {
+                continue;
+            }
+            visit_known_edit_candidates(
+                &path,
+                workspace_root,
+                tokens,
+                normalized_hints,
+                scored,
+                visited_files,
+            );
+            continue;
+        }
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        *visited_files += 1;
+        let rel = path
+            .strip_prefix(workspace_root)
+            .ok()
+            .map(|relative| relative.to_string_lossy().replace('\\', "/"));
+        let Some(rel) = rel else {
+            continue;
+        };
+        if !is_plausible_workspace_file(&rel) {
+            continue;
+        }
+
+        let score = known_edit_candidate_score(&rel, tokens, normalized_hints);
+        match scored.entry(rel) {
+            Entry::Occupied(mut entry) => {
+                if score > *entry.get() {
+                    entry.insert(score);
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(score);
+            }
+        }
+    }
+}
+
+fn known_edit_candidate_score(path: &str, tokens: &[String], normalized_hints: &[String]) -> i32 {
+    let mut score = score_execution_pressure_path(path);
+    let path_lower = path.to_ascii_lowercase();
+
+    for (index, hint) in normalized_hints.iter().enumerate() {
+        if path == hint {
+            score += 250 - index as i32 * 10;
+            continue;
+        }
+
+        let hint_lower = hint.to_ascii_lowercase();
+        if path_lower.contains(&hint_lower) || hint_lower.contains(&path_lower) {
+            score += 80 - index as i32 * 5;
+        }
+    }
+
+    for token in tokens {
+        if path_lower.contains(token) {
+            score += 25;
+        }
+    }
+
+    score
+}
+
+fn known_edit_search_tokens(prompt: &str, hinted_paths: &[String]) -> Vec<String> {
+    let mut tokens = Vec::new();
+    for source in std::iter::once(prompt).chain(hinted_paths.iter().map(String::as_str)) {
+        for token in source
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .map(|token| token.trim().to_ascii_lowercase())
+            .filter(|token| token.len() >= 3)
+        {
+            if matches!(
+                token.as_str(),
+                "the"
+                    | "and"
+                    | "for"
+                    | "with"
+                    | "from"
+                    | "that"
+                    | "this"
+                    | "turn"
+                    | "file"
+                    | "files"
+                    | "edit"
+                    | "code"
+                    | "best"
+                    | "then"
+                    | "just"
+                    | "start"
+                    | "next"
+            ) {
+                continue;
+            }
+            if !tokens.contains(&token) {
+                tokens.push(token);
+            }
+        }
+    }
+    tokens
 }
 
 fn normalize_execution_pressure_source(source: &str, workspace_root: &Path) -> Option<String> {
@@ -2828,11 +3181,12 @@ mod tests {
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-        InitialAction, InitialActionDecision, InterpretationContext, InterpretationRequest,
-        ModelPaths, ModelRegistry, PlannerAction, PlannerCapability, PlannerGraphBranch,
-        PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerRequest, PlannerStrategyKind,
-        PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
-        RetrievalMode, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+        InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
+        InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction, PlannerCapability,
+        PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerRequest,
+        PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision,
+        RetainedEvidence, RetrievalMode, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
@@ -3099,6 +3453,14 @@ mod tests {
         }
     }
 
+    fn initial_action_decision(action: InitialAction, rationale: &str) -> InitialActionDecision {
+        InitialActionDecision {
+            action,
+            rationale: rationale.to_string(),
+            edit: InitialEditInstruction::default(),
+        }
+    }
+
     #[test]
     fn runtime_lane_config_defaults_to_synthesizer_responses() {
         let config = RuntimeLaneConfig::new("qwen-1.5b", None);
@@ -3186,10 +3548,7 @@ mod tests {
 
         let plan = super::execution_plan_from_initial_action(
             &prepared,
-            InitialActionDecision {
-                action: InitialAction::Answer,
-                rationale: "no workspace resources needed".to_string(),
-            },
+            initial_action_decision(InitialAction::Answer, "no workspace resources needed"),
         );
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
@@ -3214,14 +3573,14 @@ mod tests {
 
         let plan = super::execution_plan_from_initial_action(
             &prepared,
-            InitialActionDecision {
-                action: InitialAction::Workspace {
+            initial_action_decision(
+                InitialAction::Workspace {
                     action: WorkspaceAction::Shell {
                         command: "git status".to_string(),
                     },
                 },
-                rationale: "explicit workspace action".to_string(),
-            },
+                "explicit workspace action",
+            ),
         );
 
         assert_eq!(plan.intent, TurnIntent::Planned);
@@ -3252,14 +3611,14 @@ mod tests {
 
         let plan = super::execution_plan_from_initial_action(
             &prepared,
-            InitialActionDecision {
-                action: InitialAction::Workspace {
+            initial_action_decision(
+                InitialAction::Workspace {
                     action: WorkspaceAction::Inspect {
                         command: "git status".to_string(),
                     },
                 },
-                rationale: "inspect repo state first".to_string(),
-            },
+                "inspect repo state first",
+            ),
         );
 
         assert_eq!(plan.intent, TurnIntent::Planned);
@@ -3286,12 +3645,12 @@ mod tests {
 
         let plan = super::execution_plan_from_initial_action(
             &prepared,
-            InitialActionDecision {
-                action: InitialAction::Stop {
+            initial_action_decision(
+                InitialAction::Stop {
                     reason: "no recursive resource use needed".to_string(),
                 },
-                rationale: "answer directly".to_string(),
-            },
+                "answer directly",
+            ),
         );
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
@@ -3322,10 +3681,10 @@ mod tests {
         };
         let request_log = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
-            InitialActionDecision {
-                action: InitialAction::Answer,
-                rationale: "the turn can be answered directly after interpretation".to_string(),
-            },
+            initial_action_decision(
+                InitialAction::Answer,
+                "the turn can be answered directly after interpretation",
+            ),
             Vec::new(),
             Arc::clone(&request_log),
         ));
@@ -3410,10 +3769,7 @@ mod tests {
             gatherer: None,
         };
         let planner = Arc::new(TestPlanner::new(
-            InitialActionDecision {
-                action: InitialAction::Answer,
-                rationale: "answer directly".to_string(),
-            },
+            initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -3492,8 +3848,8 @@ mod tests {
             }),
         };
         let planner = Arc::new(TestPlanner::new(
-            InitialActionDecision {
-                action: InitialAction::Workspace {
+            initial_action_decision(
+                InitialAction::Workspace {
                     action: WorkspaceAction::Search {
                         query: "what should the recursive gatherer inspect".to_string(),
                         mode: RetrievalMode::Graph,
@@ -3501,8 +3857,8 @@ mod tests {
                         intent: Some("repo-question".to_string()),
                     },
                 },
-                rationale: "start with bounded recursive retrieval".to_string(),
-            },
+                "start with bounded recursive retrieval",
+            ),
             vec![RecursivePlannerDecision {
                 action: PlannerAction::Stop {
                     reason: "enough graph evidence".to_string(),
@@ -3691,8 +4047,8 @@ mod tests {
         };
         let request_log = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
-            InitialActionDecision {
-                action: InitialAction::Workspace {
+            initial_action_decision(
+                InitialAction::Workspace {
                     action: WorkspaceAction::Search {
                         query: "planner loop edit target".to_string(),
                         mode: RetrievalMode::Linear,
@@ -3700,8 +4056,8 @@ mod tests {
                         intent: Some("implementation search".to_string()),
                     },
                 },
-                rationale: "start with one bounded search".to_string(),
-            },
+                "start with one bounded search",
+            ),
             vec![
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -3776,6 +4132,165 @@ mod tests {
             action,
             WorkspaceAction::Search { query, .. } if query == "keep searching broadly"
         )));
+    }
+
+    #[test]
+    fn known_edit_initial_decision_bootstraps_to_a_file_read() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::write(
+            workspace.path().join("src/application/mod.rs"),
+            "fn planner_loop() {}\n",
+        )
+        .expect("write app file");
+        fs::write(workspace.path().join("README.md"), "# Docs\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "known edit turn; controller should choose the file".to_string(),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec![
+                        "README.md".to_string(),
+                        "src/application/mod.rs".to_string(),
+                    ],
+                },
+            },
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "the file was enough".to_string(),
+                },
+                rationale: "stop after the read".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt("edit the planner loop")
+                .await
+                .expect("process prompt")
+        });
+
+        let executed_actions = synthesizer
+            .executed_actions
+            .lock()
+            .expect("executed actions lock");
+        assert!(matches!(
+            executed_actions.first(),
+            Some(WorkspaceAction::Read { path }) if path == "src/application/mod.rs"
+        ));
+    }
+
+    #[test]
+    fn known_edit_bootstrap_uses_vector_evidence_to_pick_the_best_candidate() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src")).expect("create src");
+        fs::write(workspace.path().join("src/one.rs"), "fn one() {}\n").expect("write one");
+        fs::write(workspace.path().join("src/two.rs"), "fn two() {}\n").expect("write two");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: Some(PreparedGathererLane {
+                provider: GathererProvider::SiftDirect,
+                label: "sift-direct".to_string(),
+                model_id: None,
+                paths: None,
+            }),
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Workspace {
+                    action: WorkspaceAction::Search {
+                        query: "find the edit target".to_string(),
+                        mode: RetrievalMode::Linear,
+                        strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                        intent: Some("implementation search".to_string()),
+                    },
+                },
+                rationale: "controller should still choose the file".to_string(),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["src/one.rs".to_string(), "src/two.rs".to_string()],
+                },
+            },
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "done".to_string(),
+                },
+                rationale: "stop".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let gatherer = Arc::new(RecordingGatherer {
+            recorded_requests: Arc::new(Mutex::new(Vec::new())),
+            bundle: EvidenceBundle::new(
+                "vector bootstrap ranked the file candidates".to_string(),
+                vec![EvidenceItem {
+                    source: "src/two.rs".to_string(),
+                    snippet: "most relevant".to_string(),
+                    rationale: "closest semantic match".to_string(),
+                    rank: 1,
+                }],
+            ),
+        });
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: Some(gatherer),
+            });
+            service
+                .process_prompt("edit the second implementation")
+                .await
+                .expect("process prompt")
+        });
+
+        let executed_actions = synthesizer
+            .executed_actions
+            .lock()
+            .expect("executed actions lock");
+        assert!(matches!(
+            executed_actions.first(),
+            Some(WorkspaceAction::Read { path }) if path == "src/two.rs"
+        ));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {
