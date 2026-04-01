@@ -73,11 +73,43 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   flex: 1;
   overflow: auto;
   padding: 4px 6px 20px 4px;
+  position: relative;
+}
+.trace-canvas {
+  position: relative;
+  min-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  padding-bottom: 6px;
+}
+.trace-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.trace-overlay__glow {
+  fill: none;
+  stroke: rgba(88, 166, 255, 0.2);
+  stroke-width: 14;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.trace-overlay__line {
+  fill: none;
+  stroke: rgba(188, 140, 255, 0.75);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 10 12;
 }
 .trace-row {
+  position: relative;
+  z-index: 1;
   display: flex;
   gap: 14px;
   justify-content: flex-start;
@@ -86,6 +118,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 .trace-row.reverse { flex-direction: row-reverse; }
 .trace-node {
   position: relative;
+  z-index: 1;
   width: var(--tile-size);
   min-width: var(--tile-size);
   aspect-ratio: 1 / 1;
@@ -496,14 +529,23 @@ function renderTraceDAG(graph) {
     rows.push(sorted.slice(i, i + columns));
   }
 
-  board.innerHTML = rows
-    .map((row, rowIndex) => {
-      const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
-      return '<div class="trace-row' + reverse + '">' +
-        row.map((node) => renderTraceNode(node, branchLabels)).join('') +
-      '</div>';
-    })
-    .join('');
+  board.innerHTML =
+    '<div class="trace-canvas">' +
+      '<svg class="trace-overlay" id="trace-overlay" aria-hidden="true">' +
+        '<path class="trace-overlay__glow" id="trace-overlay-glow"></path>' +
+        '<path class="trace-overlay__line" id="trace-overlay-line"></path>' +
+      '</svg>' +
+      rows
+        .map((row, rowIndex) => {
+          const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
+          return '<div class="trace-row' + reverse + '">' +
+            row.map((node) => renderTraceNode(node, branchLabels)).join('') +
+          '</div>';
+        })
+        .join('') +
+    '</div>';
+
+  requestAnimationFrame(() => drawTraceSnake(board));
 }
 
 function renderTraceNode(node, branchLabels) {
@@ -535,6 +577,50 @@ function renderTraceNode(node, branchLabels) {
 
 function formatTraceKind(kind) {
   return kind.replace(/_/g, ' ');
+}
+
+function drawTraceSnake(board) {
+  const canvas = board.querySelector('.trace-canvas');
+  const overlay = document.getElementById('trace-overlay');
+  const glow = document.getElementById('trace-overlay-glow');
+  const line = document.getElementById('trace-overlay-line');
+  if (!canvas || !overlay || !glow || !line) {
+    return;
+  }
+
+  const nodes = Array.from(canvas.querySelectorAll('.trace-node'));
+  if (nodes.length < 2) {
+    overlay.setAttribute('viewBox', '0 0 1 1');
+    glow.setAttribute('d', '');
+    line.setAttribute('d', '');
+    return;
+  }
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const points = nodes.map((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      x: rect.left - canvasRect.left + rect.width / 2,
+      y: rect.top - canvasRect.top + rect.height / 2,
+    };
+  });
+
+  const width = Math.max(canvas.scrollWidth, Math.ceil(canvasRect.width));
+  const height = Math.max(canvas.scrollHeight, Math.ceil(canvasRect.height));
+  overlay.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+  overlay.setAttribute('width', width);
+  overlay.setAttribute('height', height);
+
+  let path = 'M ' + points[0].x + ' ' + points[0].y;
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1];
+    const next = points[i];
+    const midX = (prev.x + next.x) / 2;
+    path += ' C ' + midX + ' ' + prev.y + ', ' + midX + ' ' + next.y + ', ' + next.x + ' ' + next.y;
+  }
+
+  glow.setAttribute('d', path);
+  line.setAttribute('d', path);
 }
 
 async function replayHistory() {
