@@ -615,6 +615,7 @@ body {
 <script>
 let sessionId = null;
 let eventSource = null;
+let transcriptReplayDebounce = null;
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 
 const KIND_COLORS = {
@@ -658,19 +659,46 @@ function addMessage(cls, text) {
   el.scrollIntoView({ behavior: 'smooth' });
 }
 
-function addEventRow(badge, badgeCls, text, htmlContent = null) {
+function clearMessages() {
+  document.getElementById('messages').innerHTML = '';
+}
+
+function eventGroup() {
   let group = document.getElementById('messages').lastElementChild;
   if (!group || !group.classList.contains('events-group')) {
     group = document.createElement('div');
     group.className = 'events-group';
     document.getElementById('messages').appendChild(group);
   }
+  return group;
+}
+
+function addEventRow(badge, badgeCls, text, htmlContent = null, options = {}) {
+  const { key = null, replace = false } = options;
+  const group = eventGroup();
+  if (key) {
+    const existing = group.querySelector('[data-event-key="' + key + '"]');
+    if (existing) {
+      const content = htmlContent === null ? escapeHtml(text) : htmlContent;
+      existing.innerHTML = '<span class="event-badge ' + badgeCls + '">' + badge + '</span><span>' + content + '</span>';
+      existing.dataset.eventText = text;
+      existing.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+  }
+  if (replace && group.lastElementChild && group.lastElementChild.classList.contains('event-row')) {
+    group.lastElementChild.remove();
+  }
   const row = document.createElement('div');
   row.className = 'event-row';
   const content = htmlContent === null ? escapeHtml(text) : htmlContent;
   row.innerHTML = '<span class="event-badge ' + badgeCls + '">' + badge + '</span><span>' + content + '</span>';
+  if (key) {
+    row.dataset.eventKey = key;
+  }
+  row.dataset.eventText = text;
   group.appendChild(row);
-  row.scrollIntoView({ behavior: 'smooth' });
+  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function escapeHtml(s) {
@@ -806,11 +834,8 @@ function handleEvent(ev) {
     const eta = ev.eta_seconds == null ? 'unknown' : formatDuration(ev.eta_seconds);
     const strategy = ev.strategy ? ' strategy=' + ev.strategy : '';
     const details = ev.detail ? ' · ' + ev.detail : '';
-    addEventRow(
-      'gather',
-      'gatherer',
-      'searching (' + ev.phase + ')' + strategy + ' · eta ' + eta + details
-    );
+    const progressText = 'searching (' + ev.phase + ')' + strategy + ' · eta ' + eta + details;
+    addEventRow('gather', 'gatherer', progressText, null, { key: 'gather-progress' });
   } else if (t === 'planner_summary') {
     addEventRow('planner', 'planner', ev.strategy + ' ' + ev.mode + ' (' + ev.steps + ' steps)');
   } else if (t === 'synthesis_ready') {
@@ -819,6 +844,7 @@ function handleEvent(ev) {
     } else {
       addEventRow('synth', 'synthesis', ev.grounded ? 'Grounded' : 'Direct');
     }
+    scheduleTranscriptReplay();
   } else if (t === 'route_selected') {
     addEventRow('route', 'route', truncate(ev.summary, 80));
   } else if (t === 'fallback') {
@@ -877,6 +903,16 @@ function refreshTraceGraph() {
       renderTraceDAG(graph);
     } catch (e) { /* ignore fetch errors during turn processing */ }
   }, 200);
+}
+
+function scheduleTranscriptReplay() {
+  if (transcriptReplayDebounce) {
+    return;
+  }
+  transcriptReplayDebounce = setTimeout(async () => {
+    transcriptReplayDebounce = null;
+    await replayHistory({ reset: true });
+  }, 250);
 }
 
 function renderTraceDAG(graph) {
@@ -1118,11 +1154,14 @@ function bindTraceDetailPlacement(board) {
   }
 }
 
-async function replayHistory() {
+async function replayHistory({ reset = false } = {}) {
   try {
     const res = await fetch('/trace/replay');
     if (!res.ok) return;
     const replays = await res.json();
+    if (reset) {
+      clearMessages();
+    }
     for (const replay of replays) {
       for (const record of replay.records) {
         const k = record.kind;
@@ -1166,8 +1205,13 @@ async function replayHistory() {
   } catch (e) { /* ignore fetch errors */ }
 }
 
-replayHistory().then(() => refreshTraceGraph());
-connectSSE();
+async function bootstrapWebUi() {
+  await replayHistory({ reset: true });
+  refreshTraceGraph();
+  connectSSE();
+}
+
+bootstrapWebUi();
 window.addEventListener('resize', () => {
   if (latestTraceGraph) {
     renderTraceDAG(latestTraceGraph);
