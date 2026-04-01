@@ -122,7 +122,7 @@ impl SiftDirectGathererAdapter {
         let response = env.search(&search_request)?;
         if total_chunks > 0
             && request.planning.retrieval_strategy
-                == crate::domain::ports::RetrievalStrategy::Hybrid
+                == crate::domain::ports::RetrievalStrategy::Vector
         {
             progress(&SearchProgress::Embedding {
                 phase: SearchPhase::Embedding,
@@ -393,10 +393,10 @@ fn describe_direct_sift_progress(
 fn search_plan_for_strategy(strategy: crate::domain::ports::RetrievalStrategy) -> sift::SearchPlan {
     match strategy {
         crate::domain::ports::RetrievalStrategy::Lexical => sift::SearchPlan::default_lexical(),
-        crate::domain::ports::RetrievalStrategy::Hybrid => sift::SearchPlan {
-            name: "hybrid".to_string(),
+        crate::domain::ports::RetrievalStrategy::Vector => sift::SearchPlan {
+            name: "vector".to_string(),
             query_expansion: sift::QueryExpansionPolicy::None,
-            retrievers: vec![sift::RetrieverPolicy::Bm25, sift::RetrieverPolicy::Vector],
+            retrievers: vec![sift::RetrieverPolicy::Vector],
             fusion: sift::FusionPolicy::Rrf,
             reranking: sift::RerankingPolicy::None,
         },
@@ -521,7 +521,7 @@ mod tests {
         .with_planning(
             PlannerConfig::default()
                 .with_mode(RetrievalMode::Graph)
-                .with_retrieval_strategy(RetrievalStrategy::Hybrid),
+                .with_retrieval_strategy(RetrievalStrategy::Vector),
         )
         .with_prior_context(vec!["Prefer runtime-related files first.".to_string()]);
 

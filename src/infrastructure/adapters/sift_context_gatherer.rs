@@ -121,10 +121,10 @@ impl ContextGatherer for SiftContextGathererAdapter {
 fn search_plan_for_strategy(strategy: RetrievalStrategy) -> SearchPlan {
     match strategy {
         RetrievalStrategy::Lexical => SearchPlan::default_lexical(),
-        RetrievalStrategy::Hybrid => SearchPlan {
-            name: "hybrid".to_string(),
+        RetrievalStrategy::Vector => SearchPlan {
+            name: "vector".to_string(),
             query_expansion: QueryExpansionPolicy::None,
-            retrievers: vec![RetrieverPolicy::Bm25, RetrieverPolicy::Vector],
+            retrievers: vec![RetrieverPolicy::Vector],
             fusion: FusionPolicy::Rrf,
             reranking: RerankingPolicy::None,
         },

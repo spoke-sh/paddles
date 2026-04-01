@@ -3169,7 +3169,7 @@ mod tests {
                     action: WorkspaceAction::Search {
                         query: "what should the recursive gatherer inspect".to_string(),
                         mode: RetrievalMode::Graph,
-                        strategy: crate::domain::ports::RetrievalStrategy::Hybrid,
+                        strategy: crate::domain::ports::RetrievalStrategy::Vector,
                         intent: Some("repo-question".to_string()),
                     },
                 },

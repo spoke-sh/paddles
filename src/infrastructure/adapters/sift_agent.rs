@@ -2407,7 +2407,7 @@ Precedence Rules:\n\
 - Assess coverage confidence: \"high\" if all aspects of the user prompt are covered by rules/procedures, \"low\" if major gaps exist.\n\
 \n\
 Workspace action schema:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\"}}\n\
@@ -2493,7 +2493,7 @@ Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2502,7 +2502,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
@@ -2511,6 +2511,7 @@ Rules:\n\
 - Answer or stop as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
+- Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
@@ -2553,7 +2554,7 @@ Return ONLY one valid JSON initial action.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2562,11 +2563,12 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2600,7 +2602,7 @@ Return ONLY one valid JSON object.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2609,13 +2611,14 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
+Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2644,7 +2647,7 @@ Choose the NEXT bounded workspace resource action for this turn.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2653,13 +2656,14 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
 - Choose retrieval mode and strategy explicitly when you search or refine.\n\
+- Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
@@ -2709,7 +2713,7 @@ fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
 Return ONLY one valid JSON planner action.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2718,11 +2722,12 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2755,7 +2760,7 @@ If the loop state already contains enough evidence, return stop.\n\
 Return ONLY one valid JSON planner action.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -2764,13 +2769,14 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"lexical|hybrid\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
+Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\

@@ -408,7 +408,7 @@ impl HttpProviderAdapter {
 You must respond with a single JSON object selecting your next action. Available actions:
 
 {"action":"answer","rationale":"..."}
-{"action":"search","query":"...","mode":"graph","strategy":"hybrid","intent":"...","rationale":"..."}
+{"action":"search","query":"...","mode":"graph","strategy":"bm25|vector","intent":"...","rationale":"..."}
 {"action":"list_files","pattern":"...","rationale":"..."}
 {"action":"read","path":"...","rationale":"..."}
 {"action":"inspect","command":"...","rationale":"..."}
@@ -447,7 +447,7 @@ Rules:
                 action: WorkspaceAction::Search {
                     query: envelope.query.unwrap_or_default(),
                     mode: RetrievalMode::Graph,
-                    strategy: RetrievalStrategy::Hybrid,
+                    strategy: envelope.strategy.unwrap_or_default(),
                     intent: envelope.intent,
                 },
             },
@@ -870,6 +870,8 @@ struct PlannerEnvelope {
     pattern: Option<String>,
     #[serde(default)]
     intent: Option<String>,
+    #[serde(default)]
+    strategy: Option<RetrievalStrategy>,
 }
 
 fn extract_json(text: &str) -> Option<&str> {

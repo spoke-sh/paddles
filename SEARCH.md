@@ -13,7 +13,7 @@ This document is the source of truth for how search works in `paddles`.
 `sift` owns retrieval execution.
 
 - It indexes the workspace.
-- It executes lexical or hybrid retrieval against local artifacts.
+- It executes fast `bm25` or `vector` retrieval against local artifacts.
 - It ranks results and produces snippets/evidence payloads.
 - It emits low-level progress during direct retrieval stages.
 
@@ -24,7 +24,7 @@ This document is the source of truth for how search works in `paddles`.
 The direct `sift` retrieval backend currently provides:
 
 - local workspace indexing
-- lexical and hybrid search execution
+- `bm25` and vector search execution
 - ranked hits with snippets
 - stage-level progress during initialization, indexing, embedding, retrieval, and ranking
 - evidence bundles returned to the planner/synthesizer boundary with typed metadata

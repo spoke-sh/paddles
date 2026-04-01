@@ -159,15 +159,16 @@ impl RetrievalMode {
 #[serde(rename_all = "snake_case")]
 pub enum RetrievalStrategy {
     #[default]
+    #[serde(alias = "bm25")]
     Lexical,
-    Hybrid,
+    Vector,
 }
 
 impl RetrievalStrategy {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Lexical => "lexical",
-            Self::Hybrid => "hybrid",
+            Self::Lexical => "bm25",
+            Self::Vector => "vector",
         }
     }
 }
