@@ -32,7 +32,7 @@ started_at: 2026-03-31T18:50:02
 | Title | Type | Status |
 |-------|------|--------|
 | [Replace Sift Autonomous Gatherer With Direct Retrieval Adapter](../../../../stories/VFV0xnwcf/README.md) | feat | in-progress |
-| [Surface Concrete Sift Retrieval Stages In Progress Events](../../../../stories/VFV0xoFck/README.md) | feat | backlog |
+| [Surface Concrete Sift Retrieval Stages In Progress Events](../../../../stories/VFV0xoFck/README.md) | feat | in-progress |
 | [Rename And Rewire Gatherer Configuration Away From Autonomous Planning](../../../../stories/VFV0xoWcl/README.md) | feat | backlog |
 | [Document Direct Search Boundary Constraints And Capabilities](../../../../stories/VFV0xopci/README.md) | feat | backlog |
 <!-- END GENERATED -->
