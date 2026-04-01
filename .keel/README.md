@@ -254,11 +254,11 @@
 |--------|--------|
 | [Direct Sift Retrieval Boundary](epics/VFV0VmEj0/voyages/VFV0uvpPX/) | done |
 
-### [Canonical Transcript Plane For Cross-Surface Conversations](epics/VFYbtfpVG/) (active)
+### [Canonical Transcript Plane For Cross-Surface Conversations](epics/VFYbtfpVG/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Shared Conversation Transcript Plane](epics/VFYbtfpVG/voyages/VFYc27reW/) | planned |
+| [Shared Conversation Transcript Plane](epics/VFYbtfpVG/voyages/VFYc27reW/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

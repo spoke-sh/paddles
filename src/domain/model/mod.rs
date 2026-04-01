@@ -5,6 +5,7 @@ pub mod context_quality;
 pub mod interpretation;
 pub mod threading;
 pub mod traces;
+pub mod transcript;
 pub mod turns;
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use context_quality::{ContextPressure, PressureFactor, PressureLevel, PressureTracker};
@@ -25,6 +26,10 @@ pub use traces::{
     TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
     TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
     TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+};
+pub use transcript::{
+    ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
+    ConversationTranscriptUpdate, NullTranscriptUpdateSink, TranscriptUpdateSink,
 };
 pub use turns::{MultiplexEventSink, NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
 

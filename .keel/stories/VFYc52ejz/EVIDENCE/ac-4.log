@@ -1,0 +1,12 @@
+---
+recorded_at: 2026-04-01T10:25:54.887665108-07:00
+command: rg -n "process_prompt_with_session_and_sink|process_prompt_in_session_with_sink" /home/alex/workspace/spoke-sh/paddles/src/application/mod.rs /home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs /home/alex/workspace/spoke-sh/paddles/src/main.rs
+---
+/home/alex/workspace/spoke-sh/paddles/src/main.rs:484:                .process_prompt_in_session_with_sink(
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs:190:        .process_prompt_in_session_with_sink(&body.prompt, session, sink)
+/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs:1166:        self.process_prompt_in_session_with_sink(prompt, session, Arc::clone(&self.event_sink))
+/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs:1176:        self.process_prompt_in_session_with_sink(prompt, session, event_sink)
+/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs:1180:    pub async fn process_prompt_in_session_with_sink(
+/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs:1495:        self.process_prompt_in_session_with_sink(
+/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs:4024:                .process_prompt_in_session_with_sink(
+/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs:4106:                .process_prompt_in_session_with_sink(

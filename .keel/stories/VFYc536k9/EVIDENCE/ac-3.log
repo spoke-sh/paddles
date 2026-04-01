@@ -1,0 +1,17 @@
+---
+recorded_at: 2026-04-01T10:26:15.926924098-07:00
+command: rg -n "/sessions/\{id\}/transcript|transcript_update|refreshConversationTranscript|sendTurn\(|trace/replay|synthesis_ready" /home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs /home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html
+---
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:602:    <button id="send" onclick="sendTurn()">Send</button>
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:655:  transcriptEventSource.addEventListener('transcript_update', async () => {
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:656:    await refreshConversationTranscript({ reset: true, only_if_changed: true });
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:862:  } else if (t === 'synthesis_ready') {
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:882:async function sendTurn() {
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:902:    await refreshConversationTranscript({ reset: true, only_if_changed: true });
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:912:  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); }
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:1178:async function refreshConversationTranscript({ reset = false, only_if_changed = false } = {}) {
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html:1197:  await refreshConversationTranscript({ reset: true });
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs:118:        .route("/sessions/{id}/transcript", get(conversation_transcript))
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs:120:            "/sessions/{id}/transcript/events",
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs:127:        .route("/trace/replay", get(trace_replay_all))
+/home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/mod.rs:217:            Some(Ok(Event::default().event("transcript_update").data(json)))

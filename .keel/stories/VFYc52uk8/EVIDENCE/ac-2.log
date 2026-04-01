@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T10:26:08.474754291-07:00
+mode: manual
+---
+Implementation note for manual verification: the TUI now registers InteractiveTranscriptUpdateSink and, on matching ConversationTranscriptUpdate, replays the shared conversation transcript and syncs it into the visible transcript without restart. This is the intended path for web-originated turns to appear in the TUI once manually verified.

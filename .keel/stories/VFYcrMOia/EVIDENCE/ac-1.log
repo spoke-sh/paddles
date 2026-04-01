@@ -1,0 +1,13 @@
+---
+recorded_at: 2026-04-01T10:26:26.604536216-07:00
+command: rg -n "transcriptEventSource|transcript_update|refreshConversationTranscript|synthesis_ready" /home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html
+---
+618:let transcriptEventSource = null;
+648:  if (transcriptEventSource) transcriptEventSource.close();
+654:  transcriptEventSource = new EventSource('/sessions/' + sessionId + '/transcript/events');
+655:  transcriptEventSource.addEventListener('transcript_update', async () => {
+656:    await refreshConversationTranscript({ reset: true, only_if_changed: true });
+862:  } else if (t === 'synthesis_ready') {
+902:    await refreshConversationTranscript({ reset: true, only_if_changed: true });
+1178:async function refreshConversationTranscript({ reset = false, only_if_changed = false } = {}) {
+1197:  await refreshConversationTranscript({ reset: true });

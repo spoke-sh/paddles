@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T10:26:26.734306276-07:00
+mode: manual
+---
+Implementation note for manual verification: TUI, web, and plain interactive CLI now attach to the same shared conversation identity, and transcript visibility is driven by conversation replay plus transcript_update notifications rather than reload/restart repair loops. A live cross-surface spot-check remains the final acceptance step.

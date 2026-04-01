@@ -1,17 +1,18 @@
 use crate::application::MechSuitService;
-use crate::domain::model::{TraceRecordKind, TurnEvent, TurnEventSink};
+use crate::domain::model::{
+    ConversationTranscript, ConversationTranscriptUpdate, TaskTraceId, TraceRecordKind,
+    TranscriptUpdateSink, TurnEvent, TurnEventSink,
+};
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, Json};
 use axum::routing::{get, post};
-use paddles_conversation::ConversationSession;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
@@ -19,12 +20,8 @@ use tower_http::cors::CorsLayer;
 struct AppState {
     service: Arc<MechSuitService>,
     trace_recorder: Arc<dyn TraceRecorder>,
-    sessions: Mutex<HashMap<String, SessionEntry>>,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
-}
-
-struct SessionEntry {
-    session: ConversationSession,
+    transcript_tx: broadcast::Sender<ConversationTranscriptUpdate>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +43,9 @@ struct TurnRequest {
 struct TurnResponse {
     response: String,
 }
+
+#[derive(Serialize)]
+struct TranscriptResponse(ConversationTranscript);
 
 #[derive(Serialize)]
 struct TraceGraphResponse {
@@ -96,14 +96,18 @@ pub fn router(
     trace_recorder: Arc<dyn TraceRecorder>,
 ) -> (Router, Arc<dyn TurnEventSink>) {
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
+    let (transcript_tx, _) = broadcast::channel::<ConversationTranscriptUpdate>(256);
     let observer: Arc<dyn TurnEventSink> = Arc::new(GlobalBroadcastSink {
         tx: event_tx.clone(),
     });
+    service.register_transcript_observer(Arc::new(BroadcastTranscriptSink {
+        tx: transcript_tx.clone(),
+    }));
     let state = Arc::new(AppState {
         service,
         trace_recorder,
-        sessions: Mutex::new(HashMap::new()),
         event_tx,
+        transcript_tx,
     });
 
     let app = Router::new()
@@ -111,6 +115,11 @@ pub fn router(
         .route("/health", get(health))
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
+        .route("/sessions/{id}/transcript", get(conversation_transcript))
+        .route(
+            "/sessions/{id}/transcript/events",
+            get(conversation_transcript_event_stream),
+        )
         .route("/sessions/{id}/events", get(event_stream))
         .route("/events", get(global_event_stream))
         .route("/sessions/{id}/trace/graph", get(trace_graph))
@@ -136,6 +145,16 @@ impl TurnEventSink for GlobalBroadcastSink {
     }
 }
 
+struct BroadcastTranscriptSink {
+    tx: broadcast::Sender<ConversationTranscriptUpdate>,
+}
+
+impl TranscriptUpdateSink for BroadcastTranscriptSink {
+    fn emit(&self, update: ConversationTranscriptUpdate) {
+        let _ = self.tx.send(update);
+    }
+}
+
 async fn index_page() -> Html<&'static str> {
     Html(include_str!("index.html"))
 }
@@ -145,13 +164,8 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn create_session(State(state): State<Arc<AppState>>) -> Json<SessionResponse> {
-    let session = state.service.create_conversation_session();
+    let session = state.service.shared_conversation_session();
     let session_id = session.task_id().as_str().to_string();
-    state
-        .sessions
-        .lock()
-        .await
-        .insert(session_id.clone(), SessionEntry { session });
     Json(SessionResponse { session_id })
 }
 
@@ -160,13 +174,11 @@ async fn submit_turn(
     Path(id): Path<String>,
     Json(body): Json<TurnRequest>,
 ) -> Result<Json<TurnResponse>, axum::http::StatusCode> {
-    let session = {
-        let sessions = state.sessions.lock().await;
-        sessions
-            .get(&id)
-            .map(|entry| entry.session.clone())
-            .ok_or(axum::http::StatusCode::NOT_FOUND)?
-    };
+    let task_id = parse_task_id(&id)?;
+    let session = state
+        .service
+        .conversation_session(&task_id)
+        .ok_or(axum::http::StatusCode::NOT_FOUND)?;
 
     let sink: Arc<dyn TurnEventSink> = Arc::new(BroadcastEventSink {
         session_id: id,
@@ -180,6 +192,34 @@ async fn submit_turn(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(TurnResponse { response }))
+}
+
+async fn conversation_transcript(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<TranscriptResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let transcript = state
+        .service
+        .replay_conversation_transcript(&task_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(TranscriptResponse(transcript)))
+}
+
+async fn conversation_transcript_event_stream(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.transcript_tx.subscribe();
+    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
+        Ok(update) if update.task_id.as_str() == id => {
+            let json = serde_json::to_string(&update).unwrap_or_default();
+            Some(Ok(Event::default().event("transcript_update").data(json)))
+        }
+        _ => None,
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn event_stream(
@@ -217,13 +257,7 @@ async fn trace_graph(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<TraceGraphResponse>, axum::http::StatusCode> {
-    let task_id = {
-        let sessions = state.sessions.lock().await;
-        sessions
-            .get(&id)
-            .map(|entry| entry.session.task_id())
-            .ok_or(axum::http::StatusCode::NOT_FOUND)?
-    };
+    let task_id = parse_task_id(&id)?;
 
     let replay = state
         .trace_recorder
@@ -231,6 +265,10 @@ async fn trace_graph(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(build_trace_graph(&[replay])))
+}
+
+fn parse_task_id(id: &str) -> Result<TaskTraceId, axum::http::StatusCode> {
+    TaskTraceId::new(id).map_err(|_| axum::http::StatusCode::BAD_REQUEST)
 }
 
 async fn trace_replay_all(

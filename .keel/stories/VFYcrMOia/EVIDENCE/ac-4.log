@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-04-01T10:26:26.810474083-07:00
+command: git -C /home/alex/workspace/spoke-sh/paddles diff -- Cargo.toml Cargo.lock package.json pnpm-lock.yaml yarn.lock
+---

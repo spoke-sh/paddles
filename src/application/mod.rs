@@ -5,12 +5,13 @@ pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifac
 
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
-    ConversationThreadRef, MultiplexEventSink, TaskTraceId, ThreadCandidate, ThreadDecision,
-    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
-    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
-    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    ConversationThreadRef, ConversationTranscript, ConversationTranscriptUpdate,
+    MultiplexEventSink, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
+    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
+    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord,
+    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot,
+    TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent,
+    TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -64,8 +65,11 @@ pub struct MechSuitService {
     verbose: AtomicU8,
     event_sink: Arc<dyn TurnEventSink>,
     event_observers: Mutex<Vec<Arc<dyn TurnEventSink>>>,
+    transcript_observers: Mutex<Vec<Arc<dyn TranscriptUpdateSink>>>,
     trace_recorder: Arc<dyn TraceRecorder>,
     trace_counter: AtomicU64,
+    sessions: Mutex<HashMap<String, ConversationSession>>,
+    shared_session_id: Mutex<Option<String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -922,8 +926,11 @@ impl MechSuitService {
             verbose: AtomicU8::new(0),
             event_sink: Arc::new(ConsoleTurnEventSink::default()),
             event_observers: Mutex::new(Vec::new()),
+            transcript_observers: Mutex::new(Vec::new()),
             trace_recorder,
             trace_counter: AtomicU64::new(1),
+            sessions: Mutex::new(HashMap::new()),
+            shared_session_id: Mutex::new(None),
         }
     }
 
@@ -938,6 +945,27 @@ impl MechSuitService {
             .lock()
             .expect("event observers lock")
             .push(observer);
+    }
+
+    pub fn register_transcript_observer(&self, observer: Arc<dyn TranscriptUpdateSink>) {
+        self.transcript_observers
+            .lock()
+            .expect("transcript observers lock")
+            .push(observer);
+    }
+
+    fn emit_transcript_update(&self, task_id: &TaskTraceId) {
+        let update = ConversationTranscriptUpdate {
+            task_id: task_id.clone(),
+        };
+        let observers = self
+            .transcript_observers
+            .lock()
+            .expect("transcript observers lock")
+            .clone();
+        for observer in observers {
+            observer.emit(update.clone());
+        }
     }
 
     pub fn replay_all_traces(&self) -> Result<Vec<crate::domain::model::TraceReplay>> {
@@ -968,8 +996,70 @@ impl MechSuitService {
         TaskTraceId::new(format!("task-{sequence:06}")).expect("generated task trace id")
     }
 
+    fn register_session(&self, session: ConversationSession) -> ConversationSession {
+        self.sessions
+            .lock()
+            .expect("conversation sessions lock")
+            .insert(session.task_id().as_str().to_string(), session.clone());
+        session
+    }
+
     pub fn create_conversation_session(&self) -> ConversationSession {
-        ConversationSession::new(self.allocate_task_id())
+        self.register_session(ConversationSession::new(self.allocate_task_id()))
+    }
+
+    pub fn shared_conversation_session(&self) -> ConversationSession {
+        if let Some(session_id) = self
+            .shared_session_id
+            .lock()
+            .expect("shared session lock")
+            .clone()
+            && let Some(session) = self
+                .sessions
+                .lock()
+                .expect("conversation sessions lock")
+                .get(&session_id)
+                .cloned()
+        {
+            return session;
+        }
+
+        let session = self.create_conversation_session();
+        *self.shared_session_id.lock().expect("shared session lock") =
+            Some(session.task_id().as_str().to_string());
+        session
+    }
+
+    pub fn conversation_session(&self, task_id: &TaskTraceId) -> Option<ConversationSession> {
+        self.sessions
+            .lock()
+            .expect("conversation sessions lock")
+            .get(task_id.as_str())
+            .cloned()
+    }
+
+    pub fn replay_conversation_transcript(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationTranscript> {
+        match self.trace_recorder.replay(task_id) {
+            Ok(replay) => Ok(ConversationTranscript::from_trace_replay(&replay)),
+            Err(err) => {
+                let known_session = self
+                    .sessions
+                    .lock()
+                    .expect("conversation sessions lock")
+                    .contains_key(task_id.as_str());
+                if known_session {
+                    Ok(ConversationTranscript {
+                        task_id: task_id.clone(),
+                        entries: Vec::new(),
+                    })
+                } else {
+                    Err(err)
+                }
+            }
+        }
     }
 
     /// Execute the boot sequence.
@@ -1115,6 +1205,7 @@ impl MechSuitService {
             active_thread.clone(),
         ));
         trace.record_turn_start(prompt, &interpretation, &prepared);
+        self.emit_transcript_update(&session.task_id());
         trace.emit(TurnEvent::InterpretationContext {
             context: interpretation.clone(),
         });
@@ -1231,7 +1322,7 @@ impl MechSuitService {
         let session_for_reply = session.clone();
         let thread_for_reply = active_thread;
         let prompt_for_model = prompt.clone();
-        tokio::task::spawn_blocking(move || {
+        let reply = tokio::task::spawn_blocking(move || {
             engine.respond_for_turn(
                 &prompt_for_model,
                 intent,
@@ -1240,11 +1331,12 @@ impl MechSuitService {
             )
         })
         .await
-        .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))?
-        .inspect(|reply| {
-            trace.record_completion(reply);
-            session_for_reply.note_thread_reply(&thread_for_reply, &prompt, reply);
-        })
+        .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
+
+        trace.record_completion(&reply);
+        self.emit_transcript_update(&session.task_id());
+        session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
+        Ok(reply)
     }
 
     async fn bootstrap_known_edit_initial_action(
@@ -3203,8 +3295,8 @@ mod tests {
     };
     use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
-        ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceRecordKind, TurnEvent,
-        TurnEventSink,
+        ConversationTranscriptUpdate, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
+        TraceRecordKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
@@ -3383,6 +3475,23 @@ mod tests {
     impl TurnEventSink for RecordingTurnEventSink {
         fn emit(&self, event: TurnEvent) {
             self.events.lock().expect("event lock").push(event);
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingTranscriptUpdateSink {
+        updates: Mutex<Vec<ConversationTranscriptUpdate>>,
+    }
+
+    impl RecordingTranscriptUpdateSink {
+        fn recorded(&self) -> Vec<ConversationTranscriptUpdate> {
+            self.updates.lock().expect("update lock").clone()
+        }
+    }
+
+    impl TranscriptUpdateSink for RecordingTranscriptUpdateSink {
+        fn emit(&self, update: ConversationTranscriptUpdate) {
+            self.updates.lock().expect("update lock").push(update);
         }
     }
 
@@ -3844,6 +3953,169 @@ mod tests {
                 .records
                 .iter()
                 .any(|record| matches!(record.kind, TraceRecordKind::CompletionCheckpoint(_)))
+        );
+    }
+
+    #[test]
+    fn shared_conversation_session_reuses_live_session_state() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+
+        let shared = service.shared_conversation_session();
+        let attached = service.shared_conversation_session();
+
+        assert_eq!(shared.task_id(), attached.task_id());
+        assert_eq!(shared.allocate_turn_id().as_str(), "task-000001.turn-0001");
+        assert_eq!(
+            attached.allocate_turn_id().as_str(),
+            "task-000001.turn-0002"
+        );
+    }
+
+    #[test]
+    fn replay_conversation_transcript_projects_prompt_and_completion_records() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nProject a canonical transcript from durable trace records.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Transcript response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Project this conversation",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let transcript = service
+            .replay_conversation_transcript(&session.task_id())
+            .expect("transcript replay");
+
+        assert_eq!(transcript.task_id, session.task_id());
+        assert_eq!(transcript.entries.len(), 2);
+        assert_eq!(transcript.entries[0].content, "Project this conversation");
+        assert_eq!(transcript.entries[1].content, "Transcript response.");
+    }
+
+    #[test]
+    fn replay_conversation_transcript_returns_empty_for_known_session_without_trace_records() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+        let session = service.shared_conversation_session();
+
+        let transcript = service
+            .replay_conversation_transcript(&session.task_id())
+            .expect("transcript replay");
+
+        assert_eq!(transcript.task_id, session.task_id());
+        assert!(transcript.entries.is_empty());
+    }
+
+    #[test]
+    fn process_prompt_emits_transcript_updates_for_prompt_and_completion() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nEmit transcript updates for durable conversation changes.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Update response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let updates = Arc::new(RecordingTranscriptUpdateSink::default());
+        service.register_transcript_observer(updates.clone());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Emit transcript updates",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let recorded = updates.recorded();
+        assert_eq!(recorded.len(), 2);
+        assert!(
+            recorded
+                .iter()
+                .all(|update| update.task_id == session.task_id())
         );
     }
 

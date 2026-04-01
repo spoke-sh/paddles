@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-04-01T10:26:26.672823399-07:00
+command: ! rg -n "scheduleTranscriptReplay|pending_external_sync|sync_external_transcript|replay_all_traces" /home/alex/workspace/spoke-sh/paddles/src/infrastructure/web/index.html /home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs
+---

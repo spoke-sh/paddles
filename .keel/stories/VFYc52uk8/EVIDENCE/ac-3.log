@@ -1,0 +1,27 @@
+---
+recorded_at: 2026-04-01T10:26:08.535143813-07:00
+command: rg -n "shared_conversation_session|replay_conversation_transcript|register_transcript_observer|load_transcript|sync_transcript|pending_transcript_sync" /home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs
+---
+79:    let session = service.shared_conversation_session();
+81:        .register_transcript_observer(Arc::new(InteractiveTranscriptUpdateSink { tx: tx.clone() }));
+91:    if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
+92:        app.load_transcript(&transcript);
+98:            && let Ok(transcript) = service.replay_conversation_transcript(&session.task_id())
+100:            app.sync_transcript(&transcript);
+660:    pending_transcript_sync: bool,
+746:            pending_transcript_sync: false,
+932:        let pending = self.pending_transcript_sync;
+933:        self.pending_transcript_sync = false;
+937:    fn load_transcript(&mut self, transcript: &ConversationTranscript) {
+938:        self.sync_transcript_with_mode(transcript, false);
+941:    fn sync_transcript(&mut self, transcript: &ConversationTranscript) {
+942:        self.sync_transcript_with_mode(transcript, true);
+945:    fn sync_transcript_with_mode(
+1092:                    self.pending_transcript_sync = true;
+1109:                        self.pending_transcript_sync = true;
+2392:        app.sync_transcript(&transcript(&[(
+2474:        app.sync_transcript(&transcript(&[(
+2509:        app.sync_transcript(&transcript(&[(
+2522:        app.sync_transcript(&transcript(&[
+2672:        app.sync_transcript(&transcript(&[(
+2893:        app.sync_transcript(&transcript(&[(

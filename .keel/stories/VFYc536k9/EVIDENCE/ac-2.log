@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T10:26:15.860434878-07:00
+mode: manual
+---
+Implementation note for manual verification: the browser now subscribes to /sessions/{id}/transcript/events and refreshes transcript state from the canonical conversation projection on transcript_update, which is the intended path for TUI or CLI turns to appear without reload. A live browser spot-check remains the final acceptance step.

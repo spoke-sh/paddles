@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T10:26:08.426281080-07:00
+mode: manual
+---
+Implementation note for manual verification: the TUI now attaches to service.shared_conversation_session() and replays service.replay_conversation_transcript(task) before entering the event loop, so bootstrap state comes from the canonical conversation plane instead of local transcript memory. A live operator spot-check is still the final acceptance step.

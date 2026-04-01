@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T10:26:15.809175379-07:00
+mode: manual
+---
+Implementation note for manual verification: the web UI now bootstraps transcript state from GET /sessions/{id}/transcript after attaching to the shared conversation session, so the first render comes from the canonical conversation projection rather than local DOM state or /trace/replay polling. A live browser spot-check remains the final acceptance step.

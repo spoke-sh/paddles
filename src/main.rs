@@ -465,7 +465,7 @@ async fn main() -> Result<()> {
 async fn run_plain_interactive_loop(service: Arc<MechSuitService>) -> Result<()> {
     println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
     let mut stdin_reader = BufReader::new(tokio_io::stdin()).lines();
-    let session = service.create_conversation_session();
+    let session = service.shared_conversation_session();
     loop {
         print!(">> ");
         use std::io::Write;

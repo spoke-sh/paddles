@@ -615,8 +615,7 @@ body {
 <script>
 let sessionId = null;
 let eventSource = null;
-let transcriptReplayTimer = null;
-let transcriptReplayAttempts = 0;
+let transcriptEventSource = null;
 let transcriptSignature = '';
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 
@@ -646,10 +645,15 @@ async function ensureSession() {
 
 function connectSSE() {
   if (eventSource) eventSource.close();
+  if (transcriptEventSource) transcriptEventSource.close();
   eventSource = new EventSource('/events');
   eventSource.addEventListener('turn_event', (e) => {
     const event = JSON.parse(e.data);
     handleEvent(event);
+  });
+  transcriptEventSource = new EventSource('/sessions/' + sessionId + '/transcript/events');
+  transcriptEventSource.addEventListener('transcript_update', async () => {
+    await refreshConversationTranscript({ reset: true, only_if_changed: true });
   });
 }
 
@@ -657,23 +661,27 @@ function addMessage(cls, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + cls;
   el.textContent = text;
-  document.getElementById('messages').appendChild(el);
+  const messages = document.getElementById('messages');
+  const group = messages.querySelector('.events-group');
+  if (group) {
+    messages.insertBefore(el, group);
+  } else {
+    messages.appendChild(el);
+  }
   el.scrollIntoView({ behavior: 'smooth' });
 }
 
-function clearMessages() {
-  document.getElementById('messages').innerHTML = '';
+function clearTranscriptMessages() {
+  const messages = document.getElementById('messages');
+  for (const node of Array.from(messages.querySelectorAll('.msg'))) {
+    node.remove();
+  }
 }
 
-function transcriptSignatureForReplays(replays) {
-  return replays
-    .map((replay) => {
-      const last = replay.records.length ? replay.records[replay.records.length - 1] : null;
-      const lastId = last ? last.record_id : 'none';
-      return replay.task_id + ':' + replay.records.length + ':' + lastId;
-    })
-    .sort()
-    .join('|');
+function transcriptSignatureForConversation(transcript) {
+  const last = transcript.entries.length ? transcript.entries[transcript.entries.length - 1] : null;
+  const lastId = last ? last.record_id : 'none';
+  return transcript.task_id + ':' + transcript.entries.length + ':' + lastId;
 }
 
 function eventGroup() {
@@ -857,7 +865,6 @@ function handleEvent(ev) {
     } else {
       addEventRow('synth', 'synthesis', ev.grounded ? 'Grounded' : 'Direct');
     }
-    scheduleTranscriptReplay();
   } else if (t === 'route_selected') {
     addEventRow('route', 'route', truncate(ev.summary, 80));
   } else if (t === 'fallback') {
@@ -879,7 +886,6 @@ async function sendTurn() {
   if (!text) return;
   await ensureSession();
 
-  addMessage('user', text);
   input.value = '';
   btn.disabled = true;
 
@@ -889,8 +895,11 @@ async function sendTurn() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: text }),
     });
-    const data = await res.json();
-    addMessage('assistant', data.response);
+    if (!res.ok) {
+      throw new Error('Request failed with status ' + res.status);
+    }
+    await res.json();
+    await refreshConversationTranscript({ reset: true, only_if_changed: true });
     refreshTraceGraph();
   } catch (err) {
     addMessage('system', 'Error: ' + err.message);
@@ -916,29 +925,6 @@ function refreshTraceGraph() {
       renderTraceDAG(graph);
     } catch (e) { /* ignore fetch errors during turn processing */ }
   }, 200);
-}
-
-function scheduleTranscriptReplay() {
-  if (transcriptReplayTimer) {
-    return;
-  }
-  transcriptReplayAttempts = 0;
-  const poll = async () => {
-    transcriptReplayTimer = null;
-    const updated = await replayHistory({ reset: true, only_if_changed: true });
-    if (updated) {
-      transcriptReplayAttempts = 0;
-      return;
-    }
-    transcriptReplayAttempts += 1;
-    if (transcriptReplayAttempts >= 6) {
-      transcriptReplayAttempts = 0;
-      return;
-    }
-    const delay = 250 + transcriptReplayAttempts * 250;
-    transcriptReplayTimer = setTimeout(poll, delay);
-  };
-  transcriptReplayTimer = setTimeout(poll, 250);
 }
 
 function renderTraceDAG(graph) {
@@ -1180,62 +1166,26 @@ function bindTraceDetailPlacement(board) {
   }
 }
 
-function renderReplayHistory(replays, { reset = false } = {}) {
+function renderConversationTranscript(transcript, { reset = false } = {}) {
   if (reset) {
-    clearMessages();
+    clearTranscriptMessages();
   }
-  for (const replay of replays) {
-    for (const record of replay.records) {
-      const k = record.kind;
-      if (typeof k === 'object') {
-        if ('TaskRootStarted' in k) {
-          const root = k.TaskRootStarted;
-          if (root.prompt && root.prompt.inline_content) {
-            addMessage('user', root.prompt.inline_content);
-          }
-        } else if ('TurnStarted' in k) {
-          const turn = k.TurnStarted;
-          if (turn.prompt && turn.prompt.inline_content) {
-            addMessage('user', turn.prompt.inline_content);
-          }
-        } else if ('PlannerAction' in k) {
-          addEventRow('planner', 'planner', k.PlannerAction.action);
-        } else if ('ToolCallRequested' in k) {
-          addEventRow('tool', 'tool', k.ToolCallRequested.tool_name);
-        } else if ('ToolCallCompleted' in k) {
-          const tool = k.ToolCallCompleted.tool_name;
-          const summary = k.ToolCallCompleted.payload && k.ToolCallCompleted.payload.summary
-            ? k.ToolCallCompleted.payload.summary
-            : '';
-          const diff = isMutationTool(tool) ? extractMutationDiff(tool, summary) : null;
-          if (diff) {
-            addEventRow('tool', 'tool-diff', tool + ' done', formatDiffForEvent(tool, diff));
-          } else {
-            addEventRow('tool', 'tool', tool + ' done');
-          }
-        } else if ('CompletionCheckpoint' in k) {
-          const cp = k.CompletionCheckpoint;
-          if (cp.response && cp.response.inline_content) {
-            addMessage('assistant', cp.response.inline_content);
-          }
-        } else if ('SelectionArtifact' in k) {
-          addEventRow('evidence', 'gatherer', k.SelectionArtifact.summary);
-        }
-      }
-    }
+  for (const entry of transcript.entries) {
+    addMessage(entry.speaker === 'assistant' ? 'assistant' : 'user', entry.content);
   }
 }
 
-async function replayHistory({ reset = false, only_if_changed = false } = {}) {
+async function refreshConversationTranscript({ reset = false, only_if_changed = false } = {}) {
   try {
-    const res = await fetch('/trace/replay');
+    if (!sessionId) return false;
+    const res = await fetch('/sessions/' + sessionId + '/transcript');
     if (!res.ok) return false;
-    const replays = await res.json();
-    const nextSignature = transcriptSignatureForReplays(replays);
+    const transcript = await res.json();
+    const nextSignature = transcriptSignatureForConversation(transcript);
     if (only_if_changed && nextSignature === transcriptSignature) {
       return false;
     }
-    renderReplayHistory(replays, { reset });
+    renderConversationTranscript(transcript, { reset });
     transcriptSignature = nextSignature;
     return true;
   } catch (e) { /* ignore fetch errors */ }
@@ -1243,9 +1193,10 @@ async function replayHistory({ reset = false, only_if_changed = false } = {}) {
 }
 
 async function bootstrapWebUi() {
-  await replayHistory({ reset: true });
-  refreshTraceGraph();
+  await ensureSession();
+  await refreshConversationTranscript({ reset: true });
   connectSSE();
+  refreshTraceGraph();
 }
 
 bootstrapWebUi();

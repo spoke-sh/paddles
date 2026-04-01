@@ -1,6 +1,7 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
 use crate::domain::model::{
-    ThreadCandidate, TraceRecordKind, TraceReplay, TurnEvent, TurnEventSink,
+    ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
+    ThreadCandidate, TranscriptUpdateSink, TurnEvent, TurnEventSink,
 };
 use crate::infrastructure::credentials::CredentialStore;
 use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
@@ -75,8 +76,9 @@ pub async fn run_interactive_tui(
     )?;
 
     let (tx, mut rx) = unbounded_channel();
-    let session = service.create_conversation_session();
-    service.register_event_observer(Arc::new(ExternalTranscriptSyncSink { tx: tx.clone() }));
+    let session = service.shared_conversation_session();
+    service
+        .register_transcript_observer(Arc::new(InteractiveTranscriptUpdateSink { tx: tx.clone() }));
     let mut app = InteractiveApp::new(
         model_label.into(),
         detect_palette(),
@@ -86,13 +88,16 @@ pub async fn run_interactive_tui(
         tui_ctx.credential_status.clone(),
         tui_ctx.verbose,
     );
+    if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
+        app.load_transcript(&transcript);
+    }
 
     loop {
         drain_messages(&mut app, &mut rx);
-        if app.take_external_sync_request()
-            && let Ok(replays) = service.replay_all_traces()
+        if app.take_transcript_sync_request()
+            && let Ok(transcript) = service.replay_conversation_transcript(&session.task_id())
         {
-            app.sync_external_transcript(&replays);
+            app.sync_transcript(&transcript);
         }
         app.tick();
         if let Some(prompt) = app.dispatch_next_prompt() {
@@ -335,7 +340,9 @@ enum UiMessage {
         event: TurnEvent,
         occurred_at: Instant,
     },
-    ExternalTranscriptSync,
+    TranscriptUpdated {
+        update: ConversationTranscriptUpdate,
+    },
     TurnFinished {
         result: std::result::Result<String, String>,
         occurred_at: Instant,
@@ -357,8 +364,8 @@ impl UiMessage {
         }
     }
 
-    fn external_transcript_sync() -> Self {
-        Self::ExternalTranscriptSync
+    fn transcript_updated(update: ConversationTranscriptUpdate) -> Self {
+        Self::TranscriptUpdated { update }
     }
 }
 
@@ -399,15 +406,13 @@ impl TurnEventSink for InteractiveTurnEventSink {
 }
 
 #[derive(Clone)]
-struct ExternalTranscriptSyncSink {
+struct InteractiveTranscriptUpdateSink {
     tx: UnboundedSender<UiMessage>,
 }
 
-impl TurnEventSink for ExternalTranscriptSyncSink {
-    fn emit(&self, event: TurnEvent) {
-        if matches!(event, TurnEvent::SynthesisReady { .. }) {
-            let _ = self.tx.send(UiMessage::external_transcript_sync());
-        }
+impl TranscriptUpdateSink for InteractiveTranscriptUpdateSink {
+    fn emit(&self, update: ConversationTranscriptUpdate) {
+        let _ = self.tx.send(UiMessage::transcript_updated(update));
     }
 }
 
@@ -652,8 +657,9 @@ struct InteractiveApp {
     history_cursor: Option<usize>,
     history_draft: String,
     current_task_id: String,
-    pending_external_sync: bool,
-    seen_external_record_ids: HashSet<String>,
+    pending_transcript_sync: bool,
+    seen_transcript_record_ids: HashSet<String>,
+    pending_turn_total_timing: Option<TranscriptTiming>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -737,8 +743,9 @@ impl InteractiveApp {
             history_cursor: None,
             history_draft: String::new(),
             current_task_id,
-            pending_external_sync: false,
-            seen_external_record_ids: HashSet::new(),
+            pending_transcript_sync: false,
+            seen_transcript_record_ids: HashSet::new(),
+            pending_turn_total_timing: None,
         }
     }
 
@@ -877,11 +884,6 @@ impl InteractiveApp {
 
         // Normal prompt submission.
         let was_busy = self.busy || self.pending_reveal.is_some();
-        self.rows.push(TranscriptRow::new(
-            TranscriptRowKind::User,
-            "You",
-            &raw_display,
-        ));
         if was_busy || !self.queued_prompts.is_empty() {
             self.queued_prompts.push_back(QueuedPrompt::Steering(
                 self.session.capture_candidate(raw.clone()),
@@ -926,66 +928,68 @@ impl InteractiveApp {
         self.dispatch_next_prompt_at(Instant::now())
     }
 
-    fn take_external_sync_request(&mut self) -> bool {
-        let pending = self.pending_external_sync;
-        self.pending_external_sync = false;
+    fn take_transcript_sync_request(&mut self) -> bool {
+        let pending = self.pending_transcript_sync;
+        self.pending_transcript_sync = false;
         pending
     }
 
-    fn sync_external_transcript(&mut self, replays: &[TraceReplay]) {
-        for replay in replays {
-            if replay.task_id.as_str() == self.current_task_id {
+    fn load_transcript(&mut self, transcript: &ConversationTranscript) {
+        self.sync_transcript_with_mode(transcript, false);
+    }
+
+    fn sync_transcript(&mut self, transcript: &ConversationTranscript) {
+        self.sync_transcript_with_mode(transcript, true);
+    }
+
+    fn sync_transcript_with_mode(
+        &mut self,
+        transcript: &ConversationTranscript,
+        animate_new_assistant: bool,
+    ) {
+        if transcript.task_id.as_str() != self.current_task_id {
+            return;
+        }
+
+        for entry in &transcript.entries {
+            let record_id = entry.record_id.as_str().to_string();
+            if self.seen_transcript_record_ids.contains(&record_id) {
                 continue;
             }
-            for record in &replay.records {
-                let record_id = record.record_id.as_str().to_string();
-                if self.seen_external_record_ids.contains(&record_id) {
-                    continue;
+
+            match entry.speaker {
+                ConversationTranscriptSpeaker::User => {
+                    self.rows.push(TranscriptRow::new(
+                        TranscriptRowKind::User,
+                        "User",
+                        inline_multiline_text(&entry.content),
+                    ));
                 }
-                match &record.kind {
-                    TraceRecordKind::TaskRootStarted(root) => {
-                        if let Some(prompt) = root
-                            .prompt
-                            .inline_content
-                            .clone()
-                            .or_else(|| Some(root.prompt.summary.clone()))
-                        {
-                            self.rows.push(TranscriptRow::new(
-                                TranscriptRowKind::User,
-                                "Web",
-                                inline_multiline_text(&prompt),
-                            ));
+                ConversationTranscriptSpeaker::Assistant => {
+                    let wrapped = soft_wrap_prose(&entry.content, MAX_PROSE_WIDTH);
+                    if animate_new_assistant {
+                        let row_index = self.rows.len();
+                        let mut row =
+                            TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "");
+                        if let Some(timing) = self.pending_turn_total_timing.take() {
+                            row = row.timed(timing);
                         }
-                    }
-                    TraceRecordKind::TurnStarted(turn) => {
-                        if let Some(prompt) = turn
-                            .prompt
-                            .inline_content
-                            .clone()
-                            .or_else(|| Some(turn.prompt.summary.clone()))
-                        {
-                            self.rows.push(TranscriptRow::new(
-                                TranscriptRowKind::User,
-                                "Web",
-                                inline_multiline_text(&prompt),
-                            ));
+                        self.rows.push(row);
+                        self.pending_reveal = Some(PendingReveal::new(row_index, wrapped));
+                        self.busy = true;
+                        self.busy_phase = BusyPhase::Rendering;
+                    } else {
+                        let mut row =
+                            TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", wrapped);
+                        if let Some(timing) = self.pending_turn_total_timing.take() {
+                            row = row.timed(timing);
                         }
+                        self.rows.push(row);
                     }
-                    TraceRecordKind::CompletionCheckpoint(cp) => {
-                        if let Some(response) = cp.response.as_ref().and_then(|r| {
-                            r.inline_content.clone().or_else(|| Some(r.summary.clone()))
-                        }) {
-                            self.rows.push(TranscriptRow::new(
-                                TranscriptRowKind::Assistant,
-                                "Paddles",
-                                soft_wrap_prose(&response, MAX_PROSE_WIDTH),
-                            ));
-                        }
-                    }
-                    _ => {}
                 }
-                self.seen_external_record_ids.insert(record_id);
             }
+
+            self.seen_transcript_record_ids.insert(record_id);
         }
     }
 
@@ -1083,8 +1087,10 @@ impl InteractiveApp {
                     timing.mark_step(occurred_at, pace);
                 }
             }
-            UiMessage::ExternalTranscriptSync => {
-                self.pending_external_sync = true;
+            UiMessage::TranscriptUpdated { update } => {
+                if update.task_id.as_str() == self.current_task_id {
+                    self.pending_transcript_sync = true;
+                }
             }
             UiMessage::TurnFinished {
                 result,
@@ -1095,19 +1101,25 @@ impl InteractiveApp {
                 self.last_event = None;
                 self.emitted_in_flight = false;
                 match result {
-                    Ok(response) => {
-                        let row_index = self.rows.len();
-                        let row = self.annotate_turn_total(
-                            TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", ""),
-                            occurred_at,
-                        );
-                        self.rows.push(row);
-                        let wrapped = soft_wrap_prose(&response, MAX_PROSE_WIDTH);
-                        self.pending_reveal = Some(PendingReveal::new(row_index, wrapped));
+                    Ok(_response) => {
+                        let timing = self
+                            .active_turn_timing
+                            .take()
+                            .map(|timing| timing.finish(occurred_at));
+                        self.pending_transcript_sync = true;
+                        if let (Some(pending), Some(timing)) = (&self.pending_reveal, timing) {
+                            if pending.row_index < self.rows.len() {
+                                self.rows[pending.row_index] =
+                                    self.rows[pending.row_index].clone().timed(timing);
+                            }
+                        } else {
+                            self.pending_turn_total_timing = timing;
+                        }
                         self.busy = true;
                         self.busy_phase = BusyPhase::Rendering;
                     }
                     Err(error) => {
+                        self.pending_turn_total_timing = None;
                         let row = self.annotate_turn_total(
                             TranscriptRow::new(TranscriptRowKind::Error, "• Turn failed", error),
                             occurred_at,
@@ -2187,13 +2199,34 @@ mod tests {
         select_interactive_frontend,
     };
     use crate::application::ConversationSession;
-    use crate::domain::model::{TaskTraceId, TurnEvent};
+    use crate::domain::model::{
+        ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
+        ConversationTranscriptUpdate, TaskTraceId, TraceRecordId, TurnEvent, TurnTraceId,
+    };
     use crate::infrastructure::step_timing::Pace;
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
     use std::time::{Duration, Instant};
 
     fn session() -> ConversationSession {
         ConversationSession::new(TaskTraceId::new("task-1").expect("task"))
+    }
+
+    fn transcript(entries: &[(ConversationTranscriptSpeaker, &str)]) -> ConversationTranscript {
+        ConversationTranscript {
+            task_id: TaskTraceId::new("task-1").expect("task"),
+            entries: entries
+                .iter()
+                .enumerate()
+                .map(|(index, (speaker, content))| ConversationTranscriptEntry {
+                    record_id: TraceRecordId::new(format!("record-{}", index + 1))
+                        .expect("record id"),
+                    turn_id: TurnTraceId::new(format!("task-1.turn-{:04}", index + 1))
+                        .expect("turn id"),
+                    speaker: *speaker,
+                    content: (*content).to_string(),
+                })
+                .collect(),
+        }
     }
 
     fn render_buffer(app: &InteractiveApp, width: u16, height: u16) -> Buffer {
@@ -2356,6 +2389,10 @@ mod tests {
             result: Ok("hi there".to_string()),
             occurred_at: Instant::now(),
         });
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::Assistant,
+            "hi there",
+        )]));
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Rendering);
 
@@ -2434,6 +2471,10 @@ mod tests {
             result: Ok("done".to_string()),
             occurred_at: Instant::now(),
         });
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::Assistant,
+            "done",
+        )]));
         while app.busy {
             app.tick();
         }
@@ -2465,15 +2506,23 @@ mod tests {
 
         app.input = "hello".to_string();
         app.submit_prompt();
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::User,
+            "hello",
+        )]));
         let user_rows = app.take_scrollback_rows();
         assert_eq!(user_rows.len(), 1);
-        assert_eq!(user_rows[0].header, "You");
+        assert_eq!(user_rows[0].header, "User");
 
         app.dispatch_next_prompt();
         app.handle_message(super::UiMessage::TurnFinished {
             result: Ok("hi there".to_string()),
             occurred_at: Instant::now(),
         });
+        app.sync_transcript(&transcript(&[
+            (ConversationTranscriptSpeaker::User, "hello"),
+            (ConversationTranscriptSpeaker::Assistant, "hi there"),
+        ]));
 
         assert!(app.take_scrollback_rows().is_empty());
         assert_eq!(app.visible_live_rows(80, 20).len(), 1);
@@ -2620,6 +2669,10 @@ mod tests {
             result: Ok("done".to_string()),
             occurred_at: start + Duration::from_millis(350),
         });
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::Assistant,
+            "done",
+        )]));
 
         let event_row = app
             .rows
@@ -2647,6 +2700,51 @@ mod tests {
                 pace: Pace::Normal,
             })
         );
+    }
+
+    #[test]
+    fn transcript_update_for_current_task_requests_transcript_sync() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+
+        app.handle_message(super::UiMessage::transcript_updated(
+            ConversationTranscriptUpdate {
+                task_id: TaskTraceId::new("task-1").expect("task"),
+            },
+        ));
+
+        assert!(app.take_transcript_sync_request());
+        assert!(!app.take_transcript_sync_request());
+    }
+
+    #[test]
+    fn transcript_update_for_other_task_is_ignored() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+
+        app.handle_message(super::UiMessage::transcript_updated(
+            ConversationTranscriptUpdate {
+                task_id: TaskTraceId::new("task-2").expect("task"),
+            },
+        ));
+
+        assert!(!app.take_transcript_sync_request());
     }
 
     #[test]
@@ -2792,6 +2890,10 @@ mod tests {
 
         app.input = "line one\nline two\nline three".to_string();
         app.submit_prompt();
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::User,
+            "line one\nline two\nline three",
+        )]));
 
         let last_row = app.rows.last().expect("user row exists");
         assert_eq!(last_row.kind, TranscriptRowKind::User);
