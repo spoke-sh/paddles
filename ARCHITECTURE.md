@@ -129,7 +129,7 @@ The target architecture is implemented across these modules:
 | **Planner Contract** | [src/domain/ports/planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs) | Bounded action schema and planner port |
 | **Planner Adapter** | [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs) | Sift-backed planner model |
 | **Synthesizer Adapter** | [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) | Sift-backed synthesis + guidance graph derivation |
-| **Gatherer** | [src/infrastructure/adapters/sift_autonomous_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_autonomous_gatherer.rs) | Local graph-mode retrieval backend |
+| **Gatherer** | [src/infrastructure/adapters/sift_direct_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_direct_gatherer.rs) | Direct sift-backed retrieval backend |
 | **Operator Memory** | [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs) | AGENTS.md hierarchy + tool hint extraction + procedure derivation |
 | **Trace Contract** | [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs) | Stable task/turn/record/branch/checkpoint ids |
 | **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
@@ -146,7 +146,7 @@ The target architecture is implemented across these modules:
 The runtime follows the backbone narrative from above:
 
 1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid initial replies get one constrained re-decision pass before the controller fails closed.
-2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode and strategy into the gatherer boundary. The `sift-autonomous` gatherer runs bounded graph-mode retrieval, preserving episode/frontier/branch state as typed metadata.
+2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode and strategy into the gatherer boundary. The `sift-direct` gatherer executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second planner.
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
 4. **Context quality** — a `PressureTracker` accumulates truncation events during context assembly and emits `ContextPressure` as a turn event when pressure is non-nominal.
 5. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
@@ -227,8 +227,8 @@ Current routing now uses explicit planner/synth roles:
 - optional coding-oriented planner/synth models: `qwen-coder-0.5b`,
   `qwen-coder-1.5b`, `qwen-coder-3b`
 - heavier opt-in planner/synth lane: `qwen3.5-2b`
-- local gatherer backend: `sift-autonomous`
-- current recursive gatherer mode: bounded `graph` for planner-driven `search` / `refine` requests
+- local gatherer backend: `sift-direct`
+- current gatherer mode: planner-selected bounded retrieval for `search` / `refine` requests
 - experimental planner/gatherer boundary: `context-1`
 
 ## Context-1 Fit

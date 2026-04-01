@@ -201,10 +201,22 @@ A few areas are still maturing:
 - The synthesizer lane defaults to `qwen-1.5b`.
 - The planner lane defaults to the synthesizer model unless `--planner-model <id>` selects a different planner-capable model.
 - `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in planner or synthesizer variants.
-- `sift-autonomous` is the current local gatherer/search backend used by planner `search` and `refine` actions.
-- Recursive planner `search` and `refine` actions now request bounded `graph` mode through that gatherer path instead of stopping at linear autonomous search.
-- Graph-mode gatherer results preserve typed branch/frontier/node/edge metadata with stable ids in the evidence bundle and default event stream.
+- `sift-direct` is the default local gatherer/search backend used by planner `search` and `refine` actions.
+- `paddles` owns recursive planning. `sift` executes direct retrieval only.
+- Planner `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.
+- Gatherer progress now reflects direct retrieval stages such as initialization, indexing, retrieval, and ranking.
 - `context-1` remains an explicit experimental planner/gatherer boundary and stays fail-closed until its harness is real.
+
+## Search And Retrieval
+
+Search behavior is documented in [SEARCH.md](SEARCH.md).
+
+Use that document when you need the retrieval boundary, provider names, capabilities, or constraints. The short version is:
+
+- `paddles` plans
+- `sift` retrieves
+- `sift-direct` is the active local retrieval backend
+- `sift-autonomous` remains a compatibility alias only
 
 ## Foundational Documents
 
@@ -217,7 +229,8 @@ Use these in this order when reading the foundational stack:
 5. [POLICY.md](POLICY.md) for operational commitments and runtime guarantees
 6. [ARCHITECTURE.md](ARCHITECTURE.md) for the turn loop narrative and implementation map
 7. [PROTOCOL.md](PROTOCOL.md) for communications and data contracts
-8. [CONFIGURATION.md](CONFIGURATION.md) for concrete lane/runtime configuration
+8. [SEARCH.md](SEARCH.md) for search/retrieval behavior, constraints, and provider semantics
+9. [CONFIGURATION.md](CONFIGURATION.md) for concrete lane/runtime configuration
 
 Supplementary references:
 

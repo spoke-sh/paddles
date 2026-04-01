@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFV0xopci
-status: backlog
+status: in-progress
 created_at: 2026-03-31T18:39:51
-updated_at: 2026-03-31T18:41:56
+updated_at: 2026-03-31T19:02:17
 # authored
 title: Document Direct Search Boundary Constraints And Capabilities
 type: feat
 operator-signal:
 scope: VFV0VmEj0/VFV0uvpPX
 index: 4
+started_at: 2026-03-31T19:02:17
 ---
 
 # Document Direct Search Boundary Constraints And Capabilities

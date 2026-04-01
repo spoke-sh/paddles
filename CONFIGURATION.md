@@ -137,33 +137,31 @@ selection rather than single-model-only routing:
 Today the lane wiring is exposed through CLI/runtime configuration:
 
 ```bash
-paddles --model qwen-1.5b --planner-model qwen3.5-2b --gatherer-provider sift-autonomous
+paddles --model qwen-1.5b --planner-model qwen3.5-2b --gatherer-provider sift-direct
 ```
 
 This keeps a light synthesizer while assigning a heavier planner to the recursive loop.
 
-If you want a distinct local gatherer model instead of the autonomous backend:
+If you want a distinct local gatherer model instead of the direct retrieval backend:
 
 ```bash
 paddles --model qwen-1.5b --gatherer-model qwen-coder-1.5b --gatherer-provider local
 ```
 
-For local autonomous retrieval planning, select the explicit provider:
+For local sift-backed retrieval, select the explicit provider:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-provider sift-autonomous
+paddles --model qwen-1.5b --gatherer-provider sift-direct
 ```
 
 That backend stays local-first and services bounded planner search.
 
-- It defaults to the heuristic planner strategy.
-- Recursive planner `search` / `refine` actions currently request bounded `graph` mode through the internal gatherer planning contract.
-- The graph-mode trace is preserved as typed branch/frontier/node/edge metadata in the evidence bundle and default event stream.
-- The internal contract still leaves room for future external artifact references, but large graph traces remain inline today.
-- It returns planner trace metadata, stop reason, and retained artifact
-  summaries inside the evidence bundle consumed by the synthesizer lane.
-- The default REPL event stream surfaces planner action selection, gatherer
-  summaries, and final planner stop reasons so operators can inspect the loop.
+- `paddles` remains the only recursive planner in the runtime path.
+- Direct retrieval progress is surfaced as concrete execution stages instead of autonomous planner states.
+- The provider returns evidence bundles and retrieval metadata consumed by the planner and synthesizer lanes.
+- The legacy config value `sift-autonomous` is accepted as a compatibility alias and normalized to `sift-direct`.
+
+See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
 Current local model guidance on an 8 GB CUDA card:
 
