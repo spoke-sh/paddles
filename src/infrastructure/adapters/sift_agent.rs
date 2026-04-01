@@ -995,7 +995,9 @@ impl SiftAgentAdapter {
 
         Self {
             workspace_root: workspace_root.clone(),
-            sift: Sift::builder().build(),
+            sift: Sift::builder()
+                .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                .build(),
             conversation_factory,
             base_context,
             render_capability,
@@ -2022,6 +2024,10 @@ impl SiftAgentAdapter {
 
         Ok(all_documents)
     }
+}
+
+fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(".sift").join("cache")
 }
 
 impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {

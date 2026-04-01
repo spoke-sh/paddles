@@ -9,7 +9,7 @@ use sift::{
     FusionPolicy, LocalContextSource, QueryExpansionPolicy, RerankingPolicy, RetrieverPolicy,
     SearchPlan, Sift,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 const DEFAULT_RETAINED_LIMIT: usize = 5;
@@ -23,10 +23,13 @@ pub struct SiftContextGathererAdapter {
 
 impl SiftContextGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>, model_id: impl Into<String>) -> Self {
+        let workspace_root = workspace_root.into();
         Self {
-            workspace_root: workspace_root.into(),
+            workspace_root: workspace_root.clone(),
             model_id: model_id.into(),
-            sift: Sift::builder().build(),
+            sift: Sift::builder()
+                .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                .build(),
             verbose: AtomicU8::new(0),
         }
     }
@@ -126,6 +129,10 @@ fn search_plan_for_strategy(strategy: RetrievalStrategy) -> SearchPlan {
             reranking: RerankingPolicy::None,
         },
     }
+}
+
+fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(".sift").join("cache")
 }
 
 fn trim_for_budget(input: &str, limit: usize) -> String {

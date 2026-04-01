@@ -16,7 +16,7 @@ use sift::{
     SearchEmission, SearchPlan, Sift,
 };
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
@@ -31,9 +31,14 @@ pub struct SiftAutonomousGathererAdapter {
 
 impl SiftAutonomousGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+        let workspace_root = workspace_root.into();
         Self {
-            workspace_root: workspace_root.into(),
-            sift: Arc::new(Sift::builder().build()),
+            workspace_root: workspace_root.clone(),
+            sift: Arc::new(
+                Sift::builder()
+                    .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                    .build(),
+            ),
             verbose: AtomicU8::new(0),
             planner_profile: None,
             event_sink: std::sync::Mutex::new(None),
@@ -95,6 +100,10 @@ impl SiftAutonomousGathererAdapter {
             .with_local_context(local_context)
             .with_verbose(self.verbose.load(Ordering::Relaxed))
     }
+}
+
+fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(".sift").join("cache")
 }
 
 #[async_trait]
