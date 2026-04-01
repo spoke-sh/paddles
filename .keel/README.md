@@ -252,7 +252,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Direct Sift Retrieval Boundary](epics/VFV0VmEj0/voyages/VFV0uvpPX/) | planned |
+| [Direct Sift Retrieval Boundary](epics/VFV0VmEj0/voyages/VFV0uvpPX/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFV0uvpPX
-status: planned
+status: in-progress
 epic: VFV0VmEj0
 created_at: 2026-03-31T18:39:40
 # authored
 title: Direct Sift Retrieval Boundary
 index: 1
 updated_at: 2026-03-31T18:41:56
+started_at: 2026-03-31T18:50:02
 ---
 
 # Direct Sift Retrieval Boundary
@@ -30,7 +31,7 @@ updated_at: 2026-03-31T18:41:56
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Replace Sift Autonomous Gatherer With Direct Retrieval Adapter](../../../../stories/VFV0xnwcf/README.md) | feat | backlog |
+| [Replace Sift Autonomous Gatherer With Direct Retrieval Adapter](../../../../stories/VFV0xnwcf/README.md) | feat | in-progress |
 | [Surface Concrete Sift Retrieval Stages In Progress Events](../../../../stories/VFV0xoFck/README.md) | feat | backlog |
 | [Rename And Rewire Gatherer Configuration Away From Autonomous Planning](../../../../stories/VFV0xoWcl/README.md) | feat | backlog |
 | [Document Direct Search Boundary Constraints And Capabilities](../../../../stories/VFV0xopci/README.md) | feat | backlog |

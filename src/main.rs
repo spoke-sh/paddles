@@ -16,8 +16,8 @@ use paddles::infrastructure::adapters::http_provider::{
     ApiFormat, HttpPlannerAdapter, HttpProviderAdapter,
 };
 use paddles::infrastructure::adapters::sift_agent::SiftAgentAdapter;
-use paddles::infrastructure::adapters::sift_autonomous_gatherer::SiftAutonomousGathererAdapter;
 use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
+use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
 use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
@@ -333,7 +333,7 @@ async fn main() -> Result<()> {
                         model_id: None,
                         paths: None,
                     };
-                    let adapter = SiftAutonomousGathererAdapter::new(workspace.to_path_buf());
+                    let adapter = SiftDirectGathererAdapter::new(workspace.to_path_buf());
                     adapter.set_verbose(verbose);
                     Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
                 }

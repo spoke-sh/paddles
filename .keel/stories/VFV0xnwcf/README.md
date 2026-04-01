@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFV0xnwcf
-status: backlog
+status: in-progress
 created_at: 2026-03-31T18:39:51
-updated_at: 2026-03-31T18:41:56
+updated_at: 2026-03-31T18:50:02
 # authored
 title: Replace Sift Autonomous Gatherer With Direct Retrieval Adapter
 type: feat
 operator-signal:
 scope: VFV0VmEj0/VFV0uvpPX
 index: 1
+started_at: 2026-03-31T18:50:02
 ---
 
 # Replace Sift Autonomous Gatherer With Direct Retrieval Adapter
