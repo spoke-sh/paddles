@@ -142,6 +142,7 @@ pub struct PlannerBudget {
     pub max_evidence_items: usize,
     pub max_reads: usize,
     pub max_inspects: usize,
+    pub max_searches: usize,
 }
 
 impl Default for PlannerBudget {
@@ -152,6 +153,7 @@ impl Default for PlannerBudget {
             max_evidence_items: 12,
             max_reads: 6,
             max_inspects: 6,
+            max_searches: 4,
         }
     }
 }
@@ -510,6 +512,7 @@ mod tests {
         assert_eq!(budget.max_branch_factor, 3);
         assert_eq!(budget.max_evidence_items, 12);
         assert_eq!(budget.max_inspects, 6);
+        assert_eq!(budget.max_searches, 4);
     }
 
     #[test]

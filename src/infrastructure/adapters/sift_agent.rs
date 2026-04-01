@@ -9,9 +9,9 @@ use crate::domain::ports::{
     InitialActionDecision, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerRequest,
-    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, ThreadDecisionRequest,
-    WorkspaceAction,
+    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
+    PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
+    ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::adapters::sift_registry::{
     QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
@@ -2512,6 +2512,8 @@ Rules:\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
 - Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
+- When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
+- Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
@@ -2569,6 +2571,8 @@ Allowed actions:\n\
 \n\
 Do not answer the user directly.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
+Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2619,6 +2623,8 @@ Invalid reply to correct:\n\
 {}\n\
 \n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
+Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2664,6 +2670,8 @@ Rules:\n\
 - Search when you need workspace retrieval.\n\
 - Choose retrieval mode and strategy explicitly when you search or refine.\n\
 - Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
+- When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
+- Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
@@ -2728,6 +2736,8 @@ Allowed actions:\n\
 \n\
 Do not answer the user directly.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
+Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2777,6 +2787,8 @@ Invalid reply to correct:\n\
 {}\n\
 \n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
+Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -3339,6 +3351,18 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
         }
     }
 
+    let likely_targets = planner_likely_target_files(
+        &request.user_prompt,
+        &request.interpretation,
+        &request.loop_state,
+    );
+    if !likely_targets.is_empty() {
+        lines.push("Likely target files:".to_string());
+        for path in likely_targets {
+            lines.push(format!("- {}", path));
+        }
+    }
+
     if !request.loop_state.notes.is_empty() {
         lines.push("Current notes:".to_string());
         for note in request.loop_state.notes.iter().take(3) {
@@ -3360,6 +3384,93 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
     }
 
     lines.join("\n")
+}
+
+fn planner_likely_target_files(
+    user_prompt: &str,
+    interpretation: &InterpretationContext,
+    loop_state: &PlannerLoopState,
+) -> Vec<String> {
+    if !planner_prompt_needs_execution_mode(user_prompt, interpretation) {
+        return Vec::new();
+    }
+
+    let mut ranked = loop_state
+        .evidence_items
+        .iter()
+        .filter_map(|item| planner_candidate_path(&item.source).map(|path| (path, item.rank)))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|(path_a, rank_a), (path_b, rank_b)| {
+        planner_candidate_score(path_b, *rank_b)
+            .cmp(&planner_candidate_score(path_a, *rank_a))
+            .then_with(|| path_a.cmp(path_b))
+    });
+    ranked.dedup_by(|(path_a, _), (path_b, _)| path_a == path_b);
+    ranked.into_iter().take(3).map(|(path, _)| path).collect()
+}
+
+fn planner_prompt_needs_execution_mode(
+    user_prompt: &str,
+    interpretation: &InterpretationContext,
+) -> bool {
+    let prompt_lower = user_prompt.to_ascii_lowercase();
+    let prompt_signals = [
+        "edit ",
+        "change ",
+        "update ",
+        "modify ",
+        "implement ",
+        "fix ",
+        "refactor ",
+        "rename ",
+        "make ",
+        "render ",
+        "add ",
+        "remove ",
+    ];
+    if prompt_signals
+        .iter()
+        .any(|signal| prompt_lower.contains(signal))
+    {
+        return true;
+    }
+
+    interpretation.tool_hints.iter().any(|hint| {
+        matches!(
+            hint.action,
+            WorkspaceAction::WriteFile { .. }
+                | WorkspaceAction::ReplaceInFile { .. }
+                | WorkspaceAction::ApplyPatch { .. }
+        )
+    })
+}
+
+fn planner_candidate_path(source: &str) -> Option<String> {
+    if source.trim().is_empty() || source.starts_with("command: ") {
+        return None;
+    }
+    let path = source.replace('\\', "/");
+    if Path::new(&path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some()
+    {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn planner_candidate_score(path: &str, rank: usize) -> i32 {
+    let mut score = if path.starts_with("src/") { 100 } else { 40 };
+    score += match Path::new(path).extension().and_then(|ext| ext.to_str()) {
+        Some("rs" | "ts" | "tsx" | "js" | "jsx" | "vue" | "svelte") => 30,
+        Some("html" | "css" | "json" | "toml") => 15,
+        Some("md") => -20,
+        Some(_) => 0,
+        None => -40,
+    };
+    score - rank as i32
 }
 
 fn format_planner_strategy(strategy: &crate::domain::ports::PlannerStrategyKind) -> &'static str {

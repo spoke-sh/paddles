@@ -24,6 +24,7 @@ use crate::domain::ports::{
 use anyhow::Result;
 use clap::ValueEnum;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -1344,7 +1345,7 @@ impl MechSuitService {
         trace: Arc<StructuredTurnTrace>,
     ) -> Result<Option<EvidenceBundle>> {
         let mut context = context;
-        let budget = PlannerBudget::default();
+        let budget = planner_budget_for_turn(prompt, &context.interpretation);
         let mut loop_state = PlannerLoopState::default();
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
@@ -1359,7 +1360,7 @@ impl MechSuitService {
 
         for sequence in 1..=budget.max_steps {
             let evidence_count_before = loop_state.evidence_items.len();
-            let decision = if let Some(decision) = pending_initial_decision.take() {
+            let mut decision = if let Some(decision) = pending_initial_decision.take() {
                 decision
             } else {
                 let request = PlannerRequest::new(
@@ -1381,6 +1382,26 @@ impl MechSuitService {
                 decision
             };
 
+            if let Some(forced_decision) = coerce_execution_pressure_action(
+                prompt,
+                &context.interpretation,
+                &loop_state,
+                &decision,
+                &self.workspace_root,
+            ) {
+                let reason = format!(
+                    "execution pressure redirected `{}` to `{}` because acting on a likely file is more informative than more retrieval",
+                    decision.action.summary(),
+                    forced_decision.action.summary()
+                );
+                trace.emit(TurnEvent::Fallback {
+                    stage: "execution-pressure".to_string(),
+                    reason: reason.clone(),
+                });
+                loop_state.notes.push(reason);
+                decision = forced_decision;
+            }
+
             trace.emit(TurnEvent::PlannerStepProgress {
                 step_number: sequence,
                 step_limit: budget.max_steps,
@@ -1397,7 +1418,19 @@ impl MechSuitService {
                         strategy,
                         intent,
                     } => {
-                        if let Some(gatherer) = context.gatherer.as_ref() {
+                        if search_steps(&loop_state) >= budget.max_searches {
+                            stop_reason = Some("search-budget-exhausted".to_string());
+                            "planner search budget exhausted".to_string()
+                        } else if mutation_turn_requires_execution_pressure(
+                            prompt,
+                            &context.interpretation,
+                        ) && search_steps(&loop_state) >= 1
+                            && !has_file_targeting_step(&loop_state)
+                        {
+                            let message = "execution pressure requires reading or editing a likely file after the initial search instead of continuing broad retrieval".to_string();
+                            loop_state.notes.push(message.clone());
+                            message
+                        } else if let Some(gatherer) = context.gatherer.as_ref() {
                             trace.emit(TurnEvent::GathererCapability {
                                 provider: gatherer_provider.clone(),
                                 capability: format_gatherer_capability(&gatherer.capability()),
@@ -1585,7 +1618,18 @@ impl MechSuitService {
                     strategy,
                     ..
                 } => {
-                    if let Some(gatherer) = context.gatherer.as_ref() {
+                    if search_steps(&loop_state) >= budget.max_searches {
+                        stop_reason = Some("search-budget-exhausted".to_string());
+                        "planner refine budget exhausted".to_string()
+                    } else if mutation_turn_requires_execution_pressure(
+                        prompt,
+                        &context.interpretation,
+                    ) && !has_file_targeting_step(&loop_state)
+                    {
+                        let message = "execution pressure blocks refine until the planner reads or edits a likely target file".to_string();
+                        loop_state.notes.push(message.clone());
+                        message
+                    } else if let Some(gatherer) = context.gatherer.as_ref() {
                         trace.emit(TurnEvent::GathererCapability {
                             provider: gatherer_provider.clone(),
                             capability: format_gatherer_capability(&gatherer.capability()),
@@ -2167,6 +2211,246 @@ async fn build_planner_prior_context(
     }
 
     prior
+}
+
+fn planner_budget_for_turn(prompt: &str, interpretation: &InterpretationContext) -> PlannerBudget {
+    if mutation_turn_requires_execution_pressure(prompt, interpretation) {
+        PlannerBudget {
+            max_steps: 8,
+            max_reads: 4,
+            max_inspects: 2,
+            max_searches: 1,
+            ..PlannerBudget::default()
+        }
+    } else {
+        PlannerBudget::default()
+    }
+}
+
+fn mutation_turn_requires_execution_pressure(
+    prompt: &str,
+    interpretation: &InterpretationContext,
+) -> bool {
+    let prompt_lower = prompt.to_ascii_lowercase();
+    let prompt_signals = [
+        "edit ",
+        "change ",
+        "update ",
+        "modify ",
+        "implement ",
+        "fix ",
+        "refactor ",
+        "rename ",
+        "make ",
+        "render ",
+        "show ",
+        "add ",
+        "remove ",
+    ];
+    if prompt_signals
+        .iter()
+        .any(|signal| prompt_lower.contains(signal))
+    {
+        return true;
+    }
+
+    interpretation.tool_hints.iter().any(|hint| {
+        matches!(
+            hint.action,
+            WorkspaceAction::WriteFile { .. }
+                | WorkspaceAction::ReplaceInFile { .. }
+                | WorkspaceAction::ApplyPatch { .. }
+        )
+    })
+}
+
+fn search_steps(loop_state: &PlannerLoopState) -> usize {
+    loop_state
+        .steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.action,
+                PlannerAction::Workspace {
+                    action: WorkspaceAction::Search { .. }
+                } | PlannerAction::Refine { .. }
+            )
+        })
+        .count()
+}
+
+fn has_file_targeting_step(loop_state: &PlannerLoopState) -> bool {
+    loop_state.steps.iter().any(|step| {
+        matches!(
+            step.action,
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Read { .. }
+                    | WorkspaceAction::ListFiles { .. }
+                    | WorkspaceAction::Diff { .. }
+                    | WorkspaceAction::WriteFile { .. }
+                    | WorkspaceAction::ReplaceInFile { .. }
+                    | WorkspaceAction::ApplyPatch { .. }
+            }
+        )
+    })
+}
+
+fn coerce_execution_pressure_action(
+    prompt: &str,
+    interpretation: &InterpretationContext,
+    loop_state: &PlannerLoopState,
+    decision: &RecursivePlannerDecision,
+    workspace_root: &Path,
+) -> Option<RecursivePlannerDecision> {
+    if !mutation_turn_requires_execution_pressure(prompt, interpretation)
+        || has_file_targeting_step(loop_state)
+        || search_steps(loop_state) == 0
+    {
+        return None;
+    }
+
+    if !matches!(
+        decision.action,
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Search { .. }
+        } | PlannerAction::Refine { .. }
+    ) {
+        return None;
+    }
+
+    let path = likely_execution_pressure_targets(loop_state, workspace_root, 3)
+        .into_iter()
+        .next()?;
+    Some(RecursivePlannerDecision {
+        action: PlannerAction::Workspace {
+            action: WorkspaceAction::Read { path: path.clone() },
+        },
+        rationale: format!(
+            "action produces information; read likely target file `{path}` before spending more time on retrieval"
+        ),
+    })
+}
+
+fn likely_execution_pressure_targets(
+    loop_state: &PlannerLoopState,
+    workspace_root: &Path,
+    limit: usize,
+) -> Vec<String> {
+    let mut scored = HashMap::<String, i32>::new();
+
+    for item in &loop_state.evidence_items {
+        let Some(path) = normalize_execution_pressure_source(&item.source, workspace_root) else {
+            continue;
+        };
+        let score = score_execution_pressure_path(&path) + evidence_rank_bonus(item.rank);
+        match scored.entry(path) {
+            Entry::Occupied(mut entry) => {
+                if score > *entry.get() {
+                    entry.insert(score);
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(score);
+            }
+        }
+    }
+
+    if let Some(trace) = &loop_state.latest_gatherer_trace {
+        for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
+            let Some(path) = normalize_execution_pressure_source(&artifact.source, workspace_root)
+            else {
+                continue;
+            };
+            let score = score_execution_pressure_path(&path) + (40 - index as i32 * 5);
+            match scored.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    if score > *entry.get() {
+                        entry.insert(score);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(score);
+                }
+            }
+        }
+    }
+
+    let mut ranked = scored.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|(path_a, score_a), (path_b, score_b)| {
+        score_b.cmp(score_a).then_with(|| path_a.cmp(path_b))
+    });
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(path, _)| path)
+        .collect()
+}
+
+fn normalize_execution_pressure_source(source: &str, workspace_root: &Path) -> Option<String> {
+    if source.trim().is_empty() || source.starts_with("command: ") {
+        return None;
+    }
+
+    let path = Path::new(source);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(workspace_root).ok()?.to_path_buf()
+    } else {
+        PathBuf::from(source)
+    };
+
+    if relative
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+
+    let path_text = relative.to_string_lossy().replace('\\', "/");
+    is_plausible_workspace_file(&path_text).then_some(path_text)
+}
+
+fn is_plausible_workspace_file(path: &str) -> bool {
+    if path.is_empty() || path.ends_with('/') {
+        return false;
+    }
+
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some()
+}
+
+fn evidence_rank_bonus(rank: usize) -> i32 {
+    if rank == 0 {
+        5
+    } else {
+        30i32.saturating_sub(rank as i32 * 3)
+    }
+}
+
+fn score_execution_pressure_path(path: &str) -> i32 {
+    let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
+    let mut score = match extension {
+        Some("rs" | "ts" | "tsx" | "js" | "jsx" | "vue" | "svelte") => 80,
+        Some("html" | "css" | "json" | "toml" | "yml" | "yaml") => 45,
+        Some("md" | "txt") => 10,
+        Some(_) => 20,
+        None => 0,
+    };
+
+    if path.starts_with("src/") {
+        score += 30;
+    } else if path.starts_with("crates/") {
+        score += 20;
+    }
+    if path.contains("/test") || path.contains("/tests/") || path.ends_with("_test.rs") {
+        score -= 10;
+    }
+    if path.ends_with("README.md") || path.ends_with("AGENTS.md") {
+        score -= 20;
+    }
+
+    score
 }
 
 #[allow(dead_code)]
@@ -2771,6 +3055,50 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingSynthesizer {
+        executed_actions: Mutex<Vec<WorkspaceAction>>,
+        gathered_summaries: Mutex<Vec<String>>,
+    }
+
+    impl SynthesizerEngine for RecordingSynthesizer {
+        fn set_verbose(&self, _level: u8) {}
+
+        fn respond_for_turn(
+            &self,
+            _prompt: &str,
+            _turn_intent: TurnIntent,
+            gathered_evidence: Option<&EvidenceBundle>,
+            _event_sink: Arc<dyn TurnEventSink>,
+        ) -> Result<String> {
+            if let Some(bundle) = gathered_evidence {
+                self.gathered_summaries
+                    .lock()
+                    .expect("gathered summaries lock")
+                    .push(bundle.summary.clone());
+            }
+            Ok("Applied the bounded action.".to_string())
+        }
+
+        fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+
+        fn execute_workspace_action(
+            &self,
+            action: &WorkspaceAction,
+        ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+            self.executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .push(action.clone());
+            Ok(crate::domain::ports::WorkspaceActionResult {
+                name: action.label().to_string(),
+                summary: format!("executed {}", action.summary()),
+            })
+        }
+    }
+
     #[test]
     fn runtime_lane_config_defaults_to_synthesizer_responses() {
         let config = RuntimeLaneConfig::new("qwen-1.5b", None);
@@ -3293,6 +3621,160 @@ mod tests {
                 && active_branch_id.as_deref() == Some("branch-root")
                 && *branch_count == Some(2)
                 && *frontier_count == Some(1)
+        )));
+    }
+
+    #[test]
+    fn execution_pressure_targets_code_files_before_docs() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            evidence_items: vec![
+                EvidenceItem {
+                    source: "README.md".to_string(),
+                    snippet: "overview".to_string(),
+                    rationale: "doc".to_string(),
+                    rank: 1,
+                },
+                EvidenceItem {
+                    source: "src/application/mod.rs".to_string(),
+                    snippet: "planner loop".to_string(),
+                    rationale: "code".to_string(),
+                    rank: 2,
+                },
+                EvidenceItem {
+                    source: "command: git status".to_string(),
+                    snippet: "clean".to_string(),
+                    rationale: "not a file".to_string(),
+                    rank: 0,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let ranked =
+            super::likely_execution_pressure_targets(&loop_state, Path::new("/workspace"), 3);
+
+        assert_eq!(
+            ranked,
+            vec![
+                "src/application/mod.rs".to_string(),
+                "README.md".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn execution_pressure_reads_best_candidate_after_initial_search() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nFavor concrete action after bounded search.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: Some(PreparedGathererLane {
+                provider: GathererProvider::SiftDirect,
+                label: "sift-direct".to_string(),
+                model_id: None,
+                paths: None,
+            }),
+        };
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Workspace {
+                    action: WorkspaceAction::Search {
+                        query: "planner loop edit target".to_string(),
+                        mode: RetrievalMode::Linear,
+                        strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                        intent: Some("implementation search".to_string()),
+                    },
+                },
+                rationale: "start with one bounded search".to_string(),
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Search {
+                            query: "keep searching broadly".to_string(),
+                            mode: RetrievalMode::Linear,
+                            strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                            intent: Some("implementation search".to_string()),
+                        },
+                    },
+                    rationale: "continue exploring".to_string(),
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "enough information".to_string(),
+                    },
+                    rationale: "stop after acting".to_string(),
+                },
+            ],
+            Arc::clone(&request_log),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let gatherer_requests = Arc::new(Mutex::new(Vec::new()));
+        let gatherer = Arc::new(RecordingGatherer {
+            recorded_requests: Arc::clone(&gatherer_requests),
+            bundle: EvidenceBundle::new(
+                "Found likely implementation targets.",
+                vec![
+                    EvidenceItem {
+                        source: "src/application/mod.rs".to_string(),
+                        snippet: "planner loop handles execution pressure".to_string(),
+                        rationale: "best candidate".to_string(),
+                        rank: 1,
+                    },
+                    EvidenceItem {
+                        source: "README.md".to_string(),
+                        snippet: "project overview".to_string(),
+                        rationale: "secondary context".to_string(),
+                        rank: 2,
+                    },
+                ],
+            ),
+        });
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: Some(gatherer),
+            });
+            service
+                .process_prompt("Fix the execution-pressure behavior")
+                .await
+                .expect("process prompt")
+        });
+
+        let gatherer_requests = gatherer_requests.lock().expect("gatherer requests");
+        assert_eq!(gatherer_requests.len(), 1);
+
+        let executed_actions = synthesizer
+            .executed_actions
+            .lock()
+            .expect("executed actions");
+        assert!(executed_actions.iter().any(|action| matches!(
+            action,
+            WorkspaceAction::Read { path } if path == "src/application/mod.rs"
+        )));
+        assert!(!executed_actions.iter().any(|action| matches!(
+            action,
+            WorkspaceAction::Search { query, .. } if query == "keep searching broadly"
         )));
     }
 
