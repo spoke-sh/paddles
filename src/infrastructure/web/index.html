@@ -6,44 +6,182 @@
 <title>Paddles</title>
 <style>
 :root {
-  --bg: #0d1117; --surface: #161b22; --border: #30363d;
-  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-  --green: #3fb950; --orange: #d29922; --red: #f85149; --purple: #bc8cff;
-  --pink: #f778ba;
+  --bg: #c6d0d8;
+  --bg-deep: #6f8392;
+  --surface: rgba(239, 243, 246, 0.82);
+  --surface-strong: rgba(251, 252, 253, 0.97);
+  --surface-soft: rgba(219, 227, 233, 0.82);
+  --border: rgba(69, 84, 97, 0.24);
+  --border-strong: rgba(48, 62, 74, 0.46);
+  --text: #0f1820;
+  --muted: #556472;
+  --accent: #2d90c8;
+  --accent-soft: #8ccae6;
+  --nav: #2d90c8;
+  --action: #f08a24;
+  --evidence: #17956c;
+  --branch: #dfb23f;
+  --merge: #d65f4a;
+  --thread: #70808d;
+  --green: #17956c;
+  --orange: #f08a24;
+  --red: #d65f4a;
+  --purple: #5376a3;
+  --pink: #d16a66;
+  --shadow-raised:
+    -10px -10px 24px rgba(255, 255, 255, 0.62),
+    16px 20px 38px rgba(62, 79, 94, 0.22);
+  --shadow-inset:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.82),
+    inset -1px -1px 0 rgba(111, 127, 141, 0.14);
+  --glass-highlight: linear-gradient(180deg, rgba(255,255,255,0.68), rgba(255,255,255,0.1));
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+body {
+  font-family: "SF Pro Display", "SF Pro Text", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.96), transparent 20%),
+    radial-gradient(circle at 84% 16%, rgba(45, 144, 200, 0.26), transparent 16%),
+    radial-gradient(circle at 76% 76%, rgba(240, 138, 36, 0.16), transparent 18%),
+    linear-gradient(160deg, #dde4ea 0%, #bac6cf 42%, #90a1af 100%);
+  color: var(--text);
+  height: 100dvh;
+  display: flex;
+  gap: 18px;
+  padding: 18px;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+}
 
-.chat-panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; }
+.chat-panel,
+.trace-panel {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  box-shadow: var(--shadow-raised), var(--shadow-inset);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.chat-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.42), rgba(255,255,255,0.08)),
+    linear-gradient(155deg, rgba(237, 242, 246, 0.94), rgba(206, 216, 225, 0.88));
+}
 .trace-panel {
   width: min(48vw, 720px);
   min-width: 420px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  padding: 14px;
+  padding: 18px;
+  min-height: 0;
   background:
-    radial-gradient(circle at top right, rgba(88, 166, 255, 0.12), transparent 38%),
-    linear-gradient(180deg, rgba(22, 27, 34, 0.96), rgba(13, 17, 23, 0.98));
+    radial-gradient(circle at top right, rgba(45, 144, 200, 0.24), transparent 34%),
+    radial-gradient(circle at 18% 84%, rgba(240, 138, 36, 0.14), transparent 22%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(214, 223, 230, 0.92));
 }
 
-.chat-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; color: var(--muted); }
-.chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.msg.user { align-self: flex-end; background: var(--accent); color: #000; border-bottom-right-radius: 4px; }
-.msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-.msg.system { align-self: center; color: var(--muted); font-size: 12px; font-style: italic; }
+.chat-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid rgba(122, 142, 157, 0.2);
+  font-weight: 700;
+  font-size: 12px;
+  color: #4d5f6c;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  background: linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0.06));
+}
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.msg {
+  max-width: 85%;
+  padding: 14px 16px;
+  border-radius: 22px;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid rgba(255,255,255,0.46);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.75),
+    0 10px 20px rgba(90, 104, 120, 0.14);
+}
+.msg.user {
+  align-self: flex-end;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.02)),
+    linear-gradient(140deg, #49a5d9, #2d90c8);
+  color: #f8fbfd;
+  border-bottom-right-radius: 8px;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.26),
+    0 12px 24px rgba(46, 125, 178, 0.26);
+}
+.msg.assistant {
+  align-self: flex-start;
+  background:
+    var(--glass-highlight),
+    linear-gradient(155deg, rgba(245, 248, 250, 0.94), rgba(220, 228, 235, 0.88));
+  border-bottom-left-radius: 8px;
+}
+.msg.system {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  background: rgba(255,255,255,0.3);
+}
 
 .events-group { align-self: flex-start; width: 100%; }
-.event-row { font-size: 12px; color: var(--muted); padding: 2px 0; display: flex; gap: 6px; align-items: baseline; }
-.event-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
-.event-badge.planner { background: #1f1030; color: var(--purple); }
-.event-badge.tool { background: #1a1500; color: var(--orange); }
-.event-badge.tool-diff { background: #112a2c; color: var(--green); }
-.event-badge.gatherer { background: #0a1a0a; color: var(--green); }
-.event-badge.route { background: #0d1a2a; color: var(--accent); }
-.event-badge.synthesis { background: #0a1a0a; color: var(--green); }
-.event-badge.fallback { background: #200a0a; color: var(--red); }
+.event-row {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 5px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  border-radius: 14px;
+  background: rgba(248,251,252,0.38);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.62),
+    0 4px 10px rgba(98, 113, 128, 0.08);
+}
+.event-badge {
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.42);
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.52);
+}
+.event-badge.planner { background: rgba(45, 144, 200, 0.18); color: #255f86; }
+.event-badge.tool { background: rgba(240, 138, 36, 0.22); color: #9e561d; }
+.event-badge.tool-diff { background: rgba(23, 149, 108, 0.22); color: #166751; }
+.event-badge.gatherer { background: rgba(223, 178, 63, 0.2); color: #82620f; }
+.event-badge.route { background: rgba(45, 144, 200, 0.18); color: #255f86; }
+.event-badge.synthesis { background: rgba(23, 149, 108, 0.16); color: #166751; }
+.event-badge.fallback { background: rgba(214, 95, 74, 0.18); color: #9a4536; }
 .diff-lines { display: block; margin-top: 4px; padding-left: 12px; }
 .diff-line { white-space: pre; display: block; }
 .diff-line.add { color: #3fb950; }
@@ -53,10 +191,51 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 .diff-line.hunk { color: var(--accent); }
 .diff-line.noop { color: var(--muted); }
 
-.chat-input { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
-.chat-input input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 14px; outline: none; }
-.chat-input input:focus { border-color: var(--accent); }
-.chat-input button { background: var(--accent); color: #000; border: none; border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer; font-size: 14px; }
+.chat-input {
+  padding: 18px;
+  border-top: 1px solid rgba(122, 142, 157, 0.2);
+  display: flex;
+  gap: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0.46));
+}
+.chat-input input {
+  flex: 1;
+  background:
+    linear-gradient(180deg, rgba(247,249,251,0.98), rgba(223, 231, 238, 0.96));
+  border: 1px solid rgba(97, 114, 129, 0.28);
+  border-radius: 18px;
+  padding: 14px 18px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  box-shadow:
+    inset 2px 2px 5px rgba(255,255,255,0.9),
+    inset -3px -3px 8px rgba(135, 151, 166, 0.24);
+}
+.chat-input input:focus {
+  border-color: rgba(46, 125, 178, 0.54);
+  box-shadow:
+    inset 2px 2px 5px rgba(255,255,255,0.9),
+    inset -3px -3px 8px rgba(181, 194, 205, 0.28),
+    0 0 0 4px rgba(92, 169, 212, 0.2);
+}
+.chat-input button {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.02)),
+    linear-gradient(140deg, #3f97ce, #2e7db2);
+  color: #f7fbfd;
+  border: 1px solid rgba(255,255,255,0.36);
+  border-radius: 18px;
+  padding: 12px 22px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.45),
+    0 10px 20px rgba(46, 125, 178, 0.3);
+}
 .chat-input button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .trace-header-wrap {
@@ -64,16 +243,39 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   justify-content: space-between;
   align-items: flex-end;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  padding: 4px 6px 10px;
 }
-.trace-header { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.trace-subhead { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+.trace-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #495b68;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+}
+.trace-subhead {
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: #61717e;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
 .trace-board {
   --tile-size: clamp(112px, 12vw, 148px);
   flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding: 4px 6px 20px 4px;
+  padding: 10px 10px 22px 6px;
   position: relative;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(45, 144, 200, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,0.24), rgba(255,255,255,0.02)),
+    linear-gradient(180deg, rgba(189, 201, 211, 0.88), rgba(157, 171, 183, 0.94));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.7),
+    inset -2px -2px 0 rgba(98, 117, 132, 0.08),
+    inset 0 24px 38px rgba(255,255,255,0.06);
 }
 .trace-canvas {
   position: relative;
@@ -94,18 +296,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 }
 .trace-overlay__glow {
   fill: none;
-  stroke: rgba(88, 166, 255, 0.2);
-  stroke-width: 14;
+  stroke: rgba(45, 144, 200, 0.22);
+  stroke-width: 16;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.trace-overlay__trench {
+  fill: none;
+  stroke: rgba(58, 72, 84, 0.22);
+  stroke-width: 20;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 .trace-overlay__line {
   fill: none;
-  stroke: rgba(188, 140, 255, 0.75);
-  stroke-width: 4;
+  stroke: rgba(36, 118, 168, 0.95);
+  stroke-width: 4.5;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 10 12;
+  stroke-dasharray: 11 11;
 }
 .trace-row {
   position: relative;
@@ -123,6 +332,66 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   min-width: var(--tile-size);
   aspect-ratio: 1 / 1;
   overflow: visible;
+  --node-raise: -3px;
+  --node-shadow-x: 10px;
+  --node-shadow-y: 13px;
+  --node-shadow-blur: 20px;
+  --node-shadow-alpha: 0.18;
+  --node-shadow-color: 70, 84, 98;
+  --node-shadow-warm-alpha: 0;
+  --node-shadow-warm-x: 0px;
+  --node-shadow-warm-y: 0px;
+  --node-shadow-warm-blur: 0px;
+  --node-specular-alpha: 0.74;
+  --node-thickness: 7px;
+  --node-tilt-x: 5deg;
+  --node-tilt-y: -3deg;
+}
+.trace-node:hover,
+.trace-node:focus-within {
+  z-index: 30;
+}
+.trace-node::before {
+  content: "";
+  position: absolute;
+  left: 16%;
+  right: 12%;
+  bottom: 12%;
+  height: 18%;
+  border-radius: 999px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(195, 134, 78, var(--node-shadow-warm-alpha)) 0%,
+    rgba(195, 134, 78, calc(var(--node-shadow-warm-alpha) * 0.55)) 18%,
+    rgba(var(--node-shadow-color), calc(var(--node-shadow-alpha) + 0.06)) 0%,
+    rgba(var(--node-shadow-color), calc(var(--node-shadow-alpha) * 0.42)) 45%,
+    rgba(var(--node-shadow-color), 0) 80%
+  );
+  transform: translate(calc(var(--node-shadow-x) * 0.58), calc(var(--node-shadow-y) * 0.62 + 2px)) scaleX(0.92);
+  filter:
+    drop-shadow(var(--node-shadow-warm-x) var(--node-shadow-warm-y) var(--node-shadow-warm-blur) rgba(195, 134, 78, calc(var(--node-shadow-warm-alpha) * 0.72)))
+    blur(calc(var(--node-shadow-blur) * 0.6));
+  opacity: 0.94;
+  pointer-events: none;
+  z-index: 0;
+  transition: transform 180ms ease, filter 180ms ease, opacity 180ms ease;
+}
+.trace-node::after {
+  content: "";
+  position: absolute;
+  inset: 4% 5% 1% 5%;
+  clip-path: polygon(24% 6%, 76% 6%, 100% 50%, 76% 94%, 24% 94%, 0% 50%);
+  background:
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--node-color) 34%, rgba(22, 29, 36, 0.94)),
+      color-mix(in srgb, var(--node-color) 58%, rgba(36, 46, 56, 0.92)) 58%,
+      rgba(31, 40, 48, 0.92)
+    );
+  transform: perspective(320px) rotateX(var(--node-tilt-x)) rotateY(var(--node-tilt-y)) translate(calc(var(--node-shadow-x) * 0.12), calc(var(--node-thickness) + var(--node-shadow-y) * 0.06));
+  opacity: 0.96;
+  z-index: 1;
+  pointer-events: none;
+  transition: transform 180ms ease, opacity 180ms ease;
 }
 .trace-node__hex {
   position: relative;
@@ -130,12 +399,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   height: 100%;
   clip-path: polygon(24% 6%, 76% 6%, 100% 50%, 76% 94%, 24% 94%, 0% 50%);
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
-    color-mix(in srgb, var(--node-color) 18%, rgba(22, 27, 34, 0.92));
-  border: 1px solid color-mix(in srgb, var(--node-color) 60%, var(--border));
+    linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0) 32%),
+    linear-gradient(150deg, rgba(255,255,255,var(--node-specular-alpha)), rgba(255,255,255,0.12) 38%, rgba(255,255,255,0.02) 100%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--node-color) 7%, rgba(253, 253, 252, 0.98)),
+      color-mix(in srgb, var(--node-color) 22%, rgba(232, 238, 242, 0.97)) 64%,
+      color-mix(in srgb, var(--node-color) 30%, rgba(210, 218, 224, 0.97))
+    );
+  border: 1px solid color-mix(in srgb, var(--node-color) 46%, rgba(70, 84, 98, 0.28));
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.04),
-    0 10px 24px rgba(0,0,0,0.22);
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -4px -5px 12px rgba(105, 119, 131, 0.12),
+    inset 0 -14px 18px rgba(77, 92, 104, 0.08),
+    -8px -8px 18px rgba(255,255,255,0.56),
+    var(--node-shadow-x) var(--node-shadow-y) var(--node-shadow-blur) rgba(var(--node-shadow-color), var(--node-shadow-alpha));
   padding: 14px 16px 18px;
   display: flex;
   flex-direction: column;
@@ -143,13 +420,38 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   justify-content: center;
   transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
   text-align: center;
+  transform: perspective(320px) rotateX(var(--node-tilt-x)) rotateY(var(--node-tilt-y)) translateY(var(--node-raise));
+  z-index: 2;
 }
 .trace-node:hover .trace-node__hex {
-  transform: translateY(-4px) scale(1.03);
+  transform: perspective(320px) rotateX(calc(var(--node-tilt-x) + 1deg)) rotateY(var(--node-tilt-y)) translateY(calc(var(--node-raise) - 6px)) scale(1.02);
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.06),
-    0 18px 34px rgba(0,0,0,0.34);
+    inset 1px 1px 0 rgba(255,255,255,0.9),
+    inset -3px -4px 12px rgba(152, 169, 184, 0.14),
+    -10px -10px 20px rgba(255,255,255,0.78),
+    calc(var(--node-shadow-x) + 4px) calc(var(--node-shadow-y) + 6px) calc(var(--node-shadow-blur) + 8px) rgba(var(--node-shadow-color), calc(var(--node-shadow-alpha) + 0.08));
   border-color: var(--node-color);
+}
+.trace-node:hover::after {
+  transform: perspective(320px) rotateX(calc(var(--node-tilt-x) + 1deg)) rotateY(var(--node-tilt-y)) translate(calc(var(--node-shadow-x) * 0.16 + 1px), calc(var(--node-thickness) + var(--node-shadow-y) * 0.08 + 2px));
+}
+.trace-node:hover::before {
+  transform: translate(calc(var(--node-shadow-x) * 0.66), calc(var(--node-shadow-y) * 0.72 + 4px)) scaleX(0.98);
+  filter: blur(calc(var(--node-shadow-blur) * 0.66));
+  opacity: 1;
+}
+.trace-node--latest::before {
+  animation: traceShadowPulse 3.2s ease-in-out infinite;
+}
+@keyframes traceShadowPulse {
+  0%, 100% {
+    opacity: 0.84;
+    filter: blur(calc(var(--node-shadow-blur) * 0.5));
+  }
+  50% {
+    opacity: 1;
+    filter: blur(calc(var(--node-shadow-blur) * 0.62));
+  }
 }
 .trace-node__sequence {
   position: absolute;
@@ -158,7 +460,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   transform: translateX(-50%);
   font-size: 10px;
   color: color-mix(in srgb, var(--node-color) 76%, white);
-  opacity: 0.9;
+  opacity: 0.82;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   text-align: center;
@@ -169,7 +471,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   left: 50%;
   transform: translateX(-50%);
   font-size: 10px;
-  color: var(--muted);
+  color: #5a6876;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   text-align: center;
@@ -181,7 +483,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 .trace-node__label {
   font-size: 14px;
   line-height: 1.2;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
   width: 100%;
   max-width: calc(100% - 10px);
@@ -199,7 +501,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   bottom: 14px;
   transform: translateX(-50%);
   font-size: 10px;
-  color: var(--muted);
+  color: #4e5b67;
   width: calc(100% - 32px);
   text-align: center;
   white-space: nowrap;
@@ -214,9 +516,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
   width: clamp(180px, 18vw, 280px);
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--node-color) 72%, var(--border));
-  background: rgba(13, 17, 23, 0.97);
-  box-shadow: 0 18px 42px rgba(0,0,0,0.46);
+  border: 1px solid color-mix(in srgb, var(--node-color) 28%, rgba(148, 164, 177, 0.4));
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.72), rgba(243,247,250,0.28)),
+    rgba(235, 241, 245, 0.94);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow:
+    -8px -8px 22px rgba(255,255,255,0.7),
+    14px 20px 38px rgba(125, 143, 159, 0.28);
   color: var(--text);
   opacity: 0;
   pointer-events: none;
@@ -278,9 +586,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 .trace-empty { color: var(--muted); font-size: 12px; font-style: italic; }
 
 @media (max-width: 960px) {
-  body { flex-direction: column; height: auto; min-height: 100vh; }
-  .chat-panel { border-right: none; border-bottom: 1px solid var(--border); min-height: 48vh; }
-  .trace-panel { width: 100%; min-width: 0; min-height: 42vh; }
+  body { flex-direction: column; height: 100dvh; padding: 14px; }
+  .chat-panel { flex: 1 1 48vh; min-height: 0; }
+  .trace-panel { width: 100%; min-width: 0; flex: 1 1 42vh; min-height: 0; }
 }
 </style>
 </head>
@@ -310,9 +618,16 @@ let eventSource = null;
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 
 const KIND_COLORS = {
-  root: '#58a6ff', turn: '#58a6ff', action: '#bc8cff', branch: '#bc8cff',
-  tool: '#d29922', tool_done: '#d29922', evidence: '#3fb950',
-  checkpoint: '#3fb950', merge: '#f778ba', thread: '#8b949e'
+  root: '#2d90c8',
+  turn: '#2d90c8',
+  action: '#f08a24',
+  branch: '#dfb23f',
+  tool: '#f08a24',
+  tool_done: '#d27820',
+  evidence: '#17956c',
+  checkpoint: '#17956c',
+  merge: '#d65f4a',
+  thread: '#70808d'
 };
 
 const TRACE_TILE_MIN = 128;
@@ -592,13 +907,20 @@ function renderTraceDAG(graph) {
     '<div class="trace-canvas">' +
       '<svg class="trace-overlay" id="trace-overlay" aria-hidden="true">' +
         '<path class="trace-overlay__glow" id="trace-overlay-glow"></path>' +
+        '<path class="trace-overlay__trench" id="trace-overlay-trench"></path>' +
         '<path class="trace-overlay__line" id="trace-overlay-line"></path>' +
       '</svg>' +
       rows
         .map((row, rowIndex) => {
           const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
           return '<div class="trace-row' + reverse + '">' +
-            row.map((node) => renderTraceNode(node, branchLabels)).join('') +
+            row.map((node, nodeIndex) => renderTraceNode(
+              node,
+              branchLabels,
+              sorted.length - (rowIndex * columns + nodeIndex) - 1,
+              sorted.length,
+              traceNodeDirection(rowIndex, nodeIndex, row.length, rows.length)
+            )).join('') +
           '</div>';
         })
         .join('') +
@@ -611,11 +933,41 @@ function renderTraceDAG(graph) {
   });
 }
 
-function renderTraceNode(node, branchLabels) {
+function traceNodeDirection(rowIndex, nodeIndex, rowLength, totalRows) {
+  const isReverseRow = rowIndex % 2 === 1;
+  const isRowTail = nodeIndex === rowLength - 1;
+  const hasNextRow = rowIndex < totalRows - 1;
+  if (isRowTail && hasNextRow) {
+    return 'down';
+  }
+  return isReverseRow ? 'rtl' : 'ltr';
+}
+
+function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction) {
   const color = KIND_COLORS[node.kind] || '#8b949e';
   const branchLabel = node.branch_id && branchLabels[node.branch_id]
     ? branchLabels[node.branch_id]
     : null;
+  const recencyRatio = totalNodes <= 1 ? 1 : 1 - (recencyIndex / Math.max(totalNodes - 1, 1));
+  const depth = Math.max(0, Math.min(1, recencyRatio));
+  const sunTrailDepth = Math.max(0, 1 - (recencyIndex / 3));
+  const raise = -(2 + depth * 6);
+  const shadowX = 5 + depth * 2.5;
+  const shadowY = 6 + depth * 4;
+  const shadowBlur = 12 + depth * 7;
+  const shadowAlpha = 0.1 + depth * 0.12;
+  const specularAlpha = 0.68 + depth * 0.2;
+  const shadowWarmAlpha = 0.02 + sunTrailDepth * 0.1;
+  const shadowWarmX = 1 + sunTrailDepth * 2;
+  const shadowWarmY = 2 + sunTrailDepth * 4;
+  const shadowWarmBlur = 4 + sunTrailDepth * 10;
+  const tiltX = direction === 'down' ? 8 : 5;
+  const tiltY = direction === 'ltr' ? -4 : direction === 'rtl' ? 4 : 0;
+  const classes = ['trace-node'];
+  if (recencyIndex === 0) {
+    classes.push('trace-node--latest');
+  }
+  classes.push('trace-node--' + direction);
   const meta = [
     'kind: ' + escapeHtml(formatTraceKind(node.kind)),
     branchLabel ? 'branch: ' + escapeHtml(branchLabel) : null,
@@ -623,7 +975,21 @@ function renderTraceNode(node, branchLabels) {
   ].filter(Boolean).join('<br>');
 
   return (
-    '<div class="trace-node" style="--node-color:' + color + '">' +
+    '<div class="' + classes.join(' ') + '" style="' +
+      '--node-color:' + color + ';' +
+      '--node-raise:' + raise.toFixed(2) + 'px;' +
+      '--node-shadow-x:' + shadowX.toFixed(2) + 'px;' +
+      '--node-shadow-y:' + shadowY.toFixed(2) + 'px;' +
+      '--node-shadow-blur:' + shadowBlur.toFixed(2) + 'px;' +
+      '--node-shadow-alpha:' + shadowAlpha.toFixed(3) + ';' +
+      '--node-shadow-warm-alpha:' + shadowWarmAlpha.toFixed(3) + ';' +
+      '--node-shadow-warm-x:' + shadowWarmX.toFixed(2) + 'px;' +
+      '--node-shadow-warm-y:' + shadowWarmY.toFixed(2) + 'px;' +
+      '--node-shadow-warm-blur:' + shadowWarmBlur.toFixed(2) + 'px;' +
+      '--node-tilt-x:' + tiltX.toFixed(2) + 'deg;' +
+      '--node-tilt-y:' + tiltY.toFixed(2) + 'deg;' +
+      '--node-specular-alpha:' + specularAlpha.toFixed(3) +
+    '">' +
       '<div class="trace-node__hex">' +
         '<div class="trace-node__sequence">step ' + node.sequence + '</div>' +
         '<div class="trace-node__kind">' + escapeHtml(formatTraceKind(node.kind)) + '</div>' +
@@ -646,8 +1012,9 @@ function drawTraceSnake(board) {
   const canvas = board.querySelector('.trace-canvas');
   const overlay = document.getElementById('trace-overlay');
   const glow = document.getElementById('trace-overlay-glow');
+  const trench = document.getElementById('trace-overlay-trench');
   const line = document.getElementById('trace-overlay-line');
-  if (!canvas || !overlay || !glow || !line) {
+  if (!canvas || !overlay || !glow || !trench || !line) {
     return;
   }
 
@@ -655,6 +1022,7 @@ function drawTraceSnake(board) {
   if (nodes.length < 2) {
     overlay.setAttribute('viewBox', '0 0 1 1');
     glow.setAttribute('d', '');
+    trench.setAttribute('d', '');
     line.setAttribute('d', '');
     return;
   }
@@ -682,6 +1050,7 @@ function drawTraceSnake(board) {
     path += ' C ' + midX + ' ' + prev.y + ', ' + midX + ' ' + next.y + ', ' + next.x + ' ' + next.y;
   }
 
+  trench.setAttribute('d', path);
   glow.setAttribute('d', path);
   line.setAttribute('d', path);
 }
