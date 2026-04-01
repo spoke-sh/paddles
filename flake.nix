@@ -6,10 +6,13 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
 
-    sift.url = "github:rupurt/sift?ref=main";
+    sift = {
+      url = "github:rupurt/sift?rev=a7f7a2f0554db556d39a7e51e4c7d1e564c6df5c";
+      inputs.keel.follows = "keel";
+    };
 
     keel = {
-      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
+      url = "github:spoke-sh/keel?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -48,7 +51,7 @@
               "candle-transformers-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-kernels-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-ug-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
-              "sift-0.2.0" = "sha256-pAeS6BkDbDSuB2JHOHbaUZRbgkZry4H43J3RZBmBswk=";
+              "sift-0.2.0" = "sha256-rYaEiRkzL2UBhG5DTosQlGe3i8OjigD9dh6EYZGg3rY=";
               "transit-core-0.1.0" = "sha256-4VvRHAf+ABRDe1q5giH/VtsJo66JJjsCKbmP/7RlXN0=";
             };
           };

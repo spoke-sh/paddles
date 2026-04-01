@@ -49,47 +49,18 @@
         ]
       },
       "locked": {
-        "lastModified": 1774839562,
-        "narHash": "sha256-+G4oKy+iAEsDggieSNgF3w+rGOYPft2IDk2sklcagik=",
-        "ref": "main",
-        "rev": "1b24f3911e3d84ee966349c9017fd1d50030c2e3",
-        "revCount": 610,
-        "type": "git",
-        "url": "ssh://git@github.com/spoke-sh/keel.git"
+        "lastModified": 1774967845,
+        "narHash": "sha256-rnWXT22jAeRtVzol8ocdbirzxtMWju3IMEdrNl//3aA=",
+        "owner": "spoke-sh",
+        "repo": "keel",
+        "rev": "761ed00b04d90a2d0eff3a8a450c6fb393e58288",
+        "type": "github"
       },
       "original": {
+        "owner": "spoke-sh",
         "ref": "main",
-        "type": "git",
-        "url": "ssh://git@github.com/spoke-sh/keel.git"
-      }
-    },
-    "keel_2": {
-      "inputs": {
-        "flake-utils": [
-          "sift",
-          "flake-utils"
-        ],
-        "nixpkgs": [
-          "sift",
-          "nixpkgs"
-        ],
-        "rust-overlay": [
-          "sift",
-          "rust-overlay"
-        ]
-      },
-      "locked": {
-        "lastModified": 1773655942,
-        "narHash": "sha256-6F8TsILtfjszpBwkfGdd9Nf6RcI7hsIlYwNbwMEbkeA=",
-        "ref": "refs/heads/main",
-        "rev": "1773700d3280d5cc1dfe57d8613f5cfaa0b9b93a",
-        "revCount": 470,
-        "type": "git",
-        "url": "ssh://git@github.com/spoke-sh/keel.git"
-      },
-      "original": {
-        "type": "git",
-        "url": "ssh://git@github.com/spoke-sh/keel.git"
+        "repo": "keel",
+        "type": "github"
       }
     },
     "nixpkgs": {
@@ -204,22 +175,24 @@
     "sift": {
       "inputs": {
         "flake-utils": "flake-utils_2",
-        "keel": "keel_2",
+        "keel": [
+          "keel"
+        ],
         "nixpkgs": "nixpkgs_3",
         "rust-overlay": "rust-overlay_2"
       },
       "locked": {
-        "lastModified": 1773684340,
-        "narHash": "sha256-qqZZvhVOnadpp4ma24BfKMYobKnXTZDv9VML41muwk4=",
+        "lastModified": 1775009098,
+        "narHash": "sha256-rYaEiRkzL2UBhG5DTosQlGe3i8OjigD9dh6EYZGg3rY=",
         "owner": "rupurt",
         "repo": "sift",
-        "rev": "7c70295b198a410b8a5f4346d76af81fa9edec6e",
+        "rev": "a7f7a2f0554db556d39a7e51e4c7d1e564c6df5c",
         "type": "github"
       },
       "original": {
         "owner": "rupurt",
-        "ref": "main",
         "repo": "sift",
+        "rev": "a7f7a2f0554db556d39a7e51e4c7d1e564c6df5c",
         "type": "github"
       }
     },
