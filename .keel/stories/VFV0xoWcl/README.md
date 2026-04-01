@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFV0xoWcl
-status: backlog
+status: in-progress
 created_at: 2026-03-31T18:39:51
-updated_at: 2026-03-31T18:41:56
+updated_at: 2026-03-31T18:59:19
 # authored
 title: Rename And Rewire Gatherer Configuration Away From Autonomous Planning
 type: feat
 operator-signal:
 scope: VFV0VmEj0/VFV0uvpPX
 index: 3
+started_at: 2026-03-31T18:59:19
 ---
 
 # Rename And Rewire Gatherer Configuration Away From Autonomous Planning

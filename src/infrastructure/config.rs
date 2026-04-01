@@ -36,7 +36,7 @@ impl Default for PaddlesConfig {
             model: "qwen-1.5b".to_string(),
             planner_model: None,
             gatherer_model: None,
-            gatherer_provider: "sift-autonomous".to_string(),
+            gatherer_provider: "sift-direct".to_string(),
             port: 3000,
             verbose: 0,
             hf_token: None,
@@ -79,6 +79,14 @@ pub fn normalize_provider_model_alias(provider: &str, model: &str) -> String {
     match (provider, model) {
         ("moonshot", "kimi-2.5") => "kimi-k2.5".to_string(),
         _ => model.to_string(),
+    }
+}
+
+/// Normalizes legacy gatherer provider aliases so old configs remain explicit and compatible.
+pub fn normalize_gatherer_provider_alias(provider: &str) -> String {
+    match provider {
+        "sift-autonomous" => "sift-direct".to_string(),
+        _ => provider.to_string(),
     }
 }
 
@@ -147,5 +155,18 @@ port = 8080
             "kimi-k2.5"
         );
         assert_eq!(normalize_provider_model_alias("openai", "gpt-4o"), "gpt-4o");
+    }
+
+    #[test]
+    fn normalizes_legacy_gatherer_provider_alias() {
+        assert_eq!(
+            normalize_gatherer_provider_alias("sift-autonomous"),
+            "sift-direct"
+        );
+        assert_eq!(
+            normalize_gatherer_provider_alias("sift-direct"),
+            "sift-direct"
+        );
+        assert_eq!(normalize_gatherer_provider_alias("context1"), "context1");
     }
 }

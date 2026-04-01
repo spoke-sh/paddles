@@ -76,7 +76,8 @@ pub enum RuntimeLaneRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GathererProvider {
     Local,
-    SiftAutonomous,
+    #[value(alias = "sift-autonomous")]
+    SiftDirect,
     Context1,
 }
 
@@ -96,7 +97,7 @@ impl RuntimeLaneConfig {
             planner_model_id: None,
             synthesizer_model_id: synthesizer_model_id.into(),
             gatherer_model_id,
-            gatherer_provider: GathererProvider::SiftAutonomous,
+            gatherer_provider: GathererProvider::SiftDirect,
             context1_harness_ready: false,
             requires_local_models: true,
         }
@@ -2777,7 +2778,7 @@ mod tests {
         assert_eq!(config.default_response_role(), RuntimeLaneRole::Synthesizer);
         assert_eq!(config.synthesizer_model_id(), "qwen-1.5b");
         assert_eq!(config.gatherer_model_id(), None);
-        assert_eq!(config.gatherer_provider(), GathererProvider::SiftAutonomous);
+        assert_eq!(config.gatherer_provider(), GathererProvider::SiftDirect);
         assert!(!config.context1_harness_ready());
     }
 
@@ -2825,16 +2826,16 @@ mod tests {
     }
 
     #[test]
-    fn sift_autonomous_boundary_can_be_prepared_without_local_model_paths() {
+    fn sift_direct_boundary_can_be_prepared_without_local_model_paths() {
         let gatherer = PreparedGathererLane {
-            provider: GathererProvider::SiftAutonomous,
-            label: "sift-autonomous".to_string(),
+            provider: GathererProvider::SiftDirect,
+            label: "sift-direct".to_string(),
             model_id: None,
             paths: None,
         };
 
-        assert_eq!(gatherer.provider, GathererProvider::SiftAutonomous);
-        assert_eq!(gatherer.label, "sift-autonomous");
+        assert_eq!(gatherer.provider, GathererProvider::SiftDirect);
+        assert_eq!(gatherer.label, "sift-direct");
         assert_eq!(gatherer.model_id, None);
         assert_eq!(gatherer.paths, None);
     }
@@ -2914,8 +2915,8 @@ mod tests {
                 paths: Some(sample_model_paths("synth")),
             },
             gatherer: Some(PreparedGathererLane {
-                provider: GathererProvider::SiftAutonomous,
-                label: "sift-autonomous".to_string(),
+                provider: GathererProvider::SiftDirect,
+                label: "sift-direct".to_string(),
                 model_id: None,
                 paths: None,
             }),
@@ -3156,8 +3157,8 @@ mod tests {
                 paths: Some(sample_model_paths("synth")),
             },
             gatherer: Some(PreparedGathererLane {
-                provider: GathererProvider::SiftAutonomous,
-                label: "sift-autonomous".to_string(),
+                provider: GathererProvider::SiftDirect,
+                label: "sift-direct".to_string(),
                 model_id: None,
                 paths: None,
             }),

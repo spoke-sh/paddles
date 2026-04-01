@@ -23,7 +23,9 @@ use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
-use paddles::infrastructure::config::{PaddlesConfig, normalize_provider_model_alias};
+use paddles::infrastructure::config::{
+    PaddlesConfig, normalize_gatherer_provider_alias, normalize_provider_model_alias,
+};
 use paddles::infrastructure::credentials::{ApiKeySource, CredentialStore};
 use paddles::infrastructure::rendering::RenderCapability;
 
@@ -169,12 +171,19 @@ async fn main() -> Result<()> {
     });
     let render_capability = RenderCapability::resolve(provider_name, &model);
 
+    let normalized_gatherer_provider = normalize_gatherer_provider_alias(&config.gatherer_provider);
+    if normalized_gatherer_provider != config.gatherer_provider {
+        eprintln!(
+            "[WARN] Gatherer provider `{}` is deprecated; using `{normalized_gatherer_provider}` instead.",
+            config.gatherer_provider
+        );
+    }
     let gatherer_provider =
         cli.gatherer_provider
-            .unwrap_or(match config.gatherer_provider.as_str() {
+            .unwrap_or(match normalized_gatherer_provider.as_str() {
                 "local" => GathererProvider::Local,
                 "context1" => GathererProvider::Context1,
-                _ => GathererProvider::SiftAutonomous,
+                _ => GathererProvider::SiftDirect,
             });
 
     let frontend = select_interactive_frontend(
@@ -326,10 +335,10 @@ async fn main() -> Result<()> {
                     }
                     None => Ok(None),
                 },
-                GathererProvider::SiftAutonomous => {
+                GathererProvider::SiftDirect => {
                     let lane = PreparedGathererLane {
-                        provider: GathererProvider::SiftAutonomous,
-                        label: "sift-autonomous".to_string(),
+                        provider: GathererProvider::SiftDirect,
+                        label: "sift-direct".to_string(),
                         model_id: None,
                         paths: None,
                     };
@@ -394,8 +403,8 @@ async fn main() -> Result<()> {
             println!("[BOOT] Syncing gatherer lane via SIFT for: {gm}...");
         }
         match gatherer_provider {
-            GathererProvider::SiftAutonomous => {
-                println!("[BOOT] Sift autonomous gatherer provider selected.");
+            GathererProvider::SiftDirect => {
+                println!("[BOOT] Sift direct retrieval gatherer provider selected.");
             }
             GathererProvider::Context1 => {
                 println!(
