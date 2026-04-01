@@ -29,10 +29,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 .event-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
 .event-badge.planner { background: #1f1030; color: var(--purple); }
 .event-badge.tool { background: #1a1500; color: var(--orange); }
+.event-badge.tool-diff { background: #112a2c; color: var(--green); }
 .event-badge.gatherer { background: #0a1a0a; color: var(--green); }
 .event-badge.route { background: #0d1a2a; color: var(--accent); }
 .event-badge.synthesis { background: #0a1a0a; color: var(--green); }
 .event-badge.fallback { background: #200a0a; color: var(--red); }
+.diff-lines { display: block; margin-top: 4px; padding-left: 12px; }
+.diff-line { white-space: pre; display: block; }
+.diff-line.add { color: #3fb950; }
+.diff-line.remove { color: #f85149; }
+.diff-line.context { color: var(--text); }
+.diff-line.meta { color: #8b949e; }
+.diff-line.hunk { color: var(--accent); }
+.diff-line.noop { color: var(--muted); }
 
 .chat-input { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
 .chat-input input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 14px; outline: none; }
@@ -65,6 +74,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 <script>
 let sessionId = null;
 let eventSource = null;
+const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 
 const KIND_COLORS = {
   root: '#58a6ff', turn: '#58a6ff', action: '#bc8cff', branch: '#bc8cff',
@@ -99,7 +109,7 @@ function addMessage(cls, text) {
   el.scrollIntoView({ behavior: 'smooth' });
 }
 
-function addEventRow(badge, badgeCls, text) {
+function addEventRow(badge, badgeCls, text, htmlContent = null) {
   let group = document.getElementById('messages').lastElementChild;
   if (!group || !group.classList.contains('events-group')) {
     group = document.createElement('div');
@@ -108,7 +118,8 @@ function addEventRow(badge, badgeCls, text) {
   }
   const row = document.createElement('div');
   row.className = 'event-row';
-  row.innerHTML = '<span class="event-badge ' + badgeCls + '">' + badge + '</span><span>' + escapeHtml(text) + '</span>';
+  const content = htmlContent === null ? escapeHtml(text) : htmlContent;
+  row.innerHTML = '<span class="event-badge ' + badgeCls + '">' + badge + '</span><span>' + content + '</span>';
   group.appendChild(row);
   row.scrollIntoView({ behavior: 'smooth' });
 }
@@ -136,6 +147,84 @@ function formatDuration(totalSeconds) {
   return `${s}s`;
 }
 
+function isMutationTool(toolName) {
+  return MUTATION_TOOLS.has(toolName);
+}
+
+function extractMutationDiff(toolName, summary) {
+  if (!summary) {
+    return null;
+  }
+  if (toolName === "diff") {
+    if (summary === "No diff output.") {
+      return summary;
+    }
+    if (summary.startsWith("Diff output:\n")) {
+      return summary.slice("Diff output:\n".length);
+    }
+    if (summary.startsWith("Diff output:\r\n")) {
+      return summary.slice("Diff output:\r\n".length);
+    }
+    return null;
+  }
+  if (toolName === "apply_patch") {
+    if (!summary.startsWith("Applied patch:\n")) {
+      return null;
+    }
+    const body = summary.slice("Applied patch:\n".length);
+    return body
+      .split("\n\nExit status:")[0]
+      .split("\nExit status:")[0]
+      .trim();
+  }
+  return null;
+}
+
+function diffLineClass(line) {
+  if (
+    line.startsWith("+++") ||
+    line.startsWith("---") ||
+    line.startsWith("diff ") ||
+    line.startsWith("index ")
+  ) {
+    return "meta";
+  }
+  if (line.startsWith("+")) {
+    return "add";
+  }
+  if (line.startsWith("-")) {
+    return "remove";
+  }
+  if (line.startsWith("@@")) {
+    return "hunk";
+  }
+  if (line.startsWith("\\")) {
+    return "noop";
+  }
+  return "context";
+}
+
+function formatDiffForEvent(toolName, diff) {
+  const lines = diff
+    .split("\n")
+    .map(
+      (line) =>
+        '<span class="diff-line ' +
+        diffLineClass(line) +
+        '">' +
+        escapeHtml(line) +
+        "</span>"
+    )
+    .join("<br>");
+  return (
+    escapeHtml(toolName + " done") +
+    "<br>" +
+    "<span class=\"diff-lines\">" +
+    lines +
+    "</span>"
+  );
+}
+
 function handleEvent(ev) {
   const t = ev.type;
   if (t === 'intent_classified') {
@@ -147,7 +236,21 @@ function handleEvent(ev) {
   } else if (t === 'tool_called') {
     addEventRow('tool', 'tool', ev.tool_name + ': ' + truncate(ev.invocation, 60));
   } else if (t === 'tool_finished') {
-    addEventRow('tool', 'tool', ev.tool_name + ' done');
+    if (isMutationTool(ev.tool_name)) {
+      const diff = extractMutationDiff(ev.tool_name, ev.summary);
+      if (diff) {
+        addEventRow(
+          'tool',
+          'tool-diff',
+          ev.tool_name + ' done',
+          formatDiffForEvent(ev.tool_name, diff)
+        );
+      } else {
+        addEventRow('tool', 'tool', ev.tool_name + ' done');
+      }
+    } else {
+      addEventRow('tool', 'tool', ev.tool_name + ' done');
+    }
   } else if (t === 'gatherer_summary') {
     addEventRow('gather', 'gatherer', ev.summary);
   } else if (t === 'gatherer_search_progress') {
@@ -319,7 +422,16 @@ async function replayHistory() {
           } else if ('ToolCallRequested' in k) {
             addEventRow('tool', 'tool', k.ToolCallRequested.tool_name);
           } else if ('ToolCallCompleted' in k) {
-            addEventRow('tool', 'tool', k.ToolCallCompleted.tool_name + ' done');
+            const tool = k.ToolCallCompleted.tool_name;
+            const summary = k.ToolCallCompleted.payload && k.ToolCallCompleted.payload.summary
+              ? k.ToolCallCompleted.payload.summary
+              : '';
+            const diff = isMutationTool(tool) ? extractMutationDiff(tool, summary) : null;
+            if (diff) {
+              addEventRow('tool', 'tool-diff', tool + ' done', formatDiffForEvent(tool, diff));
+            } else {
+              addEventRow('tool', 'tool', tool + ' done');
+            }
           } else if ('CompletionCheckpoint' in k) {
             const cp = k.CompletionCheckpoint;
             if (cp.response && cp.response.inline_content) {

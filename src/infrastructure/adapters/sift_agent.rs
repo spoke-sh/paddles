@@ -1885,7 +1885,7 @@ impl SiftAgentAdapter {
                     .wait_with_output()
                     .context("failed to wait for git apply")?;
                 let summary =
-                    format_command_summary("git apply", "git apply --whitespace=nowarn -", &output);
+                    summarize_apply_patch_result(patch, "git apply --whitespace=nowarn -", &output);
                 if !output.status.success() {
                     bail!("{summary}");
                 }
@@ -2024,6 +2024,21 @@ impl SiftAgentAdapter {
 
         Ok(all_documents)
     }
+}
+
+fn summarize_apply_patch_result(
+    patch: &str,
+    command: &str,
+    output: &std::process::Output,
+) -> String {
+    let patch_preview = trim_for_context(patch, MAX_TOOL_OUTPUT_CHARS / 2);
+    let mut summary = String::new();
+    summary.push_str("Applied patch:\n");
+    summary.push_str(&patch_preview);
+    summary.push('\n');
+    summary.push('\n');
+    summary.push_str(&format_command_summary("git apply", command, output));
+    trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
 }
 
 fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {

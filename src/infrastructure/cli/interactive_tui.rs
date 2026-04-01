@@ -1453,6 +1453,15 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         return lines;
     }
 
+    if let Some(tool_name) = row.header.strip_prefix("• Completed ").map(str::trim)
+        && is_mutation_tool_name(tool_name)
+        && let Some(diff_content) = mutation_tool_payload(tool_name, &row.content)
+    {
+        let mutation_lines = render_mutation_diff_lines(&diff_content, palette);
+        lines.extend(mutation_lines);
+        return lines;
+    }
+
     let mut in_code_block = false;
     for (index, line) in row.content.lines().enumerate() {
         let prefix = if index == 0 { "  └ " } else { "    " };
@@ -1810,11 +1819,15 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
         ),
         TurnEvent::ToolFinished {
             tool_name, summary, ..
-        } => TranscriptRow::new(
-            TranscriptRowKind::Event,
-            format!("• Completed {tool_name}"),
-            collapse_event_details(&summary, EVENT_DETAIL_LINE_LIMIT),
-        ),
+        } => {
+            let content = mutation_tool_payload(&tool_name, &summary)
+                .unwrap_or_else(|| collapse_event_details(&summary, EVENT_DETAIL_LINE_LIMIT));
+            TranscriptRow::new(
+                TranscriptRowKind::Event,
+                format!("• Completed {tool_name}"),
+                content,
+            )
+        }
         TurnEvent::Fallback { stage, reason } => TranscriptRow::new(
             TranscriptRowKind::Event,
             "• Fell back",
@@ -1862,6 +1875,70 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             }
         }
     }
+}
+
+fn is_mutation_tool_name(tool_name: &str) -> bool {
+    matches!(tool_name, "diff" | "apply_patch")
+}
+
+fn mutation_tool_payload(tool_name: &str, summary: &str) -> Option<String> {
+    if !is_mutation_tool_name(tool_name) {
+        return None;
+    }
+
+    match tool_name {
+        "diff" if summary == "No diff output." => Some(summary.to_string()),
+        "diff" => summary
+            .strip_prefix("Diff output:\n")
+            .map(|diff| diff.to_string())
+            .or_else(|| {
+                summary
+                    .strip_prefix("Diff output:\r\n")
+                    .map(|diff| diff.to_string())
+            }),
+        "apply_patch" => summary.strip_prefix("Applied patch:\n").map(|patch_block| {
+            patch_block
+                .split_once("\n\nExit status:")
+                .map_or(patch_block, |split| split.0)
+                .split_once("\nExit status:")
+                .map_or_else(|| patch_block, |split| split.0)
+                .trim()
+                .to_string()
+        }),
+        _ => None,
+    }
+}
+
+fn mutation_line_style(line: &str, palette: &Palette) -> Style {
+    if line.starts_with("+++")
+        || line.starts_with("---")
+        || line.starts_with("diff ")
+        || line.starts_with("index ")
+    {
+        return Style::default().fg(Color::Rgb(110, 118, 129));
+    }
+
+    let Some(first_char) = line.chars().next() else {
+        return palette.code;
+    };
+
+    match first_char {
+        '+' => Style::default().fg(Color::Rgb(63, 185, 80)),
+        '-' => Style::default().fg(Color::Rgb(248, 81, 73)),
+        '@' => Style::default().fg(Color::Rgb(88, 166, 255)),
+        '\\' => Style::default().fg(Color::Rgb(128, 128, 128)),
+        _ => palette.code,
+    }
+}
+
+fn render_mutation_diff_lines(content: &str, palette: &Palette) -> Vec<Line<'static>> {
+    content
+        .lines()
+        .map(|line| {
+            let style = mutation_line_style(line, palette);
+            Line::from(vec![Span::styled(format!("  {line}"), style)])
+        })
+        .collect()
 }
 
 fn collapse_event_details(input: &str, max_lines: usize) -> String {
