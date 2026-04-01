@@ -1,0 +1,134 @@
+---
+title: Search and Retrieval
+sidebar_position: 3
+description: How planner search and refine actions gather, rank, and constrain workspace evidence.
+---
+
+# Search and Retrieval
+
+Search in Paddles is part of the recursive planner contract, not a separate
+utility. The planner repeatedly chooses `search` and `refine` actions when it
+needs more grounded evidence before synthesis.
+
+The retrieval lane is the only path that turns a query into ranked workspace
+evidence bundles for downstream synthesis.
+
+## What Triggers Retrieval
+
+The planner workspace actions route here:
+
+- `search` — issue an initial or targeted workspace query
+- `refine` — tighten query wording and rerun search from existing loop context
+
+Other workspace actions (`read`, `list_files`, `shell`, `diff`, `edit`, etc.) run in
+their own tool paths and do not run through the gatherer contract.
+
+## Retrieval Providers and Capabilities
+
+The configured gatherer provider determines which backend executes search/refine:
+
+| Provider | Role | Notes |
+| --- | --- | --- |
+| `sift-autonomous` | Planner search backend (default) | Graph-capable autonomous retrieval with planner trace metadata and progress events |
+| `sift` | Local retrieval lane | Standard query retrieval with ranked evidence only |
+| `context-1` | Experimental specialized planner/gatherer | Exposed in capability checks; may be unavailable depending on environment |
+
+Each provider reports capability before execution:
+
+- `Available` — query is accepted
+- `Unsupported` — provider present but request not usable in this runtime
+- `HarnessRequired` — provider needs harness wiring before use
+
+When unsupported, the planner continues without search results but does not claim
+false evidence.
+
+## Search Contracts and Budgets
+
+Every planner `search`/`refine` invocation maps to a `ContextGatherRequest` with:
+
+- query string and intent signal (`planner-search` / `planner-refine`)
+- retrieval plan (`mode`, `strategy`, planner strategy)
+- budget caps (`max_items`, `max_summary_chars`, `max_snippet_chars`)
+- local prior context (interpretation, recent turns, and loop-derived evidence)
+
+Defaults are:
+
+- `max_items`: `8`
+- `max_summary_chars`: `1200`
+- `max_snippet_chars`: `600`
+- planner `mode`: `linear` unless set by planner action
+- retrieval `strategy`: `lexical` unless set by planner action
+- planner `strategy`: `heuristic` unless set by planner action
+- step limit: `1` for each search/refine turn
+- retained artifact limit: `5`
+
+## Retrieval Modes and Strategies
+
+### Modes
+
+- **Linear** — single-threaded retrieval flow
+- **Graph** — planner graph exploration with frontier/frontier-edge metadata and branch state
+
+### Retrieval Strategy
+
+- **Lexical** — BM25-centric ranking (default)
+- **Hybrid** — BM25 + vector search fused with RRF (`Hybrid` in docs and config)
+
+### Planner Strategy
+
+- **Heuristic** — deterministic planner expansion policy
+- **Model-driven** — planner policy guided by a model profile when configured
+
+## Planner Metadata and Graph Visibility
+
+Sift-backed graph-mode retrieval returns explicit trace structure in the
+evidence bundle:
+
+- branches and branch status
+- nodes and edges
+- frontier queue
+- active branch + completed status
+- stop reasons (`goal-satisfied`, `step-limit-reached`, `no-further-queries`,
+  `no-additional-evidence`)
+
+This metadata is included with gatherer summaries and available to synthesis.
+
+## Progress, ETA, and Visibility
+
+Search progress is emitted as `GathererSearchProgress` events:
+
+- an immediate initial event with `status: initializing gatherer`
+- periodic progress updates from the backend (`indexing`, `embedding`, planner
+  steps, retrieving, ranking)
+- heartbeat updates at 2 seconds, then every 60 seconds while work is ongoing
+
+`eta` is optional. It can be absent (`unknown`) when the backend cannot provide
+a remaining-time estimate for the current phase.
+
+## Evidence Shape and Failure Signals
+
+The evidence bundle always includes:
+
+- `summary` — one human-readable summary sentence
+- `items` — ranked evidence with `source`, `snippet`, `rationale`, and `rank`
+- optional `warnings` — examples include empty retained evidence or fallback
+  extraction conditions
+- optional planner trace metadata for downstream observability
+
+If no retained evidence is available from graph-mode planner state, retrieval may
+fall back to the latest planner-view emission and records that warning explicitly.
+
+## Constraints to Know
+
+- Search is scoped to the current workspace root configured for the session.
+- Planner actions set retrieval strategy and mode per turn; there is no separate
+  manual search policy in the TUI.
+- SIFT locator resolution is defined in architecture as a typed `ContextLocator`
+  tier but still remains unsupported at resolver time in current runtime.
+
+## What To Read Next
+
+- [Context Tiers](./context-tiers.mdx) — where retrieval evidence sits in the four-tier context model
+- [Recursive Planning](./recursive-planning.mdx) — how planner actions choose search/refine
+- [Turn Loop](./turn-loop.mdx) — where search fits in the overall cycle
+- [Context Pressure](./context-pressure.mdx) — how truncation impacts what gets surfaced inline

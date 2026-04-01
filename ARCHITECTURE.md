@@ -97,7 +97,7 @@ The planner expresses its intentions through a constrained action schema:
 | **branch** | Split an investigation into parallel subqueries |
 | **stop** | Request synthesis with current evidence |
 
-These actions are backed by Sift search, workspace tools, retained artifacts, and future planner-capable providers like `context-1`.
+These actions are backed by Sift search, workspace tools, retained artifacts, and specialist planner-capable providers like `context-1`.
 
 ## The Value of Planner/Synthesizer Separation
 
@@ -153,7 +153,7 @@ The runtime follows the backbone narrative from above:
 
 ### Growing Edges
 
-- **Sift-tier locator resolution** — cross-tier resolution covers inline, transit, and filesystem today; sift-tier resolution awaits sift API changes
+- **Sift-tier locator resolution** — typed `ContextLocator::Sift` values are emitted from retrieval today; direct Sift resolver wiring is still being finalized
 - **Automatic tier promotion/demotion** — content moves between tiers manually; automatic promotion policies are future work
 - **Default recorder policy** — embedded transit-core is available; the default runtime uses noop until the policy slice lands
 - **Context-1 integration** — available as an explicit experimental boundary for opt-in use
@@ -181,7 +181,7 @@ Context in Paddles spans four tiers with increasing depth and decreasing immedia
 |------|----------|----------------|--------|
 | **Inline** | Character-limited content in working memory | Truncated artifact excerpts in `ArtifactEnvelope.inline_content` | Direct read |
 | **Transit** | Full records in durable streams | Complete trace records keyed by task and record id | Replay via `TransitContextResolver` |
-| **Sift** | Indexed evidence in retrieval indexes | Ranked retrieval results from autonomous search | Query-based (future) |
+| **Sift** | Indexed evidence in retrieval indexes | Ranked retrieval results from autonomous search |
 | **Filesystem** | Workspace files on disk | Source files, configs, project artifacts | `tokio::fs::read_to_string` |
 
 ### Transit-Native Context Addressing

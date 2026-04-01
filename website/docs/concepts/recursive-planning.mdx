@@ -40,6 +40,19 @@ The planner expresses its intentions through a constrained action schema:
 
 These are not suggestions the model can ignore. Each action has a schema the controller validates before execution.
 
+## Search and Retrieval Contract
+
+`search` and `refine` actions are the retrieval contract boundary:
+
+- `search` starts a bounded workspace query using the configured gatherer backend.
+- `refine` reruns retrieval with a new query using the same gatherer contract and
+  current loop context.
+
+Both actions stream evidence through gatherer progress and summary events so the
+operator can observe query execution while the planner keeps looping.
+
+Key retrieval constraints are documented in [Search and Retrieval](./search-retrieval.mdx).
+
 ## Budget Enforcement
 
 Every planner session runs within a bounded budget:
@@ -60,3 +73,4 @@ Low-value artifacts are pruned from working context, but their content remains r
 
 - [Context Tiers](./context-tiers.mdx) — how pruned content stays reachable through locators
 - [Context Pressure](./context-pressure.mdx) — how truncation is tracked and surfaced
+- [Search and Retrieval](./search-retrieval.mdx) — planner retrieval behavior, modes, and limits

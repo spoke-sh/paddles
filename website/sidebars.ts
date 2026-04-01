@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'concepts/turn-loop',
         'concepts/recursive-planning',
+        'concepts/search-retrieval',
         'concepts/context-tiers',
         'concepts/context-pressure',
         'concepts/model-routing',

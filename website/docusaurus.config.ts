@@ -109,6 +109,10 @@ const config: Config = {
               to: '/docs/concepts/turn-loop',
             },
             {
+              label: 'Search and Retrieval',
+              to: '/docs/concepts/search-retrieval',
+            },
+            {
               label: 'Context Tiers',
               to: '/docs/concepts/context-tiers',
             },

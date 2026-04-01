@@ -180,7 +180,7 @@ The recursive harness runs as a bounded local-first runtime:
 
 A few areas are still maturing:
 
-- **Sift-tier locator resolution** — cross-tier resolution covers inline, transit, and filesystem tiers; sift-tier resolution awaits sift API changes
+- **Sift-tier locator resolution** — typed `ContextLocator::Sift` values are emitted from retrieval; direct Sift resolver wiring is still being finalized
 - **Automatic tier promotion** — content moves between tiers through explicit locators; automatic promotion/demotion policies are future work
 - **Default recording policy** — embedded `transit-core` recording is available through the recorder boundary; the default runtime still uses noop until the policy slice lands
 - **Context-1 integration** — `context-1` remains an explicit experimental boundary, available for opt-in use

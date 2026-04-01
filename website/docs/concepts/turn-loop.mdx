@@ -24,6 +24,13 @@ The planner model evaluates the assembled context and selects its next bounded a
 
 A controller validates each action against schema and budget contracts, executes it safely, appends the output back into context, and loops. Each pass adds real evidence grounding the eventual answer in workspace reality.
 
+The retrieval actions are explicit:
+
+- **search** — gather ranked evidence for a query
+- **refine** — rerank and re-query based on the current planner loop state
+
+Both actions use the search and retrieval subsystem and emit visible progress until either retained evidence is assembled or the gatherer stops.
+
 The loop continues until the planner determines it has enough evidence, the budget is met, or an explicit stop is reached.
 
 ### Act 3: Synthesis
@@ -49,3 +56,4 @@ When a step takes longer than two seconds with no new event, the TUI inserts a c
 - [Recursive Planning](./recursive-planning.mdx) — the planner loop in detail
 - [Context Tiers](./context-tiers.mdx) — how context spans multiple storage tiers
 - [Model Routing](./model-routing.mdx) — how planner and synthesizer roles are assigned
+- [Search and Retrieval](./search-retrieval.mdx) — evidence gathering constraints, progress, and limitations

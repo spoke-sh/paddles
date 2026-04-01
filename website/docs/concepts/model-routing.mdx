@@ -1,6 +1,6 @@
 ---
 title: Model Routing
-sidebar_position: 5
+sidebar_position: 6
 description: How Paddles routes planner and synthesizer workloads to different models.
 ---
 
@@ -26,6 +26,19 @@ By default, both roles use the same model. The `--planner-model` flag overrides 
 | `qwen-coder-0.5b/1.5b/3b` | Coding-oriented variants | Optimized for code-heavy workloads |
 | `sift-autonomous` | Gatherer backend | Local graph-mode retrieval for search/refine actions |
 | `context-1` | Experimental boundary | Specialized planner/gatherer, fail-closed until ready |
+
+## Search Contract Parameters
+
+`search` and `refine` planner actions share a gatherer contract that controls
+retrieval depth and strategy:
+
+- `mode`: `linear` or `graph`
+- `strategy`: `lexical` (BM25) or `hybrid` (BM25 + vector + RRF)
+- `step_limit`: per-call retrieve budget
+- `max_items` / `max_snippet_chars` / `max_summary_chars`: evidence bundle caps
+- `retained_artifact_limit`: number of retained artifacts preserved for planner trace
+
+Current defaults are documented on the [Search and Retrieval](./search-retrieval.mdx) page.
 
 ## Multi-Provider Support
 

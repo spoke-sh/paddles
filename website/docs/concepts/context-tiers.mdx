@@ -1,6 +1,6 @@
 ---
 title: Context Tiers
-sidebar_position: 3
+sidebar_position: 4
 description: How Paddles manages context across four tiers with typed addressing and lazy cross-tier resolution.
 ---
 
@@ -14,7 +14,7 @@ Paddles has access to effectively unlimited context, but it cannot hold everythi
 |------|----------------|--------|
 | **Inline** | Character-limited excerpts in working memory | Direct read, zero cost |
 | **Transit** | Full trace records in durable streams | Replay by task and record id |
-| **Sift** | Indexed evidence in retrieval indexes | Query-based retrieval (future) |
+| **Sift** | Indexed evidence returned by search/refine | Search and refinement retrieval in the planner loop |
 | **Filesystem** | Workspace files on disk | Path-based file read |
 
 Think of these as concentric rings. Inline is the hottest, smallest cache. Transit holds the full history. Filesystem holds the authoritative source.
@@ -26,7 +26,7 @@ When inline content is truncated, the artifact envelope carries a typed `Context
 - `ContextLocator::Inline { content }` — the content itself
 - `ContextLocator::Transit { task_id, record_id }` — a specific record in a transit stream
 - `ContextLocator::Filesystem { path }` — a file on disk
-- `ContextLocator::Sift { index_ref }` — an indexed retrieval reference (future)
+- `ContextLocator::Sift { index_ref }` — an indexed retrieval reference from search/refine evidence
 
 Each locator encodes its target tier. Consumers do not need to guess where content lives.
 
@@ -39,6 +39,7 @@ When a consumer needs the full content behind a truncated artifact, it calls `re
 - **Inline** — returns the content directly
 - **Transit** — replays the task stream, finds the record, extracts the content
 - **Filesystem** — reads the file
+- **Sift** — currently surfaced as typed locator metadata; direct Sift resolution is not yet wired in the resolver
 
 Resolution follows a local-first ordering. Inline returns immediately. Transit replays local streams. Filesystem reads local disk.
 
