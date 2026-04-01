@@ -15,7 +15,17 @@
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
 
 .chat-panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; }
-.trace-panel { width: 380px; display: flex; flex-direction: column; overflow-y: auto; padding: 12px; }
+.trace-panel {
+  width: min(48vw, 720px);
+  min-width: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(88, 166, 255, 0.12), transparent 38%),
+    linear-gradient(180deg, rgba(22, 27, 34, 0.96), rgba(13, 17, 23, 0.98));
+}
 
 .chat-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; color: var(--muted); }
 .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -49,9 +59,137 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 .chat-input button { background: var(--accent); color: #000; border: none; border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer; font-size: 14px; }
 .chat-input button:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.trace-header { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-.trace-svg { width: 100%; }
+.trace-header-wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.trace-header { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.trace-subhead { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; }
+.trace-board {
+  --tile-size: clamp(112px, 12vw, 148px);
+  flex: 1;
+  overflow: auto;
+  padding: 4px 6px 20px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.trace-row {
+  display: flex;
+  gap: 14px;
+  justify-content: flex-start;
+  overflow: visible;
+}
+.trace-row.reverse { flex-direction: row-reverse; }
+.trace-node {
+  position: relative;
+  width: var(--tile-size);
+  min-width: var(--tile-size);
+  aspect-ratio: 1 / 1;
+  overflow: visible;
+}
+.trace-node__hex {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  clip-path: polygon(24% 6%, 76% 6%, 100% 50%, 76% 94%, 24% 94%, 0% 50%);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)),
+    color-mix(in srgb, var(--node-color) 18%, rgba(22, 27, 34, 0.92));
+  border: 1px solid color-mix(in srgb, var(--node-color) 60%, var(--border));
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.04),
+    0 10px 24px rgba(0,0,0,0.22);
+  padding: 14px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.trace-node:hover .trace-node__hex {
+  transform: translateY(-4px) scale(1.03);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.06),
+    0 18px 34px rgba(0,0,0,0.34);
+  border-color: var(--node-color);
+}
+.trace-node__sequence {
+  font-size: 10px;
+  color: color-mix(in srgb, var(--node-color) 76%, white);
+  opacity: 0.9;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.trace-node__kind {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.trace-node__label {
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+.trace-node__branch {
+  margin-top: auto;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trace-node__detail {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 10px)) scale(0.96);
+  width: clamp(180px, 18vw, 280px);
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--node-color) 72%, var(--border));
+  background: rgba(13, 17, 23, 0.97);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.46);
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.trace-node:hover .trace-node__detail {
+  opacity: 1;
+  transform: translate(-50%, calc(-100% - 14px)) scale(1);
+}
+.trace-node__detail-title {
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 700;
+  word-break: break-word;
+}
+.trace-node__detail-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
 .trace-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+
+@media (max-width: 960px) {
+  body { flex-direction: column; height: auto; min-height: 100vh; }
+  .chat-panel { border-right: none; border-bottom: 1px solid var(--border); min-height: 48vh; }
+  .trace-panel { width: 100%; min-width: 0; min-height: 42vh; }
+}
 </style>
 </head>
 <body>
@@ -66,8 +204,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; ba
 </div>
 
 <div class="trace-panel">
-  <div class="trace-header">Transit Trace</div>
-  <svg id="trace-svg" class="trace-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="trace-header-wrap">
+    <div class="trace-header">Transit Trace</div>
+    <div class="trace-subhead">Turn Steps</div>
+  </div>
+  <div id="trace-board" class="trace-board"></div>
   <div class="trace-empty" id="trace-empty">Submit a prompt to see the trace railroad.</div>
 </div>
 
@@ -82,8 +223,9 @@ const KIND_COLORS = {
   checkpoint: '#3fb950', merge: '#f778ba', thread: '#8b949e'
 };
 
-const LANE_W = 160, NODE_H = 44, GAP_Y = 14, PAD_X = 16, PAD_Y = 20;
-const HEX_RX = 64, HEX_RY = 18;
+const TRACE_TILE_MIN = 128;
+const TRACE_TILE_GAP = 14;
+let latestTraceGraph = null;
 
 async function ensureSession() {
   if (sessionId) return;
@@ -331,71 +473,68 @@ function refreshTraceGraph() {
 }
 
 function renderTraceDAG(graph) {
-  if (graph.nodes.length === 0) return;
-  document.getElementById('trace-empty').style.display = 'none';
-
-  // Assign lane indices: null branch = lane 0, each unique branch_id gets a lane
-  const branchLanes = {};
-  let nextLane = 1;
-  for (const b of graph.branches) {
-    if (!(b.id in branchLanes)) branchLanes[b.id] = nextLane++;
+  latestTraceGraph = graph;
+  const board = document.getElementById('trace-board');
+  const empty = document.getElementById('trace-empty');
+  if (!graph.nodes.length) {
+    board.innerHTML = '';
+    empty.style.display = 'block';
+    return;
   }
-  const laneCount = nextLane;
 
-  // Sort nodes by sequence, assign y positions
+  empty.style.display = 'none';
   const sorted = [...graph.nodes].sort((a, b) => a.sequence - b.sequence);
-  const nodePos = {};
-  for (let i = 0; i < sorted.length; i++) {
-    const node = sorted[i];
-    const lane = node.branch_id ? (branchLanes[node.branch_id] || 0) : 0;
-    const cx = PAD_X + lane * LANE_W + HEX_RX + 4;
-    const cy = PAD_Y + i * (NODE_H + GAP_Y) + HEX_RY;
-    nodePos[node.id] = { cx, cy, node };
+  const branchLabels = Object.fromEntries(
+    (graph.branches || []).map((branch) => [branch.id, branch.label])
+  );
+  const columns = Math.max(
+    2,
+    Math.floor((Math.max(board.clientWidth, 280) + TRACE_TILE_GAP) / (TRACE_TILE_MIN + TRACE_TILE_GAP))
+  );
+  const rows = [];
+  for (let i = 0; i < sorted.length; i += columns) {
+    rows.push(sorted.slice(i, i + columns));
   }
 
-  const totalW = PAD_X * 2 + laneCount * LANE_W;
-  const totalH = PAD_Y * 2 + sorted.length * (NODE_H + GAP_Y);
-  const svg = document.getElementById('trace-svg');
-  svg.setAttribute('viewBox', '0 0 ' + totalW + ' ' + totalH);
-  svg.setAttribute('height', totalH);
-
-  let html = '';
-
-  // Draw edges
-  for (const edge of graph.edges) {
-    const from = nodePos[edge.from];
-    const to = nodePos[edge.to];
-    if (!from || !to) continue;
-    if (from.cx === to.cx) {
-      // Straight vertical
-      html += '<line x1="' + from.cx + '" y1="' + (from.cy + HEX_RY) + '" x2="' + to.cx + '" y2="' + (to.cy - HEX_RY) + '" stroke="#30363d" stroke-width="2"/>';
-    } else {
-      // Curved for cross-lane edges (branch/merge)
-      const mx = (from.cx + to.cx) / 2;
-      const my = (from.cy + HEX_RY + to.cy - HEX_RY) / 2;
-      html += '<path d="M' + from.cx + ' ' + (from.cy + HEX_RY) + ' Q' + from.cx + ' ' + my + ' ' + mx + ' ' + my + ' Q' + to.cx + ' ' + my + ' ' + to.cx + ' ' + (to.cy - HEX_RY) + '" fill="none" stroke="#30363d" stroke-width="2"/>';
-    }
-  }
-
-  // Draw nodes
-  for (const id in nodePos) {
-    const { cx, cy, node } = nodePos[id];
-    const color = KIND_COLORS[node.kind] || '#8b949e';
-    const pts = hexPoints(cx, cy, HEX_RX, HEX_RY);
-    html += '<polygon points="' + pts + '" fill="' + color + '22" stroke="' + color + '" stroke-width="1.5"/>';
-    html += '<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle" fill="' + color + '" font-size="10" font-family="monospace">' + escapeHtml(node.label) + '</text>';
-  }
-
-  svg.innerHTML = html;
+  board.innerHTML = rows
+    .map((row, rowIndex) => {
+      const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
+      return '<div class="trace-row' + reverse + '">' +
+        row.map((node) => renderTraceNode(node, branchLabels)).join('') +
+      '</div>';
+    })
+    .join('');
 }
 
-function hexPoints(cx, cy, rx, ry) {
-  const pts = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = Math.PI / 3 * i - Math.PI / 6;
-    pts.push((cx + rx * Math.cos(angle)).toFixed(1) + ',' + (cy + ry * Math.sin(angle)).toFixed(1));
-  }
-  return pts.join(' ');
+function renderTraceNode(node, branchLabels) {
+  const color = KIND_COLORS[node.kind] || '#8b949e';
+  const branchLabel = node.branch_id && branchLabels[node.branch_id]
+    ? branchLabels[node.branch_id]
+    : null;
+  const meta = [
+    'kind: ' + escapeHtml(formatTraceKind(node.kind)),
+    branchLabel ? 'branch: ' + escapeHtml(branchLabel) : null,
+    'record: ' + escapeHtml(node.id)
+  ].filter(Boolean).join('<br>');
+
+  return (
+    '<div class="trace-node" style="--node-color:' + color + '">' +
+      '<div class="trace-node__hex">' +
+        '<div class="trace-node__sequence">step ' + node.sequence + '</div>' +
+        '<div class="trace-node__kind">' + escapeHtml(formatTraceKind(node.kind)) + '</div>' +
+        '<div class="trace-node__label">' + escapeHtml(node.label) + '</div>' +
+        '<div class="trace-node__branch">' + escapeHtml(branchLabel || 'mainline') + '</div>' +
+      '</div>' +
+      '<div class="trace-node__detail">' +
+        '<div class="trace-node__detail-title">' + escapeHtml(node.label) + '</div>' +
+        '<div class="trace-node__detail-meta">' + meta + '</div>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function formatTraceKind(kind) {
+  return kind.replace(/_/g, ' ');
 }
 
 async function replayHistory() {
@@ -448,6 +587,11 @@ async function replayHistory() {
 
 replayHistory().then(() => refreshTraceGraph());
 connectSSE();
+window.addEventListener('resize', () => {
+  if (latestTraceGraph) {
+    renderTraceDAG(latestTraceGraph);
+  }
+});
 </script>
 </body>
 </html>
