@@ -13,13 +13,13 @@ use sift::{
     AutonomousPlannerStopReason, AutonomousPlannerStrategy, AutonomousPlannerStrategyKind,
     AutonomousSearchMode, AutonomousSearchRequest, AutonomousSearchResponse, EnvironmentFactInput,
     FusionPolicy, LocalContextSource, QueryExpansionPolicy, RerankingPolicy, RetrieverPolicy,
-    SearchEmission, SearchPlan, Sift,
+    SearchEmission, SearchPlan, SearchProgress, Sift,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct SiftAutonomousGathererAdapter {
     workspace_root: PathBuf,
@@ -121,11 +121,11 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
         let search_request = self.build_search_request(request);
+        let strategy = planner_strategy_label(&request.planning.planner_strategy);
         let sift = Arc::clone(&self.sift);
         let event_sink = self.event_sink.lock().expect("event sink lock").clone();
 
-        let (heartbeat_tx, mut heartbeat_rx) =
-            tokio::sync::mpsc::unbounded_channel::<(u64, String)>();
+        let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
 
         let search_preview = request.user_query.chars().take(96).collect::<String>();
         let search_summary = format!(
@@ -136,14 +136,18 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
             request.planning.step_limit,
             request.budget.max_items
         );
-        let initial_search_detail = format!(
-            "{search_summary} · elapsed: 0s · eta: unknown · status: initializing gatherer"
-        );
+        let event_sink_for_task = event_sink.clone();
+        let search_summary_for_task = search_summary.clone();
+        let strategy_for_task = strategy.to_string();
+        let initial_search_detail =
+            format!("{search_summary} · elapsed: 0s · status: initializing gatherer");
 
         if let Some(sink) = event_sink.as_ref() {
             sink.emit(TurnEvent::GathererSearchProgress {
                 phase: "searching".to_string(),
                 elapsed_seconds: 0,
+                eta_seconds: None,
+                strategy: Some(strategy.to_string()),
                 detail: Some(initial_search_detail),
             });
         }
@@ -162,11 +166,7 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
                     break;
                 }
                 let elapsed_seconds = start.elapsed().as_secs();
-                let detail = format!(
-                    "{} · elapsed: {}s · eta: unknown",
-                    search_summary, elapsed_seconds
-                );
-                if heartbeat_tx.send((elapsed_seconds, detail)).is_err() {
+                if heartbeat_tx.send(elapsed_seconds).is_err() {
                     break;
                 }
                 delay = tokio::time::sleep(Duration::from_secs(60));
@@ -174,7 +174,26 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         });
 
         let search_handle = tokio::task::spawn_blocking(move || {
-            let result = sift.search_autonomous(search_request);
+            let event_sink = event_sink_for_task;
+            let strategy = strategy_for_task;
+            let started_at = Instant::now();
+            let search_summary = search_summary_for_task;
+            let result = sift.search_autonomous_with_progress(
+                search_request,
+                Some(move |progress: &SearchProgress| {
+                    let (phase, detail, eta_seconds) =
+                        describe_sift_progress(progress, &search_summary);
+                    if let Some(sink) = event_sink.as_ref() {
+                        sink.emit(TurnEvent::GathererSearchProgress {
+                            phase,
+                            elapsed_seconds: started_at.elapsed().as_secs(),
+                            eta_seconds: eta_seconds.map(|duration| duration.as_secs()),
+                            strategy: Some(strategy.clone()),
+                            detail: Some(detail),
+                        });
+                    }
+                }),
+            );
             done.store(true, Ordering::Relaxed);
             result
         });
@@ -185,13 +204,17 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
             tokio::select! {
                 biased;
                 event = heartbeat_rx.recv() => {
-                    if let Some((elapsed_seconds, detail)) = event
+                    if let Some(elapsed_seconds) = event
                         && let Some(sink) = event_sink.as_ref()
                     {
                         sink.emit(TurnEvent::GathererSearchProgress {
                             phase: "searching".to_string(),
                             elapsed_seconds,
-                            detail: Some(detail),
+                            eta_seconds: None,
+                            strategy: Some(strategy.to_string()),
+                            detail: Some(format!(
+                                "{search_summary} · elapsed: {elapsed_seconds}s · status: searching",
+                            )),
                         });
                     }
                 }
@@ -231,6 +254,77 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         }
 
         Ok(ContextGatherResult::available(bundle))
+    }
+}
+
+fn describe_sift_progress(
+    progress: &SearchProgress,
+    search_summary: &str,
+) -> (String, String, Option<Duration>) {
+    match progress {
+        SearchProgress::Indexing {
+            phase,
+            files_processed,
+            files_total,
+            estimated_remaining,
+        } => (
+            phase.to_string(),
+            format!("{search_summary} · indexing {files_processed}/{files_total} source(s)"),
+            *estimated_remaining,
+        ),
+        SearchProgress::Embedding {
+            phase,
+            chunks_processed,
+            chunks_total,
+            estimated_remaining,
+        } => (
+            phase.to_string(),
+            format!("{phase} {chunks_processed}/{chunks_total} chunks"),
+            *estimated_remaining,
+        ),
+        SearchProgress::PlannerStep {
+            phase,
+            step_index,
+            action,
+            query,
+            estimated_remaining,
+        } => (
+            phase.to_string(),
+            format!(
+                "{phase} step {step_index}: {action}{}",
+                query
+                    .as_deref()
+                    .map_or_else(String::new, |value| format!(" · query: {value}"))
+            ),
+            *estimated_remaining,
+        ),
+        SearchProgress::Retrieving {
+            phase,
+            turn_index,
+            turns_total,
+            estimated_remaining,
+        } => (
+            phase.to_string(),
+            format!("{phase} turn {turn_index}/{turns_total}"),
+            *estimated_remaining,
+        ),
+        SearchProgress::Ranking {
+            phase,
+            results_processed,
+            results_total,
+            estimated_remaining,
+        } => (
+            phase.to_string(),
+            format!("{phase} ranking {results_processed}/{results_total} hits"),
+            *estimated_remaining,
+        ),
+    }
+}
+
+fn planner_strategy_label(strategy: &PlannerStrategyKind) -> &'static str {
+    match strategy {
+        PlannerStrategyKind::Heuristic => "heuristic",
+        PlannerStrategyKind::ModelDriven => "model-driven",
     }
 }
 

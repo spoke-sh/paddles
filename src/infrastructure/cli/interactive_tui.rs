@@ -1676,13 +1676,25 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
         TurnEvent::GathererSearchProgress {
             phase,
             elapsed_seconds,
+            eta_seconds,
+            strategy,
             detail,
         } => {
             let elapsed = format_duration_compact(Duration::from_secs(elapsed_seconds));
-            let content = detail.unwrap_or_default();
+            let eta = eta_seconds
+                .map(|eta| format_duration_compact(Duration::from_secs(eta)))
+                .unwrap_or_else(|| "unknown".to_string());
+            let strategy = strategy
+                .as_deref()
+                .map(|value| format!(" strategy={value}"))
+                .unwrap_or_default();
+            let content = detail
+                .as_deref()
+                .map(std::string::ToString::to_string)
+                .unwrap_or_default();
             TranscriptRow::new(
                 TranscriptRowKind::Event,
-                format!("• Searching ({phase}) — {elapsed}"),
+                format!("• Searching ({phase}) — {elapsed} (eta {eta}){strategy}"),
                 content,
             )
         }

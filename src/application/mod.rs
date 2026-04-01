@@ -820,13 +820,22 @@ fn render_turn_event(event: &TurnEvent) -> String {
         TurnEvent::GathererSearchProgress {
             phase,
             elapsed_seconds,
+            eta_seconds,
+            strategy,
             detail,
         } => {
+            let eta = eta_seconds
+                .map(|eta| format!(" eta {eta}s"))
+                .unwrap_or_else(|| " eta unknown".to_string());
+            let strategy = strategy
+                .as_deref()
+                .map(|value| format!(" strategy={value}"))
+                .unwrap_or_default();
             let suffix = detail
                 .as_deref()
-                .map(|d| format!(" — {d}"))
+                .map(|d| format!(" | {d}"))
                 .unwrap_or_default();
-            format!("• Searching ({phase})\n  └ elapsed {elapsed_seconds}s{suffix}")
+            format!("• Searching ({phase})\n  └ elapsed {elapsed_seconds}s{eta}{strategy}{suffix}")
         }
         TurnEvent::SynthesisReady {
             grounded,

@@ -119,6 +119,23 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+function formatDuration(totalSeconds) {
+  const seconds = Number(totalSeconds);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '0s';
+  }
+  const s = Math.floor(seconds % 60);
+  const m = Math.floor((seconds / 60) % 60);
+  const h = Math.floor(seconds / 3600);
+  if (h > 0) {
+    return `${h}h ${m}m ${s}s`;
+  }
+  if (m > 0) {
+    return `${m}m ${s}s`;
+  }
+  return `${s}s`;
+}
+
 function handleEvent(ev) {
   const t = ev.type;
   if (t === 'intent_classified') {
@@ -133,6 +150,15 @@ function handleEvent(ev) {
     addEventRow('tool', 'tool', ev.tool_name + ' done');
   } else if (t === 'gatherer_summary') {
     addEventRow('gather', 'gatherer', ev.summary);
+  } else if (t === 'gatherer_search_progress') {
+    const eta = ev.eta_seconds == null ? 'unknown' : formatDuration(ev.eta_seconds);
+    const strategy = ev.strategy ? ' strategy=' + ev.strategy : '';
+    const details = ev.detail ? ' · ' + ev.detail : '';
+    addEventRow(
+      'gather',
+      'gatherer',
+      'searching (' + ev.phase + ')' + strategy + ' · eta ' + eta + details
+    );
   } else if (t === 'planner_summary') {
     addEventRow('planner', 'planner', ev.strategy + ' ' + ev.mode + ' (' + ev.steps + ' steps)');
   } else if (t === 'synthesis_ready') {

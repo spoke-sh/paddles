@@ -99,6 +99,8 @@ pub enum TurnEvent {
     GathererSearchProgress {
         phase: String,
         elapsed_seconds: u64,
+        eta_seconds: Option<u64>,
+        strategy: Option<String>,
         detail: Option<String>,
     },
     GathererSummary {
