@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFV0UhyhP
-status: active
+status: achieved
 created_at: 2026-03-31T18:38:00
-updated_at: 2026-03-31T18:42:58
+updated_at: 2026-03-31T19:08:21
 # authored
 title: Replace Autonomous Sift Planning With Direct Retrieval
 watch: ~
 activated_at: 2026-03-31T18:42:58
+achieved_at: 2026-03-31T19:08:21
 ---
 
 # Replace Autonomous Sift Planning With Direct Retrieval

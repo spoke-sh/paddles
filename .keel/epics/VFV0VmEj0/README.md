@@ -22,8 +22,8 @@ mission: VFV0UhyhP
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Direct Sift Retrieval Boundary](voyages/VFV0uvpPX/) | in-progress | 0/4 |
+| [Direct Sift Retrieval Boundary](voyages/VFV0uvpPX/) | done | 4/4 |
 <!-- END GENERATED -->

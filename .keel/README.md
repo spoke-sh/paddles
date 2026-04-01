@@ -248,11 +248,11 @@
 |--------|--------|
 | [Tier Model And Cross-Tier Locator Resolution](epics/VFOmY0WHC/voyages/VFOvKhUFc/) | done |
 
-### [Use Sift As A Retrieval Engine Instead Of A Nested Planner](epics/VFV0VmEj0/) (active)
+### [Use Sift As A Retrieval Engine Instead Of A Nested Planner](epics/VFV0VmEj0/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Direct Sift Retrieval Boundary](epics/VFV0VmEj0/voyages/VFV0uvpPX/) | in-progress |
+| [Direct Sift Retrieval Boundary](epics/VFV0VmEj0/voyages/VFV0uvpPX/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
