@@ -2511,17 +2511,11 @@ fn coerce_execution_pressure_action(
 ) -> Option<RecursivePlannerDecision> {
     if !mutation_turn_requires_execution_pressure(prompt, interpretation)
         || has_file_targeting_step(loop_state)
-        || search_steps(loop_state) == 0
     {
         return None;
     }
 
-    if !matches!(
-        decision.action,
-        PlannerAction::Workspace {
-            action: WorkspaceAction::Search { .. }
-        } | PlannerAction::Refine { .. }
-    ) {
+    if decision_targets_file(&decision.action) {
         return None;
     }
 
@@ -2533,9 +2527,23 @@ fn coerce_execution_pressure_action(
             action: WorkspaceAction::Read { path: path.clone() },
         },
         rationale: format!(
-            "action produces information; read likely target file `{path}` before spending more time on retrieval"
+            "action produces information; read likely target file `{path}` before further non-file actions"
         ),
     })
+}
+
+fn decision_targets_file(action: &PlannerAction) -> bool {
+    matches!(
+        action,
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Read { .. }
+                | WorkspaceAction::ListFiles { .. }
+                | WorkspaceAction::Diff { .. }
+                | WorkspaceAction::WriteFile { .. }
+                | WorkspaceAction::ReplaceInFile { .. }
+                | WorkspaceAction::ApplyPatch { .. }
+        }
+    )
 }
 
 fn likely_execution_pressure_targets(
@@ -4016,6 +4024,43 @@ mod tests {
                 "README.md".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn execution_pressure_redirects_non_file_actions_before_any_search_step() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            evidence_items: vec![EvidenceItem {
+                source: "src/application/mod.rs".to_string(),
+                snippet: "planner loop".to_string(),
+                rationale: "best candidate".to_string(),
+                rank: 1,
+            }],
+            ..Default::default()
+        };
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "cargo test".to_string(),
+                },
+            },
+            rationale: "run a check first".to_string(),
+        };
+
+        let redirected = super::coerce_execution_pressure_action(
+            "fix the execution pressure behavior",
+            &InterpretationContext::default(),
+            &loop_state,
+            &decision,
+            Path::new("/workspace"),
+        )
+        .expect("redirected decision");
+
+        assert!(matches!(
+            redirected.action,
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Read { path }
+            } if path == "src/application/mod.rs"
+        ));
     }
 
     #[test]
