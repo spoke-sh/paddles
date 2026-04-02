@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:40:14.043367532-07:00
+mode: manual
+---
+Verified in src/infrastructure/web/index.html: the default forensic inspector now renders a force gauge, per-snapshot magnitude bars, and aggregated contribution-by-source chips from the current lineage selection via renderForensicOverview(), forceSnapshotsForSelection(), and aggregateForceContributions().

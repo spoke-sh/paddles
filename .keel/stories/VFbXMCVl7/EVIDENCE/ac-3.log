@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:40:14.096207278-07:00
+mode: manual
+---
+Verified in src/infrastructure/web/index.html: the inspector now derives a previous-artifact lineage baseline with previousArtifactBaseline() and renders current-vs-baseline shadow comparison in both the overview and detail panes, using the active raw/rendered mode.

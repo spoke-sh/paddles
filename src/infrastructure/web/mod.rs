@@ -738,4 +738,17 @@ mod tests {
         let received = rx.try_recv().expect("received broadcast");
         assert_eq!(received, update);
     }
+
+    #[test]
+    fn forensic_inspector_html_exposes_local_force_and_shadow_surfaces() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("id=\"forensic-topology-overview\""));
+        assert!(html.contains("id=\"forensic-force-overview\""));
+        assert!(html.contains("id=\"forensic-shadow-overview\""));
+        assert!(!html.contains("src=\"https://"));
+        assert!(!html.contains("src='https://"));
+        assert!(!html.contains("href=\"https://"));
+        assert!(!html.contains("href='https://"));
+    }
 }

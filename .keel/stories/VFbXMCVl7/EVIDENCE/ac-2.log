@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:40:14.079536559-07:00
+mode: manual
+---
+Verified in src/infrastructure/web/index.html: the inspector keeps the precise 2D nav/records/detail panes and adds a separate overview layer above them with dedicated topology and force cards (forensic-topology-overview and forensic-force-overview). Headless Chrome parsed the page successfully after the overview changes.

@@ -429,6 +429,180 @@ body {
     inset 1px 1px 0 rgba(255,255,255,0.72),
     inset -1px -1px 0 rgba(114, 128, 141, 0.08);
 }
+.forensic-chip-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--chip-color, #2d90c8);
+  box-shadow: 0 0 0 1px rgba(27, 40, 52, 0.12);
+}
+.forensic-overview-card[data-card="empty"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.forensic-topology-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.forensic-topology-metric {
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(247, 250, 252, 0.7);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.76),
+    inset -1px -1px 0 rgba(113, 128, 141, 0.08);
+}
+.forensic-topology-metric dt,
+.forensic-shadow-pane-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #607180;
+}
+.forensic-topology-metric dd {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #233544;
+}
+.forensic-topology-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.forensic-force-hero {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.forensic-force-gauge {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255,255,255,0.7), rgba(255,255,255,0) 34%),
+    conic-gradient(var(--force-color, #2d90c8) var(--force-sweep, 0%), rgba(200, 211, 219, 0.46) 0);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -2px -2px 0 rgba(111, 128, 142, 0.1),
+    0 12px 22px rgba(88, 105, 118, 0.16);
+}
+.forensic-force-gauge::after {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(239, 244, 247, 0.86)),
+    rgba(232, 238, 242, 0.92);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    inset -1px -1px 0 rgba(102, 118, 131, 0.08);
+}
+.forensic-force-gauge-content {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.forensic-force-gauge-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: #233544;
+  letter-spacing: -0.04em;
+}
+.forensic-force-gauge-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #617280;
+}
+.forensic-force-summary {
+  display: grid;
+  gap: 8px;
+}
+.forensic-force-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--muted);
+}
+.forensic-force-summary-row strong {
+  font-size: 12px;
+  color: #2d4050;
+}
+.forensic-contribs--stacked {
+  margin-top: 8px;
+}
+.forensic-shadow-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.forensic-shadow-pane {
+  min-height: 116px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.74), rgba(244, 248, 250, 0.46)),
+    rgba(226, 234, 239, 0.88);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -1px -1px 0 rgba(111, 126, 139, 0.08);
+}
+.forensic-shadow-pane.is-baseline {
+  opacity: 0.82;
+  filter: saturate(0.82);
+}
+.forensic-shadow-pane-title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #274050;
+}
+.forensic-shadow-pane-meta {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #61717f;
+}
+.forensic-shadow-pane-snippet {
+  margin-top: 10px;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #334652;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.forensic-shadow-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  color: #2d4050;
+}
+.forensic-shadow-delta.is-positive {
+  color: #d27820;
+}
+.forensic-shadow-delta.is-negative {
+  color: #17956c;
+}
 .forensic-shell {
   flex: 1;
   min-height: 0;
@@ -1123,7 +1297,11 @@ body {
     </div>
   </div>
   <div class="trace-view trace-view--active forensic-view" id="forensic-view">
-    <div class="forensic-overview" id="forensic-overview"></div>
+    <div class="forensic-overview" id="forensic-overview">
+      <section class="forensic-overview-card" id="forensic-topology-overview"></section>
+      <section class="forensic-overview-card" id="forensic-force-overview"></section>
+      <section class="forensic-overview-card" id="forensic-shadow-overview"></section>
+    </div>
     <div class="forensic-shell">
       <aside class="forensic-nav" id="forensic-nav"></aside>
       <div class="forensic-main">
@@ -1185,6 +1363,41 @@ const KIND_COLORS = {
   force: '#f08a24'
 };
 
+const FORCE_KIND_COLORS = {
+  context_pressure: '#f08a24',
+  compaction: '#5376a3',
+  execution_pressure: '#d65f4a',
+  fallback: '#9b5de5',
+  budget: '#dfb23f'
+};
+
+const FORCE_LEVEL_COLORS = {
+  low: '#17956c',
+  medium: '#2d90c8',
+  high: '#f08a24',
+  critical: '#d65f4a'
+};
+
+const FORCE_SOURCE_LABELS = {
+  operator_memory: 'Operator memory',
+  retained_artifacts: 'Retained artifacts',
+  thread_summaries: 'Thread summaries',
+  evidence_budget: 'Evidence budget',
+  controller_policy: 'Controller policy',
+  prompt_edit_signal: 'Edit signal',
+  candidate_file_evidence: 'Candidate file evidence',
+  provider_or_parser: 'Provider or parser',
+  controller_safety: 'Controller safety',
+  search_budget: 'Search budget',
+  inspect_budget: 'Inspect budget',
+  read_budget: 'Read budget',
+  evidence_pressure: 'Evidence pressure',
+  planner_budget: 'Planner budget',
+  context: 'Context'
+};
+
+const FORCE_SOURCE_PALETTE = ['#2d90c8', '#17956c', '#f08a24', '#d65f4a', '#5376a3', '#dfb23f'];
+
 const TRACE_VIEW_LABELS = {
   inspector: 'Forensic Inspector',
   transit: 'Turn Steps'
@@ -1211,6 +1424,38 @@ function escapeHtml(s) {
   const d = document.createElement('div');
   d.textContent = s == null ? '' : String(s);
   return d.innerHTML;
+}
+
+function humanizeToken(token) {
+  return String(token || '')
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase();
+}
+
+function titleCase(text) {
+  return humanizeToken(text)
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function sourceLabel(source) {
+  return FORCE_SOURCE_LABELS[source] || titleCase(source || 'unknown');
+}
+
+function sourceColor(source) {
+  const key = String(source || 'source');
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return FORCE_SOURCE_PALETTE[hash % FORCE_SOURCE_PALETTE.length];
+}
+
+function forceKindLabel(kind) {
+  return titleCase(kind || 'force');
 }
 
 function truncate(s, n) {
@@ -1505,6 +1750,204 @@ function currentTurn() {
     return null;
   }
   return turns.find((turn) => turn.turn_id === selectedTurnId) || turns[turns.length - 1];
+}
+
+function selectionScopeTurns() {
+  if (selectedSelectionMode === 'conversation') {
+    return projectionTurns();
+  }
+  const turn = currentTurn();
+  return turn ? [turn] : [];
+}
+
+function findTurnRecord(turn, recordId) {
+  if (!turn || !recordId) return null;
+  return turn.records.find((recordProjection) => recordProjection.record.record_id === recordId) || null;
+}
+
+function artifactIdForRecord(recordProjection) {
+  const artifact = primaryArtifact(recordProjection);
+  return artifact && artifact.artifact_id ? artifact.artifact_id : null;
+}
+
+function selectedComparisonRecord(turn) {
+  const selected = currentRecord();
+  if (selected) {
+    return selected;
+  }
+  const records = turn ? recordsForTurn(turn) : [];
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    if (primaryArtifact(records[index])) {
+      return records[index];
+    }
+  }
+  return records.length ? records[records.length - 1] : null;
+}
+
+function previousArtifactBaseline(turn, recordProjection) {
+  if (!turn || !recordProjection) {
+    return null;
+  }
+
+  const currentArtifactId = artifactIdForRecord(recordProjection);
+  const entry = kindEntry(recordProjection);
+  if (entry.key === 'ModelExchangeArtifact' && entry.value.parent_artifact_id) {
+    for (let index = turn.records.length - 1; index >= 0; index -= 1) {
+      const candidate = turn.records[index];
+      if (candidate.record.sequence >= recordProjection.record.sequence) {
+        continue;
+      }
+      if (artifactIdForRecord(candidate) === entry.value.parent_artifact_id) {
+        return candidate;
+      }
+    }
+  }
+
+  let parentRecordId = recordProjection.record.lineage.parent_record_id;
+  while (parentRecordId) {
+    const parent = findTurnRecord(turn, parentRecordId);
+    if (!parent) {
+      break;
+    }
+    if (primaryArtifact(parent)) {
+      return parent;
+    }
+    parentRecordId = parent.record.lineage.parent_record_id;
+  }
+
+  const scopedRecords = recordsForTurn(turn);
+  for (let index = scopedRecords.length - 1; index >= 0; index -= 1) {
+    const candidate = scopedRecords[index];
+    if (candidate.record.sequence >= recordProjection.record.sequence) {
+      continue;
+    }
+    const artifactId = artifactIdForRecord(candidate);
+    if (artifactId && artifactId !== currentArtifactId) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function strongestForceSnapshot(forceRecords) {
+  if (!forceRecords.length) {
+    return null;
+  }
+  return forceRecords.reduce((best, candidate) => {
+    const currentMagnitude = kindEntry(candidate).value.magnitude_percent || 0;
+    const bestMagnitude = kindEntry(best).value.magnitude_percent || 0;
+    return currentMagnitude > bestMagnitude ? candidate : best;
+  });
+}
+
+function aggregateForceContributions(forceRecords) {
+  const totals = new Map();
+  let totalShare = 0;
+
+  forceRecords.forEach((recordProjection) => {
+    const entry = kindEntry(recordProjection);
+    (entry.value.contributions || []).forEach((contribution) => {
+      const key = contribution.source || 'context';
+      const bucket = totals.get(key) || {
+        source: key,
+        share: 0,
+        rationales: new Set()
+      };
+      bucket.share += contribution.share_percent || 0;
+      if (contribution.rationale) {
+        bucket.rationales.add(contribution.rationale);
+      }
+      totals.set(key, bucket);
+      totalShare += contribution.share_percent || 0;
+    });
+  });
+
+  const items = Array.from(totals.values())
+    .sort((left, right) => right.share - left.share)
+    .map((bucket) => ({
+      source: bucket.source,
+      label: sourceLabel(bucket.source),
+      color: sourceColor(bucket.source),
+      share: bucket.share,
+      percent: 0,
+      rationale: Array.from(bucket.rationales)[0] || ''
+    }));
+
+  if (!items.length) {
+    return [];
+  }
+
+  const denominator = totalShare || items.reduce((sum, item) => sum + item.share, 0) || 1;
+  let assigned = 0;
+  items.forEach((item, index) => {
+    const percent = index + 1 === items.length
+      ? Math.max(0, 100 - assigned)
+      : Math.round((item.share / denominator) * 100);
+    item.percent = percent;
+    assigned += percent;
+  });
+
+  return items;
+}
+
+function forceSnapshotsForTurn(turn, recordProjection) {
+  if (!turn) {
+    return [];
+  }
+  const forceRecords = turn.records.filter((candidate) => kindEntry(candidate).key === 'ForceSnapshot');
+  if (!forceRecords.length) {
+    return [];
+  }
+
+  const relevantIds = new Set();
+  if (selectedFocus.kind === 'model_call' && selectedFocus.id) {
+    relevantIds.add('model-call:' + selectedFocus.id);
+  } else if (selectedFocus.kind === 'planner_step' && selectedFocus.id) {
+    relevantIds.add(selectedFocus.id);
+  }
+  if (recordProjection) {
+    nodeIdsForRecord(recordProjection).forEach((id) => relevantIds.add(id));
+  }
+
+  if (!relevantIds.size) {
+    return forceRecords;
+  }
+
+  const scoped = forceRecords.filter((candidate) => {
+    const appliesTo = kindEntry(candidate).value.applies_to;
+    return appliesTo && relevantIds.has(appliesTo.id);
+  });
+
+  return scoped.length ? scoped : forceRecords;
+}
+
+function forceSnapshotsForSelection() {
+  const comparisonRecord = currentTurn() ? selectedComparisonRecord(currentTurn()) : null;
+  return selectionScopeTurns().reduce((allSnapshots, turn) => {
+    const turnComparisonRecord =
+      comparisonRecord && turn.turn_id === comparisonRecord.record.lineage.turn_id
+        ? comparisonRecord
+        : null;
+    return allSnapshots.concat(forceSnapshotsForTurn(turn, turnComparisonRecord));
+  }, []);
+}
+
+function comparisonSnippet(recordProjection) {
+  if (!recordProjection) {
+    return 'No lineage artifact available.';
+  }
+  const body = selectedDetailMode === 'raw'
+    ? rawRecordBody(recordProjection)
+    : renderedRecordBody(recordProjection);
+  return truncate((body || 'No payload body recorded.').replace(/\s+/g, ' ').trim(), 180);
+}
+
+function formatDelta(value) {
+  if (!Number.isFinite(value) || value === 0) {
+    return '0';
+  }
+  return value > 0 ? '+' + value : String(value);
 }
 
 function plannerStepsForTurn(turn) {
@@ -1842,55 +2285,186 @@ function relatedLineageSummaries(turn, recordProjection) {
 }
 
 function renderForensicOverview() {
-  const overview = document.getElementById('forensic-overview');
+  const topology = document.getElementById('forensic-topology-overview');
+  const force = document.getElementById('forensic-force-overview');
+  const shadow = document.getElementById('forensic-shadow-overview');
   const turns = projectionTurns();
   const turn = currentTurn();
-  const recordProjection = currentRecord();
+  const recordProjection = turn ? selectedComparisonRecord(turn) : null;
   if (!turns.length) {
-    overview.innerHTML = '<div class="forensic-empty">Forensic replay appears here when transit records exist.</div>';
+    [topology, force, shadow].forEach((card) => {
+      card.dataset.card = 'empty';
+      card.innerHTML = '<div class="forensic-empty">Forensic replay appears here when transit records exist.</div>';
+    });
     return;
   }
 
-  const kindCounts = {};
-  for (const turnItem of turns) {
-    for (const recordItem of turnItem.records) {
-      const key = kindEntry(recordItem).key;
-      kindCounts[key] = (kindCounts[key] || 0) + 1;
-    }
-  }
-  const topologyPoints = turn.records.map((recordItem, index) => {
-    const x = 16 + index * ((250 - 32) / Math.max(turn.records.length - 1, 1));
-    const y = 22 + ((index % 2) * 18);
-    return { x, y, color: KIND_COLORS[(kindEntry(recordItem).key || '').toLowerCase()] || '#2d90c8' };
+  [topology, force, shadow].forEach((card) => delete card.dataset.card);
+
+  const scopeTurns = selectionScopeTurns();
+  const topologyRecords = (selectedSelectionMode === 'conversation'
+    ? scopeTurns.reduce((allRecords, turnItem) => allRecords.concat(turnItem.records), [])
+    : recordsForTurn(turn).length
+      ? recordsForTurn(turn)
+      : turn.records);
+  const totalScopeRecords = topologyRecords.length;
+  const forceSnapshots = forceSnapshotsForSelection();
+  const strongestForce = strongestForceSnapshot(forceSnapshots);
+  const strongestForceValue = strongestForce ? kindEntry(strongestForce).value : null;
+  const aggregatedContribs = aggregateForceContributions(forceSnapshots);
+  const selectedRecordIdForTopology = recordProjection ? recordProjection.record.record_id : null;
+  const topologyPoints = topologyRecords.map((recordItem, index) => {
+    const entry = kindEntry(recordItem);
+    const x = 16 + index * ((312 - 32) / Math.max(topologyRecords.length - 1, 1));
+    const yBand = entry.key === 'ForceSnapshot' ? 0 : entry.key === 'LineageEdge' ? 1 : 2;
+    const y = 20 + yBand * 22 + ((index % 2) * 6);
+    const recordKind = entry.key === 'ForceSnapshot'
+      ? entry.value.kind
+      : entry.key.toLowerCase();
+    const color = FORCE_KIND_COLORS[recordKind] || KIND_COLORS[recordKind] || '#2d90c8';
+    return {
+      x,
+      y,
+      color,
+      selected: recordItem.record.record_id === selectedRecordIdForTopology,
+      radius: recordItem.record.record_id === selectedRecordIdForTopology ? 7 : entry.key === 'ForceSnapshot' ? 6 : 4.5
+    };
   });
   const topologyPath = topologyPoints.length
     ? 'M ' + topologyPoints.map((point) => point.x + ' ' + point.y).join(' L ')
     : '';
+  const topologyLegend = [
+    {
+      label: 'Scope',
+      value: selectedSelectionMode === 'conversation' ? 'conversation' : (selectedFocus.kind === 'all' ? 'turn' : selectedFocus.kind.replace('_', ' '))
+    },
+    {
+      label: 'Force nodes',
+      value: forceSnapshots.length
+    },
+    {
+      label: 'Selection',
+      value: recordProjection ? truncate(recordSummary(recordProjection), 20) : 'turn'
+    }
+  ];
 
-  overview.innerHTML =
-    '<div class="forensic-overview-card">' +
-      '<div class="forensic-card-title">Conversation</div>' +
-      '<svg class="forensic-topology" viewBox="0 0 250 92" preserveAspectRatio="none">' +
-        '<path d="' + escapeHtml(topologyPath) + '" stroke="rgba(45, 144, 200, 0.76)" stroke-width="3"></path>' +
-        topologyPoints.map((point) => '<circle cx="' + point.x + '" cy="' + point.y + '" r="5" fill="' + point.color + '"></circle>').join('') +
-        '<text x="12" y="78">turns ' + turns.length + ' · records ' + turns.reduce((sum, turnItem) => sum + turnItem.records.length, 0) + '</text>' +
-      '</svg>' +
-    '</div>' +
-    '<div class="forensic-overview-card">' +
-      '<div class="forensic-card-title">Turn Scope</div>' +
-      '<div class="forensic-shadow-list">' +
-        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(turn.turn_id) + '</div><div class="forensic-shadow-meta">' + escapeHtml(lifecycleLabel(turn.lifecycle)) + ' · ' + turn.records.length + ' records</div></div>' +
-        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + modelCallsForTurn(turn).length + ' model calls</div><div class="forensic-shadow-meta">' + plannerStepsForTurn(turn).length + ' planner steps · focus ' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : selectedFocus.kind.replace('_', ' ')) + '</div></div>' +
-        Object.keys(kindCounts).slice(0, 3).map((key) => '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(kindLabel(key)) + '</div><div class="forensic-shadow-meta">' + kindCounts[key] + ' total</div></div>').join('') +
+  topology.innerHTML =
+    '<div class="forensic-card-title">Topology</div>' +
+    '<svg class="forensic-topology" viewBox="0 0 320 92" preserveAspectRatio="none">' +
+      (topologyPath ? '<path d="' + escapeHtml(topologyPath) + '" stroke="rgba(56, 87, 112, 0.54)" stroke-width="4"></path>' : '') +
+      topologyPoints.map((point) => (
+        (point.selected ? '<circle cx="' + point.x + '" cy="' + point.y + '" r="' + (point.radius + 4) + '" fill="rgba(240, 138, 36, 0.16)"></circle>' : '') +
+        '<circle cx="' + point.x + '" cy="' + point.y + '" r="' + point.radius + '" fill="' + point.color + '" stroke="rgba(255,255,255,0.82)" stroke-width="1.5"></circle>'
+      )).join('') +
+      '<text x="12" y="82">turns ' + scopeTurns.length + ' · records ' + totalScopeRecords + ' · focus ' + escapeHtml(selectedFocus.kind === 'all' ? 'all' : selectedFocus.kind.replace('_', ' ')) + '</text>' +
+    '</svg>' +
+    '<dl class="forensic-topology-metrics">' +
+      topologyLegend.map((metric) => (
+        '<div class="forensic-topology-metric"><dt>' + escapeHtml(metric.label) + '</dt><dd>' + escapeHtml(metric.value) + '</dd></div>'
+      )).join('') +
+    '</dl>' +
+    '<div class="forensic-topology-legend">' +
+      '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.forensic + '"></span>lineage path</span>' +
+      '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.action + '"></span>model/tool state</span>' +
+      '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.force + '"></span>force snapshots</span>' +
+    '</div>';
+
+  if (!forceSnapshots.length) {
+    force.innerHTML =
+      '<div class="forensic-card-title">Forces</div>' +
+      '<div class="forensic-empty">No force snapshots were recorded for the current lineage selection.</div>';
+  } else {
+    const gaugeColor = FORCE_LEVEL_COLORS[strongestForceValue.level] || FORCE_KIND_COLORS[strongestForceValue.kind] || KIND_COLORS.force;
+    const forceRows = forceSnapshots.slice(0, 4).map((forceProjection) => {
+      const value = kindEntry(forceProjection).value;
+      const rowColor = FORCE_KIND_COLORS[value.kind] || FORCE_LEVEL_COLORS[value.level] || KIND_COLORS.force;
+      const chips = (value.contributions || []).slice(0, 3).map((contribution) => (
+        '<span class="forensic-chip" title="' + escapeHtml(contribution.rationale || '') + '">' +
+          '<span class="forensic-chip-swatch" style="--chip-color:' + sourceColor(contribution.source) + '"></span>' +
+          escapeHtml(sourceLabel(contribution.source)) + ' ' + (contribution.share_percent || 0) + '%' +
+        '</span>'
+      )).join('');
+      return (
+        '<div class="forensic-force-row">' +
+          '<div class="forensic-force-label">' + escapeHtml(value.summary || forceKindLabel(value.kind)) + '</div>' +
+          '<div class="forensic-force-meta">' + escapeHtml(forceKindLabel(value.kind)) + ' · ' + escapeHtml(value.level) + '</div>' +
+          '<div class="forensic-force-bar"><span style="width:' + (value.magnitude_percent || 0) + '%;background:linear-gradient(90deg,' + rowColor + ', rgba(255,255,255,0.92));"></span></div>' +
+          '<div class="forensic-force-meta">' + (value.applies_to ? escapeHtml(value.applies_to.label) : 'turn scope') + '</div>' +
+          '<div class="forensic-contribs">' + chips + '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    force.innerHTML =
+      '<div class="forensic-card-title">Forces</div>' +
+      '<div class="forensic-force-hero">' +
+        '<div class="forensic-force-gauge" style="--force-sweep:' + (strongestForceValue.magnitude_percent || 0) + '%;--force-color:' + gaugeColor + '">' +
+          '<div class="forensic-force-gauge-content">' +
+            '<div class="forensic-force-gauge-value">' + (strongestForceValue.magnitude_percent || 0) + '%</div>' +
+            '<div class="forensic-force-gauge-label">' + escapeHtml(strongestForceValue.level) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="forensic-force-summary">' +
+          '<div class="forensic-force-summary-row"><strong>' + escapeHtml(forceKindLabel(strongestForceValue.kind)) + '</strong><span>' + forceSnapshots.length + ' snapshot' + (forceSnapshots.length === 1 ? '' : 's') + '</span></div>' +
+          '<div class="forensic-force-summary-row"><span>Selection</span><span>' + escapeHtml(recordProjection ? recordSummary(recordProjection) : turn.turn_id) + '</span></div>' +
+          '<div class="forensic-force-summary-row"><span>Scope</span><span>' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : selectedFocus.kind.replace('_', ' ')) + '</span></div>' +
+          '<div class="forensic-contribs forensic-contribs--stacked">' +
+            aggregatedContribs.slice(0, 5).map((contribution) => (
+              '<span class="forensic-chip" title="' + escapeHtml(contribution.rationale) + '">' +
+                '<span class="forensic-chip-swatch" style="--chip-color:' + contribution.color + '"></span>' +
+                escapeHtml(contribution.label) + ' ' + contribution.percent + '%' +
+              '</span>'
+            )).join('') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="forensic-force-list">' + forceRows + '</div>';
+  }
+
+  if (!recordProjection) {
+    shadow.innerHTML =
+      '<div class="forensic-card-title">Shadow Baseline</div>' +
+      '<div class="forensic-empty">Select or focus a lineage artifact to compare it with its previous artifact baseline.</div>';
+    return;
+  }
+
+  const baseline = previousArtifactBaseline(turn, recordProjection);
+  if (!baseline) {
+    shadow.innerHTML =
+      '<div class="forensic-card-title">Shadow Baseline</div>' +
+      '<div class="forensic-empty">No previous artifact in lineage was available for this selection yet.</div>';
+    return;
+  }
+
+  const currentBody = selectedDetailMode === 'raw' ? rawRecordBody(recordProjection) : renderedRecordBody(recordProjection);
+  const baselineBody = selectedDetailMode === 'raw' ? rawRecordBody(baseline) : renderedRecordBody(baseline);
+  const currentArtifact = primaryArtifact(recordProjection);
+  const baselineArtifact = primaryArtifact(baseline);
+  const charDelta = (currentBody || '').length - (baselineBody || '').length;
+  const sequenceDelta = recordProjection.record.sequence - baseline.record.sequence;
+  const deltaClass = charDelta > 0 ? 'is-positive' : charDelta < 0 ? 'is-negative' : '';
+
+  shadow.innerHTML =
+    '<div class="forensic-card-title">Shadow Baseline</div>' +
+    '<div class="forensic-shadow-compare">' +
+      '<div class="forensic-shadow-pane">' +
+        '<div class="forensic-shadow-pane-label">Current</div>' +
+        '<div class="forensic-shadow-pane-title">' + escapeHtml(recordSummary(recordProjection)) + '</div>' +
+        '<div class="forensic-shadow-pane-meta">' + escapeHtml(recordMeta(recordProjection)) + '</div>' +
+        '<div class="forensic-shadow-pane-snippet">' + escapeHtml(comparisonSnippet(recordProjection)) + '</div>' +
+      '</div>' +
+      '<div class="forensic-shadow-pane is-baseline">' +
+        '<div class="forensic-shadow-pane-label">Baseline</div>' +
+        '<div class="forensic-shadow-pane-title">' + escapeHtml(recordSummary(baseline)) + '</div>' +
+        '<div class="forensic-shadow-pane-meta">' + escapeHtml(recordMeta(baseline)) + '</div>' +
+        '<div class="forensic-shadow-pane-snippet">' + escapeHtml(comparisonSnippet(baseline)) + '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="forensic-overview-card">' +
-      '<div class="forensic-card-title">Selection</div>' +
-      '<div class="forensic-shadow-list">' +
-        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(recordProjection ? recordSummary(recordProjection) : turn.turn_id) + '</div><div class="forensic-shadow-meta">' + (recordProjection ? escapeHtml(recordMeta(recordProjection)) : 'turn summary') + '</div></div>' +
-        (recordProjection ? '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(kindLabel(kindEntry(recordProjection).key)) + '</div><div class="forensic-shadow-meta">record ' + escapeHtml(recordProjection.record.record_id) + '</div></div>' : '') +
-        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">detail mode</div><div class="forensic-shadow-meta">' + escapeHtml(selectedDetailMode) + '</div></div>' +
-      '</div>' +
+    '<div class="forensic-shadow-list">' +
+      '<div class="forensic-shadow-row"><div class="forensic-shadow-label">Delta chars</div><div class="forensic-shadow-meta"><span class="forensic-shadow-delta ' + deltaClass + '">' + escapeHtml(formatDelta(charDelta)) + '</span></div></div>' +
+      '<div class="forensic-shadow-row"><div class="forensic-shadow-label">Lineage gap</div><div class="forensic-shadow-meta">' + sequenceDelta + ' step' + (sequenceDelta === 1 ? '' : 's') + '</div></div>' +
+      '<div class="forensic-shadow-row"><div class="forensic-shadow-label">Mime</div><div class="forensic-shadow-meta">' + escapeHtml((currentArtifact && currentArtifact.mime_type) || 'record/json') + ' ← ' + escapeHtml((baselineArtifact && baselineArtifact.mime_type) || 'record/json') + '</div></div>' +
+      '<div class="forensic-shadow-row"><div class="forensic-shadow-label">Mode</div><div class="forensic-shadow-meta">' + escapeHtml(selectedDetailMode) + ' payload baseline</div></div>' +
     '</div>';
 }
 
@@ -2012,6 +2586,56 @@ function renderForensicRecords() {
   });
 }
 
+function renderShadowComparisonCard(turn, recordProjection) {
+  if (!turn || !recordProjection) {
+    return (
+      '<div class="forensic-detail-card">' +
+        '<div class="forensic-detail-card-title">Shadow Baseline</div>' +
+        '<div class="forensic-inline-note">Select a lineage artifact to compare it with the previous artifact in lineage.</div>' +
+      '</div>'
+    );
+  }
+
+  const baseline = previousArtifactBaseline(turn, recordProjection);
+  if (!baseline) {
+    return (
+      '<div class="forensic-detail-card">' +
+        '<div class="forensic-detail-card-title">Shadow Baseline</div>' +
+        '<div class="forensic-inline-note">No previous artifact in lineage was available for this selection yet.</div>' +
+      '</div>'
+    );
+  }
+
+  const currentBody = selectedDetailMode === 'raw' ? rawRecordBody(recordProjection) : renderedRecordBody(recordProjection);
+  const baselineBody = selectedDetailMode === 'raw' ? rawRecordBody(baseline) : renderedRecordBody(baseline);
+
+  return (
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Shadow Baseline</div>' +
+      '<div class="forensic-shadow-compare">' +
+        '<div class="forensic-shadow-pane">' +
+          '<div class="forensic-shadow-pane-label">Current</div>' +
+          '<div class="forensic-shadow-pane-title">' + escapeHtml(recordSummary(recordProjection)) + '</div>' +
+          '<div class="forensic-shadow-pane-meta">' + escapeHtml(recordMeta(recordProjection)) + '</div>' +
+          '<div class="forensic-shadow-pane-snippet">' + escapeHtml(comparisonSnippet(recordProjection)) + '</div>' +
+        '</div>' +
+        '<div class="forensic-shadow-pane is-baseline">' +
+          '<div class="forensic-shadow-pane-label">Baseline</div>' +
+          '<div class="forensic-shadow-pane-title">' + escapeHtml(recordSummary(baseline)) + '</div>' +
+          '<div class="forensic-shadow-pane-meta">' + escapeHtml(recordMeta(baseline)) + '</div>' +
+          '<div class="forensic-shadow-pane-snippet">' + escapeHtml(comparisonSnippet(baseline)) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<dl class="forensic-detail-grid">' +
+        '<div><dt>Delta chars</dt><dd>' + escapeHtml(formatDelta((currentBody || '').length - (baselineBody || '').length)) + '</dd></div>' +
+        '<div><dt>Lineage gap</dt><dd>' + (recordProjection.record.sequence - baseline.record.sequence) + ' steps</dd></div>' +
+        '<div><dt>Current record</dt><dd>' + escapeHtml(recordProjection.record.record_id) + '</dd></div>' +
+        '<div><dt>Baseline record</dt><dd>' + escapeHtml(baseline.record.record_id) + '</dd></div>' +
+      '</dl>' +
+    '</div>'
+  );
+}
+
 function renderConversationDetail() {
   const turns = projectionTurns();
   const detail = document.getElementById('forensic-detail');
@@ -2037,6 +2661,7 @@ function renderTurnDetail(turn) {
   const detail = document.getElementById('forensic-detail');
   const modelCalls = modelCallsForTurn(turn);
   const plannerSteps = plannerStepsForTurn(turn);
+  const comparisonRecord = selectedComparisonRecord(turn);
   document.getElementById('forensic-detail-title').textContent = turn.turn_id;
   document.getElementById('forensic-detail-meta').textContent = 'Turn summary · ' + turn.records.length + ' records · ' + lifecycleLabel(turn.lifecycle);
   detail.innerHTML =
@@ -2053,7 +2678,8 @@ function renderTurnDetail(turn) {
       '<div class="forensic-detail-card-title">Lineage Scope</div>' +
       '<div class="forensic-inline-note">Current focus: ' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : (selectedFocus.kind + ' ' + selectedFocus.id)) + '</div>' +
       '<pre class="forensic-code">' + escapeHtml(turn.records.map((recordProjection) => '[' + recordProjection.record.sequence + '] ' + recordSummary(recordProjection)).join('\n')) + '</pre>' +
-    '</div>';
+    '</div>' +
+    renderShadowComparisonCard(turn, comparisonRecord);
 }
 
 function renderRecordDetail(recordProjection) {
@@ -2094,7 +2720,8 @@ function renderRecordDetail(recordProjection) {
       (relatedLineage.length
         ? '<pre class="forensic-code">' + escapeHtml(relatedLineage.join('\n')) + '</pre>'
         : '<div class="forensic-inline-note">No explicit lineage edges were associated with this record.</div>') +
-    '</div>';
+    '</div>' +
+    renderShadowComparisonCard(turn, recordProjection);
 }
 
 function renderForensicDetail() {

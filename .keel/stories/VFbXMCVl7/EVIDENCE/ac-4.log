@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:40:14.137857606-07:00
+mode: manual
+---
+Verified by cargo test -q forensic_inspector_html_exposes_local_force_and_shadow_surfaces: the HTML exports local topology/force/shadow inspector surfaces and contains no external https script or stylesheet dependencies.
