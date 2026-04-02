@@ -5,8 +5,9 @@ import path from 'node:path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const htmlPath = path.resolve(__dirname, '../../src/infrastructure/web/index.html');
-const faviconPath = path.resolve(__dirname, '../static/img/favicon.svg');
+const port = Number.parseInt(process.env.PORT || '4173', 10);
+const htmlPath = path.resolve(__dirname, '../../../src/infrastructure/web/index.html');
+const faviconPath = path.resolve(__dirname, '../public/favicon.svg');
 
 const html = await readFile(htmlPath, 'utf8');
 const favicon = await readFile(faviconPath);
@@ -93,7 +94,7 @@ function parseJsonBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url || '/', 'http://127.0.0.1:4173');
+  const url = new URL(req.url || '/', `http://127.0.0.1:${port}`);
   const pathname = url.pathname;
 
   if (req.method === 'GET' && pathname === '/health') {
@@ -165,6 +166,6 @@ const server = http.createServer(async (req, res) => {
   return json(res, 404, { error: 'not_found', path: pathname });
 });
 
-server.listen(4173, '127.0.0.1', () => {
-  process.stdout.write('fixture server listening on http://127.0.0.1:4173\n');
+server.listen(port, '127.0.0.1', () => {
+  process.stdout.write(`fixture server listening on http://127.0.0.1:${port}\n`);
 });

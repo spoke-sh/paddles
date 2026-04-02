@@ -1,0 +1,21 @@
+{
+  "name": "paddles-frontend-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "npm@10.9.2",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "e2e": "turbo run e2e"
+  },
+  "devDependencies": {
+    "turbo": "2.5.0"
+  },
+  "engines": {
+    "node": ">=20.0"
+  }
+}

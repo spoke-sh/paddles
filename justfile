@@ -27,35 +27,35 @@ build-release:
 build-cuda:
   cargo build --release --features cuda
 
-# Run tests.
-website-install:
-  npm --prefix website ci
+# Install frontend workspace dependencies.
+frontend-install:
+  npm ci
 
-# Run website verification checks.
-website-quality:
-  npm --prefix website run lint
+# Run frontend workspace verification checks.
+frontend-quality:
+  npm run lint
 
-# Run website build verification.
-website-test:
-  npm --prefix website run test
+# Run frontend workspace unit/build verification.
+frontend-test:
+  npm run test
 
-# Run website browser e2e verification.
-website-e2e:
-  npm --prefix website run e2e
+# Run frontend workspace browser e2e verification.
+frontend-e2e:
+  npm run e2e
 
 # Run tests.
 test:
-  just website-install
+  just frontend-install
   cargo nextest run --no-tests pass
-  just website-test
-  just website-e2e
+  just frontend-test
+  just frontend-e2e
 
 # Run quality checks.
 quality:
-  just website-install
+  just frontend-install
   cargo fmt --all --check
   cargo clippy --all-targets --all-features -- -D warnings
-  just website-quality
+  just frontend-quality
 
 # Run the paddles CLI. Use --cuda to enable GPU support.
 paddles *args:
@@ -83,13 +83,14 @@ mission *args:
   # We don't pass features to just build/test/quality directly as they are separate recipes,
   # but we want to ensure the build/test runs with the right features if requested.
   if [ -n "$FEATURES" ]; then
-    just website-install
+    just frontend-install
     cargo build $FEATURES
     cargo fmt --all --check
     cargo clippy --all-targets $FEATURES -- -D warnings
     cargo nextest run --no-tests pass $FEATURES
-    just website-quality
-    just website-test
+    just frontend-quality
+    just frontend-test
+    just frontend-e2e
   else
     just build quality test
   fi

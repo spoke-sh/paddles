@@ -1,5 +1,16 @@
 /target
 /paddles.toml
+/node_modules/
+/.turbo/
+/package-lock.json.tmp
+/apps/docs/node_modules/
+/apps/docs/build/
+/apps/docs/.docusaurus/
+/apps/docs/.turbo/
+/apps/web/node_modules/
+/apps/web/dist/
+/apps/web/.turbo/
+/apps/web/test-results/
 
 # Keel ignored artifacts
 .keel/inbox/

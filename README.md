@@ -157,7 +157,12 @@ The web UI exposes three complementary trace routes:
 
 The important architectural limit is that the manifold route is metaphorical. It is a projection over exact recorded trace artifacts, not an extra hidden reasoning layer. Every selected manifold state must be able to reveal its underlying source record and route back to the precise forensic inspector.
 
-The manifold route also stays local-first: it uses the same locally served HTML/CSS/JS shell as the rest of the web UI. There is no remote visualization bundle or CDN dependency hiding behind the route.
+The frontend is now staged through a shared Turborepo workspace:
+
+- `apps/docs` owns the Docusaurus documentation site
+- `apps/web` owns the new React runtime web app shell
+
+The live runtime routes are still served by the Rust-embedded shell until React route cutover reaches parity. That means the manifold route remains local-first and does not add remote visualization bundles, CDNs, or hosted dependencies while the migration is in progress.
 
 ### Trace Recording
 
@@ -328,7 +333,7 @@ just test
 just quality
 ```
 
-`just quality` now covers both the Rust checks and the website TypeScript lint path, and `just test` covers `cargo nextest`, a production Docusaurus build, and browser E2E for the web shell so frontend regressions stay in the normal verification loop.
+`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for both the new React runtime shell and the still-live embedded runtime shell so the migration stays honest.
 
 Check board health:
 

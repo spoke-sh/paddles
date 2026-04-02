@@ -278,6 +278,12 @@
 |--------|--------|
 | [Signal Manifold Route And Chamber Projection](epics/VFes0Rhaj/voyages/VFes287sD/) | done |
 
+### [Establish A Turborepo-Driven React Frontend Platform](epics/VFfuuVwYJ/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Bootstrap Turborepo Workspace And React Runtime App](epics/VFfuuVwYJ/voyages/VFfvAz07R/) | in-progress |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
