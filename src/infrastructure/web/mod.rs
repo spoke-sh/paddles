@@ -762,4 +762,26 @@ mod tests {
         assert!(html.contains("await refreshForensics(refreshOptions)"));
         assert!(html.contains("refreshTraceGraph();"));
     }
+
+    #[test]
+    fn transit_trace_html_supports_wheel_zoom() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("--trace-scale"));
+        assert!(html.contains("bindTraceZoom"));
+        assert!(html.contains("addEventListener('wheel'"));
+        assert!(html.contains("const TRACE_ZOOM_MIN = 0.4"));
+    }
+
+    #[test]
+    fn transit_trace_html_supports_drag_pan() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("bindTracePan"));
+        assert!(html.contains("addEventListener('mousedown'"));
+        assert!(html.contains("window.addEventListener('mousemove'"));
+        assert!(html.contains("trace-board.is-panning"));
+        assert!(html.contains("--trace-pan-x"));
+        assert!(html.contains("applyTracePanTransform"));
+    }
 }

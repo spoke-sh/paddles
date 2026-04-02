@@ -18,3 +18,7 @@ Address authentication issues with gated models and improve the default out-of-t
 - [x] Implemented `--hf-token` argument and `HF_TOKEN` environment variable support.
 - [x] Secured token handling by masking it in boot logs.
 - [x] Verified seamless first-time boot and registry synchronization.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)

@@ -19,3 +19,7 @@ Refactor the `paddles` codebase into a Domain-Driven Design and Hexagonal Archit
 - [x] Extracted `InferenceEngine` port and implemented `CandleAdapter` in `Infrastructure`.
 - [x] Refactored CLI entry point to delegate to the `Application` layer.
 - [x] Maintained 100% functional parity with previous implementation.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)

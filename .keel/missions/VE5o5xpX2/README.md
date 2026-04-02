@@ -18,3 +18,7 @@ Implement interactive prompt loop in `main.rs` and execute `just paddles` to ope
 - [x] Implemented multi-turn interactive loop using `stdin` in `main.rs`.
 - [x] Maintained backward compatibility with `--prompt` CLI argument.
 - [x] Verified interactive sessions with simulated input.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)

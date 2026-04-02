@@ -18,3 +18,7 @@ Implement model fetching from Hugging Face Hub and execute real inference with G
 - [x] Integrated `hf-hub` for automated weight and config acquisition.
 - [x] Added `--model` CLI argument for flexible model selection.
 - [x] Orchestrated model asset synchronization in the `BootContext`.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)

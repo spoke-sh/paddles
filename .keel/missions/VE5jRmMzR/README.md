@@ -18,3 +18,7 @@ Implement real local inference in `CandleProvider` and execute a prompt with zer
 - [x] Implemented real prompt extraction and inference loop shell in `CandleProvider`.
 - [x] Verified build capacity for real local model execution.
 - [x] Successfully executed agentic loop with real Candle types.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)

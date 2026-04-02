@@ -18,3 +18,7 @@ Replace manual HF/Candle logic with `sift` adapters and execute multi-turn promp
 - [x] Implemented `SiftRegistryAdapter` and `SiftInferenceAdapter`.
 - [x] Removed direct `hf-hub` dependencies from the application layer.
 - [x] Verified successful model synchronization and initialization via `sift`.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)

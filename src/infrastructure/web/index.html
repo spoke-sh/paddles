@@ -935,10 +935,14 @@ body {
   min-height: 0;
 }
 .trace-board {
-  --tile-size: clamp(112px, 12vw, 148px);
+  --trace-scale: 1;
+  --trace-pan-x: 0px;
+  --trace-pan-y: 0px;
+  --tile-base-size: clamp(112px, 12vw, 148px);
+  --tile-size: calc(var(--tile-base-size) * var(--trace-scale));
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 10px 10px 22px 6px;
   position: relative;
   border-radius: 24px;
@@ -946,18 +950,29 @@ body {
     radial-gradient(circle at top right, rgba(45, 144, 200, 0.12), transparent 28%),
     linear-gradient(180deg, rgba(255,255,255,0.24), rgba(255,255,255,0.02)),
     linear-gradient(180deg, rgba(189, 201, 211, 0.88), rgba(157, 171, 183, 0.94));
+  cursor: grab;
   box-shadow:
     inset 1px 1px 0 rgba(255,255,255,0.7),
     inset -2px -2px 0 rgba(98, 117, 132, 0.08),
     inset 0 24px 38px rgba(255,255,255,0.06);
+}
+.trace-board.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.trace-board.is-panning .trace-node__detail {
+  opacity: 0 !important;
 }
 .trace-canvas {
   position: relative;
   min-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--trace-scale));
   padding-bottom: 6px;
+  transform: translate(var(--trace-pan-x), var(--trace-pan-y));
+  transform-origin: top left;
+  will-change: transform;
 }
 .trace-overlay {
   position: absolute;
@@ -994,7 +1009,7 @@ body {
   position: relative;
   z-index: 1;
   display: flex;
-  gap: 14px;
+  gap: calc(14px * var(--trace-scale));
   justify-content: flex-start;
   overflow: visible;
 }
@@ -1087,7 +1102,7 @@ body {
     inset 0 -14px 18px rgba(77, 92, 104, 0.08),
     -8px -8px 18px rgba(255,255,255,0.56),
     var(--node-shadow-x) var(--node-shadow-y) var(--node-shadow-blur) rgba(var(--node-shadow-color), var(--node-shadow-alpha));
-  padding: 14px 16px 18px;
+  padding: calc(14px * var(--trace-scale)) calc(16px * var(--trace-scale)) calc(18px * var(--trace-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1129,10 +1144,10 @@ body {
 }
 .trace-node__sequence {
   position: absolute;
-  top: 14px;
+  top: calc(14px * var(--trace-scale));
   left: 50%;
   transform: translateX(-50%);
-  font-size: 10px;
+  font-size: calc(10px * var(--trace-scale));
   color: color-mix(in srgb, var(--node-color) 76%, white);
   opacity: 0.82;
   letter-spacing: 0.08em;
@@ -1141,10 +1156,10 @@ body {
 }
 .trace-node__kind {
   position: absolute;
-  top: 31px;
+  top: calc(31px * var(--trace-scale));
   left: 50%;
   transform: translateX(-50%);
-  font-size: 10px;
+  font-size: calc(10px * var(--trace-scale));
   color: #5a6876;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1155,8 +1170,8 @@ body {
   text-overflow: ellipsis;
 }
 .trace-node__label {
-  font-size: 14px;
-  line-height: 1.2;
+  font-size: calc(14px * var(--trace-scale));
+  line-height: calc(1.2 * var(--trace-scale));
   font-weight: 700;
   color: var(--text);
   width: 100%;
@@ -1172,9 +1187,9 @@ body {
 .trace-node__branch {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  bottom: calc(14px * var(--trace-scale));
   transform: translateX(-50%);
-  font-size: 10px;
+  font-size: calc(10px * var(--trace-scale));
   color: #4e5b67;
   width: calc(100% - 32px);
   text-align: center;
@@ -1187,8 +1202,8 @@ body {
   left: 50%;
   top: 0;
   transform: translate(-50%, calc(-100% - 10px)) scale(0.96);
-  width: clamp(180px, 18vw, 280px);
-  padding: 12px 14px;
+  width: clamp(180px, calc(18vw * var(--trace-scale)), 320px);
+  padding: calc(12px * max(0.9, var(--trace-scale))) calc(14px * max(0.9, var(--trace-scale)));
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--node-color) 28%, rgba(148, 164, 177, 0.4));
   background:
@@ -1246,14 +1261,14 @@ body {
   transform: translate(0, 14px) scale(1);
 }
 .trace-node__detail-title {
-  font-size: 16px;
-  line-height: 1.25;
+  font-size: calc(16px * max(0.9, var(--trace-scale)));
+  line-height: calc(1.25 * max(0.9, var(--trace-scale)));
   font-weight: 700;
   word-break: break-word;
 }
 .trace-node__detail-meta {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: calc(11px * max(0.9, var(--trace-scale)));
   color: var(--muted);
   line-height: 1.45;
 }
@@ -1346,10 +1361,16 @@ let graphDebounce = null;
 let forensicTailMode = true;
 let forensicRefreshTimer = null;
 let pendingForensicRefresh = null;
+let tracePanState = null;
+let tracePanX = 0;
+let tracePanY = 0;
 
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 const TRACE_TILE_MIN = 128;
 const TRACE_TILE_GAP = 14;
+const TRACE_ZOOM_MIN = 0.4;
+const TRACE_ZOOM_MAX = 1.85;
+let traceZoom = 1;
 
 const KIND_COLORS = {
   root: '#2d90c8',
@@ -1493,6 +1514,9 @@ function wireStaticUi() {
       setDetailMode(button.dataset.detailMode);
     });
   });
+
+  bindTraceZoom(document.getElementById('trace-board'));
+  bindTracePan(document.getElementById('trace-board'));
 }
 
 function setTraceView(view) {
@@ -1514,6 +1538,158 @@ function setDetailMode(mode) {
     button.classList.toggle('is-active', button.dataset.detailMode === mode);
   });
   renderForensicDetail();
+}
+
+function clampTraceZoom(value) {
+  return Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, value));
+}
+
+function applyTracePanTransform(board) {
+  if (!board) {
+    return;
+  }
+
+  board.style.setProperty('--trace-pan-x', tracePanX.toFixed(2) + 'px');
+  board.style.setProperty('--trace-pan-y', tracePanY.toFixed(2) + 'px');
+}
+
+function applyTraceZoom(board, nextZoom, anchorClientX = null, anchorClientY = null) {
+  if (!board) {
+    return;
+  }
+
+  const canvas = board.querySelector('.trace-canvas');
+  const rect = board.getBoundingClientRect();
+  const focusX = anchorClientX == null
+    ? board.clientWidth / 2
+    : Math.max(0, Math.min(board.clientWidth, anchorClientX - rect.left));
+  const focusY = anchorClientY == null
+    ? board.clientHeight / 2
+    : Math.max(0, Math.min(board.clientHeight, anchorClientY - rect.top));
+  const canvasWidth = canvas ? Math.max(canvas.scrollWidth, canvas.offsetWidth, 1) : Math.max(board.clientWidth, 1);
+  const canvasHeight = canvas ? Math.max(canvas.scrollHeight, canvas.offsetHeight, 1) : Math.max(board.clientHeight, 1);
+  const ratioX = Math.max(0, Math.min(1, (focusX - tracePanX) / canvasWidth));
+  const ratioY = Math.max(0, Math.min(1, (focusY - tracePanY) / canvasHeight));
+
+  traceZoom = clampTraceZoom(nextZoom);
+  board.style.setProperty('--trace-scale', traceZoom.toFixed(3));
+
+  if (latestTraceGraph && latestTraceGraph.nodes && latestTraceGraph.nodes.length) {
+    renderTraceDAG(latestTraceGraph);
+    requestAnimationFrame(() => {
+      const nextCanvas = board.querySelector('.trace-canvas');
+      const nextWidth = nextCanvas ? Math.max(nextCanvas.scrollWidth, nextCanvas.offsetWidth, 1) : Math.max(board.clientWidth, 1);
+      const nextHeight = nextCanvas ? Math.max(nextCanvas.scrollHeight, nextCanvas.offsetHeight, 1) : Math.max(board.clientHeight, 1);
+      tracePanX = focusX - ratioX * nextWidth;
+      tracePanY = focusY - ratioY * nextHeight;
+      applyTracePanTransform(board);
+    });
+  }
+}
+
+function bindTraceZoom(board) {
+  if (!board || board.dataset.zoomBound === 'true') {
+    return;
+  }
+
+  board.dataset.zoomBound = 'true';
+  board.style.setProperty('--trace-scale', traceZoom.toFixed(3));
+  board.addEventListener('wheel', (event) => {
+    if (!latestTraceGraph || !latestTraceGraph.nodes || !latestTraceGraph.nodes.length) {
+      return;
+    }
+
+    const nextZoom = clampTraceZoom(traceZoom * Math.exp(-event.deltaY * 0.0015));
+    if (Math.abs(nextZoom - traceZoom) < 0.001) {
+      return;
+    }
+
+    event.preventDefault();
+    applyTraceZoom(board, nextZoom, event.clientX, event.clientY);
+  }, { passive: false });
+}
+
+function endTracePan() {
+  if (!tracePanState) {
+    return;
+  }
+
+  const { board, dragging } = tracePanState;
+  tracePanState = null;
+  board.classList.remove('is-panning');
+  if (dragging) {
+    window.setTimeout(() => {
+      delete board.dataset.panSuppressClick;
+    }, 0);
+  }
+}
+
+function bindTracePan(board) {
+  if (!board || board.dataset.panBound === 'true') {
+    return;
+  }
+
+  board.dataset.panBound = 'true';
+  applyTracePanTransform(board);
+  board.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    tracePanState = {
+      board,
+      startX: event.clientX,
+      startY: event.clientY,
+      startPanX: tracePanX,
+      startPanY: tracePanY,
+      dragging: false
+    };
+  });
+
+  window.addEventListener('mousemove', (event) => {
+    if (!tracePanState || tracePanState.board !== board) {
+      return;
+    }
+
+    const deltaX = event.clientX - tracePanState.startX;
+    const deltaY = event.clientY - tracePanState.startY;
+    if (!tracePanState.dragging && Math.abs(deltaX) + Math.abs(deltaY) < 4) {
+      return;
+    }
+
+    if (!tracePanState.dragging) {
+      tracePanState.dragging = true;
+      board.classList.add('is-panning');
+      board.dataset.panSuppressClick = 'true';
+    }
+
+    tracePanX = tracePanState.startPanX + deltaX;
+    tracePanY = tracePanState.startPanY + deltaY;
+    applyTracePanTransform(board);
+  });
+
+  window.addEventListener('mouseup', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    endTracePan();
+  });
+
+  window.addEventListener('blur', endTracePan);
+
+  board.addEventListener('mouseleave', () => {
+    if (!tracePanState || !tracePanState.dragging) {
+      return;
+    }
+    board.classList.add('is-panning');
+  });
+
+  board.addEventListener('click', (event) => {
+    if (board.dataset.panSuppressClick === 'true') {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
 }
 
 function scheduleForensicRefresh(options = {}) {
@@ -2922,6 +3098,8 @@ function renderTraceDAG(graph) {
   latestTraceGraph = graph;
   const board = document.getElementById('trace-board');
   const empty = document.getElementById('trace-empty');
+  board.style.setProperty('--trace-scale', traceZoom.toFixed(3));
+  applyTracePanTransform(board);
   if (!graph.nodes.length) {
     board.innerHTML = '';
     empty.style.display = 'block';
@@ -2931,7 +3109,9 @@ function renderTraceDAG(graph) {
   empty.style.display = 'none';
   const sorted = [...graph.nodes].sort((a, b) => a.sequence - b.sequence);
   const branchLabels = Object.fromEntries((graph.branches || []).map((branch) => [branch.id, branch.label]));
-  const columns = Math.max(2, Math.floor((Math.max(board.clientWidth, 280) + TRACE_TILE_GAP) / (TRACE_TILE_MIN + TRACE_TILE_GAP)));
+  const tileMin = TRACE_TILE_MIN * traceZoom;
+  const gap = TRACE_TILE_GAP * traceZoom;
+  const columns = Math.max(2, Math.floor((Math.max(board.clientWidth, 280) + gap) / (tileMin + gap)));
   const rows = [];
   for (let i = 0; i < sorted.length; i += columns) {
     rows.push(sorted.slice(i, i + columns));
@@ -2950,6 +3130,7 @@ function renderTraceDAG(graph) {
       }).join('') +
     '</div>';
 
+  applyTracePanTransform(board);
   bindTraceDetailPlacement(board);
   requestAnimationFrame(() => {
     drawTraceSnake(board);

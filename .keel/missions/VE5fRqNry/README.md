@@ -18,3 +18,7 @@ Fully wire the real `PromptLoop` in `main.rs` and execute a non-trivial agentic 
 - [x] Implemented local `CandleProvider` for air-gapped agentic execution.
 - [x] Successfully executed `paddles --prompt` with real loop orchestration.
 - [x] Stabilized build environment with required local traits and dependencies.
+
+## Verification Proof
+
+![CLI verification proof](record-cli.gif)
