@@ -4386,6 +4386,61 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn prepare_runtime_lanes_treats_inception_as_remote_http_lane_without_local_paths() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
+        let service = MechSuitService::new(
+            workspace.path(),
+            registry.clone(),
+            operator_memory,
+            Box::new(move |_, lane| {
+                *synthesizer_capture
+                    .lock()
+                    .expect("captured synthesizer lane lock") = Some(lane.clone());
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(move |_, _lane| {
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::new(Mutex::new(Vec::new())),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(|_, _, _, _| Ok(None)),
+        );
+        let config = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception))
+            .with_planner_model_id(Some("mercury-2".to_string()));
+
+        let prepared = service
+            .prepare_runtime_lanes(&config)
+            .await
+            .expect("prepare runtime lanes");
+
+        assert_eq!(prepared.synthesizer.provider, ModelProvider::Inception);
+        assert_eq!(prepared.synthesizer.paths, None);
+        assert_eq!(prepared.planner.provider, ModelProvider::Inception);
+        assert_eq!(prepared.planner.paths, None);
+        assert!(
+            registry.requested_model_ids().is_empty(),
+            "remote providers should not resolve sift model paths"
+        );
+        assert_eq!(
+            captured_synthesizer_lane
+                .lock()
+                .expect("captured synthesizer lane lock")
+                .clone()
+                .expect("synthesizer lane")
+                .provider,
+            ModelProvider::Inception
+        );
+    }
+
     #[test]
     fn prepared_runtime_lanes_keep_synthesizer_as_default_response_lane() {
         let planner = MechSuitService::build_lane(

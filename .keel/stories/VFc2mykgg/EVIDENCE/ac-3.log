@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-02T06:06:45.658378491-07:00
+command: cargo test -q inception_provider_records_exact_forensic_exchange_artifacts_in_trace_replay
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 228 filtered out; finished in 0.04s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

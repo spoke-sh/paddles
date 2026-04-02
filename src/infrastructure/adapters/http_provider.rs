@@ -1643,6 +1643,7 @@ mod tests {
 
     async fn run_mocked_turn(
         format: ApiFormat,
+        provider: crate::infrastructure::providers::ModelProvider,
         model_id: &str,
         final_answer: &str,
     ) -> (Vec<RecordedRequest>, Vec<TurnEvent>, String) {
@@ -1672,7 +1673,9 @@ mod tests {
             format,
         );
         let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
-            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai);
+            .with_synthesizer_provider(provider)
+            .with_planner_provider(Some(provider))
+            .with_planner_model_id(Some(model_id.to_string()));
         service
             .prepare_runtime_lanes(&runtime_lanes)
             .await
@@ -1731,6 +1734,7 @@ mod tests {
         let model_id = "gpt-4o-mini";
         let (requests, events, response) = run_mocked_turn(
             ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Openai,
             model_id,
             &structured_answer_json("Mocked final answer."),
         )
@@ -1796,6 +1800,32 @@ mod tests {
                 grounded: false,
                 ..
             }
+        )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inception_provider_executes_a_full_turn_against_a_mock_server() {
+        let model_id = "mercury-2";
+        let (requests, events, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Inception,
+            model_id,
+            &structured_answer_json("Mocked final answer."),
+        )
+        .await;
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].uri, "/v1/chat/completions");
+        assert_eq!(requests[1].uri, "/v1/chat/completions");
+        assert_eq!(requests[0].body["model"].as_str(), Some(model_id));
+        assert_eq!(
+            requests[1].body["response_format"]["type"].as_str(),
+            Some("json_schema")
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerCapability { provider, .. } if provider == model_id
         )));
     }
 
@@ -1897,6 +1927,92 @@ mod tests {
         }));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inception_provider_records_exact_forensic_exchange_artifacts_in_trace_replay() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the remote provider planner before answering.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let model_id = "mercury-2";
+        let structured = structured_answer_json("Mocked final answer.");
+        let raw_final_response = final_answer_response(ApiFormat::OpenAi, &structured);
+        let planner_response = provider_response(ApiFormat::OpenAi, &planner_json_answer());
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: planner_response.clone(),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: raw_final_response.clone(),
+            },
+        ])
+        .await;
+
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            ApiFormat::OpenAi,
+            recorder.clone(),
+        );
+        let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Inception)
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Inception,
+            ))
+            .with_planner_model_id(Some(model_id.to_string()));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+
+        let task_id = recorder.task_ids().into_iter().next().expect("task id");
+        let replay = recorder.replay(&task_id).expect("replay");
+        let forensic = replay
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TraceRecordKind::ModelExchangeArtifact(artifact) => Some(artifact),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Planner
+                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.phase == TraceModelExchangePhase::ProviderRequest
+                && artifact
+                    .artifact
+                    .inline_content
+                    .as_deref()
+                    .is_some_and(|content: &str| {
+                        content.contains("\"authorization\": \"[redacted]\"")
+                    })
+        }));
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Synthesizer
+                && artifact.category == TraceModelExchangeCategory::TurnResponse
+                && artifact.phase == TraceModelExchangePhase::RawProviderResponse
+                && artifact.artifact.inline_content.as_deref() == Some(raw_final_response.as_str())
+        }));
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Synthesizer
+                && artifact.category == TraceModelExchangeCategory::TurnResponse
+                && artifact.phase == TraceModelExchangePhase::RenderedResponse
+                && artifact.artifact.inline_content.as_deref() == Some("Mocked final answer.")
+        }));
+    }
+
     #[test]
     fn provider_request_redaction_hides_auth_headers_and_query_keys() {
         let redacted = super::redacted_http_request_snapshot(
@@ -1924,6 +2040,7 @@ mod tests {
         let model_id = "claude-sonnet-4-20250514";
         let (requests, events, response) = run_mocked_turn(
             ApiFormat::Anthropic,
+            crate::infrastructure::providers::ModelProvider::Anthropic,
             model_id,
             &structured_answer_json("Mocked final answer."),
         )
@@ -1992,6 +2109,7 @@ mod tests {
         let model_id = "gemini-2.5-flash";
         let (requests, events, response) = run_mocked_turn(
             ApiFormat::Gemini,
+            crate::infrastructure::providers::ModelProvider::Google,
             model_id,
             &structured_answer_json("Mocked final answer."),
         )
@@ -2059,7 +2177,39 @@ mod tests {
         })
         .to_string();
 
-        let (_, _, response) = run_mocked_turn(ApiFormat::OpenAi, model_id, &structured).await;
+        let (_, _, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Openai,
+            model_id,
+            &structured,
+        )
+        .await;
+
+        assert_eq!(
+            response,
+            "The next bearing is HTTP API Design For Paddles.\n\n- status: decision-ready\n- EV: 10.31"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inception_provider_normalizes_structured_final_answers() {
+        let model_id = "mercury-2";
+        let structured = json!({
+            "render_types": ["paragraph", "bullet_list"],
+            "blocks": [
+                { "type": "paragraph", "text": "The next bearing is HTTP API Design For Paddles." },
+                { "type": "bullet_list", "items": ["status: decision-ready", "EV: 10.31"] }
+            ]
+        })
+        .to_string();
+
+        let (_, _, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Inception,
+            model_id,
+            &structured,
+        )
+        .await;
 
         assert_eq!(
             response,

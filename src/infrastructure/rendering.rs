@@ -16,7 +16,7 @@ pub enum RenderCapability {
 impl RenderCapability {
     pub fn resolve(provider: &str, _model_id: &str) -> Self {
         match provider {
-            "openai" => Self::OpenAiJsonSchema,
+            "openai" | "inception" => Self::OpenAiJsonSchema,
             "anthropic" => Self::AnthropicToolUse,
             "google" => Self::GeminiJsonSchema,
             _ => Self::PromptEnvelope,
@@ -559,6 +559,18 @@ mod tests {
         assert!(prompt.contains("Use the render_final_answer tool exactly once"));
         let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, false);
         assert!(prompt.contains("transport enforces a JSON schema"));
+    }
+
+    #[test]
+    fn openai_compatible_render_capabilities_include_inception() {
+        assert_eq!(
+            RenderCapability::resolve("openai", "gpt-4o"),
+            RenderCapability::OpenAiJsonSchema
+        );
+        assert_eq!(
+            RenderCapability::resolve("inception", "mercury-2"),
+            RenderCapability::OpenAiJsonSchema
+        );
     }
 
     #[test]
