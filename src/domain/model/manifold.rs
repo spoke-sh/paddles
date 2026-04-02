@@ -175,7 +175,7 @@ fn frame_from_active_states(
             state
         })
         .collect();
-    let (primitives, conduits) = topology_from_active_states(&active_states);
+    let (primitives, conduits) = topology_from_active_states(active_states);
 
     ManifoldFrame {
         record_id: record_id.clone(),
