@@ -6,17 +6,17 @@ pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifac
 
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationThreadRef,
-    ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
-    ForensicTraceSink, ForensicUpdateSink, MultiplexEventSink, StrainFactor, StrainLevel,
-    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
-    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationThreadRef, ConversationTranscript, ConversationTranscriptUpdate,
+    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, MultiplexEventSink,
+    StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
+    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
+    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -1603,6 +1603,38 @@ impl MechSuitService {
         turn_id: &TurnTraceId,
     ) -> Result<Option<crate::domain::model::ForensicTurnProjection>> {
         Ok(self.replay_conversation_forensics(task_id)?.turn(turn_id))
+    }
+
+    pub fn replay_conversation_manifold(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationManifoldProjection> {
+        match self.trace_recorder.replay(task_id) {
+            Ok(replay) => Ok(ConversationManifoldProjection::from_trace_replay(&replay)),
+            Err(err) => {
+                let known_session = self
+                    .sessions
+                    .lock()
+                    .expect("conversation sessions lock")
+                    .contains_key(task_id.as_str());
+                if known_session {
+                    Ok(ConversationManifoldProjection {
+                        task_id: task_id.clone(),
+                        turns: Vec::new(),
+                    })
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
+    pub fn replay_turn_manifold(
+        &self,
+        task_id: &TaskTraceId,
+        turn_id: &TurnTraceId,
+    ) -> Result<Option<crate::domain::model::ManifoldTurnProjection>> {
+        Ok(self.replay_conversation_manifold(task_id)?.turn(turn_id))
     }
 
     pub fn replay_all_traces(&self) -> Result<Vec<crate::domain::model::TraceReplay>> {

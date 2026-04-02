@@ -1,9 +1,10 @@
 use crate::application::MechSuitService;
 use crate::domain::model::{
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationTranscript,
-    ConversationTranscriptUpdate, ForensicLifecycle, ForensicRecordProjection,
-    ForensicTurnProjection, ForensicUpdateSink, TaskTraceId, TraceRecordKind, TranscriptUpdateSink,
-    TurnEvent, TurnEventSink, TurnTraceId,
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
+    ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
+    ManifoldTurnProjection, TaskTraceId, TraceRecordKind, TranscriptUpdateSink, TurnEvent,
+    TurnEventSink, TurnTraceId,
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
@@ -61,6 +62,19 @@ struct ForensicUpdateEventResponse {
     update: ConversationForensicUpdate,
     turn_lifecycle: Option<ForensicLifecycle>,
     record: Option<ForensicRecordProjection>,
+}
+
+#[derive(Serialize)]
+struct ManifoldProjectionResponse(ConversationManifoldProjection);
+
+#[derive(Serialize)]
+struct ManifoldTurnProjectionResponse(ManifoldTurnProjection);
+
+#[derive(Serialize)]
+struct ManifoldUpdateEventResponse {
+    update: ConversationForensicUpdate,
+    turn: Option<ManifoldTurnProjection>,
+    frame: Option<ManifoldFrame>,
 }
 
 #[derive(Serialize)]
@@ -149,6 +163,15 @@ pub fn router(
         .route(
             "/sessions/{id}/forensics/events",
             get(conversation_forensic_event_stream),
+        )
+        .route("/sessions/{id}/manifold", get(conversation_manifold))
+        .route(
+            "/sessions/{id}/manifold/turns/{turn_id}",
+            get(turn_manifold),
+        )
+        .route(
+            "/sessions/{id}/manifold/events",
+            get(conversation_manifold_event_stream),
         )
         .route("/sessions/{id}/events", get(event_stream))
         .route("/events", get(global_event_stream))
@@ -272,6 +295,32 @@ async fn turn_forensics(
     Ok(Json(ForensicTurnProjectionResponse(turn)))
 }
 
+async fn conversation_manifold(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ManifoldProjectionResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let projection = state
+        .service
+        .replay_conversation_manifold(&task_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(ManifoldProjectionResponse(projection)))
+}
+
+async fn turn_manifold(
+    State(state): State<Arc<AppState>>,
+    Path((id, turn_id)): Path<(String, String)>,
+) -> Result<Json<ManifoldTurnProjectionResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let turn_id = parse_turn_id(&turn_id)?;
+    let turn = state
+        .service
+        .replay_turn_manifold(&task_id, &turn_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(axum::http::StatusCode::NOT_FOUND)?;
+    Ok(Json(ManifoldTurnProjectionResponse(turn)))
+}
+
 async fn conversation_transcript_event_stream(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -319,6 +368,46 @@ async fn conversation_forensic_event_stream(
                 });
             let json = serde_json::to_string(&payload).unwrap_or_default();
             Some(Ok(Event::default().event("forensic_update").data(json)))
+        }
+        _ => None,
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn manifold_update_payload(
+    state: &Arc<AppState>,
+    update: ConversationForensicUpdate,
+) -> ManifoldUpdateEventResponse {
+    let turn = state
+        .service
+        .replay_turn_manifold(&update.task_id, &update.turn_id)
+        .ok()
+        .flatten();
+    let frame = turn.as_ref().and_then(|turn| {
+        turn.frames
+            .iter()
+            .find(|frame| frame.record_id == update.record_id)
+            .cloned()
+    });
+    ManifoldUpdateEventResponse {
+        update,
+        turn,
+        frame,
+    }
+}
+
+async fn conversation_manifold_event_stream(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.forensic_tx.subscribe();
+    let state = Arc::clone(&state);
+    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
+        Ok(update) if update.task_id.as_str() == id => {
+            let payload = manifold_update_payload(&state, update);
+            let json = serde_json::to_string(&payload).unwrap_or_default();
+            Some(Ok(Event::default().event("manifold_update").data(json)))
         }
         _ => None,
     });
@@ -509,9 +598,10 @@ mod tests {
     use crate::application::MechSuitService;
     use crate::domain::model::{
         ArtifactKind, ConversationForensicUpdate, ForensicUpdateSink, TraceCheckpointKind,
-        TraceCompletionCheckpoint, TraceLineage, TraceModelExchangeArtifact,
-        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
-        TraceRecordId, TraceRecordKind, TraceReplay,
+        TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind, TraceLineageNodeRef,
+        TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
+        TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
+        TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
     };
     use crate::domain::ports::{ModelPaths, ModelRegistry, TraceRecorder};
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -669,6 +759,79 @@ mod tests {
         (recorder.replay(&task_id).expect("replay"), second_record_id)
     }
 
+    fn seed_manifold_replay(
+        recorder: &Arc<InMemoryTraceRecorder>,
+        session: &ConversationSession,
+    ) -> (TraceReplay, TraceRecordId) {
+        let task_id = session.task_id();
+        let turn_id = session.allocate_turn_id();
+        let signal_record_id =
+            TraceRecordId::new(format!("{}.record-0001", turn_id.as_str())).expect("record");
+        let checkpoint_record_id =
+            TraceRecordId::new(format!("{}.record-0002", turn_id.as_str())).expect("record");
+
+        recorder
+            .record(TraceRecord {
+                record_id: signal_record_id.clone(),
+                sequence: 1,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_id.clone(),
+                    branch_id: None,
+                    parent_record_id: None,
+                },
+                kind: TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
+                    kind: TraceSignalKind::ActionBias,
+                    summary: "action bias accumulated".to_string(),
+                    level: "high".to_string(),
+                    magnitude_percent: 82,
+                    applies_to: Some(TraceLineageNodeRef {
+                        kind: TraceLineageNodeKind::Turn,
+                        id: turn_id.as_str().to_string(),
+                        label: "turn".to_string(),
+                    }),
+                    contributions: vec![TraceSignalContribution {
+                        source: "controller_policy".to_string(),
+                        share_percent: 100,
+                        rationale: "test contribution".to_string(),
+                    }],
+                    artifact: text_artifact(
+                        "signal-artifact-1",
+                        ArtifactKind::Checkpoint,
+                        "signal snapshot",
+                        "{\"kind\":\"action_bias\"}",
+                    ),
+                }),
+            })
+            .expect("record signal snapshot");
+        recorder
+            .record(TraceRecord {
+                record_id: checkpoint_record_id.clone(),
+                sequence: 2,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_id.clone(),
+                    branch_id: None,
+                    parent_record_id: Some(signal_record_id.clone()),
+                },
+                kind: TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                    checkpoint_id: TraceCheckpointId::new(format!(
+                        "{}.checkpoint",
+                        turn_id.as_str()
+                    ))
+                    .expect("checkpoint"),
+                    kind: TraceCheckpointKind::TurnCompleted,
+                    summary: "done".to_string(),
+                    response: None,
+                    citations: Vec::new(),
+                    grounded: true,
+                }),
+            })
+            .expect("record checkpoint");
+
+        (recorder.replay(&task_id).expect("replay"), signal_record_id)
+    }
+
     #[tokio::test]
     async fn forensic_routes_project_conversation_and_turn_replay_with_lifecycle_states() {
         let workspace = tempfile::tempdir().expect("workspace");
@@ -721,6 +884,93 @@ mod tests {
         .expect("turn forensics");
         assert_eq!(turn.turn_id, turn_id);
         assert_eq!(turn.records.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn manifold_routes_project_time_ordered_signal_frames_and_lineage_anchors() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let (replay, signal_record_id) = seed_manifold_replay(&recorder, &session);
+        let task_id = replay.task_id.clone();
+        let turn_id = replay.records[0].lineage.turn_id.clone();
+        let (event_tx, _) = broadcast::channel(8);
+        let (transcript_tx, _) = broadcast::channel(8);
+        let (forensic_tx, _) = broadcast::channel(8);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx,
+            transcript_tx,
+            forensic_tx,
+        });
+
+        let Json(super::ManifoldProjectionResponse(conversation)) = super::conversation_manifold(
+            State(Arc::clone(&state)),
+            Path(task_id.as_str().to_string()),
+        )
+        .await
+        .expect("conversation manifold");
+        assert_eq!(conversation.task_id, task_id);
+        assert_eq!(conversation.turns.len(), 1);
+        assert_eq!(conversation.turns[0].turn_id, turn_id);
+        assert_eq!(conversation.turns[0].frames.len(), 2);
+        assert_eq!(conversation.turns[0].frames[0].record_id, signal_record_id);
+        assert_eq!(
+            conversation.turns[0].frames[0].active_signals[0]
+                .anchor
+                .as_ref()
+                .expect("anchor")
+                .kind,
+            TraceLineageNodeKind::Turn
+        );
+
+        let Json(super::ManifoldTurnProjectionResponse(turn)) = super::turn_manifold(
+            State(state),
+            Path((task_id.as_str().to_string(), turn_id.as_str().to_string())),
+        )
+        .await
+        .expect("turn manifold");
+        assert_eq!(turn.turn_id, turn_id);
+        assert_eq!(turn.frames.len(), 2);
+    }
+
+    #[test]
+    fn manifold_update_payload_replays_turn_state_for_live_updates() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let (replay, signal_record_id) = seed_manifold_replay(&recorder, &session);
+        let task_id = replay.task_id.clone();
+        let turn_id = replay.records[0].lineage.turn_id.clone();
+        let (event_tx, _) = broadcast::channel(8);
+        let (transcript_tx, _) = broadcast::channel(8);
+        let (forensic_tx, _) = broadcast::channel(8);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx,
+            transcript_tx,
+            forensic_tx,
+        });
+
+        let payload = super::manifold_update_payload(
+            &state,
+            ConversationForensicUpdate {
+                task_id,
+                turn_id,
+                record_id: signal_record_id,
+            },
+        );
+
+        assert!(payload.turn.is_some());
+        assert!(payload.frame.is_some());
+        assert_eq!(
+            payload.frame.expect("frame").active_signals[0].kind,
+            TraceSignalKind::ActionBias
+        );
     }
 
     #[test]

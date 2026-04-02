@@ -4,6 +4,7 @@ pub mod compaction;
 pub mod context_quality;
 pub mod forensics;
 pub mod interpretation;
+pub mod manifold;
 pub mod threading;
 pub mod traces;
 pub mod transcript;
@@ -18,6 +19,9 @@ pub use interpretation::{
     GuidanceCategory, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
+};
+pub use manifold::{
+    ConversationManifoldProjection, ManifoldFrame, ManifoldSignalState, ManifoldTurnProjection,
 };
 pub use paddles_conversation::{
     ArtifactEnvelope, ArtifactKind, ContextLocator, ContextTier, ConversationThread,
