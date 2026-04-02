@@ -80,8 +80,8 @@ body {
     linear-gradient(155deg, rgba(237, 242, 246, 0.94), rgba(206, 216, 225, 0.88));
 }
 .trace-panel {
-  width: min(48vw, 720px);
-  min-width: 420px;
+  width: min(56vw, 980px);
+  min-width: 520px;
   display: flex;
   flex-direction: column;
   padding: 18px;
@@ -259,6 +259,506 @@ body {
   color: #61717e;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+.trace-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(244, 248, 250, 0.68);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(110, 127, 140, 0.14);
+}
+.trace-tab {
+  border: 0;
+  background: transparent;
+  color: #5d6a76;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 10px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.trace-tab.is-active {
+  color: #10202d;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(230, 237, 242, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 10px 18px rgba(100, 116, 131, 0.16);
+}
+.trace-view {
+  display: none;
+  min-height: 0;
+  flex: 1;
+}
+.trace-view.trace-view--active {
+  display: flex;
+}
+.forensic-view {
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+.forensic-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  border-radius: 20px;
+  background: rgba(245, 249, 251, 0.66);
+  color: var(--muted);
+  font-size: 12px;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.74),
+    inset -1px -1px 0 rgba(109, 125, 139, 0.08);
+}
+.forensic-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 12px;
+  min-height: 146px;
+}
+.forensic-overview-card {
+  position: relative;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(86, 104, 118, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.8), rgba(244, 248, 250, 0.36)),
+    linear-gradient(160deg, rgba(228, 236, 241, 0.98), rgba(210, 220, 227, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -2px -2px 0 rgba(106, 123, 137, 0.08),
+    0 16px 28px rgba(103, 118, 132, 0.12);
+  overflow: hidden;
+}
+.forensic-card-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #607180;
+  margin-bottom: 12px;
+}
+.forensic-topology {
+  width: 100%;
+  height: 92px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.48), rgba(255,255,255,0.06)),
+    rgba(216, 226, 232, 0.58);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.66),
+    inset -1px -1px 0 rgba(114, 131, 144, 0.08);
+}
+.forensic-topology text {
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 9px;
+  fill: #50606e;
+  letter-spacing: 0.06em;
+}
+.forensic-topology path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.forensic-force-list,
+.forensic-shadow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.forensic-force-row,
+.forensic-shadow-row {
+  display: grid;
+  gap: 6px;
+}
+.forensic-force-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.forensic-force-label,
+.forensic-shadow-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #304250;
+}
+.forensic-force-meta,
+.forensic-shadow-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.forensic-force-bar {
+  grid-column: 1 / -1;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(186, 200, 210, 0.66);
+  overflow: hidden;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.7),
+    inset -1px -1px 0 rgba(108, 123, 136, 0.08);
+}
+.forensic-force-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(29, 131, 190, 0.86), rgba(240, 138, 36, 0.92));
+}
+.forensic-contribs {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.forensic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(247, 250, 252, 0.8);
+  color: #40515f;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.72),
+    inset -1px -1px 0 rgba(114, 128, 141, 0.08);
+}
+.forensic-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 14px;
+}
+.forensic-nav,
+.forensic-records,
+.forensic-detail-pane {
+  min-height: 0;
+  border-radius: 22px;
+  border: 1px solid rgba(90, 108, 121, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.76), rgba(241, 246, 249, 0.28)),
+    linear-gradient(160deg, rgba(229, 237, 242, 0.96), rgba(209, 219, 227, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -2px -2px 0 rgba(104, 121, 135, 0.08),
+    0 18px 28px rgba(102, 118, 132, 0.12);
+}
+.forensic-nav {
+  padding: 12px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.forensic-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.forensic-nav-group-title {
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #667785;
+}
+.forensic-nav-button {
+  border: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.76), rgba(237, 243, 247, 0.52));
+  color: #233543;
+  border-radius: 18px;
+  padding: 11px 12px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(112, 128, 141, 0.08),
+    0 8px 16px rgba(110, 124, 138, 0.1);
+}
+.forensic-nav-button.is-active {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(232, 241, 247, 0.58)),
+    linear-gradient(135deg, rgba(45, 144, 200, 0.16), rgba(255,255,255,0.2));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 12px 22px rgba(77, 114, 147, 0.18);
+  outline: 2px solid rgba(45, 144, 200, 0.18);
+}
+.forensic-nav-button.is-provisional {
+  border: 1px solid rgba(240, 138, 36, 0.18);
+}
+.forensic-nav-button.is-superseded {
+  opacity: 0.72;
+}
+.forensic-nav-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.forensic-nav-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.forensic-main {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.1fr);
+  gap: 14px;
+}
+.forensic-records {
+  padding: 12px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.forensic-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 4px 8px;
+}
+.forensic-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5b6b79;
+}
+.forensic-section-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+.forensic-record {
+  border: 0;
+  border-radius: 18px;
+  padding: 12px 13px;
+  text-align: left;
+  cursor: pointer;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.8), rgba(237, 242, 246, 0.52));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(111, 126, 140, 0.08),
+    0 10px 18px rgba(108, 122, 137, 0.1);
+  color: #1f3340;
+}
+.forensic-record.is-selected {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.82), rgba(236, 245, 250, 0.56)),
+    linear-gradient(135deg, rgba(45, 144, 200, 0.14), rgba(255,255,255,0.18));
+  outline: 2px solid rgba(45, 144, 200, 0.2);
+}
+.forensic-record.is-superseded {
+  opacity: 0.7;
+}
+.forensic-record-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.forensic-record-title {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.forensic-record-subtitle {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.forensic-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.forensic-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  background: rgba(246, 250, 252, 0.84);
+  color: #485866;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.74),
+    inset -1px -1px 0 rgba(117, 132, 145, 0.08);
+}
+.forensic-detail-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.forensic-detail-toolbar {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(110, 126, 139, 0.12);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.forensic-detail-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #213746;
+}
+.forensic-detail-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.forensic-toggle-row {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(243, 248, 250, 0.76);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(109, 124, 137, 0.08);
+}
+.forensic-toggle {
+  border: 0;
+  background: transparent;
+  color: #5d6b78;
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.forensic-toggle.is-active {
+  color: #152735;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(229, 236, 241, 0.9));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    0 8px 14px rgba(101, 117, 132, 0.14);
+}
+.forensic-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.forensic-detail-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(240, 245, 248, 0.44));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(113, 128, 141, 0.08);
+}
+.forensic-detail-card-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #617280;
+  margin-bottom: 10px;
+}
+.forensic-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+.forensic-detail-grid div {
+  min-width: 0;
+}
+.forensic-detail-grid dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #677987;
+  margin-bottom: 4px;
+}
+.forensic-detail-grid dd {
+  font-size: 12px;
+  color: #243744;
+  word-break: break-word;
+}
+.forensic-code,
+.forensic-raw {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #edf3f6;
+  color: #173040;
+  overflow: auto;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.58;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.76),
+    inset -2px -2px 0 rgba(118, 132, 145, 0.08);
+}
+.forensic-lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.forensic-lifecycle.is-final {
+  background: rgba(23, 149, 108, 0.16);
+  color: #166751;
+}
+.forensic-lifecycle.is-provisional {
+  background: rgba(240, 138, 36, 0.18);
+  color: #915219;
+}
+.forensic-lifecycle.is-superseded {
+  background: rgba(214, 95, 74, 0.16);
+  color: #984739;
+}
+.forensic-inline-note {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.forensic-empty-state {
+  padding: 20px 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.trace-view--transit {
+  flex-direction: column;
+  min-height: 0;
 }
 .trace-board {
   --tile-size: clamp(112px, 12vw, 148px);
@@ -589,6 +1089,14 @@ body {
   body { flex-direction: column; height: 100dvh; padding: 14px; }
   .chat-panel { flex: 1 1 48vh; min-height: 0; }
   .trace-panel { width: 100%; min-width: 0; flex: 1 1 42vh; min-height: 0; }
+  .forensic-overview,
+  .forensic-shell,
+  .forensic-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .forensic-overview {
+    min-height: 0;
+  }
 }
 </style>
 </head>
@@ -605,11 +1113,41 @@ body {
 
 <div class="trace-panel">
   <div class="trace-header-wrap">
-    <div class="trace-header">Transit Trace</div>
-    <div class="trace-subhead">Turn Steps</div>
+    <div>
+      <div class="trace-header">Transit Trace</div>
+      <div class="trace-subhead" id="trace-subhead">Forensic Inspector</div>
+    </div>
+    <div class="trace-tabs">
+      <button class="trace-tab is-active" data-trace-view="inspector">Inspector</button>
+      <button class="trace-tab" data-trace-view="transit">Transit</button>
+    </div>
   </div>
-  <div id="trace-board" class="trace-board"></div>
-  <div class="trace-empty" id="trace-empty">Submit a prompt to see the trace railroad.</div>
+  <div class="trace-view trace-view--active forensic-view" id="forensic-view">
+    <div class="forensic-overview" id="forensic-overview"></div>
+    <div class="forensic-shell">
+      <aside class="forensic-nav" id="forensic-nav"></aside>
+      <div class="forensic-main">
+        <section class="forensic-records" id="forensic-records"></section>
+        <section class="forensic-detail-pane">
+          <div class="forensic-detail-toolbar">
+            <div>
+              <div class="forensic-detail-title" id="forensic-detail-title">No selection</div>
+              <div class="forensic-detail-meta" id="forensic-detail-meta">Transit-backed forensic details appear here.</div>
+            </div>
+            <div class="forensic-toggle-row">
+              <button class="forensic-toggle is-active" data-detail-mode="rendered">Rendered</button>
+              <button class="forensic-toggle" data-detail-mode="raw">Raw</button>
+            </div>
+          </div>
+          <div class="forensic-detail-body" id="forensic-detail"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <div class="trace-view trace-view--transit" id="transit-view">
+    <div id="trace-board" class="trace-board"></div>
+    <div class="trace-empty" id="trace-empty">Submit a prompt to see the trace railroad.</div>
+  </div>
 </div>
 
 <script>
@@ -617,7 +1155,19 @@ let sessionId = null;
 let eventSource = null;
 let transcriptEventSource = null;
 let transcriptSignature = '';
+let latestTraceGraph = null;
+let latestForensics = null;
+let selectedTurnId = null;
+let selectedRecordId = null;
+let selectedSelectionMode = 'record';
+let selectedDetailMode = 'rendered';
+let selectedFocus = { kind: 'all', id: null };
+let activeTraceView = 'inspector';
+let graphDebounce = null;
+
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
+const TRACE_TILE_MIN = 128;
+const TRACE_TILE_GAP = 14;
 
 const KIND_COLORS = {
   root: '#2d90c8',
@@ -629,12 +1179,44 @@ const KIND_COLORS = {
   evidence: '#17956c',
   checkpoint: '#17956c',
   merge: '#d65f4a',
-  thread: '#70808d'
+  thread: '#70808d',
+  forensic: '#2d90c8',
+  lineage: '#5376a3',
+  force: '#f08a24'
 };
 
-const TRACE_TILE_MIN = 128;
-const TRACE_TILE_GAP = 14;
-let latestTraceGraph = null;
+const TRACE_VIEW_LABELS = {
+  inspector: 'Forensic Inspector',
+  transit: 'Turn Steps'
+};
+
+const FORENSIC_KIND_LABELS = {
+  TaskRootStarted: 'task root',
+  TurnStarted: 'turn start',
+  PlannerAction: 'planner step',
+  PlannerBranchDeclared: 'branch',
+  SelectionArtifact: 'selection artifact',
+  ModelExchangeArtifact: 'model exchange',
+  LineageEdge: 'lineage edge',
+  ForceSnapshot: 'force snapshot',
+  ToolCallRequested: 'tool call',
+  ToolCallCompleted: 'tool result',
+  CompletionCheckpoint: 'completion',
+  ThreadMerged: 'thread merge',
+  ThreadCandidateCaptured: 'thread candidate',
+  ThreadDecisionSelected: 'thread decision'
+};
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+function truncate(s, n) {
+  const text = s == null ? '' : String(s);
+  return text.length > n ? text.substring(0, n) + '...' : text;
+}
 
 async function ensureSession() {
   if (sessionId) return;
@@ -643,17 +1225,63 @@ async function ensureSession() {
   sessionId = data.session_id;
 }
 
+function wireStaticUi() {
+  document.getElementById('prompt').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendTurn();
+    }
+  });
+
+  document.querySelectorAll('.trace-tab').forEach((button) => {
+    button.addEventListener('click', () => {
+      setTraceView(button.dataset.traceView);
+    });
+  });
+
+  document.querySelectorAll('.forensic-toggle').forEach((button) => {
+    button.addEventListener('click', () => {
+      setDetailMode(button.dataset.detailMode);
+    });
+  });
+}
+
+function setTraceView(view) {
+  activeTraceView = view;
+  document.querySelectorAll('.trace-tab').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.traceView === view);
+  });
+  document.getElementById('forensic-view').classList.toggle('trace-view--active', view === 'inspector');
+  document.getElementById('transit-view').classList.toggle('trace-view--active', view === 'transit');
+  document.getElementById('trace-subhead').textContent = TRACE_VIEW_LABELS[view] || 'Transit Trace';
+  if (view === 'transit' && latestTraceGraph) {
+    renderTraceDAG(latestTraceGraph);
+  }
+}
+
+function setDetailMode(mode) {
+  selectedDetailMode = mode;
+  document.querySelectorAll('.forensic-toggle').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.detailMode === mode);
+  });
+  renderForensicDetail();
+}
+
 function connectSSE() {
   if (eventSource) eventSource.close();
   if (transcriptEventSource) transcriptEventSource.close();
+
   eventSource = new EventSource('/events');
   eventSource.addEventListener('turn_event', (e) => {
     const event = JSON.parse(e.data);
     handleEvent(event);
   });
+
   transcriptEventSource = new EventSource('/sessions/' + sessionId + '/transcript/events');
   transcriptEventSource.addEventListener('transcript_update', async () => {
     await refreshConversationTranscript({ reset: true, only_if_changed: true });
+    await refreshForensics({ preserveSelection: true });
+    refreshTraceGraph();
   });
 }
 
@@ -722,12 +1350,6 @@ function addEventRow(badge, badgeCls, text, htmlContent = null, options = {}) {
   row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
 function formatDuration(totalSeconds) {
   const seconds = Number(totalSeconds);
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -753,74 +1375,58 @@ function extractMutationDiff(toolName, summary) {
   if (!summary) {
     return null;
   }
-  if (toolName === "diff") {
-    if (summary === "No diff output.") {
+  if (toolName === 'diff') {
+    if (summary === 'No diff output.') {
       return summary;
     }
-    if (summary.startsWith("Diff output:\n")) {
-      return summary.slice("Diff output:\n".length);
+    if (summary.startsWith('Diff output:\n')) {
+      return summary.slice('Diff output:\n'.length);
     }
-    if (summary.startsWith("Diff output:\r\n")) {
-      return summary.slice("Diff output:\r\n".length);
+    if (summary.startsWith('Diff output:\r\n')) {
+      return summary.slice('Diff output:\r\n'.length);
     }
     return null;
   }
-  if (toolName === "apply_patch") {
-    if (!summary.startsWith("Applied patch:\n")) {
+  if (toolName === 'apply_patch') {
+    if (!summary.startsWith('Applied patch:\n')) {
       return null;
     }
-    const body = summary.slice("Applied patch:\n".length);
-    return body
-      .split("\n\nExit status:")[0]
-      .split("\nExit status:")[0]
-      .trim();
+    const body = summary.slice('Applied patch:\n'.length);
+    return body.split('\n\nExit status:')[0].split('\nExit status:')[0].trim();
   }
   return null;
 }
 
 function diffLineClass(line) {
   if (
-    line.startsWith("+++") ||
-    line.startsWith("---") ||
-    line.startsWith("diff ") ||
-    line.startsWith("index ")
+    line.startsWith('+++') ||
+    line.startsWith('---') ||
+    line.startsWith('diff ') ||
+    line.startsWith('index ')
   ) {
-    return "meta";
+    return 'meta';
   }
-  if (line.startsWith("+")) {
-    return "add";
+  if (line.startsWith('+')) {
+    return 'add';
   }
-  if (line.startsWith("-")) {
-    return "remove";
+  if (line.startsWith('-')) {
+    return 'remove';
   }
-  if (line.startsWith("@@")) {
-    return "hunk";
+  if (line.startsWith('@@')) {
+    return 'hunk';
   }
-  if (line.startsWith("\\")) {
-    return "noop";
+  if (line.startsWith('\\')) {
+    return 'noop';
   }
-  return "context";
+  return 'context';
 }
 
 function formatDiffForEvent(toolName, diff) {
   const lines = diff
-    .split("\n")
-    .map(
-      (line) =>
-        '<span class="diff-line ' +
-        diffLineClass(line) +
-        '">' +
-        escapeHtml(line) +
-        "</span>"
-    )
-    .join("<br>");
-  return (
-    escapeHtml(toolName + " done") +
-    "<br>" +
-    "<span class=\"diff-lines\">" +
-    lines +
-    "</span>"
-  );
+    .split('\n')
+    .map((line) => '<span class="diff-line ' + diffLineClass(line) + '">' + escapeHtml(line) + '</span>')
+    .join('<br>');
+  return escapeHtml(toolName + ' done') + '<br><span class="diff-lines">' + lines + '</span>';
 }
 
 function handleEvent(ev) {
@@ -837,12 +1443,7 @@ function handleEvent(ev) {
     if (isMutationTool(ev.tool_name)) {
       const diff = extractMutationDiff(ev.tool_name, ev.summary);
       if (diff) {
-        addEventRow(
-          'tool',
-          'tool-diff',
-          ev.tool_name + ' done',
-          formatDiffForEvent(ev.tool_name, diff)
-        );
+        addEventRow('tool', 'tool-diff', ev.tool_name + ' done', formatDiffForEvent(ev.tool_name, diff));
       } else {
         addEventRow('tool', 'tool', ev.tool_name + ' done');
       }
@@ -855,16 +1456,11 @@ function handleEvent(ev) {
     const eta = ev.eta_seconds == null ? 'unknown' : formatDuration(ev.eta_seconds);
     const strategy = ev.strategy ? ' strategy=' + ev.strategy : '';
     const details = ev.detail ? ' · ' + ev.detail : '';
-    const progressText = 'searching (' + ev.phase + ')' + strategy + ' · eta ' + eta + details;
-    addEventRow('gather', 'gatherer', progressText, null, { key: 'gather-progress' });
+    addEventRow('gather', 'gatherer', 'searching (' + ev.phase + ')' + strategy + ' · eta ' + eta + details, null, { key: 'gather-progress' });
   } else if (t === 'planner_summary') {
     addEventRow('planner', 'planner', ev.strategy + ' ' + ev.mode + ' (' + ev.steps + ' steps)');
   } else if (t === 'synthesis_ready') {
-    if (ev.insufficient_evidence) {
-      addEventRow('synth', 'fallback', 'Insufficient evidence');
-    } else {
-      addEventRow('synth', 'synthesis', ev.grounded ? 'Grounded' : 'Direct');
-    }
+    addEventRow('synth', ev.insufficient_evidence ? 'fallback' : 'synthesis', ev.insufficient_evidence ? 'Insufficient evidence' : (ev.grounded ? 'Grounded' : 'Direct'));
   } else if (t === 'route_selected') {
     addEventRow('route', 'route', truncate(ev.summary, 80));
   } else if (t === 'fallback') {
@@ -877,7 +1473,704 @@ function handleEvent(ev) {
   refreshTraceGraph();
 }
 
-function truncate(s, n) { return s.length > n ? s.substring(0, n) + '...' : s; }
+function kindEntry(recordProjection) {
+  const kind = (recordProjection && recordProjection.record && recordProjection.record.kind) || {};
+  const key = Object.keys(kind)[0] || 'Unknown';
+  return { key, value: kind[key] || {} };
+}
+
+function kindLabel(key) {
+  return FORENSIC_KIND_LABELS[key] || key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
+}
+
+function lifecycleLabel(lifecycle) {
+  return lifecycle ? String(lifecycle).replace(/_/g, ' ') : 'unknown';
+}
+
+function lifecycleClass(lifecycle) {
+  return lifecycle ? String(lifecycle) : 'final';
+}
+
+function lifecycleBadge(lifecycle) {
+  return '<span class="forensic-lifecycle is-' + lifecycleClass(lifecycle) + '">' + escapeHtml(lifecycleLabel(lifecycle)) + '</span>';
+}
+
+function projectionTurns() {
+  return latestForensics && Array.isArray(latestForensics.turns) ? latestForensics.turns : [];
+}
+
+function currentTurn() {
+  const turns = projectionTurns();
+  if (!turns.length) {
+    return null;
+  }
+  return turns.find((turn) => turn.turn_id === selectedTurnId) || turns[turns.length - 1];
+}
+
+function plannerStepsForTurn(turn) {
+  if (!turn) return [];
+  return turn.records
+    .filter((recordProjection) => kindEntry(recordProjection).key === 'PlannerAction')
+    .map((recordProjection) => {
+      const entry = kindEntry(recordProjection);
+      return {
+        id: 'planner-step:' + recordProjection.record.record_id,
+        recordId: recordProjection.record.record_id,
+        label: truncate(entry.value.action || 'planner step', 44)
+      };
+    });
+}
+
+function modelCallsForTurn(turn) {
+  if (!turn) return [];
+  const grouped = new Map();
+  for (const recordProjection of turn.records) {
+    const entry = kindEntry(recordProjection);
+    if (entry.key !== 'ModelExchangeArtifact') {
+      continue;
+    }
+    const exchangeId = entry.value.exchange_id;
+    if (!grouped.has(exchangeId)) {
+      grouped.set(exchangeId, {
+        id: exchangeId,
+        lane: entry.value.lane,
+        category: entry.value.category,
+        provider: entry.value.provider,
+        model: entry.value.model,
+        summary: entry.value.artifact && entry.value.artifact.summary ? entry.value.artifact.summary : 'model call',
+        phases: []
+      });
+    }
+    grouped.get(exchangeId).phases.push(entry.value.phase);
+  }
+  return Array.from(grouped.values());
+}
+
+function focusMatchesTurn(turn, focus) {
+  if (!turn) return false;
+  if (!focus || focus.kind === 'all') return true;
+  if (focus.kind === 'model_call') {
+    return modelCallsForTurn(turn).some((item) => item.id === focus.id);
+  }
+  if (focus.kind === 'planner_step') {
+    return plannerStepsForTurn(turn).some((item) => item.id === focus.id);
+  }
+  return false;
+}
+
+function nodeIdsForRecord(recordProjection) {
+  const ids = new Set();
+  const entry = kindEntry(recordProjection);
+  if (entry.key === 'ModelExchangeArtifact') {
+    ids.add('model-call:' + entry.value.exchange_id);
+    if (entry.value.artifact && entry.value.artifact.artifact_id) {
+      ids.add('artifact:' + entry.value.artifact.artifact_id);
+    }
+  } else if (entry.key === 'PlannerAction') {
+    ids.add('planner-step:' + recordProjection.record.record_id);
+  } else if (entry.key === 'CompletionCheckpoint' && entry.value.response && entry.value.response.artifact_id) {
+    ids.add('output:' + entry.value.response.artifact_id);
+  } else if (entry.key === 'ForceSnapshot') {
+    ids.add('force:' + recordProjection.record.record_id);
+    if (entry.value.applies_to && entry.value.applies_to.id) {
+      ids.add(entry.value.applies_to.id);
+    }
+  } else if (entry.key === 'LineageEdge') {
+    ids.add(entry.value.source.id);
+    ids.add(entry.value.target.id);
+  }
+  return ids;
+}
+
+function recordMatchesFocus(recordProjection, focus) {
+  if (!focus || focus.kind === 'all') {
+    return true;
+  }
+  const entry = kindEntry(recordProjection);
+  if (focus.kind === 'model_call') {
+    if (entry.key === 'ModelExchangeArtifact') {
+      return entry.value.exchange_id === focus.id;
+    }
+    if (entry.key === 'LineageEdge') {
+      return entry.value.source.id === 'model-call:' + focus.id || entry.value.target.id === 'model-call:' + focus.id;
+    }
+    if (entry.key === 'ForceSnapshot' && entry.value.applies_to) {
+      return entry.value.applies_to.id === 'model-call:' + focus.id;
+    }
+    return false;
+  }
+  if (focus.kind === 'planner_step') {
+    if (entry.key === 'PlannerAction') {
+      return 'planner-step:' + recordProjection.record.record_id === focus.id;
+    }
+    if (entry.key === 'LineageEdge') {
+      return entry.value.source.id === focus.id || entry.value.target.id === focus.id;
+    }
+    if (entry.key === 'ForceSnapshot' && entry.value.applies_to) {
+      return entry.value.applies_to.id === focus.id;
+    }
+    return false;
+  }
+  return true;
+}
+
+function recordsForTurn(turn) {
+  if (!turn) return [];
+  return turn.records.filter((recordProjection) => recordMatchesFocus(recordProjection, selectedFocus));
+}
+
+function selectConversation() {
+  selectedSelectionMode = 'conversation';
+  selectedRecordId = null;
+  renderForensics();
+}
+
+function selectTurn(turnId) {
+  selectedTurnId = turnId;
+  selectedSelectionMode = 'turn';
+  selectedRecordId = null;
+  selectedFocus = { kind: 'all', id: null };
+  normalizeSelection();
+  renderForensics();
+}
+
+function selectFocus(kind, id) {
+  selectedFocus = { kind, id };
+  selectedSelectionMode = 'turn';
+  selectedRecordId = null;
+  normalizeSelection();
+  renderForensics();
+}
+
+function selectRecord(recordId) {
+  selectedSelectionMode = 'record';
+  selectedRecordId = recordId;
+  renderForensics();
+}
+
+function normalizeSelection() {
+  const turns = projectionTurns();
+  if (!turns.length) {
+    selectedTurnId = null;
+    selectedRecordId = null;
+    selectedSelectionMode = 'conversation';
+    selectedFocus = { kind: 'all', id: null };
+    return;
+  }
+  if (!turns.some((turn) => turn.turn_id === selectedTurnId)) {
+    selectedTurnId = turns[turns.length - 1].turn_id;
+  }
+  const turn = currentTurn();
+  if (!focusMatchesTurn(turn, selectedFocus)) {
+    selectedFocus = { kind: 'all', id: null };
+  }
+  const records = recordsForTurn(turn);
+  if (selectedSelectionMode === 'record') {
+    if (!records.some((recordProjection) => recordProjection.record.record_id === selectedRecordId)) {
+      if (records.length) {
+        selectedRecordId = records[records.length - 1].record.record_id;
+      } else {
+        selectedSelectionMode = 'turn';
+        selectedRecordId = null;
+      }
+    }
+  }
+  if (!selectedSelectionMode) {
+    selectedSelectionMode = records.length ? 'record' : 'turn';
+    selectedRecordId = records.length ? records[records.length - 1].record.record_id : null;
+  }
+}
+
+function currentRecord() {
+  if (selectedSelectionMode !== 'record') {
+    return null;
+  }
+  return recordsForTurn(currentTurn()).find((recordProjection) => recordProjection.record.record_id === selectedRecordId) || null;
+}
+
+function recordSummary(recordProjection) {
+  const entry = kindEntry(recordProjection);
+  if (entry.key === 'ModelExchangeArtifact') {
+    const artifact = entry.value.artifact || {};
+    return artifact.summary || (entry.value.category + ' ' + entry.value.phase);
+  }
+  if (entry.key === 'PlannerAction') {
+    return entry.value.action || 'planner action';
+  }
+  if (entry.key === 'LineageEdge') {
+    return entry.value.summary || 'lineage edge';
+  }
+  if (entry.key === 'ForceSnapshot') {
+    return entry.value.summary || 'force snapshot';
+  }
+  if (entry.key === 'CompletionCheckpoint') {
+    return entry.value.summary || 'completion';
+  }
+  if (entry.key === 'SelectionArtifact') {
+    return entry.value.summary || 'selection';
+  }
+  if (entry.key === 'ToolCallRequested' || entry.key === 'ToolCallCompleted') {
+    return entry.value.tool_name || 'tool';
+  }
+  if (entry.key === 'TurnStarted' && entry.value.prompt) {
+    return entry.value.prompt.summary || 'turn started';
+  }
+  if (entry.key === 'TaskRootStarted' && entry.value.prompt) {
+    return entry.value.prompt.summary || 'task root';
+  }
+  return kindLabel(entry.key);
+}
+
+function recordMeta(recordProjection) {
+  const entry = kindEntry(recordProjection);
+  const base = [
+    'step ' + recordProjection.record.sequence,
+    kindLabel(entry.key),
+    lifecycleLabel(recordProjection.lifecycle)
+  ];
+  if (entry.key === 'ModelExchangeArtifact') {
+    base.push(entry.value.lane);
+    base.push(entry.value.phase);
+    base.push(entry.value.provider + ':' + entry.value.model);
+  }
+  if (entry.key === 'ForceSnapshot') {
+    base.push(entry.value.level);
+    base.push((entry.value.magnitude_percent || 0) + '%');
+  }
+  return base.filter(Boolean).join(' · ');
+}
+
+function primaryArtifact(recordProjection) {
+  const entry = kindEntry(recordProjection);
+  if (entry.key === 'ModelExchangeArtifact') {
+    return entry.value.artifact || null;
+  }
+  if (entry.key === 'CompletionCheckpoint') {
+    return entry.value.response || null;
+  }
+  if (entry.key === 'SelectionArtifact') {
+    return entry.value.artifact || null;
+  }
+  if (entry.key === 'ToolCallRequested' || entry.key === 'ToolCallCompleted') {
+    return entry.value.payload || null;
+  }
+  if (entry.key === 'ForceSnapshot') {
+    return entry.value.artifact || null;
+  }
+  if (entry.key === 'TurnStarted' || entry.key === 'TaskRootStarted') {
+    return entry.value.prompt || null;
+  }
+  return null;
+}
+
+function artifactText(artifact) {
+  if (!artifact) return '';
+  return artifact.inline_content || '';
+}
+
+function maybePrettyJson(text) {
+  if (!text) return '';
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch (err) {
+    return text;
+  }
+}
+
+function renderedRecordBody(recordProjection) {
+  const entry = kindEntry(recordProjection);
+  const artifact = primaryArtifact(recordProjection);
+  if (artifact) {
+    const text = artifactText(artifact);
+    if (!text) {
+      if (artifact.locator) {
+        return 'Payload stored in ' + artifact.locator.tier + ' context at ' + JSON.stringify(artifact.locator, null, 2);
+      }
+      return 'No inline payload was recorded for this artifact.';
+    }
+    return artifact.mime_type && artifact.mime_type.indexOf('json') !== -1 ? maybePrettyJson(text) : text;
+  }
+  if (entry.key === 'LineageEdge') {
+    return [
+      entry.value.summary || 'lineage edge',
+      '',
+      entry.value.source.label + ' -> ' + entry.value.target.label,
+      'relation: ' + entry.value.relation
+    ].join('\n');
+  }
+  if (entry.key === 'PlannerAction') {
+    return 'action: ' + (entry.value.action || '') + '\n\nrationale: ' + (entry.value.rationale || '');
+  }
+  if (entry.key === 'ForceSnapshot') {
+    const contributions = (entry.value.contributions || [])
+      .map((contribution) => '- ' + contribution.source + ': ' + contribution.share_percent + '% (' + contribution.rationale + ')')
+      .join('\n');
+    return [
+      entry.value.summary || 'force snapshot',
+      '',
+      'level: ' + entry.value.level,
+      'magnitude: ' + entry.value.magnitude_percent + '%',
+      '',
+      contributions
+    ].join('\n');
+  }
+  return maybePrettyJson(JSON.stringify(entry.value, null, 2));
+}
+
+function rawRecordBody(recordProjection) {
+  const artifact = primaryArtifact(recordProjection);
+  if (artifact && artifact.inline_content) {
+    return artifact.inline_content;
+  }
+  return JSON.stringify(recordProjection.record, null, 2);
+}
+
+function relatedLineageSummaries(turn, recordProjection) {
+  if (!turn || !recordProjection) return [];
+  const relevantIds = nodeIdsForRecord(recordProjection);
+  if (!relevantIds.size) return [];
+  return turn.records
+    .filter((candidate) => kindEntry(candidate).key === 'LineageEdge')
+    .filter((candidate) => {
+      const edge = kindEntry(candidate).value;
+      return relevantIds.has(edge.source.id) || relevantIds.has(edge.target.id);
+    })
+    .map((candidate) => {
+      const edge = kindEntry(candidate).value;
+      return edge.source.label + ' -> ' + edge.target.label + ' · ' + edge.relation;
+    });
+}
+
+function renderForensicOverview() {
+  const overview = document.getElementById('forensic-overview');
+  const turns = projectionTurns();
+  const turn = currentTurn();
+  const recordProjection = currentRecord();
+  if (!turns.length) {
+    overview.innerHTML = '<div class="forensic-empty">Forensic replay appears here when transit records exist.</div>';
+    return;
+  }
+
+  const kindCounts = {};
+  for (const turnItem of turns) {
+    for (const recordItem of turnItem.records) {
+      const key = kindEntry(recordItem).key;
+      kindCounts[key] = (kindCounts[key] || 0) + 1;
+    }
+  }
+  const topologyPoints = turn.records.map((recordItem, index) => {
+    const x = 16 + index * ((250 - 32) / Math.max(turn.records.length - 1, 1));
+    const y = 22 + ((index % 2) * 18);
+    return { x, y, color: KIND_COLORS[(kindEntry(recordItem).key || '').toLowerCase()] || '#2d90c8' };
+  });
+  const topologyPath = topologyPoints.length
+    ? 'M ' + topologyPoints.map((point) => point.x + ' ' + point.y).join(' L ')
+    : '';
+
+  overview.innerHTML =
+    '<div class="forensic-overview-card">' +
+      '<div class="forensic-card-title">Conversation</div>' +
+      '<svg class="forensic-topology" viewBox="0 0 250 92" preserveAspectRatio="none">' +
+        '<path d="' + escapeHtml(topologyPath) + '" stroke="rgba(45, 144, 200, 0.76)" stroke-width="3"></path>' +
+        topologyPoints.map((point) => '<circle cx="' + point.x + '" cy="' + point.y + '" r="5" fill="' + point.color + '"></circle>').join('') +
+        '<text x="12" y="78">turns ' + turns.length + ' · records ' + turns.reduce((sum, turnItem) => sum + turnItem.records.length, 0) + '</text>' +
+      '</svg>' +
+    '</div>' +
+    '<div class="forensic-overview-card">' +
+      '<div class="forensic-card-title">Turn Scope</div>' +
+      '<div class="forensic-shadow-list">' +
+        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(turn.turn_id) + '</div><div class="forensic-shadow-meta">' + escapeHtml(lifecycleLabel(turn.lifecycle)) + ' · ' + turn.records.length + ' records</div></div>' +
+        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + modelCallsForTurn(turn).length + ' model calls</div><div class="forensic-shadow-meta">' + plannerStepsForTurn(turn).length + ' planner steps · focus ' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : selectedFocus.kind.replace('_', ' ')) + '</div></div>' +
+        Object.keys(kindCounts).slice(0, 3).map((key) => '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(kindLabel(key)) + '</div><div class="forensic-shadow-meta">' + kindCounts[key] + ' total</div></div>').join('') +
+      '</div>' +
+    '</div>' +
+    '<div class="forensic-overview-card">' +
+      '<div class="forensic-card-title">Selection</div>' +
+      '<div class="forensic-shadow-list">' +
+        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(recordProjection ? recordSummary(recordProjection) : turn.turn_id) + '</div><div class="forensic-shadow-meta">' + (recordProjection ? escapeHtml(recordMeta(recordProjection)) : 'turn summary') + '</div></div>' +
+        (recordProjection ? '<div class="forensic-shadow-row"><div class="forensic-shadow-label">' + escapeHtml(kindLabel(kindEntry(recordProjection).key)) + '</div><div class="forensic-shadow-meta">record ' + escapeHtml(recordProjection.record.record_id) + '</div></div>' : '') +
+        '<div class="forensic-shadow-row"><div class="forensic-shadow-label">detail mode</div><div class="forensic-shadow-meta">' + escapeHtml(selectedDetailMode) + '</div></div>' +
+      '</div>' +
+    '</div>';
+}
+
+function renderForensicNav() {
+  const nav = document.getElementById('forensic-nav');
+  const turns = projectionTurns();
+  const turn = currentTurn();
+  if (!turns.length) {
+    nav.innerHTML = '<div class="forensic-empty-state">No forensic replay is available yet.</div>';
+    return;
+  }
+
+  const modelCallButtons = modelCallsForTurn(turn)
+    .map((modelCall) =>
+      '<button class="forensic-nav-button' + (selectedFocus.kind === 'model_call' && selectedFocus.id === modelCall.id ? ' is-active' : '') + '" data-focus-kind="model_call" data-focus-id="' + escapeHtml(modelCall.id) + '">' +
+        '<div class="forensic-nav-title"><span>' + escapeHtml(truncate(modelCall.summary, 34)) + '</span><span>' + escapeHtml(modelCall.lane) + '</span></div>' +
+        '<div class="forensic-nav-meta">' + escapeHtml(modelCall.provider + ':' + modelCall.model + ' · ' + modelCall.category) + '</div>' +
+      '</button>'
+    )
+    .join('');
+
+  const plannerStepButtons = plannerStepsForTurn(turn)
+    .map((step) =>
+      '<button class="forensic-nav-button' + (selectedFocus.kind === 'planner_step' && selectedFocus.id === step.id ? ' is-active' : '') + '" data-focus-kind="planner_step" data-focus-id="' + escapeHtml(step.id) + '">' +
+        '<div class="forensic-nav-title"><span>' + escapeHtml(step.label) + '</span><span>step</span></div>' +
+        '<div class="forensic-nav-meta">' + escapeHtml(step.recordId) + '</div>' +
+      '</button>'
+    )
+    .join('');
+
+  nav.innerHTML =
+    '<div class="forensic-nav-group">' +
+      '<div class="forensic-nav-group-title">Conversation</div>' +
+      '<button class="forensic-nav-button' + (selectedSelectionMode === 'conversation' ? ' is-active' : '') + '" id="forensic-conversation-button">' +
+        '<div class="forensic-nav-title"><span>' + escapeHtml(latestForensics.task_id || 'conversation') + '</span><span>' + turns.length + '</span></div>' +
+        '<div class="forensic-nav-meta">turns · replay-backed lineage surface</div>' +
+      '</button>' +
+    '</div>' +
+    '<div class="forensic-nav-group">' +
+      '<div class="forensic-nav-group-title">Turns</div>' +
+      turns.map((turnItem) =>
+        '<button class="forensic-nav-button' + (turnItem.turn_id === selectedTurnId && selectedFocus.kind === 'all' ? ' is-active' : '') + ' is-' + lifecycleClass(turnItem.lifecycle) + '" data-turn-id="' + escapeHtml(turnItem.turn_id) + '">' +
+          '<div class="forensic-nav-title"><span>' + escapeHtml(truncate(turnItem.turn_id, 28)) + '</span>' + lifecycleBadge(turnItem.lifecycle) + '</div>' +
+          '<div class="forensic-nav-meta">' + turnItem.records.length + ' records</div>' +
+        '</button>'
+      ).join('') +
+    '</div>' +
+    '<div class="forensic-nav-group">' +
+      '<div class="forensic-nav-group-title">Focus</div>' +
+      '<button class="forensic-nav-button' + (selectedFocus.kind === 'all' ? ' is-active' : '') + '" data-focus-kind="all" data-focus-id="">' +
+        '<div class="forensic-nav-title"><span>All records</span><span>' + turn.records.length + '</span></div>' +
+        '<div class="forensic-nav-meta">full turn sequence</div>' +
+      '</button>' +
+      modelCallButtons +
+      plannerStepButtons +
+    '</div>';
+
+  const conversationButton = document.getElementById('forensic-conversation-button');
+  if (conversationButton) {
+    conversationButton.addEventListener('click', selectConversation);
+  }
+  nav.querySelectorAll('[data-turn-id]').forEach((button) => {
+    button.addEventListener('click', () => selectTurn(button.dataset.turnId));
+  });
+  nav.querySelectorAll('[data-focus-kind]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const kind = button.dataset.focusKind;
+      if (kind === 'all') {
+        selectedFocus = { kind: 'all', id: null };
+        selectedSelectionMode = 'turn';
+        selectedRecordId = null;
+        normalizeSelection();
+        renderForensics();
+      } else {
+        selectFocus(kind, button.dataset.focusId);
+      }
+    });
+  });
+}
+
+function renderForensicRecords() {
+  const recordsPane = document.getElementById('forensic-records');
+  const turn = currentTurn();
+  if (!turn) {
+    recordsPane.innerHTML = '<div class="forensic-empty-state">Select a turn to inspect its transit lineage.</div>';
+    return;
+  }
+  const records = recordsForTurn(turn);
+  recordsPane.innerHTML =
+    '<div class="forensic-section-head">' +
+      '<div class="forensic-section-title">' + escapeHtml(turn.turn_id) + '</div>' +
+      '<div class="forensic-section-meta">' + records.length + ' records</div>' +
+    '</div>' +
+    (records.length
+      ? records.map((recordProjection) => {
+          const entry = kindEntry(recordProjection);
+          const artifact = primaryArtifact(recordProjection);
+          const pills = [
+            '<span class="forensic-pill">' + escapeHtml(kindLabel(entry.key)) + '</span>',
+            artifact && artifact.mime_type ? '<span class="forensic-pill">' + escapeHtml(artifact.mime_type) + '</span>' : '',
+            recordProjection.superseded_by_record_id ? '<span class="forensic-pill">superseded by ' + escapeHtml(recordProjection.superseded_by_record_id) + '</span>' : ''
+          ].filter(Boolean).join('');
+          return '<button class="forensic-record' +
+            (selectedSelectionMode === 'record' && selectedRecordId === recordProjection.record.record_id ? ' is-selected' : '') +
+            (recordProjection.lifecycle === 'superseded' ? ' is-superseded' : '') +
+            '" data-record-id="' + escapeHtml(recordProjection.record.record_id) + '">' +
+              '<div class="forensic-record-head">' +
+                '<div class="forensic-record-title">' + escapeHtml(recordSummary(recordProjection)) + '</div>' +
+                lifecycleBadge(recordProjection.lifecycle) +
+              '</div>' +
+              '<div class="forensic-record-subtitle">' + escapeHtml(recordMeta(recordProjection)) + '</div>' +
+              '<div class="forensic-pill-row">' + pills + '</div>' +
+            '</button>';
+        }).join('')
+      : '<div class="forensic-empty-state">No records match the current lineage focus.</div>');
+
+  recordsPane.querySelectorAll('[data-record-id]').forEach((button) => {
+    button.addEventListener('click', () => selectRecord(button.dataset.recordId));
+  });
+}
+
+function renderConversationDetail() {
+  const turns = projectionTurns();
+  const detail = document.getElementById('forensic-detail');
+  document.getElementById('forensic-detail-title').textContent = latestForensics.task_id || 'conversation';
+  document.getElementById('forensic-detail-meta').textContent = 'Context-lineage-first replay for ' + turns.length + ' turns.';
+  detail.innerHTML =
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Conversation Summary</div>' +
+      '<dl class="forensic-detail-grid">' +
+        '<div><dt>Task</dt><dd>' + escapeHtml(latestForensics.task_id) + '</dd></div>' +
+        '<div><dt>Turns</dt><dd>' + turns.length + '</dd></div>' +
+        '<div><dt>Records</dt><dd>' + turns.reduce((sum, turnItem) => sum + turnItem.records.length, 0) + '</dd></div>' +
+        '<div><dt>Latest Turn</dt><dd>' + escapeHtml((turns[turns.length - 1] || {}).turn_id || 'none') + '</dd></div>' +
+      '</dl>' +
+    '</div>' +
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Navigation</div>' +
+      '<div class="forensic-inline-note">Choose a turn on the left, then narrow the lineage focus to model calls or planner steps before drilling into an exact trace record. The payload pane keeps a raw and rendered toggle for exact browser-side forensics.</div>' +
+    '</div>';
+}
+
+function renderTurnDetail(turn) {
+  const detail = document.getElementById('forensic-detail');
+  const modelCalls = modelCallsForTurn(turn);
+  const plannerSteps = plannerStepsForTurn(turn);
+  document.getElementById('forensic-detail-title').textContent = turn.turn_id;
+  document.getElementById('forensic-detail-meta').textContent = 'Turn summary · ' + turn.records.length + ' records · ' + lifecycleLabel(turn.lifecycle);
+  detail.innerHTML =
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Turn Summary</div>' +
+      '<dl class="forensic-detail-grid">' +
+        '<div><dt>Lifecycle</dt><dd>' + escapeHtml(lifecycleLabel(turn.lifecycle)) + '</dd></div>' +
+        '<div><dt>Records</dt><dd>' + turn.records.length + '</dd></div>' +
+        '<div><dt>Model Calls</dt><dd>' + modelCalls.length + '</dd></div>' +
+        '<div><dt>Planner Steps</dt><dd>' + plannerSteps.length + '</dd></div>' +
+      '</dl>' +
+    '</div>' +
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Lineage Scope</div>' +
+      '<div class="forensic-inline-note">Current focus: ' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : (selectedFocus.kind + ' ' + selectedFocus.id)) + '</div>' +
+      '<pre class="forensic-code">' + escapeHtml(turn.records.map((recordProjection) => '[' + recordProjection.record.sequence + '] ' + recordSummary(recordProjection)).join('\n')) + '</pre>' +
+    '</div>';
+}
+
+function renderRecordDetail(recordProjection) {
+  const detail = document.getElementById('forensic-detail');
+  const turn = currentTurn();
+  const entry = kindEntry(recordProjection);
+  const artifact = primaryArtifact(recordProjection);
+  const relatedLineage = relatedLineageSummaries(turn, recordProjection);
+  const rawBody = rawRecordBody(recordProjection);
+  const renderedBody = renderedRecordBody(recordProjection);
+  const displayedBody = selectedDetailMode === 'raw' ? rawBody : renderedBody;
+  const mimeType = artifact && artifact.mime_type ? artifact.mime_type : 'record/json';
+  const labels = artifact && artifact.labels ? Object.entries(artifact.labels).map(([key, value]) => key + ': ' + value).join('\n') : '';
+
+  document.getElementById('forensic-detail-title').textContent = recordSummary(recordProjection);
+  document.getElementById('forensic-detail-meta').textContent = recordMeta(recordProjection);
+  detail.innerHTML =
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Record Metadata</div>' +
+      '<dl class="forensic-detail-grid">' +
+        '<div><dt>Record</dt><dd>' + escapeHtml(recordProjection.record.record_id) + '</dd></div>' +
+        '<div><dt>Sequence</dt><dd>' + recordProjection.record.sequence + '</dd></div>' +
+        '<div><dt>Kind</dt><dd>' + escapeHtml(kindLabel(entry.key)) + '</dd></div>' +
+        '<div><dt>Lifecycle</dt><dd>' + escapeHtml(lifecycleLabel(recordProjection.lifecycle)) + '</dd></div>' +
+        '<div><dt>Turn</dt><dd>' + escapeHtml(recordProjection.record.lineage.turn_id) + '</dd></div>' +
+        '<div><dt>Branch</dt><dd>' + escapeHtml(recordProjection.record.lineage.branch_id || 'mainline') + '</dd></div>' +
+        (entry.key === 'ModelExchangeArtifact' ? '<div><dt>Provider</dt><dd>' + escapeHtml(entry.value.provider) + '</dd></div><div><dt>Model</dt><dd>' + escapeHtml(entry.value.model) + '</dd></div><div><dt>Phase</dt><dd>' + escapeHtml(entry.value.phase) + '</dd></div><div><dt>Category</dt><dd>' + escapeHtml(entry.value.category) + '</dd></div>' : '') +
+      '</dl>' +
+    '</div>' +
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Payload (' + escapeHtml(selectedDetailMode) + ')</div>' +
+      '<div class="forensic-inline-note">mime: ' + escapeHtml(mimeType) + (artifact && artifact.truncated ? ' · truncated' : '') + '</div>' +
+      '<pre class="' + (selectedDetailMode === 'raw' ? 'forensic-raw' : 'forensic-code') + '">' + escapeHtml(displayedBody || 'No payload body recorded.') + '</pre>' +
+    '</div>' +
+    (labels ? '<div class="forensic-detail-card"><div class="forensic-detail-card-title">Artifact Labels</div><pre class="forensic-code">' + escapeHtml(labels) + '</pre></div>' : '') +
+    '<div class="forensic-detail-card">' +
+      '<div class="forensic-detail-card-title">Related Lineage</div>' +
+      (relatedLineage.length
+        ? '<pre class="forensic-code">' + escapeHtml(relatedLineage.join('\n')) + '</pre>'
+        : '<div class="forensic-inline-note">No explicit lineage edges were associated with this record.</div>') +
+    '</div>';
+}
+
+function renderForensicDetail() {
+  const turn = currentTurn();
+  if (!latestForensics || !projectionTurns().length) {
+    document.getElementById('forensic-detail-title').textContent = 'No selection';
+    document.getElementById('forensic-detail-meta').textContent = 'Transit-backed forensic details appear here.';
+    document.getElementById('forensic-detail').innerHTML = '<div class="forensic-empty-state">Submit a prompt or wait for a trace-producing turn to inspect raw and rendered model context.</div>';
+    return;
+  }
+  if (selectedSelectionMode === 'conversation') {
+    renderConversationDetail();
+    return;
+  }
+  const recordProjection = currentRecord();
+  if (!recordProjection || selectedSelectionMode === 'turn') {
+    renderTurnDetail(turn);
+    return;
+  }
+  renderRecordDetail(recordProjection);
+}
+
+function renderForensics() {
+  normalizeSelection();
+  renderForensicOverview();
+  renderForensicNav();
+  renderForensicRecords();
+  renderForensicDetail();
+}
+
+async function refreshForensics({ preserveSelection = true } = {}) {
+  try {
+    if (!sessionId) return false;
+    const res = await fetch('/sessions/' + sessionId + '/forensics');
+    if (!res.ok) return false;
+    const projection = await res.json();
+    latestForensics = projection;
+    if (!preserveSelection) {
+      selectedTurnId = null;
+      selectedRecordId = null;
+      selectedSelectionMode = 'record';
+      selectedFocus = { kind: 'all', id: null };
+    }
+    renderForensics();
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function renderConversationTranscript(transcript, { reset = false } = {}) {
+  if (reset) {
+    clearTranscriptMessages();
+  }
+  for (const entry of transcript.entries) {
+    addMessage(entry.speaker === 'assistant' ? 'assistant' : 'user', entry.content);
+  }
+}
+
+async function refreshConversationTranscript({ reset = false, only_if_changed = false } = {}) {
+  try {
+    if (!sessionId) return false;
+    const res = await fetch('/sessions/' + sessionId + '/transcript');
+    if (!res.ok) return false;
+    const transcript = await res.json();
+    const nextSignature = transcriptSignatureForConversation(transcript);
+    if (only_if_changed && nextSignature === transcriptSignature) {
+      return false;
+    }
+    renderConversationTranscript(transcript, { reset });
+    transcriptSignature = nextSignature;
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
 async function sendTurn() {
   const input = document.getElementById('prompt');
@@ -893,27 +2186,23 @@ async function sendTurn() {
     const res = await fetch('/sessions/' + sessionId + '/turns', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: text }),
+      body: JSON.stringify({ prompt: text })
     });
     if (!res.ok) {
       throw new Error('Request failed with status ' + res.status);
     }
     await res.json();
     await refreshConversationTranscript({ reset: true, only_if_changed: true });
+    await refreshForensics({ preserveSelection: true });
     refreshTraceGraph();
   } catch (err) {
     addMessage('system', 'Error: ' + err.message);
   }
+
   btn.disabled = false;
   input.focus();
 }
 
-document.getElementById('prompt').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTurn(); }
-});
-
-/* Trace railroad rendering from real transit trace data */
-let graphDebounce = null;
 function refreshTraceGraph() {
   if (graphDebounce) return;
   graphDebounce = setTimeout(async () => {
@@ -923,7 +2212,9 @@ function refreshTraceGraph() {
       if (!res.ok) return;
       const graph = await res.json();
       renderTraceDAG(graph);
-    } catch (e) { /* ignore fetch errors during turn processing */ }
+    } catch (err) {
+      /* ignore fetch errors during turn processing */
+    }
   }, 200);
 }
 
@@ -939,13 +2230,8 @@ function renderTraceDAG(graph) {
 
   empty.style.display = 'none';
   const sorted = [...graph.nodes].sort((a, b) => a.sequence - b.sequence);
-  const branchLabels = Object.fromEntries(
-    (graph.branches || []).map((branch) => [branch.id, branch.label])
-  );
-  const columns = Math.max(
-    2,
-    Math.floor((Math.max(board.clientWidth, 280) + TRACE_TILE_GAP) / (TRACE_TILE_MIN + TRACE_TILE_GAP))
-  );
+  const branchLabels = Object.fromEntries((graph.branches || []).map((branch) => [branch.id, branch.label]));
+  const columns = Math.max(2, Math.floor((Math.max(board.clientWidth, 280) + TRACE_TILE_GAP) / (TRACE_TILE_MIN + TRACE_TILE_GAP)));
   const rows = [];
   for (let i = 0; i < sorted.length; i += columns) {
     rows.push(sorted.slice(i, i + columns));
@@ -958,20 +2244,10 @@ function renderTraceDAG(graph) {
         '<path class="trace-overlay__trench" id="trace-overlay-trench"></path>' +
         '<path class="trace-overlay__line" id="trace-overlay-line"></path>' +
       '</svg>' +
-      rows
-        .map((row, rowIndex) => {
-          const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
-          return '<div class="trace-row' + reverse + '">' +
-            row.map((node, nodeIndex) => renderTraceNode(
-              node,
-              branchLabels,
-              sorted.length - (rowIndex * columns + nodeIndex) - 1,
-              sorted.length,
-              traceNodeDirection(rowIndex, nodeIndex, row.length, rows.length)
-            )).join('') +
-          '</div>';
-        })
-        .join('') +
+      rows.map((row, rowIndex) => {
+        const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
+        return '<div class="trace-row' + reverse + '">' + row.map((node, nodeIndex) => renderTraceNode(node, branchLabels, sorted.length - (rowIndex * columns + nodeIndex) - 1, sorted.length, traceNodeDirection(rowIndex, nodeIndex, row.length, rows.length))).join('') + '</div>';
+      }).join('') +
     '</div>';
 
   bindTraceDetailPlacement(board);
@@ -993,9 +2269,7 @@ function traceNodeDirection(rowIndex, nodeIndex, rowLength, totalRows) {
 
 function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction) {
   const color = KIND_COLORS[node.kind] || '#8b949e';
-  const branchLabel = node.branch_id && branchLabels[node.branch_id]
-    ? branchLabels[node.branch_id]
-    : null;
+  const branchLabel = node.branch_id && branchLabels[node.branch_id] ? branchLabels[node.branch_id] : null;
   const recencyRatio = totalNodes <= 1 ? 1 : 1 - (recencyIndex / Math.max(totalNodes - 1, 1));
   const depth = Math.max(0, Math.min(1, recencyRatio));
   const sunTrailDepth = Math.max(0, 1 - (recencyIndex / 3));
@@ -1022,22 +2296,20 @@ function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction
     'record: ' + escapeHtml(node.id)
   ].filter(Boolean).join('<br>');
 
-  return (
-    '<div class="' + classes.join(' ') + '" style="' +
-      '--node-color:' + color + ';' +
-      '--node-raise:' + raise.toFixed(2) + 'px;' +
-      '--node-shadow-x:' + shadowX.toFixed(2) + 'px;' +
-      '--node-shadow-y:' + shadowY.toFixed(2) + 'px;' +
-      '--node-shadow-blur:' + shadowBlur.toFixed(2) + 'px;' +
-      '--node-shadow-alpha:' + shadowAlpha.toFixed(3) + ';' +
-      '--node-shadow-warm-alpha:' + shadowWarmAlpha.toFixed(3) + ';' +
-      '--node-shadow-warm-x:' + shadowWarmX.toFixed(2) + 'px;' +
-      '--node-shadow-warm-y:' + shadowWarmY.toFixed(2) + 'px;' +
-      '--node-shadow-warm-blur:' + shadowWarmBlur.toFixed(2) + 'px;' +
-      '--node-tilt-x:' + tiltX.toFixed(2) + 'deg;' +
-      '--node-tilt-y:' + tiltY.toFixed(2) + 'deg;' +
-      '--node-specular-alpha:' + specularAlpha.toFixed(3) +
-    '">' +
+  return '<div class="' + classes.join(' ') + '" style="' +
+    '--node-color:' + color + ';' +
+    '--node-raise:' + raise.toFixed(2) + 'px;' +
+    '--node-shadow-x:' + shadowX.toFixed(2) + 'px;' +
+    '--node-shadow-y:' + shadowY.toFixed(2) + 'px;' +
+    '--node-shadow-blur:' + shadowBlur.toFixed(2) + 'px;' +
+    '--node-shadow-alpha:' + shadowAlpha.toFixed(3) + ';' +
+    '--node-shadow-warm-alpha:' + shadowWarmAlpha.toFixed(3) + ';' +
+    '--node-shadow-warm-x:' + shadowWarmX.toFixed(2) + 'px;' +
+    '--node-shadow-warm-y:' + shadowWarmY.toFixed(2) + 'px;' +
+    '--node-shadow-warm-blur:' + shadowWarmBlur.toFixed(2) + 'px;' +
+    '--node-tilt-x:' + tiltX.toFixed(2) + 'deg;' +
+    '--node-tilt-y:' + tiltY.toFixed(2) + 'deg;' +
+    '--node-specular-alpha:' + specularAlpha.toFixed(3) + '">' +
       '<div class="trace-node__hex">' +
         '<div class="trace-node__sequence">step ' + node.sequence + '</div>' +
         '<div class="trace-node__kind">' + escapeHtml(formatTraceKind(node.kind)) + '</div>' +
@@ -1048,8 +2320,7 @@ function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction
         '<div class="trace-node__detail-title">' + escapeHtml(node.label) + '</div>' +
         '<div class="trace-node__detail-meta">' + meta + '</div>' +
       '</div>' +
-    '</div>'
-  );
+    '</div>';
 }
 
 function formatTraceKind(kind) {
@@ -1080,7 +2351,7 @@ function drawTraceSnake(board) {
     const rect = node.getBoundingClientRect();
     return {
       x: rect.left - canvasRect.left + rect.width / 2,
-      y: rect.top - canvasRect.top + rect.height / 2,
+      y: rect.top - canvasRect.top + rect.height / 2
     };
   });
 
@@ -1125,22 +2396,17 @@ function updateTraceDetailPlacements(board) {
     const detailHeight = detail.offsetHeight;
     const gap = 18;
     const padding = 12;
-
     const spaceAbove = nodeRect.top - bounds.top;
     const spaceBelow = bounds.bottom - nodeRect.bottom;
     const spaceLeft = nodeRect.left - bounds.left;
     const spaceRight = bounds.right - nodeRect.right;
-
     const placeBelow = spaceAbove < detailHeight + gap && spaceBelow > spaceAbove;
-    const wouldOverflowLeftCentered =
-      nodeRect.left + nodeRect.width / 2 - detailWidth / 2 < bounds.left + padding;
-    const wouldOverflowRightCentered =
-      nodeRect.left + nodeRect.width / 2 + detailWidth / 2 > bounds.right - padding;
+    const wouldOverflowLeftCentered = nodeRect.left + nodeRect.width / 2 - detailWidth / 2 < bounds.left + padding;
+    const wouldOverflowRightCentered = nodeRect.left + nodeRect.width / 2 + detailWidth / 2 > bounds.right - padding;
 
     if (placeBelow) {
       node.dataset.detailY = 'below';
     }
-
     if (wouldOverflowLeftCentered && spaceRight > spaceLeft) {
       node.dataset.detailX = 'right';
     } else if (wouldOverflowRightCentered && spaceLeft >= spaceRight) {
@@ -1166,42 +2432,18 @@ function bindTraceDetailPlacement(board) {
   }
 }
 
-function renderConversationTranscript(transcript, { reset = false } = {}) {
-  if (reset) {
-    clearTranscriptMessages();
-  }
-  for (const entry of transcript.entries) {
-    addMessage(entry.speaker === 'assistant' ? 'assistant' : 'user', entry.content);
-  }
-}
-
-async function refreshConversationTranscript({ reset = false, only_if_changed = false } = {}) {
-  try {
-    if (!sessionId) return false;
-    const res = await fetch('/sessions/' + sessionId + '/transcript');
-    if (!res.ok) return false;
-    const transcript = await res.json();
-    const nextSignature = transcriptSignatureForConversation(transcript);
-    if (only_if_changed && nextSignature === transcriptSignature) {
-      return false;
-    }
-    renderConversationTranscript(transcript, { reset });
-    transcriptSignature = nextSignature;
-    return true;
-  } catch (e) { /* ignore fetch errors */ }
-  return false;
-}
-
 async function bootstrapWebUi() {
+  wireStaticUi();
   await ensureSession();
   await refreshConversationTranscript({ reset: true });
+  await refreshForensics({ preserveSelection: false });
   connectSSE();
   refreshTraceGraph();
 }
 
 bootstrapWebUi();
 window.addEventListener('resize', () => {
-  if (latestTraceGraph) {
+  if (latestTraceGraph && activeTraceView === 'transit') {
     renderTraceDAG(latestTraceGraph);
   }
 });
