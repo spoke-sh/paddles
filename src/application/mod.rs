@@ -2247,6 +2247,25 @@ impl MechSuitService {
                 decision
             };
 
+            if let Some(forced_decision) = coerce_hypothesis_judgement_action(
+                prompt,
+                &context.interpretation,
+                &loop_state,
+                &decision,
+            ) {
+                let reason = format!(
+                    "evidence pressure redirected `{}` to `{}` because the gathered sources already weaken the reported premise",
+                    decision.action.summary(),
+                    forced_decision.action.summary()
+                );
+                trace.emit(TurnEvent::Fallback {
+                    stage: "evidence-pressure".to_string(),
+                    reason: reason.clone(),
+                });
+                loop_state.notes.push(reason);
+                decision = forced_decision;
+            }
+
             if let Some(forced_decision) = coerce_execution_pressure_action(
                 prompt,
                 &context.interpretation,
@@ -3708,6 +3727,128 @@ fn coerce_execution_pressure_action(
     })
 }
 
+fn coerce_hypothesis_judgement_action(
+    prompt: &str,
+    _interpretation: &InterpretationContext,
+    loop_state: &PlannerLoopState,
+    decision: &RecursivePlannerDecision,
+) -> Option<RecursivePlannerDecision> {
+    if !prompt_asserts_failure_premise(prompt)
+        || decision.action.is_terminal()
+        || !evidence_weakens_failure_premise(loop_state)
+        || evidence_confirms_failure_premise(loop_state)
+        || !decision_repeats_prior_probe(&decision.action, loop_state)
+    {
+        return None;
+    }
+
+    Some(RecursivePlannerDecision {
+        action: PlannerAction::Stop {
+            reason: "evidence-pressure: reported failure not confirmed by gathered sources"
+                .to_string(),
+        },
+        rationale: "action produces information; the gathered sources already weaken the reported failure premise, so stop probing and judge the evidence".to_string(),
+    })
+}
+
+fn prompt_asserts_failure_premise(prompt: &str) -> bool {
+    let prompt_lower = prompt.to_ascii_lowercase();
+    [
+        "failing",
+        "failure",
+        "broken",
+        "regression",
+        "panic",
+        "crash",
+        "ci is failing",
+        "pipeline is failing",
+        "workflow is failing",
+        "build is failing",
+        "tests are failing",
+    ]
+    .iter()
+    .any(|signal| prompt_lower.contains(signal))
+}
+
+fn evidence_confirms_failure_premise(loop_state: &PlannerLoopState) -> bool {
+    loop_state.evidence_items.iter().any(|item| {
+        let snippet = item.snippet.to_ascii_lowercase();
+        snippet.contains("completed\tfailure")
+            || snippet.contains("\"conclusion\":\"failure\"")
+            || snippet.contains("\"status\":\"failure\"")
+            || snippet.contains("test result: failed")
+            || snippet.contains("build failed")
+            || snippet.contains("error[")
+            || (snippet.contains("thread '") && snippet.contains("panicked"))
+            || snippet.contains("failing test")
+            || snippet.contains("failed tests:")
+            || snippet.contains("failures:")
+    })
+}
+
+fn evidence_weakens_failure_premise(loop_state: &PlannerLoopState) -> bool {
+    if evidence_confirms_failure_premise(loop_state) {
+        return false;
+    }
+
+    loop_state.evidence_items.iter().any(|item| {
+        let snippet = item.snippet.to_ascii_lowercase();
+        let looks_like_run_listing = snippet.contains("\"workflowname\"")
+            || snippet.contains("\"headbranch\"")
+            || snippet.contains("\"url\":\"https://github.com/")
+            || snippet.contains("\tci\t")
+            || snippet.contains("actions/runs/");
+        let shows_non_failure = snippet.contains("\"conclusion\":\"success\"")
+            || snippet.contains("\"conclusion\":\"cancelled\"")
+            || snippet.contains("completed\tsuccess")
+            || snippet.contains("completed\tcancelled");
+        looks_like_run_listing && shows_non_failure
+    })
+}
+
+fn decision_repeats_prior_probe(action: &PlannerAction, loop_state: &PlannerLoopState) -> bool {
+    let Some(signature) = diagnostic_probe_signature(action) else {
+        return false;
+    };
+
+    loop_state.steps.iter().any(|step| {
+        diagnostic_probe_signature(&step.action)
+            .map(|prior| prior == signature)
+            .unwrap_or(false)
+    })
+}
+
+fn diagnostic_probe_signature(action: &PlannerAction) -> Option<String> {
+    match action {
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command },
+        } => Some(normalize_probe_signature(command)),
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Search { query, .. },
+        }
+        | PlannerAction::Refine { query, .. } => {
+            Some(format!("query:{}", query.trim().to_ascii_lowercase()))
+        }
+        _ => None,
+    }
+}
+
+fn normalize_probe_signature(command: &str) -> String {
+    let tokens = command
+        .split_whitespace()
+        .skip_while(|token| token.contains('=') && !token.starts_with('/'))
+        .take(3)
+        .map(|token| token.trim_matches(|ch| ch == '"' || ch == '\''))
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        command.trim().to_ascii_lowercase()
+    } else {
+        tokens.join(" ")
+    }
+}
+
 fn decision_targets_file(action: &PlannerAction) -> bool {
     matches!(
         action,
@@ -4373,9 +4514,9 @@ mod tests {
         InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
         InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction, PlannerCapability,
         PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState,
-        PlannerRequest, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
-        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, SynthesizerEngine,
-        ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+        PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
+        RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+        SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
@@ -6616,6 +6757,142 @@ mod tests {
             event,
             TurnEvent::ToolFinished { tool_name, summary, .. }
                 if tool_name == "inspect" && summary.contains("# Workspace")
+        )));
+    }
+
+    #[test]
+    fn evidence_pressure_stops_redundant_ci_probe_after_non_failing_run_evidence() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "planner-step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "gh run list --limit 10 --json status,conclusion,name,headBranch,workflowName,url"
+                            .to_string(),
+                    },
+                },
+                outcome: "inspected recent CI runs".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "command: gh run list --limit 10 --json status,conclusion,name,headBranch,workflowName,url".to_string(),
+                snippet: r#"[{"conclusion":"success","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23910509164","workflowName":"CI"},{"conclusion":"cancelled","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23902835068","workflowName":"CI"}]"#.to_string(),
+                rationale: "recent CI status listing".to_string(),
+                rank: 1,
+            }],
+            ..Default::default()
+        };
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "gh run list --limit 10 --json databaseId,status,conclusion,name,headBranch,workflowName,url"
+                        .to_string(),
+                },
+            },
+            rationale: "get the run id for the failing job".to_string(),
+        };
+
+        let redirected = super::coerce_hypothesis_judgement_action(
+            "CI is failing. Can you debug it on this machine?",
+            &InterpretationContext::default(),
+            &loop_state,
+            &decision,
+        )
+        .expect("redirected decision");
+
+        assert!(matches!(
+            redirected.action,
+            PlannerAction::Stop { ref reason }
+                if reason.contains("evidence-pressure")
+                    && reason.contains("not confirmed")
+        ));
+    }
+
+    #[test]
+    fn diagnostic_turn_stops_after_sources_weaken_failure_premise() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nVerify failures from first principles.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let inspect_command = r#"printf '%s' '[{"conclusion":"success","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23910509164","workflowName":"CI"},{"conclusion":"cancelled","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23902835068","workflowName":"CI"}]'"#.to_string();
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: inspect_command.clone(),
+                    },
+                },
+                "inspect the recent CI runs",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: inspect_command.clone(),
+                    },
+                },
+                rationale: "repeat the same status probe".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "CI is failing. Can you debug it on this machine?",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let events = sink.recorded();
+        let inspect_calls = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    TurnEvent::ToolCalled { tool_name, .. } if tool_name == "inspect"
+                )
+            })
+            .count();
+        assert_eq!(
+            inspect_calls, 1,
+            "controller should stop after the first decisive source"
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress { step_number, action, .. }
+                if *step_number == 2
+                    && action.contains("stop (evidence-pressure")
         )));
     }
 
