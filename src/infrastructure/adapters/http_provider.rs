@@ -2352,9 +2352,17 @@ fn grounded_response_defers_executed_command_work(reply: &str, evidence: &Eviden
         || normalized.starts_with("i'll ")
         || normalized.starts_with("let me ")
         || normalized.starts_with("use the github cli")
+        || normalized.contains("didn't produce any output")
+        || normalized.contains("did not produce any output")
+        || normalized.contains("failed silently")
+        || normalized.contains("execution environment is not available")
+        || normalized.contains("repository is cloned")
+        || normalized.contains("i have access to the gh cli")
+        || normalized.contains("i have access to the source code on this machine")
         || normalized.contains("please provide the specific error")
         || normalized.contains("please share the error")
         || normalized.contains("please provide the error log")
+        || normalized.contains("could you please confirm")
 }
 
 fn grounded_command_evidence_fallback(evidence: &EvidenceBundle) -> String {
@@ -3805,6 +3813,62 @@ mod tests {
         assert!(!response.contains("I will query"));
         assert!(response.contains("I already ran local inspection commands in the harness."));
         assert!(response.contains("command: gh run list --limit 5"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn grounded_http_responses_fall_back_when_they_deny_visible_command_output() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: final_answer_response(
+                ApiFormat::OpenAi,
+                &structured_answer_json(
+                    "I attempted to run the commands you requested, but the tool didn't produce any output. This usually means the execution environment is not available or the command failed silently. Could you please confirm that the repository is cloned and that I have access to the gh CLI and the source code on this machine?",
+                ),
+            ),
+        }])
+        .await;
+
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let evidence = EvidenceBundle::new(
+            "Recent local inspection commands already ran against the workspace and CI surface.",
+            vec![
+                EvidenceItem {
+                    source: "command: git status --short".to_string(),
+                    snippet: "M  CONFIGURATION.md\nM  README.md".to_string(),
+                    rationale: "workspace status".to_string(),
+                    rank: 0,
+                },
+                EvidenceItem {
+                    source: "command: gh run list --limit 20 --status failure".to_string(),
+                    snippet: "completed\tfailure\tFix public Nix inputs for CI\tCI\tmain\tpush\t23864022492".to_string(),
+                    rationale: "failed CI run".to_string(),
+                    rank: 1,
+                },
+            ],
+        );
+
+        let response = adapter
+            .respond_for_turn(
+                "CI is failing. Can you debug it on this machine?",
+                TurnIntent::Planned,
+                Some(&evidence),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .expect("grounded response");
+
+        assert!(!response.contains("didn't produce any output"));
+        assert!(!response.contains("confirm that the repository is cloned"));
+        assert!(response.contains("I already ran local inspection commands in the harness."));
+        assert!(response.contains("command: gh run list --limit 20 --status failure"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

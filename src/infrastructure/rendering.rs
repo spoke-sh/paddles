@@ -259,6 +259,8 @@ pub fn final_answer_contract_prompt(
 - Report what those completed actions found.\n\
 - Do not say you will run tools or inspect the workspace later.\n\
 - Do not ask the user for logs, file contents, or repository state that the harness could already inspect.\n\
+- Do not claim that tools produced no output when evidence is attached.\n\
+- Do not ask the user to confirm the environment when attached evidence already proves the command ran.\n\
 "
     } else {
         ""
@@ -899,6 +901,17 @@ mod tests {
         );
         assert!(prompt.contains("Do not say you will run tools"));
         assert!(prompt.contains("Do not ask the user for logs"));
+    }
+
+    #[test]
+    fn grounded_contract_prompt_forbids_denying_attached_output() {
+        let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, true);
+
+        assert!(
+            prompt
+                .contains("Do not claim that tools produced no output when evidence is attached.")
+        );
+        assert!(prompt.contains("Do not ask the user to confirm the environment when attached evidence already proves the command ran."));
     }
 
     #[test]
