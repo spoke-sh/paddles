@@ -1908,6 +1908,19 @@ impl MechSuitService {
                     });
                     decision = bootstrapped;
                 }
+                if let Some(forced) =
+                    coerce_workspace_engagement_initial_action(prompt, &interpretation, &decision)
+                {
+                    trace.emit(TurnEvent::Fallback {
+                        stage: "workspace-engagement".to_string(),
+                        reason: format!(
+                            "turn requires local workspace engagement; forced initial `{}` to `{}`",
+                            decision.action.summary(),
+                            forced.action.summary()
+                        ),
+                    });
+                    decision = forced;
+                }
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence: 1,
                     action: decision.action.summary(),
@@ -3076,6 +3089,57 @@ fn planner_budget_for_turn(prompt: &str, interpretation: &InterpretationContext)
     }
 }
 
+fn prompt_requires_workspace_engagement(
+    prompt: &str,
+    interpretation: &InterpretationContext,
+) -> bool {
+    if mutation_turn_requires_execution_pressure(prompt, interpretation) {
+        return true;
+    }
+
+    let prompt_lower = prompt.to_ascii_lowercase();
+    let diagnostic_signals = [
+        "debug",
+        "diagnos",
+        "investigat",
+        "reproduce",
+        "root cause",
+        "why is",
+        "why are",
+        "failing",
+        "failure",
+        "broken",
+        "regression",
+        "panic",
+        "crash",
+        "ci ",
+        " ci",
+        "workflow",
+        "pipeline",
+        "lint failing",
+        "build failing",
+        "tests failing",
+        "test failing",
+    ];
+    if diagnostic_signals
+        .iter()
+        .any(|signal| prompt_lower.contains(signal))
+    {
+        return true;
+    }
+
+    interpretation.tool_hints.iter().any(|hint| {
+        matches!(
+            hint.action,
+            WorkspaceAction::Inspect { .. }
+                | WorkspaceAction::Read { .. }
+                | WorkspaceAction::ListFiles { .. }
+                | WorkspaceAction::Shell { .. }
+                | WorkspaceAction::Diff { .. }
+        )
+    })
+}
+
 fn mutation_turn_requires_execution_pressure(
     prompt: &str,
     interpretation: &InterpretationContext,
@@ -3110,6 +3174,36 @@ fn mutation_turn_requires_execution_pressure(
                 | WorkspaceAction::ReplaceInFile { .. }
                 | WorkspaceAction::ApplyPatch { .. }
         )
+    })
+}
+
+fn coerce_workspace_engagement_initial_action(
+    prompt: &str,
+    interpretation: &InterpretationContext,
+    decision: &InitialActionDecision,
+) -> Option<InitialActionDecision> {
+    if !prompt_requires_workspace_engagement(prompt, interpretation) {
+        return None;
+    }
+
+    if matches!(
+        decision.action,
+        InitialAction::Workspace { .. }
+            | InitialAction::Refine { .. }
+            | InitialAction::Branch { .. }
+    ) {
+        return None;
+    }
+
+    Some(InitialActionDecision {
+        action: InitialAction::Workspace {
+            action: WorkspaceAction::Inspect {
+                command: "git status --short".to_string(),
+            },
+        },
+        rationale: "action produces information; diagnose the local workspace state before answering directly"
+            .to_string(),
+        edit: decision.edit.clone(),
     })
 }
 
@@ -4634,6 +4728,48 @@ mod tests {
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
         assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
+    }
+
+    #[test]
+    fn diagnostic_turns_force_local_inspect_when_initial_action_answers_directly() {
+        let decision = initial_action_decision(
+            InitialAction::Answer,
+            "I need more information from the user before I can help",
+        );
+
+        let forced = super::coerce_workspace_engagement_initial_action(
+            "CI is failing can you debug it?",
+            &InterpretationContext::default(),
+            &decision,
+        )
+        .expect("forced initial action");
+
+        assert_eq!(
+            forced.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "git status --short".to_string(),
+                },
+            }
+        );
+        assert!(forced.rationale.contains("action produces information"));
+    }
+
+    #[test]
+    fn casual_turns_do_not_force_local_inspect_when_initial_action_answers_directly() {
+        let decision = initial_action_decision(
+            InitialAction::Answer,
+            "the turn can be answered directly after interpretation",
+        );
+
+        assert!(
+            super::coerce_workspace_engagement_initial_action(
+                "Howdy",
+                &InterpretationContext::default(),
+                &decision,
+            )
+            .is_none()
+        );
     }
 
     #[test]

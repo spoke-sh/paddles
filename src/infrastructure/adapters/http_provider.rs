@@ -685,6 +685,12 @@ impl HttpProviderAdapter {
         };
         system.push_str(&format!(
             r#"
+## Harness Reality
+
+- You are the remote planner model inside Paddles.
+- Paddles executes your selected action locally inside the operator's repository workspace.
+- Do not ask the user for logs, file contents, or repository state that the harness can inspect locally.
+
 ## Action Schema
 
 You must respond with a single JSON object selecting your next action. Available actions:
@@ -998,6 +1004,24 @@ impl HttpPlannerAdapter {
     pub fn new(engine: Arc<HttpProviderAdapter>) -> Self {
         Self { engine }
     }
+
+    fn exchange_capture<'a>(
+        &self,
+        event_sink: &'a dyn TurnEventSink,
+        category: TraceModelExchangeCategory,
+    ) -> ExchangeCapture<'a> {
+        ExchangeCapture {
+            event_sink,
+            exchange_id: event_sink
+                .forensic_trace_sink()
+                .map(|sink| {
+                    sink.allocate_model_exchange_id(TraceModelExchangeLane::Planner, category)
+                })
+                .unwrap_or_else(|| "exchange:untracked".to_string()),
+            lane: TraceModelExchangeLane::Planner,
+            category,
+        }
+    }
 }
 
 #[async_trait]
@@ -1039,28 +1063,47 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         let system = self
             .engine
             .build_planner_system_prompt(&request.interpretation);
-        let user = format!(
-            "User prompt: {}\n\nSelect your first action. Respond with JSON only.",
-            request.user_prompt
+        let mut user = build_http_initial_action_prompt(request);
+        let mut capture = self.exchange_capture(
+            event_sink.as_ref(),
+            TraceModelExchangeCategory::InitialAction,
         );
-        let capture = ExchangeCapture {
-            event_sink: event_sink.as_ref(),
-            exchange_id: event_sink
-                .forensic_trace_sink()
-                .map(|sink| {
-                    sink.allocate_model_exchange_id(
-                        TraceModelExchangeLane::Planner,
-                        TraceModelExchangeCategory::InitialAction,
-                    )
-                })
-                .unwrap_or_else(|| "exchange:untracked".to_string()),
-            lane: TraceModelExchangeLane::Planner,
-            category: TraceModelExchangeCategory::InitialAction,
-        };
-        let (response, raw_response_artifact_id) = self
+        let (mut response, mut raw_response_artifact_id) = self
             .engine
             .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
+
+        if is_blank_model_reply(&response) || self.engine.parse_planner_action(&response).is_err() {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "initial-action-retry".to_string(),
+                reason: "missing or invalid initial action response; asking the planner to restate the action inside the harness state space".to_string(),
+            });
+            user = build_http_initial_action_retry_prompt(request);
+            capture = self.exchange_capture(
+                event_sink.as_ref(),
+                TraceModelExchangeCategory::InitialAction,
+            );
+            (response, raw_response_artifact_id) = self
+                .engine
+                .send_planner_action_async(&system, &user, Some(capture.clone()))
+                .await?;
+        }
+
+        if is_blank_model_reply(&response) || self.engine.parse_planner_action(&response).is_err() {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "initial-action-redecision".to_string(),
+                reason: "asking the planner for one final constrained initial action inside the harness state space".to_string(),
+            });
+            user = build_http_initial_action_redecision_prompt(request, &response);
+            capture = self.exchange_capture(
+                event_sink.as_ref(),
+                TraceModelExchangeCategory::InitialAction,
+            );
+            (response, raw_response_artifact_id) = self
+                .engine
+                .send_planner_action_async(&system, &user, Some(capture.clone()))
+                .await?;
+        }
 
         match self.engine.parse_planner_action(&response) {
             Ok(decision) => {
@@ -1084,11 +1127,15 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                     edit: InitialEditInstruction::default(),
                 })
             }
-            Err(_) => Ok(InitialActionDecision {
-                action: InitialAction::Answer,
-                rationale: "failed to parse planner response, answering directly".to_string(),
-                edit: InitialEditInstruction::default(),
-            }),
+            Err(_) => {
+                event_sink.emit(TurnEvent::Fallback {
+                    stage: "initial-action-fallback".to_string(),
+                    reason:
+                        "controller failed closed after repeated invalid initial-action replies"
+                            .to_string(),
+                });
+                Ok(fail_closed_http_initial_action(request))
+            }
         }
     }
 
@@ -1100,45 +1147,59 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         let system = self
             .engine
             .build_planner_system_prompt(&request.interpretation);
-        let steps_used = request.loop_state.steps.len();
-        let steps_remaining = request.budget.max_steps.saturating_sub(steps_used);
-        let mut user = format!("User prompt: {}\n\n", request.user_prompt);
-        user.push_str(&format!(
-            "Budget: {steps_used}/{} steps used, {steps_remaining} remaining.\n\n",
-            request.budget.max_steps
-        ));
-        if !request.loop_state.steps.is_empty() {
-            user.push_str("## Previous steps\n");
-            for step in &request.loop_state.steps {
-                user.push_str(&format!(
-                    "- Step {}: {} -> {}\n",
-                    step.sequence,
-                    step.action.summary(),
-                    step.outcome
-                ));
-            }
-        }
-        user.push_str("\nSelect your next action. Choose \"answer\" or \"stop\" as soon as you have enough evidence — do not use remaining budget for redundant investigation. Respond with JSON only.");
-
-        let capture = ExchangeCapture {
-            event_sink: event_sink.as_ref(),
-            exchange_id: event_sink
-                .forensic_trace_sink()
-                .map(|sink| {
-                    sink.allocate_model_exchange_id(
-                        TraceModelExchangeLane::Planner,
-                        TraceModelExchangeCategory::PlannerAction,
-                    )
-                })
-                .unwrap_or_else(|| "exchange:untracked".to_string()),
-            lane: TraceModelExchangeLane::Planner,
-            category: TraceModelExchangeCategory::PlannerAction,
-        };
-        let (response, raw_response_artifact_id) = self
+        let mut user = build_http_planner_action_prompt(request);
+        let mut capture = self.exchange_capture(
+            event_sink.as_ref(),
+            TraceModelExchangeCategory::PlannerAction,
+        );
+        let (mut response, mut raw_response_artifact_id) = self
             .engine
             .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
-        let decision = self.engine.parse_planner_action(&response)?;
+
+        if is_blank_model_reply(&response) || self.engine.parse_planner_action(&response).is_err() {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "planner-retry".to_string(),
+                reason: "missing or invalid planner action response; asking the planner to restate the next action inside the harness state space".to_string(),
+            });
+            user = build_http_planner_retry_prompt(request);
+            capture = self.exchange_capture(
+                event_sink.as_ref(),
+                TraceModelExchangeCategory::PlannerAction,
+            );
+            (response, raw_response_artifact_id) = self
+                .engine
+                .send_planner_action_async(&system, &user, Some(capture.clone()))
+                .await?;
+        }
+
+        if is_blank_model_reply(&response) || self.engine.parse_planner_action(&response).is_err() {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "planner-redecision".to_string(),
+                reason: "asking the planner for one final constrained next action inside the harness state space".to_string(),
+            });
+            user = build_http_planner_redecision_prompt(request, &response);
+            capture = self.exchange_capture(
+                event_sink.as_ref(),
+                TraceModelExchangeCategory::PlannerAction,
+            );
+            (response, raw_response_artifact_id) = self
+                .engine
+                .send_planner_action_async(&system, &user, Some(capture.clone()))
+                .await?;
+        }
+
+        let decision = match self.engine.parse_planner_action(&response) {
+            Ok(decision) => decision,
+            Err(_) => {
+                event_sink.emit(TurnEvent::Fallback {
+                    stage: "planner-fallback".to_string(),
+                    reason: "controller failed closed after repeated invalid planner replies"
+                        .to_string(),
+                });
+                return Ok(fail_closed_http_planner_action());
+            }
+        };
         let rendered = json!({
             "action": decision.action.summary(),
             "rationale": decision.rationale,
@@ -1453,6 +1514,152 @@ fn planner_action_json_schema() -> Value {
     })
 }
 
+fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
+    format!(
+        "Runtime context:\n\
+- You are the remote planner model inside Paddles.\n\
+- Paddles executes the action you choose locally in the workspace at `{}`.\n\
+- Use local harness capabilities before asking the user for logs or repository state that the workspace can reveal.\n",
+        request.workspace_root.display()
+    )
+}
+
+fn build_http_initial_action_prompt(request: &PlannerRequest) -> String {
+    format!(
+        "User prompt: {}\n\n{}\nSelect your first action.\n\
+If the user is asking to debug a repository failure like CI, build, test, workflow, or lint breakage, do not answer directly before at least one local workspace action unless the interpretation context already contains the exact failure evidence.\n\
+Respond with JSON only.",
+        request.user_prompt,
+        build_http_planner_runtime_context(request)
+    )
+}
+
+fn build_http_initial_action_retry_prompt(request: &PlannerRequest) -> String {
+    format!(
+        "Your last planner reply was empty or invalid.\n\
+{}\n\
+Return ONLY one valid JSON initial action.\n\
+Do not answer the user directly in prose.\n\
+The first key must be `action`.\n\
+If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
+\n\
+User prompt: {}",
+        build_http_planner_runtime_context(request),
+        request.user_prompt
+    )
+}
+
+fn build_http_initial_action_redecision_prompt(
+    request: &PlannerRequest,
+    invalid_reply: &str,
+) -> String {
+    format!(
+        "Your previous initial-action replies were invalid.\n\
+{}\n\
+Make one final constrained routing decision.\n\
+Return ONLY one valid JSON object.\n\
+The first key must be `action`.\n\
+Do not ask the user for logs or repository state that the harness can inspect locally.\n\
+If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
+\n\
+Invalid reply to correct:\n\
+{}\n\
+\n\
+User prompt: {}",
+        build_http_planner_runtime_context(request),
+        truncate(invalid_reply, 800),
+        request.user_prompt
+    )
+}
+
+fn build_http_planner_action_prompt(request: &PlannerRequest) -> String {
+    let steps_used = request.loop_state.steps.len();
+    let steps_remaining = request.budget.max_steps.saturating_sub(steps_used);
+    let mut user = format!(
+        "User prompt: {}\n\n{}\nBudget: {steps_used}/{} steps used, {steps_remaining} remaining.\n",
+        request.user_prompt,
+        build_http_planner_runtime_context(request),
+        request.budget.max_steps
+    );
+    if !request.loop_state.steps.is_empty() {
+        user.push_str("\n## Previous steps\n");
+        for step in &request.loop_state.steps {
+            user.push_str(&format!(
+                "- Step {}: {} -> {}\n",
+                step.sequence,
+                step.action.summary(),
+                step.outcome
+            ));
+        }
+    }
+    user.push_str(
+        "\nSelect your next action.\n\
+Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
+Respond with JSON only.",
+    );
+    user
+}
+
+fn build_http_planner_retry_prompt(request: &PlannerRequest) -> String {
+    format!(
+        "Your last planner reply was empty or invalid.\n\
+{}\n\
+Return ONLY one valid JSON planner action.\n\
+Do not answer the user directly in prose.\n\
+The first key must be `action`.\n\
+\n\
+Current user request: {}",
+        build_http_planner_runtime_context(request),
+        request.user_prompt
+    )
+}
+
+fn build_http_planner_redecision_prompt(request: &PlannerRequest, invalid_reply: &str) -> String {
+    format!(
+        "Your previous planner replies were invalid.\n\
+{}\n\
+Make one final constrained next-action decision.\n\
+Return ONLY one valid JSON planner action.\n\
+The first key must be `action`.\n\
+Do not answer the user directly in prose.\n\
+\n\
+Invalid reply to correct:\n\
+{}\n\
+\n\
+Current user request: {}",
+        build_http_planner_runtime_context(request),
+        truncate(invalid_reply, 800),
+        request.user_prompt
+    )
+}
+
+fn is_blank_model_reply(reply: &str) -> bool {
+    reply.trim().is_empty()
+}
+
+fn fail_closed_http_initial_action(request: &PlannerRequest) -> InitialActionDecision {
+    InitialActionDecision {
+        action: InitialAction::Stop {
+            reason: format!(
+                "initial-action-unavailable after invalid planner replies for `{}`",
+                truncate(&request.user_prompt, 120)
+            ),
+        },
+        rationale: "controller failed closed after repeated invalid initial-action replies"
+            .to_string(),
+        edit: InitialEditInstruction::default(),
+    }
+}
+
+fn fail_closed_http_planner_action() -> RecursivePlannerDecision {
+    RecursivePlannerDecision {
+        action: PlannerAction::Stop {
+            reason: "planner-action-unavailable after invalid planner replies".to_string(),
+        },
+        rationale: "controller failed closed after repeated invalid planner replies".to_string(),
+    }
+}
+
 fn infer_planner_action_name(envelope: &PlannerEnvelope) -> Option<String> {
     if let Some(action) = envelope.action.clone() {
         return Some(action);
@@ -1541,7 +1748,8 @@ mod tests {
         TraceRecordKind, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
-        ModelPaths, ModelRegistry, PlannerAction, RecursivePlanner, RecursivePlannerDecision,
+        InitialAction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
+        PlannerBudget, PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
         SynthesizerEngine, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -2304,6 +2512,121 @@ mod tests {
         assert!(prompt.contains("The first key must be `action`"));
         assert!(prompt.contains("Do not wrap the JSON in markdown fences"));
         assert!(prompt.contains("Do not emit partial, truncated, or streaming JSON"));
+        assert!(prompt.contains("Paddles executes your selected action locally"));
+        assert!(prompt.contains("Do not ask the user for logs"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_planner_retries_invalid_initial_action_before_succeeding() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, "I should inspect the workspace first."),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(
+                    ApiFormat::OpenAi,
+                    r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis"}"#,
+                ),
+            },
+        ])
+        .await;
+        let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
+            workspace.path(),
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        )));
+        let request = PlannerRequest::new(
+            "CI is failing can you debug it?",
+            workspace.path(),
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        );
+
+        let decision = planner
+            .select_initial_action(&request, Arc::new(RecordingTurnEventSink::default()))
+            .await
+            .expect("initial action");
+
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "git status --short".to_string(),
+                },
+            }
+        );
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1].body["messages"][1]["content"]
+                .as_str()
+                .expect("retry prompt")
+                .contains("Your last planner reply was empty or invalid.")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_planner_retries_invalid_next_action_before_succeeding() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, "Let me think out loud about that."),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(
+                    ApiFormat::OpenAi,
+                    r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis"}"#,
+                ),
+            },
+        ])
+        .await;
+        let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
+            workspace.path(),
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        )));
+        let request = PlannerRequest::new(
+            "CI is failing can you debug it?",
+            workspace.path(),
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        );
+
+        let decision = planner
+            .select_next_action(&request, Arc::new(RecordingTurnEventSink::default()))
+            .await
+            .expect("planner action");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "git status --short".to_string(),
+                    },
+                },
+                rationale: "check the local workspace state before deeper diagnosis".to_string(),
+            }
+        );
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1].body["messages"][1]["content"]
+                .as_str()
+                .expect("retry prompt")
+                .contains("Your last planner reply was empty or invalid.")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
