@@ -308,6 +308,7 @@ pub struct ConversationSessionState {
     pub task_id: TaskTraceId,
     pub next_turn_sequence: u64,
     pub next_candidate_sequence: u64,
+    pub next_exchange_sequence: u64,
     pub next_record_sequence: u64,
     pub next_artifact_sequence: u64,
     pub next_branch_sequence: u64,
@@ -336,6 +337,7 @@ impl ConversationSession {
                 task_id,
                 next_turn_sequence: 1,
                 next_candidate_sequence: 1,
+                next_exchange_sequence: 1,
                 next_record_sequence: 1,
                 next_artifact_sequence: 1,
                 next_branch_sequence: 1,
@@ -391,6 +393,17 @@ impl ConversationSession {
             active_thread: state.active_thread.clone(),
             captured_sequence,
         }
+    }
+
+    pub fn next_exchange_id(&self, turn_id: &TurnTraceId) -> String {
+        let mut state = self.state.lock().expect("conversation session lock");
+        let exchange_id = format!(
+            "{}.exchange-{:04}",
+            turn_id.as_str(),
+            state.next_exchange_sequence
+        );
+        state.next_exchange_sequence += 1;
+        exchange_id
     }
 
     pub fn active_thread(&self) -> ConversationThread {

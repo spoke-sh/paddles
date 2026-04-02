@@ -23,10 +23,12 @@ pub use paddles_conversation::{
 };
 pub use threading::ConversationReplayView;
 pub use traces::{
-    TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
-    TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
-    TraceModelExchangePhase, TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
-    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceForceContribution, TraceForceKind, TraceForceSnapshot, TraceLineage, TraceLineageEdge,
+    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
+    TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot,
+    TraceToolCall, TraceTurnStarted,
 };
 pub use transcript::{
     ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,

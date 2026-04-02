@@ -227,6 +227,7 @@ pub trait TurnEventSink: Send + Sync {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForensicArtifactCapture {
+    pub exchange_id: String,
     pub lane: TraceModelExchangeLane,
     pub category: TraceModelExchangeCategory,
     pub phase: TraceModelExchangePhase,
@@ -240,6 +241,12 @@ pub struct ForensicArtifactCapture {
 }
 
 pub trait ForensicTraceSink: Send + Sync {
+    fn allocate_model_exchange_id(
+        &self,
+        lane: TraceModelExchangeLane,
+        category: TraceModelExchangeCategory,
+    ) -> String;
+
     fn record_forensic_artifact(&self, capture: ForensicArtifactCapture)
     -> Option<TraceArtifactId>;
 }

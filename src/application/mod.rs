@@ -7,13 +7,15 @@ pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifac
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
     ConversationThreadRef, ConversationTranscript, ConversationTranscriptUpdate,
-    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, TaskTraceId, ThreadCandidate,
-    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceLineage, TraceModelExchangeArtifact, TraceModelExchangePhase,
-    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, PressureFactor, PressureLevel,
+    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceForceContribution, TraceForceKind,
+    TraceForceSnapshot, TraceLineage, TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef,
+    TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord,
+    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot,
+    TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent,
+    TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -248,6 +250,7 @@ struct StructuredTurnTrace {
     turn_id: TurnTraceId,
     active_thread: ConversationThreadRef,
     last_synthesis: Arc<Mutex<Option<SynthesisTraceState>>>,
+    last_turn_response_exchange_id: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -255,6 +258,16 @@ struct SynthesisTraceState {
     grounded: bool,
     citations: Vec<String>,
     insufficient_evidence: bool,
+}
+
+struct ForceSnapshotRecord {
+    kind: TraceForceKind,
+    summary: String,
+    level: String,
+    magnitude_percent: u8,
+    applies_to: Option<TraceLineageNodeRef>,
+    contributions: Vec<TraceForceContribution>,
+    details: serde_json::Value,
 }
 
 impl StructuredTurnTrace {
@@ -272,6 +285,7 @@ impl StructuredTurnTrace {
             turn_id,
             active_thread,
             last_synthesis: Arc::new(Mutex::new(None)),
+            last_turn_response_exchange_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -282,6 +296,62 @@ impl StructuredTurnTrace {
 
     fn default_branch_id(&self) -> Option<TraceBranchId> {
         self.active_thread.branch_id()
+    }
+
+    fn conversation_node(&self) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::Conversation,
+            id: format!("conversation:{}", self.session.task_id().as_str()),
+            label: "conversation".to_string(),
+        }
+    }
+
+    fn turn_node(&self) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::Turn,
+            id: format!("turn:{}", self.turn_id.as_str()),
+            label: self.turn_id.as_str().to_string(),
+        }
+    }
+
+    fn planner_step_node(&self, record_id: &TraceRecordId) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::PlannerStep,
+            id: format!("planner-step:{}", record_id.as_str()),
+            label: record_id.as_str().to_string(),
+        }
+    }
+
+    fn model_call_node(&self, exchange_id: &str) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::ModelCall,
+            id: format!("model-call:{exchange_id}"),
+            label: exchange_id.to_string(),
+        }
+    }
+
+    fn artifact_node(&self, artifact_id: &TraceArtifactId) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::Artifact,
+            id: format!("artifact:{}", artifact_id.as_str()),
+            label: artifact_id.as_str().to_string(),
+        }
+    }
+
+    fn output_node(&self, artifact_id: &TraceArtifactId) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::Output,
+            id: format!("output:{}", artifact_id.as_str()),
+            label: artifact_id.as_str().to_string(),
+        }
+    }
+
+    fn force_node(&self, kind: TraceForceKind, record_id: &TraceRecordId) -> TraceLineageNodeRef {
+        TraceLineageNodeRef {
+            kind: TraceLineageNodeKind::Force,
+            id: format!("force:{}", record_id.as_str()),
+            label: kind.label().to_string(),
+        }
     }
 
     fn record_turn_start(
@@ -326,6 +396,13 @@ impl StructuredTurnTrace {
                     synthesizer_model: prepared.synthesizer.model_id.clone(),
                 }),
             );
+            self.record_lineage_edge(
+                None,
+                self.conversation_node(),
+                self.turn_node(),
+                TraceLineageRelation::Contains,
+                "conversation contains initial turn",
+            );
             return;
         }
 
@@ -339,6 +416,13 @@ impl StructuredTurnTrace {
                 thread: self.active_thread.clone(),
             }),
         );
+        self.record_lineage_edge(
+            self.default_branch_id(),
+            self.conversation_node(),
+            self.turn_node(),
+            TraceLineageRelation::Contains,
+            "conversation contains turn",
+        );
     }
 
     fn record_planner_action(
@@ -347,12 +431,20 @@ impl StructuredTurnTrace {
         rationale: &str,
         branch_id: Option<TraceBranchId>,
     ) {
-        self.record_kind(
-            branch_id.or_else(|| self.default_branch_id()),
+        let branch_id = branch_id.or_else(|| self.default_branch_id());
+        let record_id = self.record_kind(
+            branch_id.clone(),
             TraceRecordKind::PlannerAction {
                 action: action.to_string(),
                 rationale: rationale.to_string(),
             },
+        );
+        self.record_lineage_edge(
+            branch_id,
+            self.turn_node(),
+            self.planner_step_node(&record_id),
+            TraceLineageRelation::Contains,
+            format!("turn contains planner step `{action}`"),
         );
     }
 
@@ -494,6 +586,7 @@ impl StructuredTurnTrace {
                 1_200,
             )
             .with_label("citations", synthesis.citations.join(", "));
+        let response_artifact_id = response.artifact_id.clone();
         self.record_kind(
             self.default_branch_id(),
             TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
@@ -513,6 +606,27 @@ impl StructuredTurnTrace {
                 grounded: synthesis.grounded,
             }),
         );
+        self.record_lineage_edge(
+            self.default_branch_id(),
+            self.turn_node(),
+            self.output_node(&response_artifact_id),
+            TraceLineageRelation::ResultsIn,
+            "turn produced final output",
+        );
+        if let Some(exchange_id) = self
+            .last_turn_response_exchange_id
+            .lock()
+            .expect("turn response exchange lock")
+            .clone()
+        {
+            self.record_lineage_edge(
+                self.default_branch_id(),
+                self.model_call_node(&exchange_id),
+                self.output_node(&response_artifact_id),
+                TraceLineageRelation::ResultsIn,
+                "model call resulted in final output",
+            );
+        }
     }
 
     fn parent_record_id_for(
@@ -526,7 +640,21 @@ impl StructuredTurnTrace {
             .or(root_last_record_id)
     }
 
-    fn record_kind(&self, branch_id: Option<TraceBranchId>, kind: TraceRecordKind) {
+    fn current_parent_record_id(&self, branch_id: Option<&TraceBranchId>) -> Option<TraceRecordId> {
+        let session_state = self.session.state();
+        let state = session_state.lock().expect("conversation session lock");
+        self.parent_record_id_for(
+            state.root_last_record_id.clone(),
+            &state.branch_last_record_ids,
+            branch_id,
+        )
+    }
+
+    fn record_kind(
+        &self,
+        branch_id: Option<TraceBranchId>,
+        kind: TraceRecordKind,
+    ) -> TraceRecordId {
         let record = {
             let session_state = self.session.state();
             let mut state = session_state.lock().expect("conversation session lock");
@@ -561,7 +689,72 @@ impl StructuredTurnTrace {
                 kind,
             }
         };
+        let record_id = record.record_id.clone();
         self.record_or_warn(record);
+        record_id
+    }
+
+    fn record_lineage_edge(
+        &self,
+        branch_id: Option<TraceBranchId>,
+        source: TraceLineageNodeRef,
+        target: TraceLineageNodeRef,
+        relation: TraceLineageRelation,
+        summary: impl Into<String>,
+    ) {
+        self.record_kind(
+            branch_id,
+            TraceRecordKind::LineageEdge(TraceLineageEdge {
+                source,
+                target,
+                relation,
+                summary: summary.into(),
+                labels: Default::default(),
+            }),
+        );
+    }
+
+    fn record_force_snapshot(&self, record: ForceSnapshotRecord) {
+        let summary = record.summary;
+        let artifact = self.exact_artifact(
+            ArtifactKind::PlannerTrace,
+            summary.clone(),
+            record.details.to_string(),
+            "application/json",
+        );
+        let force_record_id = self.record_kind(
+            self.default_branch_id(),
+            TraceRecordKind::ForceSnapshot(TraceForceSnapshot {
+                kind: record.kind,
+                summary: summary.clone(),
+                level: record.level,
+                magnitude_percent: record.magnitude_percent,
+                applies_to: record.applies_to.clone(),
+                contributions: record.contributions,
+                artifact,
+            }),
+        );
+        let force_node = self.force_node(record.kind, &force_record_id);
+        self.record_lineage_edge(
+            self.default_branch_id(),
+            self.turn_node(),
+            force_node.clone(),
+            TraceLineageRelation::Contains,
+            format!("turn carries {} force", record.kind.label()),
+        );
+        if let Some(target) = record.applies_to {
+            self.record_lineage_edge(
+                self.default_branch_id(),
+                force_node,
+                target.clone(),
+                TraceLineageRelation::Constrains,
+                format!(
+                    "{} force constrains {}",
+                    record.kind.label(),
+                    target.kind.label()
+                ),
+            );
+        }
     }
 
     fn text_artifact(
@@ -668,6 +861,81 @@ impl TurnEventSink for StructuredTurnTrace {
             } => {
                 self.remember_synthesis(grounded, citations, insufficient_evidence);
             }
+            TurnEvent::ContextPressure { pressure } => {
+                let contributions = pressure_force_contributions(&pressure);
+                self.record_force_snapshot(ForceSnapshotRecord {
+                    kind: TraceForceKind::ContextPressure,
+                    summary: format!("context pressure reached {}", pressure.level.label()),
+                    level: pressure.level.label().to_string(),
+                    magnitude_percent: pressure_level_magnitude(pressure.level),
+                    applies_to: Some(self.turn_node()),
+                    contributions,
+                    details: serde_json::json!({
+                        "level": pressure.level.label(),
+                        "truncation_count": pressure.truncation_count,
+                        "factors": pressure.factors.iter().map(|factor| factor.label()).collect::<Vec<_>>(),
+                    }),
+                });
+            }
+            TurnEvent::Fallback { stage, reason } => {
+                let force_kind = if stage == "execution-pressure" {
+                    TraceForceKind::ExecutionPressure
+                } else {
+                    TraceForceKind::Fallback
+                };
+                let (level, magnitude_percent, contributions) =
+                    fallback_force_details(stage.as_str(), reason.as_str());
+                self.record_force_snapshot(ForceSnapshotRecord {
+                    kind: force_kind,
+                    summary: format!("{stage} fallback"),
+                    level: level.to_string(),
+                    magnitude_percent,
+                    applies_to: Some(self.turn_node()),
+                    contributions,
+                    details: serde_json::json!({
+                        "stage": stage,
+                        "reason": reason,
+                    }),
+                });
+            }
+            TurnEvent::RefinementApplied {
+                reason,
+                before_summary,
+                after_summary,
+            } => {
+                self.record_force_snapshot(ForceSnapshotRecord {
+                    kind: TraceForceKind::Compaction,
+                    summary: "context refinement applied".to_string(),
+                    level: "medium".to_string(),
+                    magnitude_percent: 58,
+                    applies_to: Some(self.turn_node()),
+                    contributions: compaction_force_contributions(),
+                    details: serde_json::json!({
+                        "reason": reason,
+                        "before_summary": before_summary,
+                        "after_summary": after_summary,
+                    }),
+                });
+            }
+            TurnEvent::PlannerSummary { stop_reason, .. } => {
+                if let Some(stop_reason) = stop_reason
+                    .filter(|reason| reason.contains("budget") || reason.contains("pressure"))
+                {
+                    let (level, magnitude_percent, contributions) =
+                        budget_force_details(stop_reason.as_str());
+                    self.record_force_snapshot(ForceSnapshotRecord {
+                        kind: TraceForceKind::Budget,
+                        summary: format!("planner stop reason `{stop_reason}`"),
+                        level: level.to_string(),
+                        magnitude_percent,
+                        applies_to: Some(self.turn_node()),
+                        contributions,
+                        details: serde_json::json!({
+                            "stop_reason": stop_reason,
+                        }),
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -678,10 +946,21 @@ impl TurnEventSink for StructuredTurnTrace {
 }
 
 impl ForensicTraceSink for StructuredTurnTrace {
+    fn allocate_model_exchange_id(
+        &self,
+        _lane: crate::domain::model::TraceModelExchangeLane,
+        _category: crate::domain::model::TraceModelExchangeCategory,
+    ) -> String {
+        self.session.next_exchange_id(&self.turn_id)
+    }
+
     fn record_forensic_artifact(
         &self,
         capture: ForensicArtifactCapture,
     ) -> Option<TraceArtifactId> {
+        let branch_id = self.default_branch_id();
+        let current_parent_record_id = self.current_parent_record_id(branch_id.as_ref());
+        let parent_artifact_id = capture.parent_artifact_id.clone();
         let mut artifact = self
             .exact_artifact(
                 match capture.phase {
@@ -704,19 +983,230 @@ impl ForensicTraceSink for StructuredTurnTrace {
         }
         let artifact_id = artifact.artifact_id.clone();
         self.record_kind(
-            self.default_branch_id(),
+            branch_id.clone(),
             TraceRecordKind::ModelExchangeArtifact(TraceModelExchangeArtifact {
+                exchange_id: capture.exchange_id.clone(),
                 lane: capture.lane,
                 category: capture.category,
                 phase: capture.phase,
                 provider: capture.provider,
                 model: capture.model,
-                parent_artifact_id: capture.parent_artifact_id,
+                parent_artifact_id: parent_artifact_id.clone(),
                 artifact,
             }),
         );
+        if parent_artifact_id.is_none() {
+            self.record_lineage_edge(
+                branch_id.clone(),
+                self.turn_node(),
+                self.model_call_node(&capture.exchange_id),
+                TraceLineageRelation::Contains,
+                format!("turn contains model call {}", capture.exchange_id),
+            );
+            if matches!(
+                capture.lane,
+                crate::domain::model::TraceModelExchangeLane::Planner
+            ) && let Some(parent_record_id) = current_parent_record_id
+            {
+                self.record_lineage_edge(
+                    branch_id.clone(),
+                    self.planner_step_node(&parent_record_id),
+                    self.model_call_node(&capture.exchange_id),
+                    TraceLineageRelation::Triggers,
+                    "planner step triggered model call",
+                );
+            }
+        }
+        self.record_lineage_edge(
+            branch_id.clone(),
+            self.model_call_node(&capture.exchange_id),
+            self.artifact_node(&artifact_id),
+            TraceLineageRelation::Produces,
+            format!("model call produced {}", capture.phase.label()),
+        );
+        if let Some(parent_artifact_id) = &parent_artifact_id {
+            self.record_lineage_edge(
+                branch_id.clone(),
+                self.artifact_node(parent_artifact_id),
+                self.artifact_node(&artifact_id),
+                TraceLineageRelation::Transforms,
+                format!(
+                    "{} transformed into {}",
+                    parent_artifact_id.as_str(),
+                    artifact_id.as_str()
+                ),
+            );
+        }
+        if capture.category == crate::domain::model::TraceModelExchangeCategory::TurnResponse
+            && capture.phase == TraceModelExchangePhase::RenderedResponse
+        {
+            let mut state = self
+                .last_turn_response_exchange_id
+                .lock()
+                .expect("turn response exchange lock");
+            *state = Some(capture.exchange_id);
+        }
         Some(artifact_id)
     }
+}
+
+fn pressure_level_magnitude(level: PressureLevel) -> u8 {
+    match level {
+        PressureLevel::Low => 10,
+        PressureLevel::Medium => 45,
+        PressureLevel::High => 72,
+        PressureLevel::Critical => 92,
+    }
+}
+
+fn pressure_force_contributions(
+    pressure: &crate::domain::model::ContextPressure,
+) -> Vec<TraceForceContribution> {
+    if pressure.factors.is_empty() {
+        return vec![TraceForceContribution {
+            source: "context".to_string(),
+            share_percent: 100,
+            rationale: "No specific factor was isolated, so the pressure is attributed to the overall assembled context.".to_string(),
+        }];
+    }
+
+    let share = (100 / pressure.factors.len()).max(1) as u8;
+    let mut remaining = 100u8;
+    pressure
+        .factors
+        .iter()
+        .enumerate()
+        .map(|(index, factor)| {
+            let assigned = if index + 1 == pressure.factors.len() {
+                remaining
+            } else {
+                let value = share.min(remaining);
+                remaining = remaining.saturating_sub(value);
+                value
+            };
+            let (source, rationale) = match factor {
+                PressureFactor::MemoryTruncated => (
+                    "operator_memory",
+                    "Operator memory truncation raised context pressure.",
+                ),
+                PressureFactor::ArtifactTruncated => (
+                    "retained_artifacts",
+                    "Retained artifacts were truncated to fit the active context budget.",
+                ),
+                PressureFactor::ThreadSummaryTrimmed => (
+                    "thread_summaries",
+                    "Thread summaries were trimmed, reducing recalled state.",
+                ),
+                PressureFactor::EvidenceBudgetExhausted => (
+                    "evidence_budget",
+                    "Evidence budget exhaustion constrained how much supporting context could be retained.",
+                ),
+            };
+            TraceForceContribution {
+                source: source.to_string(),
+                share_percent: assigned,
+                rationale: rationale.to_string(),
+            }
+        })
+        .collect()
+}
+
+fn compaction_force_contributions() -> Vec<TraceForceContribution> {
+    vec![
+        TraceForceContribution {
+            source: "controller_policy".to_string(),
+            share_percent: 60,
+            rationale: "The controller compacted or refined context to preserve actionability under budget.".to_string(),
+        },
+        TraceForceContribution {
+            source: "retained_artifacts".to_string(),
+            share_percent: 40,
+            rationale: "Existing retained artifacts shaped what was summarized or dropped.".to_string(),
+        },
+    ]
+}
+
+fn fallback_force_details(
+    stage: &str,
+    reason: &str,
+) -> (&'static str, u8, Vec<TraceForceContribution>) {
+    if stage == "execution-pressure" {
+        return (
+            "high",
+            84,
+            vec![
+                TraceForceContribution {
+                    source: "controller_policy".to_string(),
+                    share_percent: 45,
+                    rationale: "Execution pressure is a controller-enforced policy to act on likely target files quickly.".to_string(),
+                },
+                TraceForceContribution {
+                    source: "prompt_edit_signal".to_string(),
+                    share_percent: 30,
+                    rationale: "The turn was interpreted as an edit-oriented request requiring file action.".to_string(),
+                },
+                TraceForceContribution {
+                    source: "candidate_file_evidence".to_string(),
+                    share_percent: 25,
+                    rationale: format!("The controller had plausible file evidence: {reason}"),
+                },
+            ],
+        );
+    }
+
+    (
+        "medium",
+        56,
+        vec![
+            TraceForceContribution {
+                source: "provider_or_parser".to_string(),
+                share_percent: 60,
+                rationale: format!("The fallback was triggered at `{stage}` because `{reason}`."),
+            },
+            TraceForceContribution {
+                source: "controller_safety".to_string(),
+                share_percent: 40,
+                rationale: "The controller substituted a safer path to keep the turn recoverable."
+                    .to_string(),
+            },
+        ],
+    )
+}
+
+fn budget_force_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceForceContribution>) {
+    let source = if stop_reason.contains("search-budget") {
+        "search_budget"
+    } else if stop_reason.contains("inspect-budget") {
+        "inspect_budget"
+    } else if stop_reason.contains("read-budget") {
+        "read_budget"
+    } else if stop_reason.contains("evidence-pressure") {
+        "evidence_pressure"
+    } else {
+        "planner_budget"
+    };
+
+    (
+        "high",
+        if stop_reason.contains("pressure") {
+            68
+        } else {
+            78
+        },
+        vec![
+            TraceForceContribution {
+                source: source.to_string(),
+                share_percent: 65,
+                rationale: format!("The planner stopped because `{stop_reason}`."),
+            },
+            TraceForceContribution {
+                source: "planner_budget".to_string(),
+                share_percent: 35,
+                rationale: "The planner budget bounded additional recursion and retrieval."
+                    .to_string(),
+            },
+        ],
+    )
 }
 
 fn render_turn_event(event: &TurnEvent) -> String {
@@ -3390,12 +3880,16 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 mod tests {
     use crate::application::{
         ActiveRuntimeState, GathererProvider, MechSuitService, PreparedGathererLane,
-        PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole, TurnIntent,
+        PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
+        StructuredTurnTrace, TurnIntent,
     };
     use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
-        ConversationTranscriptUpdate, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
-        TraceRecordKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+        ContextPressure, ConversationThreadRef, ConversationTranscriptUpdate,
+        ForensicArtifactCapture, ForensicTraceSink, PressureFactor, TaskTraceId, ThreadDecision,
+        ThreadDecisionId, ThreadDecisionKind, TraceForceKind, TraceLineageNodeKind,
+        TraceLineageRelation, TraceModelExchangeCategory, TraceModelExchangeLane,
+        TraceModelExchangePhase, TraceRecordKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
@@ -3412,6 +3906,7 @@ mod tests {
     use crate::infrastructure::providers::ModelProvider;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
+    use paddles_conversation::ConversationSession;
     use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
@@ -4166,6 +4661,289 @@ mod tests {
                 .records
                 .iter()
                 .any(|record| matches!(record.kind, TraceRecordKind::CompletionCheckpoint(_)))
+        );
+    }
+
+    #[test]
+    fn structured_turn_trace_records_lineage_edges_for_model_calls_and_outputs() {
+        let session = ConversationSession::new(TaskTraceId::new("task-lineage").expect("task id"));
+        let turn_id = session.allocate_turn_id();
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let trace = Arc::new(StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            recorder.clone(),
+            session.clone(),
+            turn_id.clone(),
+            ConversationThreadRef::Mainline,
+        ));
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+
+        trace.record_turn_start(
+            "Fix the target file",
+            &InterpretationContext::default(),
+            &prepared,
+        );
+        trace.record_planner_action("read src/lib.rs", "act on the likeliest file first", None);
+        let exchange_id = ForensicTraceSink::allocate_model_exchange_id(
+            trace.as_ref(),
+            TraceModelExchangeLane::Planner,
+            TraceModelExchangeCategory::PlannerAction,
+        );
+        let assembled_context_id = ForensicTraceSink::record_forensic_artifact(
+            trace.as_ref(),
+            ForensicArtifactCapture {
+                exchange_id: exchange_id.clone(),
+                lane: TraceModelExchangeLane::Planner,
+                category: TraceModelExchangeCategory::PlannerAction,
+                phase: TraceModelExchangePhase::AssembledContext,
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+                parent_artifact_id: None,
+                summary: "planner assembled context".to_string(),
+                content: "{\"user\":\"Fix the target file\"}".to_string(),
+                mime_type: "application/json".to_string(),
+                labels: Default::default(),
+            },
+        )
+        .expect("assembled context artifact");
+        let raw_response_id = ForensicTraceSink::record_forensic_artifact(
+            trace.as_ref(),
+            ForensicArtifactCapture {
+                exchange_id: exchange_id.clone(),
+                lane: TraceModelExchangeLane::Planner,
+                category: TraceModelExchangeCategory::PlannerAction,
+                phase: TraceModelExchangePhase::RawProviderResponse,
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+                parent_artifact_id: Some(assembled_context_id.clone()),
+                summary: "planner raw response".to_string(),
+                content: "{\"action\":\"read\"}".to_string(),
+                mime_type: "application/json".to_string(),
+                labels: Default::default(),
+            },
+        )
+        .expect("raw response artifact");
+        ForensicTraceSink::record_forensic_artifact(
+            trace.as_ref(),
+            ForensicArtifactCapture {
+                exchange_id: exchange_id.clone(),
+                lane: TraceModelExchangeLane::Synthesizer,
+                category: TraceModelExchangeCategory::TurnResponse,
+                phase: TraceModelExchangePhase::RenderedResponse,
+                provider: "openai".to_string(),
+                model: "gpt-test".to_string(),
+                parent_artifact_id: Some(raw_response_id.clone()),
+                summary: "rendered response".to_string(),
+                content: "Patched src/lib.rs".to_string(),
+                mime_type: "text/plain".to_string(),
+                labels: Default::default(),
+            },
+        )
+        .expect("rendered response artifact");
+        trace.record_completion("Patched src/lib.rs");
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        let completion_output_id = replay
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TraceRecordKind::CompletionCheckpoint(checkpoint) => checkpoint
+                    .response
+                    .as_ref()
+                    .map(|artifact| artifact.artifact_id.as_str().to_string()),
+                _ => None,
+            })
+            .expect("completion output id");
+        let lineage_edges = replay
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TraceRecordKind::LineageEdge(edge) => Some(edge),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(lineage_edges.iter().any(|edge| {
+            edge.source.kind == TraceLineageNodeKind::Conversation
+                && edge.target.kind == TraceLineageNodeKind::Turn
+                && edge.relation == TraceLineageRelation::Contains
+        }));
+        assert!(lineage_edges.iter().any(|edge| {
+            edge.source.kind == TraceLineageNodeKind::Turn
+                && edge.target.kind == TraceLineageNodeKind::PlannerStep
+                && edge.relation == TraceLineageRelation::Contains
+        }));
+        assert!(lineage_edges.iter().any(|edge| {
+            edge.source.kind == TraceLineageNodeKind::PlannerStep
+                && edge.target.kind == TraceLineageNodeKind::ModelCall
+                && edge.target.label == exchange_id
+                && edge.relation == TraceLineageRelation::Triggers
+        }));
+        assert!(lineage_edges.iter().any(|edge| {
+            edge.source.kind == TraceLineageNodeKind::ModelCall
+                && edge.source.label == exchange_id
+                && edge.target.id == format!("artifact:{}", assembled_context_id.as_str())
+                && edge.relation == TraceLineageRelation::Produces
+        }));
+        assert!(lineage_edges.iter().any(|edge| {
+            edge.source.id == format!("artifact:{}", assembled_context_id.as_str())
+                && edge.target.id == format!("artifact:{}", raw_response_id.as_str())
+                && edge.relation == TraceLineageRelation::Transforms
+        }));
+        assert!(lineage_edges.iter().any(|edge| {
+            edge.source.kind == TraceLineageNodeKind::ModelCall
+                && edge.source.label == exchange_id
+                && edge.target.id == format!("output:{completion_output_id}")
+                && edge.relation == TraceLineageRelation::ResultsIn
+        }));
+    }
+
+    #[test]
+    fn structured_turn_trace_records_force_snapshots_with_contribution_estimates() {
+        let session = ConversationSession::new(TaskTraceId::new("task-force").expect("task id"));
+        let turn_id = session.allocate_turn_id();
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let trace = Arc::new(StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            recorder.clone(),
+            session.clone(),
+            turn_id,
+            ConversationThreadRef::Mainline,
+        ));
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+
+        trace.record_turn_start(
+            "Investigate context pressure",
+            &InterpretationContext::default(),
+            &prepared,
+        );
+        trace.emit(TurnEvent::ContextPressure {
+            pressure: ContextPressure::new(
+                vec![
+                    PressureFactor::MemoryTruncated,
+                    PressureFactor::ArtifactTruncated,
+                ],
+                3,
+            ),
+        });
+        trace.emit(TurnEvent::Fallback {
+            stage: "execution-pressure".to_string(),
+            reason: "acting on the likely file is more informative".to_string(),
+        });
+        trace.emit(TurnEvent::Fallback {
+            stage: "planner-fallback".to_string(),
+            reason: "planner response could not be parsed".to_string(),
+        });
+        trace.emit(TurnEvent::RefinementApplied {
+            reason: "Archived deeper artifacts".to_string(),
+            before_summary: "12 retained artifacts".to_string(),
+            after_summary: "6 retained artifacts".to_string(),
+        });
+        trace.emit(TurnEvent::PlannerSummary {
+            strategy: "bounded".to_string(),
+            mode: "search".to_string(),
+            turns: 1,
+            steps: 4,
+            stop_reason: Some("search-budget-exhausted".to_string()),
+            active_branch_id: None,
+            branch_count: None,
+            frontier_count: None,
+            node_count: None,
+            edge_count: None,
+            retained_artifact_count: None,
+        });
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        let force_snapshots = replay
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TraceRecordKind::ForceSnapshot(snapshot) => Some(snapshot),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(force_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceForceKind::ContextPressure
+                && snapshot
+                    .contributions
+                    .iter()
+                    .any(|item| item.source == "operator_memory")
+                && snapshot
+                    .contributions
+                    .iter()
+                    .any(|item| item.source == "retained_artifacts")
+        }));
+        assert!(force_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceForceKind::ExecutionPressure
+                && snapshot
+                    .contributions
+                    .iter()
+                    .any(|item| item.source == "controller_policy")
+        }));
+        assert!(force_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceForceKind::Fallback
+                && snapshot
+                    .contributions
+                    .iter()
+                    .any(|item| item.source == "provider_or_parser")
+        }));
+        assert!(force_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceForceKind::Compaction
+                && snapshot
+                    .contributions
+                    .iter()
+                    .any(|item| item.source == "controller_policy")
+        }));
+        assert!(force_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceForceKind::Budget
+                && snapshot
+                    .contributions
+                    .iter()
+                    .any(|item| item.source == "planner_budget")
+        }));
+
+        let ordered_kinds = force_snapshots
+            .iter()
+            .map(|snapshot| snapshot.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered_kinds,
+            vec![
+                TraceForceKind::ContextPressure,
+                TraceForceKind::ExecutionPressure,
+                TraceForceKind::Fallback,
+                TraceForceKind::Compaction,
+                TraceForceKind::Budget,
+            ]
         );
     }
 

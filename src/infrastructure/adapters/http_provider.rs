@@ -27,9 +27,10 @@ const MAX_CITATIONS: usize = 4;
 const MAX_RETRIES: u32 = 3;
 const RETRY_BASE_DELAY_MS: u64 = 2000;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ExchangeCapture<'a> {
     event_sink: &'a dyn TurnEventSink,
+    exchange_id: String,
     lane: TraceModelExchangeLane,
     category: TraceModelExchangeCategory,
 }
@@ -194,11 +195,12 @@ impl HttpProviderAdapter {
 
     fn record_exchange_artifact(
         &self,
-        capture: ExchangeCapture<'_>,
+        capture: &ExchangeCapture<'_>,
         record: ExchangeArtifactRecord,
     ) -> Option<TraceArtifactId> {
         capture.event_sink.forensic_trace_sink().and_then(|sink| {
             sink.record_forensic_artifact(ForensicArtifactCapture {
+                exchange_id: capture.exchange_id.clone(),
                 lane: capture.lane,
                 category: capture.category,
                 phase: record.phase,
@@ -215,7 +217,7 @@ impl HttpProviderAdapter {
 
     fn record_assembled_context(
         &self,
-        capture: ExchangeCapture<'_>,
+        capture: &ExchangeCapture<'_>,
         system: &str,
         user: &str,
     ) -> Option<TraceArtifactId> {
@@ -244,7 +246,7 @@ impl HttpProviderAdapter {
 
     fn record_rendered_response(
         &self,
-        capture: ExchangeCapture<'_>,
+        capture: &ExchangeCapture<'_>,
         rendered: &str,
         parent_artifact_id: Option<TraceArtifactId>,
     ) -> Option<TraceArtifactId> {
@@ -274,7 +276,7 @@ impl HttpProviderAdapter {
         capture: Option<ExchangeCapture<'_>>,
         assembled_context_id: Option<TraceArtifactId>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
-        let request_artifact_id = capture.and_then(|capture| {
+        let request_artifact_id = capture.as_ref().and_then(|capture| {
             let borrowed = headers
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -305,7 +307,7 @@ impl HttpProviderAdapter {
         })
         .await?;
 
-        let raw_response_artifact_id = capture.and_then(|capture| {
+        let raw_response_artifact_id = capture.as_ref().and_then(|capture| {
             self.record_exchange_artifact(
                 capture,
                 ExchangeArtifactRecord {
@@ -345,8 +347,9 @@ impl HttpProviderAdapter {
             "max_tokens": 4096,
         });
 
-        let assembled_context_id =
-            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
         let (text, raw_response_artifact_id) = self
             .post_json_with_capture(
                 "OpenAI",
@@ -401,8 +404,9 @@ impl HttpProviderAdapter {
             }
         });
 
-        let assembled_context_id =
-            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
         let (text, raw_response_artifact_id) = self
             .post_json_with_capture(
                 "OpenAI",
@@ -445,8 +449,9 @@ impl HttpProviderAdapter {
             ],
         });
 
-        let assembled_context_id =
-            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
         let (text, raw_response_artifact_id) = self
             .post_json_with_capture(
                 "Anthropic",
@@ -498,8 +503,9 @@ impl HttpProviderAdapter {
             }
         });
 
-        let assembled_context_id =
-            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
         let (text, raw_response_artifact_id) = self
             .post_json_with_capture(
                 "Anthropic",
@@ -550,8 +556,9 @@ impl HttpProviderAdapter {
             "contents": [{ "parts": [{ "text": user }] }],
         });
 
-        let assembled_context_id =
-            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
         let (text, raw_response_artifact_id) = self
             .post_json_with_capture(
                 "Gemini",
@@ -595,8 +602,9 @@ impl HttpProviderAdapter {
             }
         });
 
-        let assembled_context_id =
-            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
         let (text, raw_response_artifact_id) = self
             .post_json_with_capture(
                 "Gemini",
@@ -851,6 +859,15 @@ impl SynthesizerEngine for HttpProviderAdapter {
 
         let capture = ExchangeCapture {
             event_sink: event_sink.as_ref(),
+            exchange_id: event_sink
+                .forensic_trace_sink()
+                .map(|sink| {
+                    sink.allocate_model_exchange_id(
+                        TraceModelExchangeLane::Synthesizer,
+                        TraceModelExchangeCategory::TurnResponse,
+                    )
+                })
+                .unwrap_or_else(|| "exchange:untracked".to_string()),
             lane: TraceModelExchangeLane::Synthesizer,
             category: TraceModelExchangeCategory::TurnResponse,
         };
@@ -858,12 +875,12 @@ impl SynthesizerEngine for HttpProviderAdapter {
             &system,
             &user_msg,
             gathered_evidence.is_some(),
-            Some(capture),
+            Some(capture.clone()),
         )?;
         let mut response = normalize_assistant_response(&raw_response);
         let citations = gathered_evidence.map(citation_sources).unwrap_or_default();
         response = ensure_citation_section(&response, &citations);
-        self.record_rendered_response(capture, &response, raw_response_artifact_id);
+        self.record_rendered_response(&capture, &response, raw_response_artifact_id);
 
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: gathered_evidence.is_some(),
@@ -944,12 +961,21 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         );
         let capture = ExchangeCapture {
             event_sink: event_sink.as_ref(),
+            exchange_id: event_sink
+                .forensic_trace_sink()
+                .map(|sink| {
+                    sink.allocate_model_exchange_id(
+                        TraceModelExchangeLane::Planner,
+                        TraceModelExchangeCategory::InitialAction,
+                    )
+                })
+                .unwrap_or_else(|| "exchange:untracked".to_string()),
             lane: TraceModelExchangeLane::Planner,
             category: TraceModelExchangeCategory::InitialAction,
         };
         let (response, raw_response_artifact_id) = self
             .engine
-            .send_async(&system, &user, Some(capture))
+            .send_async(&system, &user, Some(capture.clone()))
             .await?;
 
         match self.engine.parse_planner_action(&response) {
@@ -960,7 +986,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 })
                 .to_string();
                 self.engine
-                    .record_rendered_response(capture, &rendered, raw_response_artifact_id);
+                    .record_rendered_response(&capture, &rendered, raw_response_artifact_id);
                 let action = match &decision.action {
                     PlannerAction::Stop { .. } => InitialAction::Answer,
                     PlannerAction::Workspace { action } => InitialAction::Workspace {
@@ -1012,12 +1038,21 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
 
         let capture = ExchangeCapture {
             event_sink: event_sink.as_ref(),
+            exchange_id: event_sink
+                .forensic_trace_sink()
+                .map(|sink| {
+                    sink.allocate_model_exchange_id(
+                        TraceModelExchangeLane::Planner,
+                        TraceModelExchangeCategory::PlannerAction,
+                    )
+                })
+                .unwrap_or_else(|| "exchange:untracked".to_string()),
             lane: TraceModelExchangeLane::Planner,
             category: TraceModelExchangeCategory::PlannerAction,
         };
         let (response, raw_response_artifact_id) = self
             .engine
-            .send_async(&system, &user, Some(capture))
+            .send_async(&system, &user, Some(capture.clone()))
             .await?;
         let decision = self.engine.parse_planner_action(&response)?;
         let rendered = json!({
@@ -1026,7 +1061,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         })
         .to_string();
         self.engine
-            .record_rendered_response(capture, &rendered, raw_response_artifact_id);
+            .record_rendered_response(&capture, &rendered, raw_response_artifact_id);
         Ok(decision)
     }
 

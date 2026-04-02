@@ -126,6 +126,15 @@ pub(crate) struct ToolResult {
     pub(crate) retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
+struct SiftForensicRecord {
+    exchange_id: String,
+    phase: TraceModelExchangePhase,
+    summary: String,
+    content: String,
+    mime_type: String,
+    parent_artifact_id: Option<TraceArtifactId>,
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum PlannerActionEnvelope {
@@ -1416,28 +1425,32 @@ impl SiftAgentAdapter {
         let follow_up_execution = false;
         let mut conversation = self.conversation_factory.start_conversation()?;
         let mut rendered_parent_artifact_id = None;
+        let mut rendered_exchange_id = None;
         let mut reply = if direct_response_turn {
-            let (reply, raw_response_artifact_id) = self.send_to_model_for_turn(
+            let (reply, exchange_id, raw_response_artifact_id) = self.send_to_model_for_turn(
                 conversation.as_mut(),
                 &build_direct_turn_prompt(prompt, &memory_prompt, self.render_capability),
                 event_sink,
             )?;
+            rendered_exchange_id = Some(exchange_id);
             rendered_parent_artifact_id = raw_response_artifact_id;
             reply
         } else if require_grounding {
             match gathered_evidence.filter(|bundle| !bundle.items.is_empty()) {
                 Some(evidence) => {
-                    let (reply, raw_response_artifact_id) = self.send_to_model_for_turn(
-                        conversation.as_mut(),
-                        &build_grounded_turn_prompt(
-                            prompt,
-                            &recent_turns,
-                            &memory_prompt,
-                            evidence,
-                            self.render_capability,
-                        ),
-                        event_sink,
-                    )?;
+                    let (reply, exchange_id, raw_response_artifact_id) = self
+                        .send_to_model_for_turn(
+                            conversation.as_mut(),
+                            &build_grounded_turn_prompt(
+                                prompt,
+                                &recent_turns,
+                                &memory_prompt,
+                                evidence,
+                                self.render_capability,
+                            ),
+                            event_sink,
+                        )?;
+                    rendered_exchange_id = Some(exchange_id);
                     rendered_parent_artifact_id = raw_response_artifact_id;
                     reply
                 }
@@ -1457,7 +1470,7 @@ impl SiftAgentAdapter {
             working_retained = initial_context.retained_artifacts.clone();
             self.log_context_assembly("initial", &initial_context, event_sink);
 
-            let (reply, raw_response_artifact_id) = self.send_to_model_for_turn(
+            let (reply, exchange_id, raw_response_artifact_id) = self.send_to_model_for_turn(
                 conversation.as_mut(),
                 &build_turn_prompt(&TurnPrompt {
                     workspace_root: &self.workspace_root,
@@ -1472,10 +1485,11 @@ impl SiftAgentAdapter {
                 }),
                 event_sink,
             )?;
+            rendered_exchange_id = Some(exchange_id);
             rendered_parent_artifact_id = raw_response_artifact_id;
             reply
         } else {
-            let (reply, raw_response_artifact_id) = self.send_to_model_for_turn(
+            let (reply, exchange_id, raw_response_artifact_id) = self.send_to_model_for_turn(
                 conversation.as_mut(),
                 &build_planned_direct_prompt(
                     prompt,
@@ -1486,6 +1500,7 @@ impl SiftAgentAdapter {
                 ),
                 event_sink,
             )?;
+            rendered_exchange_id = Some(exchange_id);
             rendered_parent_artifact_id = raw_response_artifact_id;
             reply
         };
@@ -1497,11 +1512,13 @@ impl SiftAgentAdapter {
                     &reply,
                     "empty or tool-like direct response",
                 );
-                let (next_reply, raw_response_artifact_id) = self.send_to_model_for_turn(
-                    conversation.as_mut(),
-                    &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
-                    event_sink,
-                )?;
+                let (next_reply, exchange_id, raw_response_artifact_id) = self
+                    .send_to_model_for_turn(
+                        conversation.as_mut(),
+                        &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
+                        event_sink,
+                    )?;
+                rendered_exchange_id = Some(exchange_id);
                 rendered_parent_artifact_id = raw_response_artifact_id;
                 reply = next_reply;
             }
@@ -1525,17 +1542,19 @@ impl SiftAgentAdapter {
                     if let Some(evidence) =
                         gathered_evidence.filter(|bundle| !bundle.items.is_empty())
                     {
-                        let (next_reply, raw_response_artifact_id) = self.send_to_model_for_turn(
-                            conversation.as_mut(),
-                            &build_grounded_retry_prompt(
-                                prompt,
-                                &recent_turns,
-                                &memory_prompt,
-                                evidence,
-                                self.render_capability,
-                            ),
-                            event_sink,
-                        )?;
+                        let (next_reply, exchange_id, raw_response_artifact_id) = self
+                            .send_to_model_for_turn(
+                                conversation.as_mut(),
+                                &build_grounded_retry_prompt(
+                                    prompt,
+                                    &recent_turns,
+                                    &memory_prompt,
+                                    evidence,
+                                    self.render_capability,
+                                ),
+                                event_sink,
+                            )?;
+                        rendered_exchange_id = Some(exchange_id);
                         rendered_parent_artifact_id = raw_response_artifact_id;
                         reply = next_reply;
                     }
@@ -1544,22 +1563,26 @@ impl SiftAgentAdapter {
                 && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
             {
                 self.log_retry_reason("tool-retry", &reply, "missing or empty tool call response");
-                let (next_reply, raw_response_artifact_id) = self.send_to_model_for_turn(
-                    conversation.as_mut(),
-                    &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
-                    event_sink,
-                )?;
+                let (next_reply, exchange_id, raw_response_artifact_id) = self
+                    .send_to_model_for_turn(
+                        conversation.as_mut(),
+                        &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
+                        event_sink,
+                    )?;
+                rendered_exchange_id = Some(exchange_id);
                 rendered_parent_artifact_id = raw_response_artifact_id;
                 reply = next_reply;
             } else if is_blank_model_reply(&reply)
                 || response_looks_like_malformed_tool_protocol(&reply)?
             {
                 self.log_retry_reason("direct-retry", &reply, "empty or tool-like direct response");
-                let (next_reply, raw_response_artifact_id) = self.send_to_model_for_turn(
-                    conversation.as_mut(),
-                    &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
-                    event_sink,
-                )?;
+                let (next_reply, exchange_id, raw_response_artifact_id) = self
+                    .send_to_model_for_turn(
+                        conversation.as_mut(),
+                        &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
+                        event_sink,
+                    )?;
+                rendered_exchange_id = Some(exchange_id);
                 rendered_parent_artifact_id = raw_response_artifact_id;
                 reply = next_reply;
             }
@@ -1610,18 +1633,20 @@ impl SiftAgentAdapter {
                     )),
                 );
 
-                let (next_reply, raw_response_artifact_id) = self.send_to_model_for_turn(
-                    conversation.as_mut(),
-                    &build_tool_follow_up_prompt(
-                        prompt,
-                        &call_id,
-                        result.name,
-                        &result.summary,
-                        &memory_prompt,
-                        self.render_capability,
-                    ),
-                    event_sink,
-                )?;
+                let (next_reply, exchange_id, raw_response_artifact_id) = self
+                    .send_to_model_for_turn(
+                        conversation.as_mut(),
+                        &build_tool_follow_up_prompt(
+                            prompt,
+                            &call_id,
+                            result.name,
+                            &result.summary,
+                            &memory_prompt,
+                            self.render_capability,
+                        ),
+                        event_sink,
+                    )?;
+                rendered_exchange_id = Some(exchange_id);
                 rendered_parent_artifact_id = raw_response_artifact_id;
                 reply = next_reply;
             }
@@ -1657,7 +1682,14 @@ impl SiftAgentAdapter {
             gathered_evidence,
             event_sink,
         );
-        self.record_rendered_turn_response(event_sink, &reply, rendered_parent_artifact_id);
+        self.record_rendered_turn_response(
+            event_sink,
+            rendered_exchange_id
+                .as_deref()
+                .unwrap_or("exchange:untracked"),
+            &reply,
+            rendered_parent_artifact_id,
+        );
 
         push_local_context(
             &mut working_local_context,
@@ -1708,23 +1740,20 @@ impl SiftAgentAdapter {
     fn record_forensic_artifact(
         &self,
         event_sink: &dyn TurnEventSink,
-        phase: TraceModelExchangePhase,
-        summary: impl Into<String>,
-        content: impl Into<String>,
-        mime_type: impl Into<String>,
-        parent_artifact_id: Option<TraceArtifactId>,
+        record: SiftForensicRecord,
     ) -> Option<TraceArtifactId> {
         event_sink.forensic_trace_sink().and_then(|sink| {
             sink.record_forensic_artifact(ForensicArtifactCapture {
+                exchange_id: record.exchange_id,
                 lane: TraceModelExchangeLane::Synthesizer,
                 category: TraceModelExchangeCategory::TurnResponse,
-                phase,
+                phase: record.phase,
                 provider: "sift".to_string(),
                 model: self.model_id.clone(),
-                parent_artifact_id,
-                summary: summary.into(),
-                content: content.into(),
-                mime_type: mime_type.into(),
+                parent_artifact_id: record.parent_artifact_id,
+                summary: record.summary,
+                content: record.content,
+                mime_type: record.mime_type,
                 labels: std::collections::BTreeMap::new(),
             })
         })
@@ -1735,54 +1764,76 @@ impl SiftAgentAdapter {
         conversation: &mut dyn Conversation,
         prompt: &str,
         event_sink: &dyn TurnEventSink,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+    ) -> Result<(String, String, Option<TraceArtifactId>)> {
+        let exchange_id = event_sink
+            .forensic_trace_sink()
+            .map(|sink| {
+                sink.allocate_model_exchange_id(
+                    TraceModelExchangeLane::Synthesizer,
+                    TraceModelExchangeCategory::TurnResponse,
+                )
+            })
+            .unwrap_or_else(|| "exchange:untracked".to_string());
         let assembled_context_id = self.record_forensic_artifact(
             event_sink,
-            TraceModelExchangePhase::AssembledContext,
-            "sift turn assembled context",
-            prompt.to_string(),
-            "text/plain",
-            None,
+            SiftForensicRecord {
+                exchange_id: exchange_id.clone(),
+                phase: TraceModelExchangePhase::AssembledContext,
+                summary: "sift turn assembled context".to_string(),
+                content: prompt.to_string(),
+                mime_type: "text/plain".to_string(),
+                parent_artifact_id: None,
+            },
         );
         let request_envelope_id = self.record_forensic_artifact(
             event_sink,
-            TraceModelExchangePhase::ProviderRequest,
-            "sift local request envelope",
-            json!({
-                "runtime": "sift-native",
-                "model": self.model_id.clone(),
-                "max_tokens": MAX_MODEL_TOKENS,
-                "prompt": prompt,
-            })
-            .to_string(),
-            "application/json",
-            assembled_context_id,
+            SiftForensicRecord {
+                exchange_id: exchange_id.clone(),
+                phase: TraceModelExchangePhase::ProviderRequest,
+                summary: "sift local request envelope".to_string(),
+                content: json!({
+                    "runtime": "sift-native",
+                    "model": self.model_id.clone(),
+                    "max_tokens": MAX_MODEL_TOKENS,
+                    "prompt": prompt,
+                })
+                .to_string(),
+                mime_type: "application/json".to_string(),
+                parent_artifact_id: assembled_context_id,
+            },
         );
         let response = self.send_to_model(conversation, prompt)?;
         let raw_response_artifact_id = self.record_forensic_artifact(
             event_sink,
-            TraceModelExchangePhase::RawProviderResponse,
-            "sift raw model response",
-            response.clone(),
-            "text/plain",
-            request_envelope_id,
+            SiftForensicRecord {
+                exchange_id: exchange_id.clone(),
+                phase: TraceModelExchangePhase::RawProviderResponse,
+                summary: "sift raw model response".to_string(),
+                content: response.clone(),
+                mime_type: "text/plain".to_string(),
+                parent_artifact_id: request_envelope_id,
+            },
         );
-        Ok((response, raw_response_artifact_id))
+        Ok((response, exchange_id, raw_response_artifact_id))
     }
 
     fn record_rendered_turn_response(
         &self,
         event_sink: &dyn TurnEventSink,
+        exchange_id: &str,
         response: &str,
         parent_artifact_id: Option<TraceArtifactId>,
     ) -> Option<TraceArtifactId> {
         self.record_forensic_artifact(
             event_sink,
-            TraceModelExchangePhase::RenderedResponse,
-            "sift rendered response",
-            response.to_string(),
-            "text/plain",
-            parent_artifact_id,
+            SiftForensicRecord {
+                exchange_id: exchange_id.to_string(),
+                phase: TraceModelExchangePhase::RenderedResponse,
+                summary: "sift rendered response".to_string(),
+                content: response.to_string(),
+                mime_type: "text/plain".to_string(),
+                parent_artifact_id,
+            },
         )
     }
 
@@ -4723,6 +4774,15 @@ mod tests {
     }
 
     impl ForensicTraceSink for RecordingForensicSink {
+        fn allocate_model_exchange_id(
+            &self,
+            _lane: TraceModelExchangeLane,
+            _category: TraceModelExchangeCategory,
+        ) -> String {
+            let next = self.captures.lock().expect("captures lock").len() + 1;
+            format!("exchange-{next:04}")
+        }
+
         fn record_forensic_artifact(
             &self,
             capture: ForensicArtifactCapture,

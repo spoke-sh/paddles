@@ -4,6 +4,7 @@ use paddles_conversation::{
     TurnTraceId,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLineage {
@@ -135,12 +136,119 @@ impl TraceModelExchangePhase {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceModelExchangeArtifact {
+    pub exchange_id: String,
     pub lane: TraceModelExchangeLane,
     pub category: TraceModelExchangeCategory,
     pub phase: TraceModelExchangePhase,
     pub provider: String,
     pub model: String,
     pub parent_artifact_id: Option<TraceArtifactId>,
+    pub artifact: ArtifactEnvelope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceLineageNodeKind {
+    Conversation,
+    Turn,
+    ModelCall,
+    PlannerStep,
+    Artifact,
+    Output,
+    Force,
+}
+
+impl TraceLineageNodeKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Conversation => "conversation",
+            Self::Turn => "turn",
+            Self::ModelCall => "model_call",
+            Self::PlannerStep => "planner_step",
+            Self::Artifact => "artifact",
+            Self::Output => "output",
+            Self::Force => "force",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceLineageNodeRef {
+    pub kind: TraceLineageNodeKind,
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceLineageRelation {
+    Contains,
+    Triggers,
+    Produces,
+    Transforms,
+    ResultsIn,
+    Constrains,
+}
+
+impl TraceLineageRelation {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Contains => "contains",
+            Self::Triggers => "triggers",
+            Self::Produces => "produces",
+            Self::Transforms => "transforms",
+            Self::ResultsIn => "results_in",
+            Self::Constrains => "constrains",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceLineageEdge {
+    pub source: TraceLineageNodeRef,
+    pub target: TraceLineageNodeRef,
+    pub relation: TraceLineageRelation,
+    pub summary: String,
+    pub labels: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceForceKind {
+    ContextPressure,
+    Compaction,
+    ExecutionPressure,
+    Fallback,
+    Budget,
+}
+
+impl TraceForceKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::ContextPressure => "context_pressure",
+            Self::Compaction => "compaction",
+            Self::ExecutionPressure => "execution_pressure",
+            Self::Fallback => "fallback",
+            Self::Budget => "budget",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceForceContribution {
+    pub source: String,
+    pub share_percent: u8,
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceForceSnapshot {
+    pub kind: TraceForceKind,
+    pub summary: String,
+    pub level: String,
+    pub magnitude_percent: u8,
+    pub applies_to: Option<TraceLineageNodeRef>,
+    pub contributions: Vec<TraceForceContribution>,
     pub artifact: ArtifactEnvelope,
 }
 
@@ -197,6 +305,8 @@ pub enum TraceRecordKind {
     PlannerBranchDeclared(TraceBranch),
     SelectionArtifact(TraceSelectionArtifact),
     ModelExchangeArtifact(TraceModelExchangeArtifact),
+    LineageEdge(TraceLineageEdge),
+    ForceSnapshot(TraceForceSnapshot),
     ToolCallRequested(TraceToolCall),
     ToolCallCompleted(TraceToolCall),
     CompletionCheckpoint(TraceCompletionCheckpoint),

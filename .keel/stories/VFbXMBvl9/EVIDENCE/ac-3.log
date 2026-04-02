@@ -1,0 +1,12 @@
+---
+recorded_at: 2026-04-01T22:00:35.544218892-07:00
+command: rg -n 'pressure_force_contributions|compaction_force_contributions|fallback_force_details|budget_force_details' /home/alex/workspace/spoke-sh/paddles/src/application/mod.rs
+---
+855:                let contributions = pressure_force_contributions(&pressure);
+877:                    fallback_force_details(stage.as_str(), reason.as_str());
+902:                    compaction_force_contributions(),
+915:                        budget_force_details(stop_reason.as_str());
+1053:fn pressure_force_contributions(
+1105:fn compaction_force_contributions() -> Vec<TraceForceContribution> {
+1120:fn fallback_force_details(
+1166:fn budget_force_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceForceContribution>) {

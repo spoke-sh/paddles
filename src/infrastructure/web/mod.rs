@@ -337,6 +337,13 @@ fn build_trace_graph(replays: &[crate::domain::model::TraceReplay]) -> TraceGrap
                         24,
                     ),
                 ),
+                TraceRecordKind::LineageEdge(edge) => {
+                    ("lineage".to_string(), truncate(&edge.summary, 24))
+                }
+                TraceRecordKind::ForceSnapshot(force) => (
+                    "force".to_string(),
+                    truncate(&format!("{} {}", force.kind.label(), force.level), 24),
+                ),
                 TraceRecordKind::CompletionCheckpoint(cp) => {
                     ("checkpoint".to_string(), cp.kind.label().to_string())
                 }
