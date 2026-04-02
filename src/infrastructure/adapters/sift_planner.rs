@@ -36,22 +36,28 @@ impl RecursivePlanner for SiftPlannerAdapter {
     async fn select_initial_action(
         &self,
         request: &PlannerRequest,
+        event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
     ) -> Result<InitialActionDecision, anyhow::Error> {
-        self.engine.select_initial_action(request)
+        self.engine
+            .select_initial_action(request, event_sink.as_ref())
     }
 
     async fn select_next_action(
         &self,
         request: &PlannerRequest,
+        event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
     ) -> Result<RecursivePlannerDecision, anyhow::Error> {
-        self.engine.select_planner_action(request)
+        self.engine
+            .select_planner_action(request, event_sink.as_ref())
     }
 
     async fn select_thread_decision(
         &self,
         request: &ThreadDecisionRequest,
+        event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
     ) -> Result<ThreadDecision, anyhow::Error> {
-        self.engine.select_thread_decision(request)
+        self.engine
+            .select_thread_decision(request, event_sink.as_ref())
     }
 
     async fn assess_context_relevance(

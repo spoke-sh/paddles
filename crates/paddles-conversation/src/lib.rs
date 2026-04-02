@@ -168,6 +168,11 @@ impl ArtifactEnvelope {
         self.labels.insert(key.into(), value.into());
         self
     }
+
+    pub fn with_mime_type(mut self, mime_type: impl Into<String>) -> Self {
+        self.mime_type = mime_type.into();
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

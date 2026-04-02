@@ -29,16 +29,19 @@ pub trait RecursivePlanner: Send + Sync {
     async fn select_initial_action(
         &self,
         request: &PlannerRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InitialActionDecision, anyhow::Error>;
 
     async fn select_next_action(
         &self,
         request: &PlannerRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<PlannerDecision, anyhow::Error>;
 
     async fn select_thread_decision(
         &self,
         request: &ThreadDecisionRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<ThreadDecision, anyhow::Error>;
 
     /// Evaluate context artifacts for relevance and produce a compaction plan.

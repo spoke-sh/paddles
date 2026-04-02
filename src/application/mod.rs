@@ -7,12 +7,13 @@ pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifac
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
     ConversationThreadRef, ConversationTranscript, ConversationTranscriptUpdate,
-    MultiplexEventSink, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
-    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
-    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord,
-    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot,
-    TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent,
-    TurnTraceId,
+    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, TaskTraceId, ThreadCandidate,
+    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
+    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceLineage, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -574,6 +575,18 @@ impl StructuredTurnTrace {
         ArtifactEnvelope::text(artifact_id, kind, summary, content, inline_limit)
     }
 
+    fn exact_artifact(
+        &self,
+        kind: ArtifactKind,
+        summary: impl Into<String>,
+        content: impl Into<String>,
+        mime_type: impl Into<String>,
+    ) -> ArtifactEnvelope {
+        let artifact_id = self.session.next_artifact_id(&self.turn_id);
+        ArtifactEnvelope::text(artifact_id, kind, summary, content, usize::MAX)
+            .with_mime_type(mime_type)
+    }
+
     fn next_checkpoint_id(&self) -> TraceCheckpointId {
         TraceCheckpointId::new(format!("{}.checkpoint", self.turn_id.as_str()))
             .expect("generated checkpoint id")
@@ -657,6 +670,52 @@ impl TurnEventSink for StructuredTurnTrace {
             }
             _ => {}
         }
+    }
+
+    fn forensic_trace_sink(&self) -> Option<&dyn ForensicTraceSink> {
+        Some(self)
+    }
+}
+
+impl ForensicTraceSink for StructuredTurnTrace {
+    fn record_forensic_artifact(
+        &self,
+        capture: ForensicArtifactCapture,
+    ) -> Option<TraceArtifactId> {
+        let mut artifact = self
+            .exact_artifact(
+                match capture.phase {
+                    TraceModelExchangePhase::AssembledContext => ArtifactKind::Prompt,
+                    TraceModelExchangePhase::ProviderRequest => ArtifactKind::ToolInvocation,
+                    TraceModelExchangePhase::RawProviderResponse => ArtifactKind::ModelOutput,
+                    TraceModelExchangePhase::RenderedResponse => ArtifactKind::Checkpoint,
+                },
+                capture.summary,
+                capture.content,
+                capture.mime_type,
+            )
+            .with_label("lane", capture.lane.label())
+            .with_label("category", capture.category.label())
+            .with_label("phase", capture.phase.label())
+            .with_label("provider", capture.provider.clone())
+            .with_label("model", capture.model.clone());
+        for (key, value) in capture.labels {
+            artifact = artifact.with_label(key, value);
+        }
+        let artifact_id = artifact.artifact_id.clone();
+        self.record_kind(
+            self.default_branch_id(),
+            TraceRecordKind::ModelExchangeArtifact(TraceModelExchangeArtifact {
+                lane: capture.lane,
+                category: capture.category,
+                phase: capture.phase,
+                provider: capture.provider,
+                model: capture.model,
+                parent_artifact_id: capture.parent_artifact_id,
+                artifact,
+            }),
+        );
+        Some(artifact_id)
     }
 }
 
@@ -1262,7 +1321,9 @@ impl MechSuitService {
 
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
-                let mut decision = planner_engine.select_initial_action(&request).await?;
+                let mut decision = planner_engine
+                    .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
+                    .await?;
                 if let Some(bootstrapped) = self
                     .bootstrap_known_edit_initial_action(
                         prompt,
@@ -1484,7 +1545,7 @@ impl MechSuitService {
         .with_recent_thread_summary(session.recent_thread_summary(&active_thread.thread_ref));
 
         let decision = planner_engine
-            .select_thread_decision(&thread_request)
+            .select_thread_decision(&thread_request, trace.clone() as Arc<dyn TurnEventSink>)
             .await?;
         trace.emit(TurnEvent::ThreadDecisionApplied {
             candidate_id: candidate.candidate_id.as_str().to_string(),
@@ -1597,7 +1658,10 @@ impl MechSuitService {
                 .with_recent_turns(context.recent_turns.clone())
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone());
-                let decision = context.planner_engine.select_next_action(&request).await?;
+                let decision = context
+                    .planner_engine
+                    .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
+                    .await?;
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence,
                     action: decision.action.summary(),
@@ -3471,6 +3535,7 @@ mod tests {
         async fn select_initial_action(
             &self,
             request: &PlannerRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<InitialActionDecision> {
             self.recorded_requests
                 .lock()
@@ -3482,6 +3547,7 @@ mod tests {
         async fn select_next_action(
             &self,
             request: &PlannerRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<RecursivePlannerDecision> {
             self.recorded_requests
                 .lock()
@@ -3497,6 +3563,7 @@ mod tests {
         async fn select_thread_decision(
             &self,
             request: &ThreadDecisionRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<ThreadDecision> {
             Ok(ThreadDecision {
                 decision_id: ThreadDecisionId::new(format!(

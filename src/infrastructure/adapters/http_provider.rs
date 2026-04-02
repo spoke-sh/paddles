@@ -1,6 +1,8 @@
+use crate::domain::model::ForensicArtifactCapture;
 use crate::domain::model::{
     CompactionDecision, CompactionPlan, CompactionRequest, ThreadDecision, ThreadDecisionId,
-    ThreadDecisionKind, TurnEvent, TurnEventSink, TurnIntent,
+    ThreadDecisionKind, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
+    TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     EvidenceBundle, InitialAction, InitialActionDecision, InitialEditInstruction,
@@ -16,6 +18,7 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,6 +26,22 @@ use std::sync::{Arc, Mutex};
 const MAX_CITATIONS: usize = 4;
 const MAX_RETRIES: u32 = 3;
 const RETRY_BASE_DELAY_MS: u64 = 2000;
+
+#[derive(Clone, Copy)]
+struct ExchangeCapture<'a> {
+    event_sink: &'a dyn TurnEventSink,
+    lane: TraceModelExchangeLane,
+    category: TraceModelExchangeCategory,
+}
+
+struct ExchangeArtifactRecord {
+    phase: TraceModelExchangePhase,
+    summary: String,
+    content: String,
+    mime_type: String,
+    parent_artifact_id: Option<TraceArtifactId>,
+    labels: BTreeMap<String, String>,
+}
 
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
@@ -92,7 +111,12 @@ impl HttpProviderAdapter {
         }
     }
 
-    async fn send_async(&self, system: &str, user: &str) -> Result<String> {
+    async fn send_async(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let verbose = self.verbose.load(Ordering::Relaxed);
         if verbose >= 2 {
             eprintln!("[HTTP] Sending to {} ({})", self.base_url, self.model_id);
@@ -103,18 +127,18 @@ impl HttpProviderAdapter {
         }
 
         let response = match self.format {
-            ApiFormat::OpenAi => self.send_openai(system, user).await?,
-            ApiFormat::Anthropic => self.send_anthropic(system, user).await?,
-            ApiFormat::Gemini => self.send_gemini(system, user).await?,
+            ApiFormat::OpenAi => self.send_openai(system, user, capture).await?,
+            ApiFormat::Anthropic => self.send_anthropic(system, user, capture).await?,
+            ApiFormat::Gemini => self.send_gemini(system, user, capture).await?,
         };
 
         if verbose >= 2 {
             eprintln!(
                 "[HTTP] Response: {}",
-                if response.len() > 200 {
-                    format!("{}...", &response[..200])
+                if response.0.len() > 200 {
+                    format!("{}...", &response.0[..200])
                 } else {
-                    response.clone()
+                    response.0.clone()
                 }
             );
         }
@@ -127,11 +151,12 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         require_citations: bool,
-    ) -> Result<String> {
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let rt = tokio::runtime::Handle::try_current()
             .map_err(|_| anyhow!("no tokio runtime for HTTP provider"))?;
         tokio::task::block_in_place(|| {
-            rt.block_on(self.send_structured_answer_async(system, user, require_citations))
+            rt.block_on(self.send_structured_answer_async(system, user, require_citations, capture))
         })
     }
 
@@ -140,25 +165,173 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         require_citations: bool,
-    ) -> Result<String> {
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         match self.render_capability {
             RenderCapability::OpenAiJsonSchema => {
-                self.send_openai_structured_answer(system, user, require_citations)
+                self.send_openai_structured_answer(system, user, require_citations, capture)
                     .await
             }
             RenderCapability::AnthropicToolUse => {
-                self.send_anthropic_structured_answer(system, user, require_citations)
+                self.send_anthropic_structured_answer(system, user, require_citations, capture)
                     .await
             }
             RenderCapability::GeminiJsonSchema => {
-                self.send_gemini_structured_answer(system, user, require_citations)
+                self.send_gemini_structured_answer(system, user, require_citations, capture)
                     .await
             }
-            RenderCapability::PromptEnvelope => self.send_async(system, user).await,
+            RenderCapability::PromptEnvelope => self.send_async(system, user, capture).await,
         }
     }
 
-    async fn send_openai(&self, system: &str, user: &str) -> Result<String> {
+    fn provider_label(&self) -> &'static str {
+        match self.format {
+            ApiFormat::OpenAi => "openai",
+            ApiFormat::Anthropic => "anthropic",
+            ApiFormat::Gemini => "gemini",
+        }
+    }
+
+    fn record_exchange_artifact(
+        &self,
+        capture: ExchangeCapture<'_>,
+        record: ExchangeArtifactRecord,
+    ) -> Option<TraceArtifactId> {
+        capture.event_sink.forensic_trace_sink().and_then(|sink| {
+            sink.record_forensic_artifact(ForensicArtifactCapture {
+                lane: capture.lane,
+                category: capture.category,
+                phase: record.phase,
+                provider: self.provider_label().to_string(),
+                model: self.model_id.clone(),
+                parent_artifact_id: record.parent_artifact_id,
+                summary: record.summary,
+                content: record.content,
+                mime_type: record.mime_type,
+                labels: record.labels,
+            })
+        })
+    }
+
+    fn record_assembled_context(
+        &self,
+        capture: ExchangeCapture<'_>,
+        system: &str,
+        user: &str,
+    ) -> Option<TraceArtifactId> {
+        let mut labels = BTreeMap::new();
+        labels.insert("format".to_string(), self.provider_label().to_string());
+        self.record_exchange_artifact(
+            capture,
+            ExchangeArtifactRecord {
+                phase: TraceModelExchangePhase::AssembledContext,
+                summary: format!(
+                    "{} {} assembled context",
+                    capture.lane.label(),
+                    capture.category.label()
+                ),
+                content: json!({
+                    "system": system,
+                    "user": user,
+                })
+                .to_string(),
+                mime_type: "application/json".to_string(),
+                parent_artifact_id: None,
+                labels,
+            },
+        )
+    }
+
+    fn record_rendered_response(
+        &self,
+        capture: ExchangeCapture<'_>,
+        rendered: &str,
+        parent_artifact_id: Option<TraceArtifactId>,
+    ) -> Option<TraceArtifactId> {
+        self.record_exchange_artifact(
+            capture,
+            ExchangeArtifactRecord {
+                phase: TraceModelExchangePhase::RenderedResponse,
+                summary: format!(
+                    "{} {} rendered response",
+                    capture.lane.label(),
+                    capture.category.label()
+                ),
+                content: rendered.to_string(),
+                mime_type: "text/plain".to_string(),
+                parent_artifact_id,
+                labels: BTreeMap::new(),
+            },
+        )
+    }
+
+    async fn post_json_with_capture(
+        &self,
+        provider_name: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: &Value,
+        capture: Option<ExchangeCapture<'_>>,
+        assembled_context_id: Option<TraceArtifactId>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        let request_artifact_id = capture.and_then(|capture| {
+            let borrowed = headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect::<Vec<_>>();
+            self.record_exchange_artifact(
+                capture,
+                ExchangeArtifactRecord {
+                    phase: TraceModelExchangePhase::ProviderRequest,
+                    summary: format!(
+                        "{} {} provider request",
+                        capture.lane.label(),
+                        capture.category.label()
+                    ),
+                    content: redacted_http_request_snapshot(url, &borrowed, body),
+                    mime_type: "application/json".to_string(),
+                    parent_artifact_id: assembled_context_id,
+                    labels: BTreeMap::new(),
+                },
+            )
+        });
+
+        let text = send_with_retry(provider_name, || {
+            let mut request = self.client.post(url);
+            for (name, value) in headers {
+                request = request.header(name, value);
+            }
+            request.json(body)
+        })
+        .await?;
+
+        let raw_response_artifact_id = capture.and_then(|capture| {
+            self.record_exchange_artifact(
+                capture,
+                ExchangeArtifactRecord {
+                    phase: TraceModelExchangePhase::RawProviderResponse,
+                    summary: format!(
+                        "{} {} raw provider response",
+                        capture.lane.label(),
+                        capture.category.label()
+                    ),
+                    content: text.clone(),
+                    mime_type: "application/json".to_string(),
+                    parent_artifact_id: request_artifact_id,
+                    labels: BTreeMap::new(),
+                },
+            )
+        });
+
+        Ok((text, raw_response_artifact_id))
+    }
+
+    async fn send_openai(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
@@ -172,22 +345,32 @@ impl HttpProviderAdapter {
             "max_tokens": 4096,
         });
 
-        let api_key = self.api_key.clone();
-        let text = send_with_retry("OpenAI", || {
-            self.client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
+        let assembled_context_id =
+            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "OpenAI",
+                &url,
+                &[
+                    (
+                        "Authorization".to_string(),
+                        format!("Bearer {}", self.api_key),
+                    ),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
 
         let parsed: OpenAiResponse = serde_json::from_str(&text)?;
-        parsed
+        let content = parsed
             .choices
             .first()
             .and_then(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow!("empty OpenAI response"))
+            .ok_or_else(|| anyhow!("empty OpenAI response"))?;
+        Ok((content, raw_response_artifact_id))
     }
 
     async fn send_openai_structured_answer(
@@ -195,7 +378,8 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         require_citations: bool,
-    ) -> Result<String> {
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
@@ -217,25 +401,40 @@ impl HttpProviderAdapter {
             }
         });
 
-        let api_key = self.api_key.clone();
-        let text = send_with_retry("OpenAI", || {
-            self.client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
+        let assembled_context_id =
+            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "OpenAI",
+                &url,
+                &[
+                    (
+                        "Authorization".to_string(),
+                        format!("Bearer {}", self.api_key),
+                    ),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
 
         let parsed: OpenAiResponse = serde_json::from_str(&text)?;
-        parsed
+        let content = parsed
             .choices
             .first()
             .and_then(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow!("empty OpenAI response"))
+            .ok_or_else(|| anyhow!("empty OpenAI response"))?;
+        Ok((content, raw_response_artifact_id))
     }
 
-    async fn send_anthropic(&self, system: &str, user: &str) -> Result<String> {
+    async fn send_anthropic(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
         let body = serde_json::json!({
             "model": self.model_id,
@@ -246,23 +445,30 @@ impl HttpProviderAdapter {
             ],
         });
 
-        let api_key = self.api_key.clone();
-        let text = send_with_retry("Anthropic", || {
-            self.client
-                .post(&url)
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
+        let assembled_context_id =
+            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "Anthropic",
+                &url,
+                &[
+                    ("x-api-key".to_string(), self.api_key.clone()),
+                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
 
         let parsed: AnthropicResponse = serde_json::from_str(&text)?;
-        parsed
+        let content = parsed
             .content
             .first()
             .and_then(|b| b.text.clone())
-            .ok_or_else(|| anyhow!("empty Anthropic response"))
+            .ok_or_else(|| anyhow!("empty Anthropic response"))?;
+        Ok((content, raw_response_artifact_id))
     }
 
     async fn send_anthropic_structured_answer(
@@ -270,7 +476,8 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         require_citations: bool,
-    ) -> Result<String> {
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
         let body = json!({
             "model": self.model_id,
@@ -291,16 +498,22 @@ impl HttpProviderAdapter {
             }
         });
 
-        let api_key = self.api_key.clone();
-        let text = send_with_retry("Anthropic", || {
-            self.client
-                .post(&url)
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
+        let assembled_context_id =
+            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "Anthropic",
+                &url,
+                &[
+                    ("x-api-key".to_string(), self.api_key.clone()),
+                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
 
         let parsed: AnthropicResponse = serde_json::from_str(&text)?;
         if let Some(input) = parsed.content.iter().find_map(|block| {
@@ -309,17 +522,23 @@ impl HttpProviderAdapter {
             .then(|| block.input.clone())
             .flatten()
         }) {
-            return Ok(input.to_string());
+            return Ok((input.to_string(), raw_response_artifact_id));
         }
 
-        parsed
+        let content = parsed
             .content
             .iter()
             .find_map(|block| block.text.clone())
-            .ok_or_else(|| anyhow!("empty Anthropic response"))
+            .ok_or_else(|| anyhow!("empty Anthropic response"))?;
+        Ok((content, raw_response_artifact_id))
     }
 
-    async fn send_gemini(&self, system: &str, user: &str) -> Result<String> {
+    async fn send_gemini(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!(
             "{}/v1beta/models/{}:generateContent?key={}",
             self.base_url.trim_end_matches('/'),
@@ -331,21 +550,27 @@ impl HttpProviderAdapter {
             "contents": [{ "parts": [{ "text": user }] }],
         });
 
-        let text = send_with_retry("Gemini", || {
-            self.client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
+        let assembled_context_id =
+            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "Gemini",
+                &url,
+                &[("Content-Type".to_string(), "application/json".to_string())],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
 
         let parsed: GeminiResponse = serde_json::from_str(&text)?;
-        parsed
+        let content = parsed
             .candidates
             .and_then(|c| c.first().cloned())
             .and_then(|c| c.content.parts.first().cloned())
             .and_then(|p| p.text)
-            .ok_or_else(|| anyhow!("empty Gemini response"))
+            .ok_or_else(|| anyhow!("empty Gemini response"))?;
+        Ok((content, raw_response_artifact_id))
     }
 
     async fn send_gemini_structured_answer(
@@ -353,7 +578,8 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         require_citations: bool,
-    ) -> Result<String> {
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!(
             "{}/v1beta/models/{}:generateContent?key={}",
             self.base_url.trim_end_matches('/'),
@@ -369,21 +595,27 @@ impl HttpProviderAdapter {
             }
         });
 
-        let text = send_with_retry("Gemini", || {
-            self.client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
+        let assembled_context_id =
+            capture.and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "Gemini",
+                &url,
+                &[("Content-Type".to_string(), "application/json".to_string())],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
 
         let parsed: GeminiResponse = serde_json::from_str(&text)?;
-        parsed
+        let content = parsed
             .candidates
             .and_then(|c| c.first().cloned())
             .and_then(|c| c.content.parts.first().cloned())
             .and_then(|p| p.text)
-            .ok_or_else(|| anyhow!("empty Gemini response"))
+            .ok_or_else(|| anyhow!("empty Gemini response"))?;
+        Ok((content, raw_response_artifact_id))
     }
 
     fn build_system_prompt(&self, interpretation: &InterpretationContext) -> String {
@@ -617,13 +849,21 @@ impl SynthesizerEngine for HttpProviderAdapter {
             }
         }
 
-        let mut response = normalize_assistant_response(&self.send_structured_answer_blocking(
+        let capture = ExchangeCapture {
+            event_sink: event_sink.as_ref(),
+            lane: TraceModelExchangeLane::Synthesizer,
+            category: TraceModelExchangeCategory::TurnResponse,
+        };
+        let (raw_response, raw_response_artifact_id) = self.send_structured_answer_blocking(
             &system,
             &user_msg,
             gathered_evidence.is_some(),
-        )?);
+            Some(capture),
+        )?;
+        let mut response = normalize_assistant_response(&raw_response);
         let citations = gathered_evidence.map(citation_sources).unwrap_or_default();
         response = ensure_citation_section(&response, &citations);
+        self.record_rendered_response(capture, &response, raw_response_artifact_id);
 
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: gathered_evidence.is_some(),
@@ -693,6 +933,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
     async fn select_initial_action(
         &self,
         request: &PlannerRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InitialActionDecision> {
         let system = self
             .engine
@@ -701,10 +942,25 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
             "User prompt: {}\n\nSelect your first action. Respond with JSON only.",
             request.user_prompt
         );
-        let response = self.engine.send_async(&system, &user).await?;
+        let capture = ExchangeCapture {
+            event_sink: event_sink.as_ref(),
+            lane: TraceModelExchangeLane::Planner,
+            category: TraceModelExchangeCategory::InitialAction,
+        };
+        let (response, raw_response_artifact_id) = self
+            .engine
+            .send_async(&system, &user, Some(capture))
+            .await?;
 
         match self.engine.parse_planner_action(&response) {
             Ok(decision) => {
+                let rendered = json!({
+                    "action": decision.action.summary(),
+                    "rationale": decision.rationale,
+                })
+                .to_string();
+                self.engine
+                    .record_rendered_response(capture, &rendered, raw_response_artifact_id);
                 let action = match &decision.action {
                     PlannerAction::Stop { .. } => InitialAction::Answer,
                     PlannerAction::Workspace { action } => InitialAction::Workspace {
@@ -729,6 +985,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
     async fn select_next_action(
         &self,
         request: &PlannerRequest,
+        event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<RecursivePlannerDecision> {
         let system = self
             .engine
@@ -753,13 +1010,30 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         }
         user.push_str("\nSelect your next action. Choose \"answer\" or \"stop\" as soon as you have enough evidence — do not use remaining budget for redundant investigation. Respond with JSON only.");
 
-        let response = self.engine.send_async(&system, &user).await?;
-        self.engine.parse_planner_action(&response)
+        let capture = ExchangeCapture {
+            event_sink: event_sink.as_ref(),
+            lane: TraceModelExchangeLane::Planner,
+            category: TraceModelExchangeCategory::PlannerAction,
+        };
+        let (response, raw_response_artifact_id) = self
+            .engine
+            .send_async(&system, &user, Some(capture))
+            .await?;
+        let decision = self.engine.parse_planner_action(&response)?;
+        let rendered = json!({
+            "action": decision.action.summary(),
+            "rationale": decision.rationale,
+        })
+        .to_string();
+        self.engine
+            .record_rendered_response(capture, &rendered, raw_response_artifact_id);
+        Ok(decision)
     }
 
     async fn select_thread_decision(
         &self,
         request: &ThreadDecisionRequest,
+        _event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<ThreadDecision> {
         Ok(ThreadDecision {
             decision_id: ThreadDecisionId::new(format!(
@@ -800,6 +1074,110 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
 
         Ok(CompactionPlan { decisions })
     }
+}
+
+fn redacted_http_request_snapshot(url: &str, headers: &[(&str, &str)], body: &Value) -> String {
+    serde_json::to_string_pretty(&json!({
+        "url": redact_url_secrets(url),
+        "headers": redact_headers(headers),
+        "body": redact_secretish_json(body),
+    }))
+    .unwrap_or_else(|_| "{}".to_string())
+}
+
+fn redact_headers(headers: &[(&str, &str)]) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            let lower = name.to_ascii_lowercase();
+            let redacted = if matches!(
+                lower.as_str(),
+                "authorization" | "x-api-key" | "api-key" | "proxy-authorization"
+            ) {
+                "[redacted]".to_string()
+            } else {
+                (*value).to_string()
+            };
+            (lower, redacted)
+        })
+        .collect()
+}
+
+fn redact_url_secrets(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => {
+            let query_pairs = parsed
+                .query_pairs()
+                .map(|(key, value)| {
+                    let key_string = key.to_string();
+                    let redacted = if is_secretish_key(&key_string) {
+                        "[redacted]".to_string()
+                    } else {
+                        value.to_string()
+                    };
+                    (key_string, redacted)
+                })
+                .collect::<Vec<_>>();
+
+            let mut base = parsed.clone();
+            base.set_query(None);
+            let fragment = parsed
+                .fragment()
+                .map(|fragment| format!("#{fragment}"))
+                .unwrap_or_default();
+            let mut rendered = base.to_string();
+            if !query_pairs.is_empty() {
+                rendered.push('?');
+                rendered.push_str(
+                    &query_pairs
+                        .iter()
+                        .map(|(key, value)| format!("{key}={value}"))
+                        .collect::<Vec<_>>()
+                        .join("&"),
+                );
+            }
+            if !fragment.is_empty() && !rendered.ends_with(&fragment) {
+                rendered.push_str(&fragment);
+            }
+            rendered
+        }
+        Err(_) => url.to_string(),
+    }
+}
+
+fn redact_secretish_json(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    let redacted = if is_secretish_key(key) {
+                        Value::String("[redacted]".to_string())
+                    } else {
+                        redact_secretish_json(value)
+                    };
+                    (key.clone(), redacted)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(redact_secretish_json).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn is_secretish_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "authorization"
+            | "x-api-key"
+            | "api-key"
+            | "api_key"
+            | "apikey"
+            | "access_token"
+            | "token"
+            | "secret"
+            | "password"
+            | "key"
+    )
 }
 
 // --- API response types ---
@@ -921,9 +1299,15 @@ fn citation_sources(evidence: &EvidenceBundle) -> Vec<String> {
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
     use crate::application::{MechSuitService, RuntimeLaneConfig};
-    use crate::domain::model::{TurnEvent, TurnEventSink};
-    use crate::domain::ports::{ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine};
+    use crate::domain::model::{
+        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
+        TraceRecordKind, TurnEvent, TurnEventSink,
+    };
+    use crate::domain::ports::{
+        ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
+    };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
+    use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::rendering::{ANTHROPIC_RENDER_TOOL_NAME, RenderCapability};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
@@ -1168,6 +1552,60 @@ mod tests {
         )
     }
 
+    fn http_test_service_with_recorder(
+        workspace: &Path,
+        base_url: String,
+        api_key: String,
+        format: ApiFormat,
+        recorder: Arc<dyn crate::domain::ports::TraceRecorder>,
+    ) -> MechSuitService {
+        let operator_memory = Arc::new(AgentMemory::load(workspace));
+
+        let synth_base_url = base_url.clone();
+        let synth_api_key = api_key.clone();
+        let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
+            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
+                Ok(Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    lane.model_id.clone(),
+                    synth_api_key.clone(),
+                    synth_base_url.clone(),
+                    format,
+                    render_capability_for(format),
+                )) as Arc<dyn SynthesizerEngine>)
+            },
+        );
+
+        let planner_base_url = base_url;
+        let planner_api_key = api_key;
+        let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
+            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
+                let engine = Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    lane.model_id.clone(),
+                    planner_api_key.clone(),
+                    planner_base_url.clone(),
+                    format,
+                    render_capability_for(format),
+                ));
+                Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
+            },
+        );
+
+        let gatherer_factory: Box<crate::application::GathererFactory> =
+            Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
+
+        MechSuitService::with_trace_recorder(
+            workspace,
+            Arc::new(StaticRegistry),
+            operator_memory,
+            synthesizer_factory,
+            planner_factory,
+            gatherer_factory,
+            recorder,
+        )
+    }
+
     async fn run_mocked_turn(
         format: ApiFormat,
         model_id: &str,
@@ -1324,6 +1762,126 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_provider_records_exact_forensic_exchange_artifacts_in_trace_replay() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the remote provider planner before answering.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let model_id = "gpt-4o-mini";
+        let structured = structured_answer_json("Mocked final answer.");
+        let raw_final_response = final_answer_response(ApiFormat::OpenAi, &structured);
+        let planner_response = provider_response(ApiFormat::OpenAi, &planner_json_answer());
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: planner_response.clone(),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: raw_final_response.clone(),
+            },
+        ])
+        .await;
+
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            ApiFormat::OpenAi,
+            recorder.clone(),
+        );
+        let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai);
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+
+        let task_id = recorder.task_ids().into_iter().next().expect("task id");
+        let replay = recorder.replay(&task_id).expect("replay");
+        let forensic = replay
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TraceRecordKind::ModelExchangeArtifact(artifact) => Some(artifact),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Planner
+                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.phase == TraceModelExchangePhase::AssembledContext
+                && artifact
+                    .artifact
+                    .inline_content
+                    .as_deref()
+                    .is_some_and(|content: &str| content.contains("User prompt: Sup dawg"))
+        }));
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Planner
+                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.phase == TraceModelExchangePhase::ProviderRequest
+                && artifact
+                    .artifact
+                    .inline_content
+                    .as_deref()
+                    .is_some_and(|content: &str| {
+                        content.contains("\"authorization\": \"[redacted]\"")
+                    })
+        }));
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Planner
+                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.phase == TraceModelExchangePhase::RawProviderResponse
+                && artifact.artifact.inline_content.as_deref() == Some(planner_response.as_str())
+        }));
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Synthesizer
+                && artifact.category == TraceModelExchangeCategory::TurnResponse
+                && artifact.phase == TraceModelExchangePhase::RawProviderResponse
+                && artifact.artifact.inline_content.as_deref() == Some(raw_final_response.as_str())
+        }));
+        assert!(forensic.iter().any(|artifact| {
+            artifact.lane == TraceModelExchangeLane::Synthesizer
+                && artifact.category == TraceModelExchangeCategory::TurnResponse
+                && artifact.phase == TraceModelExchangePhase::RenderedResponse
+                && artifact.artifact.inline_content.as_deref() == Some("Mocked final answer.")
+        }));
+    }
+
+    #[test]
+    fn provider_request_redaction_hides_auth_headers_and_query_keys() {
+        let redacted = super::redacted_http_request_snapshot(
+            "http://localhost/v1beta/models/gemini:generateContent?key=secret-key",
+            &[
+                ("Authorization", "Bearer secret-token"),
+                ("x-api-key", "abc123"),
+            ],
+            &json!({
+                "model": "gpt-4o-mini",
+                "api_key": "body-secret",
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        );
+
+        assert!(redacted.contains("\"authorization\": \"[redacted]\""));
+        assert!(redacted.contains("\"x-api-key\": \"[redacted]\""));
+        assert!(redacted.contains("key=[redacted]"));
+        assert!(redacted.contains("\"api_key\": \"[redacted]\""));
+        assert!(redacted.contains("\"content\": \"hello\""));
     }
 
     #[tokio::test(flavor = "multi_thread")]

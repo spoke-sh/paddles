@@ -330,6 +330,13 @@ fn build_trace_graph(replays: &[crate::domain::model::TraceReplay]) -> TraceGrap
                 TraceRecordKind::SelectionArtifact(sel) => {
                     ("evidence".to_string(), truncate(&sel.summary, 24))
                 }
+                TraceRecordKind::ModelExchangeArtifact(artifact) => (
+                    "forensic".to_string(),
+                    truncate(
+                        &format!("{} {}", artifact.category.label(), artifact.phase.label()),
+                        24,
+                    ),
+                ),
                 TraceRecordKind::CompletionCheckpoint(cp) => {
                     ("checkpoint".to_string(), cp.kind.label().to_string())
                 }

@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFbXKFBWT
-status: planned
+status: in-progress
 epic: VFbXKEdWb
 created_at: 2026-04-01T21:26:02
 # authored
 title: Transit Artifact Capture And Inspector Projection
 index: 1
 updated_at: 2026-04-01T21:29:42
+started_at: 2026-04-01T21:34:30
 ---
 
 # Transit Artifact Capture And Inspector Projection
@@ -26,11 +27,11 @@ updated_at: 2026-04-01T21:29:42
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/6 stories complete
+**Progress:** 1/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Record Exact Model Exchange Artifacts In Transit](../../../../stories/VFbXMBbl8/README.md) | feat | backlog |
+| [Record Exact Model Exchange Artifacts In Transit](../../../../stories/VFbXMBbl8/README.md) | feat | done |
 | [Record Context Lineage And Force Snapshots In Transit](../../../../stories/VFbXMBvl9/README.md) | feat | backlog |
 | [Expose Web Inspector Replay And Live Projection APIs](../../../../stories/VFbXMCHl6/README.md) | feat | backlog |
 | [Add Force Overview And Shadow Comparison To The Web Inspector](../../../../stories/VFbXMCVl7/README.md) | feat | backlog |

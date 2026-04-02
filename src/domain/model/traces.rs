@@ -76,6 +76,75 @@ pub struct TraceToolCall {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceModelExchangeLane {
+    Planner,
+    Synthesizer,
+}
+
+impl TraceModelExchangeLane {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Planner => "planner",
+            Self::Synthesizer => "synthesizer",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceModelExchangeCategory {
+    Interpretation,
+    InitialAction,
+    PlannerAction,
+    ThreadDecision,
+    TurnResponse,
+}
+
+impl TraceModelExchangeCategory {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Interpretation => "interpretation",
+            Self::InitialAction => "initial_action",
+            Self::PlannerAction => "planner_action",
+            Self::ThreadDecision => "thread_decision",
+            Self::TurnResponse => "turn_response",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceModelExchangePhase {
+    AssembledContext,
+    ProviderRequest,
+    RawProviderResponse,
+    RenderedResponse,
+}
+
+impl TraceModelExchangePhase {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::AssembledContext => "assembled_context",
+            Self::ProviderRequest => "provider_request",
+            Self::RawProviderResponse => "raw_provider_response",
+            Self::RenderedResponse => "rendered_response",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceModelExchangeArtifact {
+    pub lane: TraceModelExchangeLane,
+    pub category: TraceModelExchangeCategory,
+    pub phase: TraceModelExchangePhase,
+    pub provider: String,
+    pub model: String,
+    pub parent_artifact_id: Option<TraceArtifactId>,
+    pub artifact: ArtifactEnvelope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TraceCheckpointKind {
     TurnCompleted,
     TurnFailed,
@@ -127,6 +196,7 @@ pub enum TraceRecordKind {
     PlannerAction { action: String, rationale: String },
     PlannerBranchDeclared(TraceBranch),
     SelectionArtifact(TraceSelectionArtifact),
+    ModelExchangeArtifact(TraceModelExchangeArtifact),
     ToolCallRequested(TraceToolCall),
     ToolCallCompleted(TraceToolCall),
     CompletionCheckpoint(TraceCompletionCheckpoint),

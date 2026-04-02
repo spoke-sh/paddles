@@ -264,7 +264,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Transit Artifact Capture And Inspector Projection](epics/VFbXKEdWb/voyages/VFbXKFBWT/) | planned |
+| [Transit Artifact Capture And Inspector Projection](epics/VFbXKEdWb/voyages/VFbXKFBWT/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

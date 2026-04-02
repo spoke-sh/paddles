@@ -1,6 +1,9 @@
 use super::context_quality::ContextPressure;
 use super::interpretation::InterpretationContext;
+use super::traces::{TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase};
+use paddles_conversation::TraceArtifactId;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -216,6 +219,29 @@ impl TurnEvent {
 
 pub trait TurnEventSink: Send + Sync {
     fn emit(&self, event: TurnEvent);
+
+    fn forensic_trace_sink(&self) -> Option<&dyn ForensicTraceSink> {
+        None
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForensicArtifactCapture {
+    pub lane: TraceModelExchangeLane,
+    pub category: TraceModelExchangeCategory,
+    pub phase: TraceModelExchangePhase,
+    pub provider: String,
+    pub model: String,
+    pub parent_artifact_id: Option<TraceArtifactId>,
+    pub summary: String,
+    pub content: String,
+    pub mime_type: String,
+    pub labels: BTreeMap<String, String>,
+}
+
+pub trait ForensicTraceSink: Send + Sync {
+    fn record_forensic_artifact(&self, capture: ForensicArtifactCapture)
+    -> Option<TraceArtifactId>;
 }
 
 #[derive(Default)]

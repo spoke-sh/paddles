@@ -24,14 +24,18 @@ pub use paddles_conversation::{
 pub use threading::ConversationReplayView;
 pub use traces::{
     TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
-    TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
+    TraceModelExchangePhase, TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
+    TraceSelectionKind, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
 };
 pub use transcript::{
     ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
     ConversationTranscriptUpdate, NullTranscriptUpdateSink, TranscriptUpdateSink,
 };
-pub use turns::{MultiplexEventSink, NullTurnEventSink, TurnEvent, TurnEventSink, TurnIntent};
+pub use turns::{
+    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink, TurnEvent,
+    TurnEventSink, TurnIntent,
+};
 
 /// Constitutional bounds for environmental calibration.
 pub struct Constitution {
