@@ -202,7 +202,7 @@ A few areas are still maturing:
 - The planner lane defaults to the synthesizer provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
 - Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect or switch planner/synthesizer lanes.
 - Successful `/model` changes persist to the machine-managed runtime state file at `~/.local/state/paddles/runtime-lanes.toml` so they survive restarts without rewriting authored `paddles.toml`.
-- Workspace `./paddles.toml` remains authoritative over that runtime state file, so project-local lane pinning still wins when both are present.
+- That runtime lane state overrides authored config for planner/synthesizer lane selection on startup, while non-lane settings like `port` still come from layered config and CLI flags still win over everything.
 - Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model synthesizer inception mercury-2` or `/model planner inception mercury-2`.
 - `mercury-2` remains the supported Inception planner/synthesizer chat model. When an Inception-backed turn executes `apply_patch`, paddles now uses the provider-native `mercury-edit` companion endpoint behind the scenes for single-file patch application.
 - Provider-native streaming/diffusion views remain optional follow-on capabilities; they are still not required to use Inception in `paddles`.

@@ -229,9 +229,11 @@ does not use API-key login.
 Successful `/model` changes are written to the machine-managed runtime lane
 state file at `~/.local/state/paddles/runtime-lanes.toml`. That file preserves
 the last selected planner/synthesizer lanes across restarts without mutating
-authored `paddles.toml` files. Runtime lane state sits between user config and
-workspace config in precedence, so a project-local `./paddles.toml` still
-overrides the saved machine state when both are present.
+authored `paddles.toml` files. Runtime lane state is applied after authored
+config for the planner/synthesizer lane fields, so the last `/model` selection
+is restored even when a project-local `./paddles.toml` also sets `provider` or
+`model`. Other settings such as `port`, verbosity, gatherer configuration, and
+CLI flags keep their normal precedence.
 
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.

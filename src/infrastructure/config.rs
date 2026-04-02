@@ -12,7 +12,7 @@ const SYSTEM_CONFIG_PATH: &str = "/etc/paddles/paddles.toml";
 ///
 /// Layering order:
 /// `/etc/paddles/paddles.toml` < `~/.config/paddles/paddles.toml` <
-/// `~/.local/state/paddles/runtime-lanes.toml` < `./paddles.toml`.
+/// `./paddles.toml` < `~/.local/state/paddles/runtime-lanes.toml`.
 /// CLI flags override all persisted values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaddlesConfig {
@@ -112,18 +112,16 @@ impl PaddlesConfig {
     ) -> Self {
         let mut config = Self::default();
 
-        for path in [system_config, user_config].into_iter().flatten() {
+        for path in [system_config, user_config, workspace_config]
+            .into_iter()
+            .flatten()
+        {
             if let Some(overlay) = parse_config_overlay(path) {
                 config.apply_overlay(overlay);
             }
         }
         if let Some(runtime_preferences) = runtime_preferences {
             config.apply_runtime_preferences(runtime_preferences);
-        }
-        if let Some(path) = workspace_config
-            && let Some(overlay) = parse_config_overlay(path)
-        {
-            config.apply_overlay(overlay);
         }
 
         config
@@ -301,7 +299,7 @@ port = 8080
     }
 
     #[test]
-    fn load_layers_runtime_preferences_between_user_and_workspace_configs() {
+    fn load_layers_runtime_preferences_after_authored_config() {
         let dir = tempfile::tempdir().expect("tempdir");
         let system = dir.path().join("etc-paddles.toml");
         let user = dir.path().join("user-paddles.toml");
@@ -387,7 +385,7 @@ model = "gpt-4o"
     }
 
     #[test]
-    fn workspace_config_overrides_runtime_preferences_for_lane_fields() {
+    fn runtime_preferences_override_workspace_config_for_lane_fields() {
         let dir = tempfile::tempdir().expect("tempdir");
         let workspace = dir.path().join("workspace-paddles.toml");
         fs::write(
@@ -413,8 +411,8 @@ model = "qwen-1.5b"
             Some(&preferences),
         );
 
-        assert_eq!(config.provider, "sift");
-        assert_eq!(config.model, "qwen-1.5b");
+        assert_eq!(config.provider, "inception");
+        assert_eq!(config.model, "mercury-2");
         assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
         assert_eq!(
             config.planner_model.as_deref(),

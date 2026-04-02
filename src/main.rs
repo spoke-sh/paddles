@@ -248,7 +248,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Load layered config: system -> user -> runtime lane state -> workspace.
+    // Load layered config: system -> user -> workspace -> runtime lane state.
     let config =
         PaddlesConfig::load_with_runtime_preferences(&root_path, runtime_preferences.as_ref());
 

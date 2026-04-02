@@ -537,6 +537,7 @@ enum TranscriptRowKind {
     User,
     Assistant,
     Event,
+    CommandNotice,
     /// A started event that only materialized because the operation took >2s.
     InFlightEvent,
     Error,
@@ -1478,7 +1479,7 @@ impl InteractiveApp {
 
     fn push_event(&mut self, header: impl Into<String>, content: impl Into<String>) {
         self.rows.push(TranscriptRow::new(
-            TranscriptRowKind::Event,
+            TranscriptRowKind::CommandNotice,
             format!("• {}", header.into()),
             content,
         ));
@@ -2187,6 +2188,9 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         TranscriptRowKind::User => (palette.user_header, palette.user_body),
         TranscriptRowKind::Assistant => (palette.assistant_header, palette.assistant_body),
         TranscriptRowKind::Event => (palette.event_header, palette.event_body),
+        TranscriptRowKind::CommandNotice => {
+            (palette.command_notice_header, palette.command_notice_body)
+        }
         TranscriptRowKind::InFlightEvent => (palette.in_flight_header, palette.in_flight_body),
         TranscriptRowKind::Error => (palette.error_header, palette.error_body),
     };
@@ -2762,6 +2766,8 @@ struct Palette {
     assistant_body: Style,
     event_header: Style,
     event_body: Style,
+    command_notice_header: Style,
+    command_notice_body: Style,
     in_flight_header: Style,
     in_flight_body: Style,
     error_header: Style,
@@ -2789,6 +2795,8 @@ fn detect_palette() -> Palette {
             assistant_body: Style::default().fg(Color::Rgb(24, 33, 45)),
             event_header: Style::default().fg(Color::Rgb(138, 87, 0)),
             event_body: Style::default().fg(Color::Rgb(72, 77, 84)),
+            command_notice_header: Style::default().fg(Color::Rgb(0, 92, 184)),
+            command_notice_body: Style::default().fg(Color::Rgb(24, 41, 68)),
             in_flight_header: Style::default().fg(Color::Rgb(168, 126, 40)),
             in_flight_body: Style::default().fg(Color::Rgb(120, 124, 130)),
             error_header: Style::default().fg(Color::Rgb(173, 38, 45)),
@@ -2814,6 +2822,8 @@ fn detect_palette() -> Palette {
             assistant_body: Style::default().fg(Color::Rgb(234, 240, 247)),
             event_header: Style::default().fg(Color::Rgb(255, 202, 92)),
             event_body: Style::default().fg(Color::Rgb(182, 191, 204)),
+            command_notice_header: Style::default().fg(Color::Rgb(126, 204, 255)),
+            command_notice_body: Style::default().fg(Color::Rgb(229, 241, 255)),
             in_flight_header: Style::default().fg(Color::Rgb(200, 170, 80)),
             in_flight_body: Style::default().fg(Color::Rgb(130, 140, 155)),
             error_header: Style::default().fg(Color::Rgb(255, 122, 132)),
@@ -2858,6 +2868,7 @@ mod tests {
     use crate::infrastructure::credentials::ProviderAvailability;
     use crate::infrastructure::providers::ModelProvider;
     use crate::infrastructure::step_timing::Pace;
+    use ratatui::style::Modifier;
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, prelude::Rect};
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
@@ -2983,6 +2994,25 @@ mod tests {
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Ran shell");
         assert_eq!(row.content, "git status --short");
+    }
+
+    #[test]
+    fn command_notice_rows_use_brighter_notice_styles() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(
+            TranscriptRowKind::CommandNotice,
+            "• Model catalog",
+            "Current lanes...",
+        );
+
+        let lines = render_row_lines(&row, &palette);
+
+        assert_eq!(
+            lines[0].spans[0].style,
+            palette.command_notice_header.add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(lines[1].spans[0].style, palette.command_notice_body);
+        assert_eq!(lines[1].spans[1].style, palette.command_notice_body);
     }
 
     #[test]
@@ -3389,6 +3419,7 @@ mod tests {
         app.submit_prompt();
 
         let row = app.rows.last().expect("catalog row");
+        assert_eq!(row.kind, TranscriptRowKind::CommandNotice);
         assert_eq!(row.header, "• Model catalog");
         assert!(row.content.contains(&runtime_lane_summary(&runtime_lanes)));
         assert!(row.content.contains("[enabled] openai"));
