@@ -1,0 +1,38 @@
+---
+# system-managed
+id: VFc2jHVLG
+status: planned
+epic: VFc2hwU7e
+created_at: 2026-04-01T23:30:47
+# authored
+title: Plan Inception Provider Delivery
+index: 1
+updated_at: 2026-04-01T23:37:25
+---
+
+# Plan Inception Provider Delivery
+
+> Deliver first-class Inception Labs provider support in staged slices: core Mercury-2 chat compatibility first, then optional diffusion streaming and edit-native capabilities.
+
+## Documents
+
+<!-- BEGIN DOCUMENTS -->
+| Document | Description |
+|----------|-------------|
+| [SRS.md](SRS.md) | Requirements and verification criteria |
+| [SDD.md](SDD.md) | Architecture and implementation details |
+<!-- END DOCUMENTS -->
+
+## Stories
+
+<!-- BEGIN GENERATED -->
+**Progress:** 0/5 stories complete
+
+| Title | Type | Status |
+|-------|------|--------|
+| [Add Inception Provider Catalog And Authentication Support](../../../../stories/VFc2mxZgj/README.md) | feat | backlog |
+| [Expose Inception Defaults And Operator Guidance](../../../../stories/VFc2my2gi/README.md) | chore | backlog |
+| [Add Inception Streaming And Diffusion Visualization Support](../../../../stories/VFc2myPgh/README.md) | feat | backlog |
+| [Wire Mercury-2 Through The OpenAI-Compatible HTTP Adapter](../../../../stories/VFc2mykgg/README.md) | feat | backlog |
+| [Support Inception Edit-Native Endpoints](../../../../stories/VFc2myzhw/README.md) | feat | backlog |
+<!-- END GENERATED -->

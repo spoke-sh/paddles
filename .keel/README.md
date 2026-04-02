@@ -266,6 +266,12 @@
 |--------|--------|
 | [Transit Artifact Capture And Inspector Projection](epics/VFbXKEdWb/voyages/VFbXKFBWT/) | done |
 
+### [Integrate Inception Labs Provider](epics/VFc2hwU7e/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Plan Inception Provider Delivery](epics/VFc2hwU7e/voyages/VFc2jHVLG/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
