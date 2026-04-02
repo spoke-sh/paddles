@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFc2jHVLG
-status: in-progress
+status: done
 epic: VFc2hwU7e
 created_at: 2026-04-01T23:30:47
 # authored
@@ -9,6 +9,7 @@ title: Plan Inception Provider Delivery
 index: 1
 updated_at: 2026-04-01T23:37:25
 started_at: 2026-04-02T05:59:25
+completed_at: 2026-04-02T06:16:01
 ---
 
 # Plan Inception Provider Delivery
@@ -22,12 +23,14 @@ started_at: 2026-04-02T05:59:25
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 4/5 stories complete
+**Progress:** 5/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -35,5 +38,5 @@ started_at: 2026-04-02T05:59:25
 | [Expose Inception Defaults And Operator Guidance](../../../../stories/VFc2my2gi/README.md) | chore | done |
 | [Add Inception Streaming And Diffusion Visualization Support](../../../../stories/VFc2myPgh/README.md) | feat | done |
 | [Wire Mercury-2 Through The OpenAI-Compatible HTTP Adapter](../../../../stories/VFc2mykgg/README.md) | feat | done |
-| [Support Inception Edit-Native Endpoints](../../../../stories/VFc2myzhw/README.md) | feat | backlog |
+| [Support Inception Edit-Native Endpoints](../../../../stories/VFc2myzhw/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T06:15:47.707474104-07:00
+mode: manual
+---
+Core Inception compatibility shipped through the Mercury-2 chat path while edit-native endpoint work remains isolated in this later slice, protecting the core path from depending on edit-native work under SRS-NFR-03.
