@@ -1052,6 +1052,29 @@ mod tests {
         assert!(html.contains("manifold-conduit"));
     }
 
+    #[test]
+    fn manifold_route_html_supports_time_scrub_controls() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("id=\"manifold-play-toggle\""));
+        assert!(html.contains("id=\"manifold-replay-button\""));
+        assert!(html.contains("id=\"manifold-time-scrubber\""));
+        assert!(html.contains("data-manifold-turn-id"));
+        assert!(html.contains("function advanceManifoldPlayback"));
+        assert!(html.contains("requestAnimationFrame"));
+    }
+
+    #[test]
+    fn manifold_route_html_encodes_temporal_signal_phases() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("function primitivePhase"));
+        assert!(html.contains("accumulating"));
+        assert!(html.contains("superseded"));
+        assert!(html.contains("bleed_off"));
+        assert!(html.contains("manifold-node__fill"));
+    }
+
     #[tokio::test]
     async fn web_router_serves_dedicated_manifold_and_transit_routes() {
         let workspace = tempfile::tempdir().expect("workspace");
