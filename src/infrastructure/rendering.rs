@@ -61,8 +61,18 @@ struct AssistantResponse {
 
 impl AssistantResponse {
     fn parse(response: &str) -> Option<Self> {
-        let json = extract_json_payload(response.trim())?;
+        let trimmed = response.trim();
+        extract_json_payload(trimmed)
+            .and_then(Self::parse_json_envelope)
+            .or_else(|| salvage_partial_assistant_response(trimmed))
+    }
+
+    fn parse_json_envelope(json: &str) -> Option<Self> {
         let envelope: AssistantResponseEnvelope = serde_json::from_str(json).ok()?;
+        Self::from_envelope(envelope)
+    }
+
+    fn from_envelope(envelope: AssistantResponseEnvelope) -> Option<Self> {
         let blocks: Vec<AssistantBlock> = envelope
             .blocks
             .into_iter()
@@ -362,6 +372,284 @@ fn sanitize_markdownish_fallback(input: &str) -> String {
     sanitized.join("\n")
 }
 
+#[derive(Clone, Debug, Default)]
+struct PartialAssistantBlock {
+    kind: Option<String>,
+    text: Option<String>,
+    items: Option<Vec<String>>,
+    language: Option<String>,
+    code: Option<String>,
+    sources: Option<Vec<String>>,
+}
+
+impl PartialAssistantBlock {
+    fn parse(fragment: &str) -> Option<Self> {
+        let repaired = repair_json_object_fragment(fragment)?;
+        let value: Value = serde_json::from_str(&repaired).ok()?;
+        let object = value.as_object()?;
+        let partial = Self {
+            kind: object
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+            text: object
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+            items: string_array_field(object, "items"),
+            language: object
+                .get("language")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+            code: object
+                .get("code")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToString::to_string),
+            sources: string_array_field(object, "sources"),
+        };
+
+        partial.has_any_field().then_some(partial)
+    }
+
+    fn merge(parts: &[Self]) -> Option<Self> {
+        let mut merged = Self::default();
+        for part in parts {
+            merged.kind = merge_optional(merged.kind.take(), part.kind.clone())?;
+            merged.text = merge_optional(merged.text.take(), part.text.clone())?;
+            merged.items = merge_optional(merged.items.take(), part.items.clone())?;
+            merged.language = merge_optional(merged.language.take(), part.language.clone())?;
+            merged.code = merge_optional(merged.code.take(), part.code.clone())?;
+            merged.sources = merge_optional(merged.sources.take(), part.sources.clone())?;
+        }
+
+        merged.resolved_render_type()?;
+        Some(merged)
+    }
+
+    fn into_block(self) -> Option<AssistantBlock> {
+        match self.resolved_render_type()? {
+            RenderType::Paragraph => Some(AssistantBlock::Paragraph(self.text?)),
+            RenderType::BulletList => Some(AssistantBlock::BulletList(self.items?)),
+            RenderType::CodeBlock => Some(AssistantBlock::CodeBlock {
+                language: self.language,
+                code: self.code?,
+            }),
+            RenderType::Citations => Some(AssistantBlock::Citations(self.sources?)),
+        }
+    }
+
+    fn resolved_render_type(&self) -> Option<RenderType> {
+        let declared = self.kind.as_deref().and_then(RenderType::from_str);
+        let inferred = self.inferred_render_type()?;
+
+        declared.map_or(Some(inferred), |declared| {
+            (declared == inferred).then_some(declared)
+        })
+    }
+
+    fn inferred_render_type(&self) -> Option<RenderType> {
+        let has_text = self.text.is_some();
+        let has_items = self.items.as_ref().is_some_and(|items| !items.is_empty());
+        let has_code = self.code.is_some();
+        let has_sources = self
+            .sources
+            .as_ref()
+            .is_some_and(|sources| !sources.is_empty());
+        let has_language = self.language.is_some();
+
+        match (has_text, has_items, has_code || has_language, has_sources) {
+            (true, false, false, false) => Some(RenderType::Paragraph),
+            (false, true, false, false) => Some(RenderType::BulletList),
+            (false, false, true, false) if has_code => Some(RenderType::CodeBlock),
+            (false, false, false, true) => Some(RenderType::Citations),
+            _ => None,
+        }
+    }
+
+    fn has_any_field(&self) -> bool {
+        self.kind.is_some()
+            || self.text.is_some()
+            || self.items.is_some()
+            || self.language.is_some()
+            || self.code.is_some()
+            || self.sources.is_some()
+    }
+}
+
+fn salvage_partial_assistant_response(response: &str) -> Option<AssistantResponse> {
+    let partials = candidate_json_object_fragments(response)
+        .into_iter()
+        .filter_map(|fragment| PartialAssistantBlock::parse(&fragment))
+        .collect::<Vec<_>>();
+    if partials.is_empty() {
+        return None;
+    }
+
+    let mut blocks = Vec::new();
+    let mut cursor = 0;
+    while cursor < partials.len() {
+        let max_width = usize::min(3, partials.len() - cursor);
+        let mut consumed = None;
+        for width in (1..=max_width).rev() {
+            let candidate = PartialAssistantBlock::merge(&partials[cursor..cursor + width]);
+            let Some(block) = candidate.and_then(PartialAssistantBlock::into_block) else {
+                continue;
+            };
+            blocks.push(block);
+            consumed = Some(width);
+            break;
+        }
+
+        cursor += consumed.unwrap_or(1);
+    }
+
+    if blocks.is_empty() {
+        return None;
+    }
+
+    let render_types = render_types_for_blocks(&blocks);
+    Some(AssistantResponse {
+        render_types,
+        blocks,
+    })
+}
+
+fn candidate_json_object_fragments(response: &str) -> Vec<String> {
+    let body = unwrap_jsonish_body(response);
+    let mut fragments = Vec::new();
+    let mut starts = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (index, ch) in body.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => starts.push(index),
+            '}' if !in_string => {
+                if let Some(start) = starts.pop() {
+                    fragments.push((start, body[start..=index].to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for start in starts {
+        fragments.push((start, body[start..].to_string()));
+    }
+
+    fragments.sort_by_key(|(start, _)| *start);
+    fragments
+        .into_iter()
+        .map(|(_, fragment)| fragment)
+        .collect()
+}
+
+fn unwrap_jsonish_body(response: &str) -> &str {
+    let trimmed = response.trim();
+    if trimmed.starts_with("```") {
+        trimmed
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim()
+    } else {
+        trimmed
+    }
+}
+
+fn repair_json_object_fragment(fragment: &str) -> Option<String> {
+    let mut repaired = fragment.trim().trim_end_matches(',').trim_end().to_string();
+    if !repaired.starts_with('{') {
+        return None;
+    }
+
+    for ch in unmatched_json_closers(&repaired)? {
+        repaired.push(ch);
+    }
+
+    Some(repaired)
+}
+
+fn unmatched_json_closers(fragment: &str) -> Option<Vec<char>> {
+    let mut stack = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for ch in fragment.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '{' | '[' if !in_string => stack.push(ch),
+            '}' if !in_string => match stack.pop() {
+                Some('{') => {}
+                _ => return None,
+            },
+            ']' if !in_string => match stack.pop() {
+                Some('[') => {}
+                _ => return None,
+            },
+            _ => {}
+        }
+    }
+
+    if in_string {
+        return None;
+    }
+
+    Some(
+        stack
+            .into_iter()
+            .rev()
+            .map(|ch| match ch {
+                '{' => '}',
+                '[' => ']',
+                _ => unreachable!("only braces and brackets are pushed"),
+            })
+            .collect(),
+    )
+}
+
+fn string_array_field(object: &serde_json::Map<String, Value>, key: &str) -> Option<Vec<String>> {
+    let values = object.get(key)?.as_array()?;
+    let items = values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    (!items.is_empty()).then_some(items)
+}
+
+fn merge_optional<T: PartialEq>(current: Option<T>, incoming: Option<T>) -> Option<Option<T>> {
+    match (current, incoming) {
+        (None, None) => Some(None),
+        (Some(current), None) => Some(Some(current)),
+        (None, Some(incoming)) => Some(Some(incoming)),
+        (Some(current), Some(incoming)) if current == incoming => Some(Some(current)),
+        _ => None,
+    }
+}
+
 fn unique_render_types(render_types: Vec<RenderType>) -> Option<Vec<RenderType>> {
     let unique = render_types.iter().copied().collect::<BTreeSet<_>>();
     if unique.len() != render_types.len() {
@@ -577,6 +865,23 @@ mod tests {
     fn empty_citation_sources_do_not_poison_parse() {
         let response = r#"{"render_types":["paragraph","citations"],"blocks":[{"type":"paragraph","text":"Hello."},{"type":"citations","sources":[]}]}"#;
         assert_eq!(normalize_assistant_response(response), "Hello.");
+    }
+
+    #[test]
+    fn salvages_fragmented_structured_responses_from_partial_json() {
+        let response = r#"{
+  "blocks": [
+    {
+      "type": "paragraph"
+    },
+    {
+      "text": "Hey! How can I help you today?"
+"#;
+
+        assert_eq!(
+            normalize_assistant_response(response),
+            "Hey! How can I help you today?"
+        );
     }
 
     #[test]

@@ -22,3 +22,5 @@ Fully wire the real `PromptLoop` in `main.rs` and execute a non-trivial agentic 
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

@@ -22,3 +22,5 @@ Replace manual HF/Candle logic with `sift` adapters and execute multi-turn promp
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

@@ -22,3 +22,5 @@ Implement real local inference in `CandleProvider` and execute a prompt with zer
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

@@ -22,3 +22,5 @@ Address authentication issues with gated models and improve the default out-of-t
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

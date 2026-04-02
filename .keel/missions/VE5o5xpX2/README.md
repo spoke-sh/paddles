@@ -22,3 +22,5 @@ Implement interactive prompt loop in `main.rs` and execute `just paddles` to ope
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

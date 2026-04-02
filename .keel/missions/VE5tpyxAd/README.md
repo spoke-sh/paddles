@@ -22,3 +22,5 @@ Implement model fetching from Hugging Face Hub and execute real inference with G
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

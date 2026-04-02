@@ -23,3 +23,5 @@ Refactor the `paddles` codebase into a Domain-Driven Design and Hexagonal Archit
 ## Verification Proof
 
 ![CLI verification proof](record-cli.gif)
+
+![High-dimension verification proof](verification.gif)

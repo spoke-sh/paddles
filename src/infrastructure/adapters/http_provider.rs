@@ -2218,6 +2218,29 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn inception_provider_salvages_fragmented_structured_final_answers() {
+        let model_id = "mercury-2";
+        let structured = r#"{
+  "blocks": [
+    {
+      "type": "paragraph"
+    },
+    {
+      "text": "Hey! How can I help you today?"
+"#;
+
+        let (_, _, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Inception,
+            model_id,
+            structured,
+        )
+        .await;
+
+        assert_eq!(response, "Hey! How can I help you today?");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn openai_provider_surfaces_mock_server_errors_through_full_turns() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("AGENTS.md"), "# Operator Memory\n")
