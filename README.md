@@ -333,7 +333,7 @@ just test
 just quality
 ```
 
-`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for both the new React runtime shell and the still-live embedded runtime shell so the migration stays honest.
+`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for the docs app, the new React runtime shell, and the still-live embedded runtime shell so the migration stays honest.
 
 Check board health:
 

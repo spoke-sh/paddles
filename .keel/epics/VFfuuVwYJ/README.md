@@ -22,8 +22,8 @@ mission: VFfudmTWs
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/4 stories done
+**Progress:** 0/1 voyages complete, 2/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Bootstrap Turborepo Workspace And React Runtime App](voyages/VFfvAz07R/) | in-progress | 1/4 |
+| [Bootstrap Turborepo Workspace And React Runtime App](voyages/VFfvAz07R/) | in-progress | 2/4 |
 <!-- END GENERATED -->

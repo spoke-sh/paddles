@@ -144,6 +144,29 @@ fn docs_static_favicon_exists_for_docusaurus_builds() {
 }
 
 #[test]
+fn docs_app_defines_browser_e2e_verification() {
+    let package_json = read_repo_file("apps/docs/package.json");
+    let package: Value =
+        serde_json::from_str(&package_json).expect("apps/docs/package.json should parse");
+    let scripts = package["scripts"]
+        .as_object()
+        .expect("apps/docs/package.json scripts should be an object");
+
+    assert!(
+        scripts.contains_key("e2e"),
+        "docs app should define a browser e2e script in the shared workspace",
+    );
+    assert!(
+        repo_file("apps/docs/playwright.config.mjs").exists(),
+        "docs app should define a Playwright config for browser verification",
+    );
+    assert!(
+        repo_file("apps/docs/e2e/docs.spec.mjs").exists(),
+        "docs app should define a browser smoke test for the docs route",
+    );
+}
+
+#[test]
 fn runtime_web_playwright_config_exists() {
     assert!(
         repo_file("apps/web/playwright.config.mjs").exists(),

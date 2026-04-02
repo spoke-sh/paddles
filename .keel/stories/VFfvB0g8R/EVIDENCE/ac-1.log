@@ -1,0 +1,7 @@
+---
+recorded_at: 2026-04-02T15:54:45.055803371-07:00
+command: nix develop --command sh -lc 'cargo test -q infrastructure::dev_workflow_contracts::docs_app_defines_browser_e2e_verification && just quality && just test'
+---
+
+--- stderr ---
+Command timed out

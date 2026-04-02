@@ -27,12 +27,12 @@ started_at: 2026-04-02T15:28:04
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Create Turborepo Workspace And Shared Frontend Scripts](../../../../stories/VFfvAzX7H/README.md) | feat | done |
 | [Stage Route Cutover Between Embedded Shell And React App](../../../../stories/VFfvAzz7F/README.md) | feat | backlog |
 | [Bootstrap A Tested React Runtime Web App](../../../../stories/VFfvB0L8b/README.md) | feat | backlog |
-| [Move The Docs App Into The Shared Frontend Workspace](../../../../stories/VFfvB0g8R/README.md) | feat | backlog |
+| [Move The Docs App Into The Shared Frontend Workspace](../../../../stories/VFfvB0g8R/README.md) | feat | done |
 <!-- END GENERATED -->

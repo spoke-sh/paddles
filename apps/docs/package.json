@@ -9,7 +9,8 @@
     "clear": "docusaurus clear",
     "typecheck": "tsc --noEmit",
     "lint": "npm run typecheck",
-    "test": "npm run build"
+    "test": "npm run build",
+    "e2e": "playwright test --config=playwright.config.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.9.2",
@@ -24,6 +25,7 @@
     "@docusaurus/module-type-aliases": "3.9.2",
     "@docusaurus/tsconfig": "3.9.2",
     "@docusaurus/types": "3.9.2",
+    "@playwright/test": "1.55.0",
     "typescript": "~5.6.2"
   },
   "engines": {
