@@ -3737,7 +3737,8 @@ fn coerce_hypothesis_judgement_action(
         || decision.action.is_terminal()
         || !evidence_weakens_failure_premise(loop_state)
         || evidence_confirms_failure_premise(loop_state)
-        || !decision_repeats_prior_probe(&decision.action, loop_state)
+        || !(decision_repeats_prior_probe(&decision.action, loop_state)
+            || redundant_github_run_list_probe(&decision.action, loop_state))
     {
         return None;
     }
@@ -3818,6 +3819,21 @@ fn decision_repeats_prior_probe(action: &PlannerAction, loop_state: &PlannerLoop
     })
 }
 
+fn redundant_github_run_list_probe(action: &PlannerAction, loop_state: &PlannerLoopState) -> bool {
+    if !action_is_github_run_list_probe(action) {
+        return false;
+    }
+
+    loop_state
+        .steps
+        .iter()
+        .any(|step| action_is_github_run_list_probe(&step.action))
+        || loop_state
+            .evidence_items
+            .iter()
+            .any(|item| source_is_github_run_list_probe(&item.source))
+}
+
 fn diagnostic_probe_signature(action: &PlannerAction) -> Option<String> {
     match action {
         PlannerAction::Workspace {
@@ -3847,6 +3863,26 @@ fn normalize_probe_signature(command: &str) -> String {
     } else {
         tokens.join(" ")
     }
+}
+
+fn action_is_github_run_list_probe(action: &PlannerAction) -> bool {
+    match action {
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command },
+        } => command_is_github_run_list_probe(command),
+        _ => false,
+    }
+}
+
+fn source_is_github_run_list_probe(source: &str) -> bool {
+    source
+        .strip_prefix("command: ")
+        .map(command_is_github_run_list_probe)
+        .unwrap_or(false)
+}
+
+fn command_is_github_run_list_probe(command: &str) -> bool {
+    normalize_probe_signature(command) == "gh run list"
 }
 
 fn decision_targets_file(action: &PlannerAction) -> bool {
@@ -6810,6 +6846,53 @@ mod tests {
     }
 
     #[test]
+    fn evidence_pressure_stops_redundant_plain_ci_run_list_probe() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "planner-step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "gh run list --limit 20".to_string(),
+                    },
+                },
+                outcome: "inspected recent CI runs".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "command: gh run list --limit 20".to_string(),
+                snippet: "in_progress\t\tTreat reported failures as verifiable hypotheses\tCI\tmain\tpush\t23912848177\t1m45s\t2026-04-02T17:18:06Z\ncompleted\tsuccess\tPersist runtime lane preferences over config\tCI\tmain\tpush\t23910509164\t16m4s\t2026-04-02T16:21:22Z\ncompleted\tcancelled\tAutocomplete TUI provider and model commands\tCI\tmain\tpush\t23902835068\t23m45s\t2026-04-02T13:29:15Z".to_string(),
+                rationale: "recent CI table output".to_string(),
+                rank: 1,
+            }],
+            ..Default::default()
+        };
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "gh run list --limit 10".to_string(),
+                },
+            },
+            rationale: "check a smaller recent window".to_string(),
+        };
+
+        let redirected = super::coerce_hypothesis_judgement_action(
+            "CI is failing. Can you debug it on this machine?",
+            &InterpretationContext::default(),
+            &loop_state,
+            &decision,
+        )
+        .expect("redirected decision");
+
+        assert!(matches!(
+            redirected.action,
+            PlannerAction::Stop { ref reason }
+                if reason.contains("evidence-pressure")
+                    && reason.contains("not confirmed")
+        ));
+    }
+
+    #[test]
     fn diagnostic_turn_stops_after_sources_weaken_failure_premise() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -6887,6 +6970,109 @@ mod tests {
         assert_eq!(
             inspect_calls, 1,
             "controller should stop after the first decisive source"
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress { step_number, action, .. }
+                if *step_number == 2
+                    && action.contains("stop (evidence-pressure")
+        )));
+    }
+
+    #[test]
+    fn diagnostic_turn_stops_after_plain_ci_listing_shows_no_failure() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nVerify failures from first principles.\n",
+        )
+        .expect("write AGENTS.md");
+        fs::create_dir_all(workspace.path().join("bin")).expect("create bin");
+        let gh_path = workspace.path().join("bin/gh");
+        fs::write(
+            &gh_path,
+            "#!/bin/sh\nif [ \"$1\" = \"run\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\nin_progress\t\tTreat reported failures as verifiable hypotheses\tCI\tmain\tpush\t23912848177\t1m45s\t2026-04-02T17:18:06Z\ncompleted\tsuccess\tPersist runtime lane preferences over config\tCI\tmain\tpush\t23910509164\t16m4s\t2026-04-02T16:21:22Z\ncompleted\tcancelled\tAutocomplete TUI provider and model commands\tCI\tmain\tpush\t23902835068\t23m45s\t2026-04-02T13:29:15Z\nEOF\nelse\n  echo \"unexpected gh invocation: $*\" >&2\n  exit 1\nfi\n",
+        )
+        .expect("write fake gh");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&gh_path)
+                .expect("fake gh metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&gh_path, permissions).expect("chmod fake gh");
+        }
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let first_command = "PATH=\"$PWD/bin:$PATH\" gh run list --limit 20".to_string();
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: first_command.clone(),
+                    },
+                },
+                "inspect the recent CI runs",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "gh run list --limit 10".to_string(),
+                    },
+                },
+                rationale: "narrow the list size".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "CI is failing. Can you debug it on this machine?",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let events = sink.recorded();
+        let inspect_calls = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    TurnEvent::ToolCalled { tool_name, .. } if tool_name == "inspect"
+                )
+            })
+            .count();
+        assert_eq!(
+            inspect_calls, 1,
+            "controller should stop after the plain CI listing already weakens the failure premise"
         );
         assert!(events.iter().any(|event| matches!(
             event,
