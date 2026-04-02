@@ -162,7 +162,7 @@ The frontend is now staged through a shared Turborepo workspace:
 - `apps/docs` owns the Docusaurus documentation site
 - `apps/web` owns the new React runtime web app shell
 
-The live runtime routes are still served by the Rust-embedded shell until React route cutover reaches parity. That means the manifold route remains local-first and does not add remote visualization bundles, CDNs, or hosted dependencies while the migration is in progress.
+The Rust-embedded shell remains the runtime source of truth and still serves the live runtime routes until React route cutover reaches parity. That means the manifold route remains local-first and does not add remote visualization bundles, CDNs, or hosted dependencies while the migration is in progress.
 
 ### Trace Recording
 

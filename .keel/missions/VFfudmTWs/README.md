@@ -1,13 +1,15 @@
 ---
 # system-managed
 id: VFfudmTWs
-status: active
+status: verified
 created_at: 2026-04-02T15:23:44
-updated_at: 2026-04-02T15:27:53
+updated_at: 2026-04-02T16:05:00
 # authored
 title: Convert Web Surfaces To Turborepo React Workspace
 watch: ~
 activated_at: 2026-04-02T15:27:53
+achieved_at: 2026-04-02T16:04:58
+verified_at: 2026-04-02T16:05:00
 ---
 
 # Convert Web Surfaces To Turborepo React Workspace

@@ -182,7 +182,7 @@ The manifold route is intentionally metaphorical. Chambers, reservoirs, valves, 
 
 That metaphor is only valid if it remains accountable to exact trace sources. Selecting a manifold state must reveal the exact underlying source record and provide a direct route back to the forensic inspector for raw/rendered payload inspection. The manifold is therefore an expressive overview, not a second source of truth.
 
-This route also remains inside the local-first delivery contract. Frontend ownership is now split between `apps/docs` and the new `apps/web` React shell inside one Turborepo workspace, but the live runtime routes are still served from the embedded Rust shell until React cutover reaches parity. The migration therefore does not add remote visualization libraries, CDNs, or runtime network fetches outside the existing local HTTP surface.
+This route also remains inside the local-first delivery contract. Frontend ownership is now split between `apps/docs` and the new `apps/web` React shell inside one Turborepo workspace, but the embedded Rust shell remains the runtime source of truth and still serves the live runtime routes until React cutover reaches parity. The migration therefore does not add remote visualization libraries, CDNs, or runtime network fetches outside the existing local HTTP surface.
 
 ## Planner Action Vocabulary
 

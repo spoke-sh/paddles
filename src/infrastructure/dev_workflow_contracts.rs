@@ -136,6 +136,20 @@ fn root_workspace_lockfile_exists_for_clean_ci_installs() {
 }
 
 #[test]
+fn frontend_playwright_artifacts_are_gitignored() {
+    let gitignore = read_repo_file(".gitignore");
+
+    assert!(
+        gitignore.contains("/apps/web/test-results/"),
+        "frontend workspace should ignore runtime app Playwright test output",
+    );
+    assert!(
+        gitignore.contains("/apps/docs/test-results/"),
+        "frontend workspace should ignore docs Playwright test output",
+    );
+}
+
+#[test]
 fn docs_static_favicon_exists_for_docusaurus_builds() {
     assert!(
         repo_file("apps/docs/static/img/favicon.svg").exists(),

@@ -1,0 +1,5 @@
+Manual proof for AC-02:
+
+- `README.md` now says the Rust-embedded shell remains the runtime source of truth and still serves the live runtime routes until React cutover reaches parity.
+- `ARCHITECTURE.md` repeats that the embedded Rust shell remains the runtime source of truth while the React app grows toward parity.
+- `apps/web/src/runtime-app.tsx` still renders a migration-state callout telling operators that the Rust-embedded web shell owns live runtime behavior while the React app grows route-by-route.

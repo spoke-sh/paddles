@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFfvAz07R
-status: in-progress
+status: done
 epic: VFfuuVwYJ
 created_at: 2026-04-02T15:25:52
 # authored
@@ -9,6 +9,7 @@ title: Bootstrap Turborepo Workspace And React Runtime App
 index: 1
 updated_at: 2026-04-02T15:27:53
 started_at: 2026-04-02T15:28:04
+completed_at: 2026-04-02T16:04:12
 ---
 
 # Bootstrap Turborepo Workspace And React Runtime App
@@ -22,17 +23,19 @@ started_at: 2026-04-02T15:28:04
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Create Turborepo Workspace And Shared Frontend Scripts](../../../../stories/VFfvAzX7H/README.md) | feat | done |
-| [Stage Route Cutover Between Embedded Shell And React App](../../../../stories/VFfvAzz7F/README.md) | feat | backlog |
+| [Stage Route Cutover Between Embedded Shell And React App](../../../../stories/VFfvAzz7F/README.md) | feat | done |
 | [Bootstrap A Tested React Runtime Web App](../../../../stories/VFfvB0L8b/README.md) | feat | done |
 | [Move The Docs App Into The Shared Frontend Workspace](../../../../stories/VFfvB0g8R/README.md) | feat | done |
 <!-- END GENERATED -->
