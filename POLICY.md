@@ -38,6 +38,15 @@ Model selection is an architectural decision that shapes every turn.
 - **Grounded Answers Cite Sources**: Repository-question answers include file citations by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
 - **Final Answer Rendering Stays Typed**: Synthesizer models advertise the render block types they are using (`paragraph`, `bullet_list`, `code_block`, `citations`) through a constrained response envelope; operators see a normalized transcript projection instead of raw markdown conventions.
 
+### Pressure Systems
+- **Pressure Is A Typed Controller Policy**: Pressure is not a hidden vibe check. It is the family of explicit controller policies that bias or stop recursive work as evidence accumulates.
+- **Context Pressure Stays Observable**: Truncation and evidence-budget loss surface as `ContextPressure` events and force snapshots. They make context degradation visible without silently changing the answer contract.
+- **Execution Pressure Prefers Action Over Drift**: Mutation turns should move toward a plausible file read or edit once enough evidence exists. Repeated non-file probing is a controller-corrected failure mode.
+- **Evidence Pressure Revises Priors**: User reports start as hypotheses, not facts. When gathered sources weaken a premise, the harness should stop redundant confirmatory probes and force a source-judged answer.
+- **Compaction Pressure Preserves Actionability**: Context refinement and compaction may summarize or prune low-value artifacts when depth threatens actionability, while preserving locators to deeper records.
+- **Budget Pressure Ends The Loop Honestly**: Step, search, inspect, and read caps are hard limits. When the budget is spent, the harness stops and answers from the evidence it actually has.
+- **Force Snapshots Stay Visible**: Pressure systems must remain legible in transit traces with source-attributed contributions, so operators can inspect what shaped a turn.
+
 ### Evidence and Gathering
 - **Evidence-First Gatherers**: Context-gathering adapters return typed evidence bundles and capability state for downstream synthesis.
 - **Graph Retrieval Strengthens The Gatherer Path**: Richer graph/branching retrieval enhances the generic gatherer boundary and typed evidence contract, keeping the harness general-purpose.

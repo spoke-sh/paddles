@@ -81,6 +81,96 @@ flowchart TD
 
 The planner operates within bounded action and budget contracts. Every action is validated before execution, every output is recorded, and the operator can observe the full trace.
 
+## Pressure Systems
+
+Pressure in Paddles is a controller layer, not a loose metaphor. The runtime uses it to decide when the loop should keep investigating, when it should compress context, and when the evidence already justifies stopping.
+
+```mermaid
+flowchart LR
+    Prior["Prompt prior<br/>user report · operator intent"]
+    Planner["Planner proposal<br/>next bounded action"]
+    Controller["Controller pressure checks"]
+    Loop["Loop state<br/>evidence · steps · retained context"]
+    Outcome["Next action / stop / synthesis"]
+
+    Context["Context pressure<br/>truncation + loss"]
+    Execution["Execution pressure<br/>act on likely file"]
+    Evidence["Evidence pressure<br/>quiet steps / premise weakened"]
+    Compaction["Compaction pressure<br/>refine and retain locators"]
+    Budget["Budget pressure<br/>hard caps"]
+
+    Prior --> Loop
+    Loop --> Planner --> Controller --> Outcome
+    Context --> Controller
+    Execution --> Controller
+    Evidence --> Controller
+    Compaction --> Controller
+    Budget --> Controller
+
+    style Controller fill:#ffebee,stroke:#f44336
+    style Outcome fill:#e8f5e9,stroke:#4CAF50
+```
+
+### Pressure Families
+
+| System | Trigger | What it does | Trace surface |
+|-------|---------|--------------|---------------|
+| **Context pressure** | Truncated memory, artifacts, thread summaries, or evidence-budget loss | Warns that the assembled context is degraded | `TurnEvent::ContextPressure`, `TraceForceKind::ContextPressure` |
+| **Execution pressure** | Mutation/known-edit turns with no file-targeting action yet | Redirects broad non-file work toward a plausible file read/edit | `Fallback(stage = execution-pressure)`, `TraceForceKind::ExecutionPressure` |
+| **Evidence pressure** | Enough evidence but too many quiet steps, or evidence weakens the prompt's premise | Refines interpretation or stops redundant probes so synthesis judges the sources | `RefinementApplied`, `PlannerSummary(stop_reason = evidence-pressure...)`, `TraceForceKind::Budget` |
+| **Compaction pressure** | Active context is getting too noisy for useful next actions | Summarizes/prunes low-value artifacts while preserving locators | `TraceForceKind::Compaction` |
+| **Budget pressure** | Step, search, inspect, or read caps are reached | Terminates recursion honestly | `PlannerSummary(stop_reason = *-budget-exhausted)`, `TraceForceKind::Budget` |
+
+### Context Pressure
+
+`PressureTracker` accumulates truncation events during context assembly and emits a `ContextPressure` turn event when the result is non-nominal. The factors are explicit:
+
+- `memory-truncated`
+- `artifact-truncated`
+- `thread-summary-trimmed`
+- `evidence-budget-exhausted`
+
+This pressure is observational. It tells the operator and the trace that the current answer may be operating with a degraded working set.
+
+### Execution Pressure
+
+Execution pressure exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it redirects non-file actions to a concrete file read.
+
+This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
+
+### Evidence Pressure
+
+Evidence pressure is the system that keeps the harness intellectually honest.
+
+It has two important modes:
+
+1. **Quiet-step refinement**
+   After evidence has accumulated but several steps fail to add anything new, the controller derives a refined interpretation context. This is how the loop resists thrashing.
+2. **Premise judgement**
+   A user can supply the initial hypothesis, but gathered sources must be allowed to overturn it. When the prompt says a failure exists but the accumulated evidence shows only success, cancelled runs, or otherwise weakens that premise, the controller stops redundant confirmatory probes and forces synthesis to judge the actual sources.
+
+This is the pressure family that prevents the planner from repeatedly shrinking `gh run list --limit N` instead of admitting that the current evidence does not confirm the original claim.
+
+### Compaction Pressure
+
+Compaction is how the harness stays sharp under depth. The planner can evaluate its own retained evidence, produce a compaction plan, and keep only the most relevant artifacts in active context. Pruned material is not lost; typed locators preserve reachability into transit and filesystem tiers.
+
+### Budget Pressure
+
+Budget pressure is the hard outer wall around recursion. Even if the planner keeps wanting more steps, the controller stops after bounded step, search, inspect, or read limits. Those stop reasons are part of the recorded force model, not silent control flow.
+
+### Pressure And Force Snapshots
+
+The trace model records force snapshots so the operator can inspect not just what happened, but what shaped the turn:
+
+- `context_pressure`
+- `execution_pressure`
+- `compaction`
+- `budget`
+- `fallback`
+
+Each snapshot carries a magnitude, a summary, and source-attributed contribution estimates. The web forensic inspector uses these as first-class visualization inputs.
+
 ## Planner Action Vocabulary
 
 The planner expresses its intentions through a constrained action schema:
@@ -198,7 +288,7 @@ The planner can evaluate its own accumulated context state and produce a structu
 
 Context budget exhaustion is modeled as a first-class capability signal through `ContextPressure`. A `PressureTracker` accumulates truncation events during context assembly — memory documents exceeding the 12k character cap, truncated artifact envelopes, trimmed thread summaries. The tracker computes a `PressureLevel` (Low / Medium / High / Critical) from the count of truncation events and emits a `TurnEvent::ContextPressure` when pressure is non-nominal.
 
-These signals are informational — they surface context degradation in the turn event stream without altering routing or synthesis behavior. The TUI renders pressure events at verbose≥1.
+These signals are informational at the context-quality layer — they surface context degradation in the turn event stream and into force snapshots. Higher-order controller pressures, such as execution pressure and evidence pressure, are what actually redirect or stop the recursive loop.
 
 ### In-Flight Visibility
 

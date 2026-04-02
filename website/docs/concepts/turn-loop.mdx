@@ -51,9 +51,31 @@ Every step of this process is surfaced through the TUI transcript or plain CLI o
 
 When a step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
 
+## Where Pressure Intervenes
+
+Pressure is the controller layer between the planner's proposed action and the next loop step.
+
+```text
+interpretation assembled
+   ↓
+planner proposes next bounded action
+   ↓
+controller checks pressure systems
+   ├─ context pressure: is the working set degraded?
+   ├─ execution pressure: should this turn act on a likely file now?
+   ├─ evidence pressure: do the sources already justify refinement or stop?
+   ├─ compaction pressure: should active context be tightened?
+   └─ budget pressure: have we hit a hard loop cap?
+   ↓
+execute action, refine context, or stop and synthesize
+```
+
+This is how the harness stays both model-directed and disciplined. The model chooses direction, but the controller can insist on acting, refining, or stopping when the trace already supports that choice better than another redundant step would.
+
 ## What To Read Next
 
 - [Recursive Planning](./recursive-planning.mdx) — the planner loop in detail
+- [Pressure Systems](./context-pressure.mdx) — the pressure families in detail
 - [Context Tiers](./context-tiers.mdx) — how context spans multiple storage tiers
 - [Model Routing](./model-routing.mdx) — how planner and synthesizer roles are assigned
 - [Search and Retrieval](./search-retrieval.mdx) — evidence gathering constraints, progress, and limitations

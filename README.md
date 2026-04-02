@@ -108,6 +108,45 @@ flowchart TD
     style S fill:#e8f5e9,stroke:#4CAF50
 ```
 
+### Pressure Systems
+
+Paddles does not rely on one generic "pressure" signal. It runs a family of controller-owned pressure systems that bias the loop when evidence starts to matter more than priors.
+
+```mermaid
+flowchart TD
+    P["Prompt prior<br/>user claim · operator intent"]
+    I["Interpretation context<br/>memory · hints · procedures"]
+    L["Planner loop state<br/>actions · evidence · retained context"]
+    C["Controller pressure layer"]
+    S["Synthesis<br/>judge sources and answer"]
+
+    CP["Context pressure<br/>truncation / evidence-budget loss"]
+    EP["Execution pressure<br/>act on a likely file"]
+    EVP["Evidence pressure<br/>refine or stop and judge"]
+    CMP["Compaction pressure<br/>summarize / retain locators"]
+    BP["Budget pressure<br/>step / search / inspect / read caps"]
+
+    P --> I --> L --> C --> S
+    CP --> C
+    EP --> C
+    EVP --> C
+    CMP --> C
+    BP --> C
+
+    style C fill:#ffebee,stroke:#f44336
+    style S fill:#e8f5e9,stroke:#4CAF50
+```
+
+The systems serve different jobs:
+
+- **Context pressure** reports degraded assembled context when memory, retained artifacts, thread summaries, or evidence budgets are truncated.
+- **Execution pressure** redirects mutation turns toward a plausible file read or edit when broad retrieval is no longer the highest-value move.
+- **Evidence pressure** forces the harness to react to accumulated evidence: refine interpretation after quiet steps, or stop redundant probing when sources already weaken the original premise.
+- **Compaction pressure** keeps the active context tight by summarizing or pruning low-value artifacts while preserving locators to the deeper record.
+- **Budget pressure** terminates recursive work when step, search, inspect, or read caps have been reached.
+
+The important invariant is that pressure becomes stronger as real evidence accumulates. A user claim can start the investigation, but gathered sources get the final say.
+
 ### Trace Recording
 
 Every recursive step produces typed trace records alongside the visible transcript. The UI is a projection; durable lineage lives in the recorder boundary.
@@ -166,6 +205,7 @@ The recursive harness runs as a bounded local-first runtime:
 - **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the planner until evidence is sufficient or budgets are met
 - **Separate synthesis** — a distinct synthesizer lane produces the final grounded answer from the accumulated evidence bundle
 - **Full-stream visibility** — a default TUI/event stream shows interpretation, planner actions, retrieval, fallbacks, and synthesis as they happen
+- **Pressure-guided control** — context, execution, evidence, compaction, and budget pressure are recorded as explicit controller-visible signals rather than hidden heuristics
 - **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary with noop, in-memory, and embedded `transit-core` adapters
 - **Artifact envelopes** — prompts, tool I/O, evidence bundles, planner traces, and responses sit behind logical refs, ready for external storage when needed
 - **Threaded conversations** — interactive sessions keep one durable root task with model-driven steering-thread decisions, structured thread candidates, explicit merge-back records, and full replay views
@@ -173,6 +213,7 @@ The recursive harness runs as a bounded local-first runtime:
 - **Transit-native addressing** — truncated `ArtifactEnvelope` content carries typed locators to full records in transit or on disk, resolvable on demand without re-searching
 - **Recursive self-assessing compaction** — the planner evaluates its own retained evidence for relevance and produces structured compaction plans that prune low-value artifacts while preserving locators for depth
 - **Context pressure signals** — a `PressureTracker` accumulates truncation events during context assembly and emits `ContextPressure` turn events so context degradation is visible in the event stream
+- **Evidence-judgement stops** — when gathered sources weaken a user-stated failure premise, the controller stops redundant confirmatory probes and forces synthesis to judge the evidence
 - **In-flight visibility** — the TUI inserts contextual "Planning...", "Synthesizing...", etc. rows after 2s of silence between events, so long model calls don't look stalled
 - **Shared conversation primitives** — an internal workspace crate ([crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs)) cleanly separates conversation/thread/session types from the main binary
 

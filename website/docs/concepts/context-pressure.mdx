@@ -1,14 +1,43 @@
 ---
-title: Context Pressure
+title: Pressure Systems
 sidebar_position: 5
-description: How Paddles tracks context degradation and surfaces it as a first-class signal.
+description: How Paddles applies context, execution, evidence, compaction, and budget pressure inside the recursive harness.
 ---
 
-# Context Pressure
+# Pressure Systems
 
-When context is truncated — an operator memory file exceeds 12k characters, an artifact is too large for inline storage, a thread summary is trimmed — the system loses signal. Paddles tracks these truncation events and surfaces them as a first-class capability signal.
+Paddles does not use one generic "pressure" score. It applies a family of controller-owned pressure systems that bias the turn loop when evidence starts to matter more than priors.
 
-## How It Works
+```text
+prompt prior
+   ↓
+interpretation context
+   ↓
+planner proposes next action
+   ↓
+controller pressure layer
+   ├─ context pressure: context degraded
+   ├─ execution pressure: act on a likely file
+   ├─ evidence pressure: refine or stop and judge
+   ├─ compaction pressure: tighten active context
+   └─ budget pressure: terminate bounded recursion
+   ↓
+next action or grounded synthesis
+```
+
+The key rule is simple: the user can supply the starting premise, but gathered sources get to revise it.
+
+## Pressure Families
+
+| System | Trigger | Effect |
+|-------|---------|--------|
+| **Context pressure** | Truncation during context assembly | Surfaces degraded context quality |
+| **Execution pressure** | Mutation turn is still avoiding file action | Redirects to a likely target file |
+| **Evidence pressure** | Quiet steps or evidence weakens the original premise | Refines interpretation or stops redundant probing |
+| **Compaction pressure** | Active context is getting noisy | Summarizes/prunes low-value artifacts while preserving locators |
+| **Budget pressure** | Hard recursion caps are reached | Stops the loop and forces an honest answer |
+
+## Context Pressure
 
 A `PressureTracker` accumulates truncation events during context assembly for each turn. When the turn's context has been fully assembled, the tracker computes a `ContextPressure` value:
 
@@ -25,19 +54,51 @@ A `PressureTracker` accumulates truncation events during context assembly for ea
 | **High** | 3-5 | Significant truncation across multiple sources |
 | **Critical** | 6+ | Severe context degradation |
 
-## What It Surfaces
+When pressure is non-nominal, the system emits a `ContextPressure` turn event. This is observational: it tells the operator that the working set was degraded.
 
-When pressure is non-nominal (anything above Low), the system emits a `ContextPressure` turn event. In the TUI, this appears as a trace step:
+## Execution Pressure
+
+Execution pressure encodes the principle that action produces information.
+
+On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller can redirect those non-file actions into a file read so the loop stops drifting.
+
+## Evidence Pressure
+
+Evidence pressure is what makes the harness intellectually honest.
+
+It operates in two modes:
+
+- **Quiet-step refinement** — if the loop has real evidence but several steps add nothing new, the controller derives a refined interpretation context.
+- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller stops redundant confirmatory probes and forces synthesis to judge the sources.
+
+This is how Paddles avoids blindly trusting the operator once the evidence says otherwise.
+
+## Compaction Pressure
+
+Compaction pressure keeps the active context small enough to stay useful. The controller can summarize or prune low-value retained artifacts while preserving typed locators to the deeper records in transit or on disk.
+
+## Budget Pressure
+
+Budget pressure is the hard outer wall. Step, search, inspect, and read limits are all explicit. When they are exhausted, the loop stops and synthesis proceeds from the evidence actually gathered.
+
+## What Operators See
+
+Pressure is visible in both the transcript and the trace model. In the TUI, context pressure appears as a turn step:
 
 ```
 • Context pressure: medium
   └ 2 truncation(s), factors: [memory-truncated, artifact-truncated]
 ```
 
-The event is informational. It does not alter routing or synthesis behavior. Its purpose is to make context degradation visible so operators can understand when answers might be less grounded than usual.
+In transit traces and the web forensic inspector, pressure and force snapshots carry:
+
+- a pressure kind
+- a magnitude estimate
+- a summary
+- source-attributed contribution estimates
 
 ## What To Read Next
 
+- [Turn Loop](./turn-loop.mdx) — where the pressure layer sits in the full cycle
+- [Recursive Planning](./recursive-planning.mdx) — how pressure changes planner behavior
 - [Context Tiers](./context-tiers.mdx) — how content moves between tiers and gets truncated
-- [Turn Loop](./turn-loop.mdx) — where context assembly fits in the overall cycle
-- [Search and Retrieval](./search-retrieval.mdx) — what happens after truncation and search evidence enters the planner evidence stream

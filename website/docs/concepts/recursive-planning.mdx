@@ -63,6 +63,24 @@ Every planner session runs within a bounded budget:
 
 When any budget is exhausted, the loop stops and synthesis proceeds with whatever evidence has been gathered. This prevents runaway investigation while still allowing deep multi-step reasoning.
 
+## Pressure-Guided Decisions
+
+The planner is not left alone once evidence starts to accumulate. The controller applies pressure systems that bias the loop toward more intelligent moves.
+
+| Pressure | What it changes |
+|----------|-----------------|
+| **Execution pressure** | Redirects edit-oriented turns toward likely file action instead of repeated broad retrieval |
+| **Evidence pressure** | Refines context after quiet steps, or stops redundant confirmatory probes when sources already weaken the original premise |
+| **Compaction pressure** | Keeps retained context small enough to stay actionable |
+| **Budget pressure** | Terminates recursion when the hard caps are reached |
+
+Two evidence-pressure cases matter most:
+
+1. **Quiet-step refinement**
+   If the loop has gathered evidence but several steps add nothing new, the controller refreshes interpretation context before asking the planner again.
+2. **Premise judgement**
+   If the user says "CI is failing" but the gathered sources show only `success`, `cancelled`, or an unconfirmed `in_progress` run, repeating `gh run list --limit 20`, then `--limit 10`, then `--limit 5` is not intelligent work. The controller should stop and make synthesis judge those sources directly.
+
 ## Recursive Self-Assessing Compaction
 
 As the planner accumulates evidence across many steps, the working context can grow large. A compaction engine evaluates the planner's retained evidence for relevance against the current query and produces a structured compaction plan.
@@ -72,5 +90,5 @@ Low-value artifacts are pruned from working context, but their content remains r
 ## What To Read Next
 
 - [Context Tiers](./context-tiers.mdx) — how pruned content stays reachable through locators
-- [Context Pressure](./context-pressure.mdx) — how truncation is tracked and surfaced
+- [Pressure Systems](./context-pressure.mdx) — how controller pressure shapes the loop
 - [Search and Retrieval](./search-retrieval.mdx) — planner retrieval behavior, modes, and limits
