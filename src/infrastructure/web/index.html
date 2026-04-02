@@ -4384,7 +4384,8 @@ function refreshTraceGraph() {
   graphDebounce = setTimeout(async () => {
     graphDebounce = null;
     try {
-      const res = await fetch('/trace/graph');
+      if (!sessionId) return;
+      const res = await fetch('/sessions/' + sessionId + '/trace/graph');
       if (!res.ok) return;
       const graph = await res.json();
       renderTraceDAG(graph);

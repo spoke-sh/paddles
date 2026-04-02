@@ -597,7 +597,7 @@ mod tests {
         AppState, BroadcastForensicSink, ForensicProjectionResponse,
         ForensicTurnProjectionResponse, conversation_forensics, parse_task_id, turn_forensics,
     };
-    use crate::application::MechSuitService;
+    use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::{
         ArtifactKind, ConversationForensicUpdate, ForensicUpdateSink, TraceCheckpointKind,
         TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind, TraceLineageNodeRef,
@@ -605,21 +605,35 @@ mod tests {
         TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
         TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
     };
-    use crate::domain::ports::{ModelPaths, ModelRegistry, TraceRecorder};
+    use crate::domain::model::NullTurnEventSink;
+    use crate::domain::ports::{
+        ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
+    };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
+    use crate::infrastructure::adapters::http_provider::{
+        ApiFormat, HttpPlannerAdapter, HttpProviderAdapter,
+    };
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::providers::ModelProvider;
+    use crate::infrastructure::rendering::RenderCapability;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use axum::Json;
     use axum::body::Body;
     use axum::extract::{Path, State};
-    use axum::http::{Request, StatusCode};
+    use axum::http::{HeaderMap, Request, StatusCode, Uri};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::any;
+    use axum::{Router, body::Bytes};
     use paddles_conversation::{
         ArtifactEnvelope, ConversationSession, TraceArtifactId, TraceCheckpointId, TurnTraceId,
     };
+    use serde_json::json;
     use std::path::Path as FsPath;
-    use std::sync::Arc;
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
     use tokio::sync::broadcast;
+    use tokio::task::JoinHandle;
     use tower::util::ServiceExt;
 
     #[derive(Default)]
@@ -644,6 +658,156 @@ mod tests {
             Box::new(|_, _| Err(anyhow!("synthesizer factory not used in this test"))),
             Box::new(|_, _| Err(anyhow!("planner factory not used in this test"))),
             Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
+            recorder,
+        ))
+    }
+
+    #[derive(Clone, Debug)]
+    struct MockResponse {
+        status: StatusCode,
+        body: String,
+    }
+
+    struct MockServerState {
+        responses: Mutex<VecDeque<MockResponse>>,
+    }
+
+    struct MockServerHandle {
+        base_url: String,
+        task: JoinHandle<()>,
+    }
+
+    impl Drop for MockServerHandle {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn mock_provider_handler(
+        State(state): State<Arc<MockServerState>>,
+        _headers: HeaderMap,
+        _uri: Uri,
+        _body: Bytes,
+    ) -> Response {
+        let response = state
+            .responses
+            .lock()
+            .expect("response lock")
+            .pop_front()
+            .expect("queued response");
+
+        (
+            response.status,
+            [("content-type", "application/json")],
+            response.body,
+        )
+            .into_response()
+    }
+
+    async fn start_mock_provider_server(responses: Vec<MockResponse>) -> MockServerHandle {
+        let state = Arc::new(MockServerState {
+            responses: Mutex::new(VecDeque::from(responses)),
+        });
+        let app = Router::new()
+            .fallback(any(mock_provider_handler))
+            .with_state(Arc::clone(&state));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock provider");
+        let addr = listener.local_addr().expect("local addr");
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("run mock provider");
+        });
+
+        MockServerHandle {
+            base_url: format!("http://{}", addr),
+            task,
+        }
+    }
+
+    fn openai_content_response(content: &str) -> String {
+        json!({
+            "choices": [
+                {
+                    "message": {
+                        "content": content,
+                    }
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn openai_tool_call_response(arguments: &str) -> String {
+        json!({
+            "choices": [
+                {
+                    "message": {
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "id": "call_test",
+                                "type": "function",
+                                "function": {
+                                    "name": "select_planner_action",
+                                    "arguments": arguments,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn live_http_test_service_with_recorder(
+        workspace: &FsPath,
+        base_url: String,
+        recorder: Arc<dyn TraceRecorder>,
+    ) -> Arc<MechSuitService> {
+        let operator_memory = Arc::new(AgentMemory::load(workspace));
+
+        let synth_base_url = base_url.clone();
+        let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
+            move |workspace: &FsPath, lane: &crate::application::PreparedModelLane| {
+                Ok(Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    ModelProvider::Inception.name(),
+                    lane.model_id.clone(),
+                    "test-key",
+                    synth_base_url.clone(),
+                    ApiFormat::OpenAi,
+                    RenderCapability::OpenAiJsonSchema,
+                )) as Arc<dyn SynthesizerEngine>)
+            },
+        );
+
+        let planner_base_url = base_url;
+        let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
+            move |workspace: &FsPath, lane: &crate::application::PreparedModelLane| {
+                let engine = Arc::new(HttpProviderAdapter::new(
+                    workspace.to_path_buf(),
+                    ModelProvider::Inception.name(),
+                    lane.model_id.clone(),
+                    "test-key",
+                    planner_base_url.clone(),
+                    ApiFormat::OpenAi,
+                    RenderCapability::OpenAiJsonSchema,
+                ));
+                Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
+            },
+        );
+
+        Arc::new(MechSuitService::with_trace_recorder(
+            workspace,
+            Arc::new(StaticRegistry),
+            operator_memory,
+            synthesizer_factory,
+            planner_factory,
+            Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None)),
             recorder,
         ))
     }
@@ -1130,6 +1294,113 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn session_routes_project_live_shared_session_turns_from_mock_provider() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the local harness before answering.\n",
+        )
+        .expect("write AGENTS.md");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let server = start_mock_provider_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    "I should inspect the local workspace before answering.",
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"inspect","command":"pwd","rationale":"inspect the local workspace before answering"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"answer","rationale":"the local evidence is sufficient"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    r#"{"render_types":["paragraph"],"blocks":[{"type":"paragraph","text":"Mock provider completed the turn after local inspection."}]}"#,
+                ),
+            },
+        ])
+        .await;
+        let service = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder.clone(),
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare lanes");
+
+        let session = service.shared_conversation_session();
+        let task_id = session.task_id().as_str().to_string();
+        service
+            .process_prompt_in_session_with_sink(
+                "CI is failing. Can you debug it on this machine?",
+                session,
+                Arc::new(NullTurnEventSink),
+            )
+            .await
+            .expect("process prompt");
+
+        let (event_tx, _) = broadcast::channel(8);
+        let (transcript_tx, _) = broadcast::channel(8);
+        let (forensic_tx, _) = broadcast::channel(8);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx,
+            transcript_tx,
+            forensic_tx,
+        });
+
+        let Json(super::TranscriptResponse(transcript)) = super::conversation_transcript(
+            State(Arc::clone(&state)),
+            Path(task_id.clone()),
+        )
+        .await
+        .expect("conversation transcript");
+        assert_eq!(transcript.entries.len(), 2);
+        assert!(
+            transcript.entries[1]
+                .content
+                .contains("Mock provider completed the turn after local inspection.")
+        );
+
+        let Json(graph) = super::trace_graph(State(Arc::clone(&state)), Path(task_id.clone()))
+            .await
+            .expect("trace graph");
+        assert!(!graph.nodes.is_empty());
+        assert!(graph.nodes.iter().any(|node| node.kind == "root"));
+        assert!(graph.nodes.iter().any(|node| node.kind == "action"));
+        assert!(graph.nodes.iter().any(|node| node.kind == "signal"));
+
+        let Json(super::ManifoldProjectionResponse(manifold)) = super::conversation_manifold(
+            State(state),
+            Path(task_id),
+        )
+        .await
+        .expect("conversation manifold");
+        assert_eq!(manifold.turns.len(), 1);
+        assert!(
+            manifold.turns[0]
+                .frames
+                .iter()
+                .any(|frame| !frame.active_signals.is_empty())
+        );
+    }
+
     #[test]
     fn transit_trace_html_supports_wheel_zoom() {
         let html = include_str!("index.html");
@@ -1163,6 +1434,14 @@ mod tests {
         assert!(html.contains("data-trace-family=\"signals\""));
         assert!(html.contains("function traceNodeVisible"));
         assert!(html.contains("function syncTransitTraceControls"));
+    }
+
+    #[test]
+    fn transit_trace_html_fetches_session_scoped_graphs() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("'/sessions/' + sessionId + '/trace/graph'"));
+        assert!(!html.contains("fetch('/trace/graph')"));
     }
 
     #[test]

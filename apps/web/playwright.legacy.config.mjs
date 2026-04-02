@@ -14,9 +14,9 @@ export default defineConfig({
       : { headless: true, args: ['--no-sandbox'] },
   },
   webServer: {
-    command: 'PORT=4174 node ./scripts/serve-web-shell-fixture.mjs',
+    command: 'PORT=4174 node ./scripts/serve-live-web-shell-harness.mjs',
     url: 'http://127.0.0.1:4174/health',
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 120_000,
   },
 });

@@ -142,6 +142,10 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, emptyManifold);
   }
 
+  if (req.method === 'GET' && pathname === `/sessions/${sessionId}/trace/graph`) {
+    return json(res, 200, traceGraph);
+  }
+
   if (req.method === 'GET' && pathname === '/trace/graph') {
     return json(res, 200, traceGraph);
   }

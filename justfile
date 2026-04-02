@@ -43,6 +43,10 @@ frontend-test:
 frontend-e2e:
   npm run e2e
 
+# Build the runtime frontend workspace.
+frontend-build:
+  npm --workspace @paddles/web run build
+
 # Run tests.
 test:
   just frontend-install
@@ -60,6 +64,8 @@ quality:
 # Run the paddles CLI. Use --cuda to enable GPU support.
 paddles *args:
   #!/usr/bin/env bash
+  just frontend-install
+  just frontend-build
   FEATURES=""
   PASSED_ARGS=()
   for arg in "$@"; do

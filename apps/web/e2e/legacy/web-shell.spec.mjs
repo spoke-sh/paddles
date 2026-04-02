@@ -1,25 +1,36 @@
 import { expect, test } from '@playwright/test';
 
-test('root route submits a prompt and renders the fixture transcript', async ({ page }) => {
+test('root route submits a prompt and renders the live shared transcript', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.locator('#prompt')).toBeVisible();
-  await page.locator('#prompt').fill('Browser fixture prompt');
+  await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
   await page.locator('#send').click();
 
-  await expect(page.locator('.msg.user')).toContainText('Browser fixture prompt');
-  await expect(page.locator('.msg.assistant')).toContainText('Fixture assistant response for: Browser fixture prompt');
+  await expect(page.locator('.msg.user')).toContainText(
+    'CI is failing. Can you debug it on this machine?'
+  );
+  await expect(page.locator('.msg.assistant')).toContainText(
+    'Mock provider completed the turn after local inspection.'
+  );
 });
 
 test('transit route renders significant steps and can expand to the full trace', async ({ page }) => {
   await page.goto('/transit');
 
+  await page.goto('/');
+  await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
+  await page.locator('#send').click();
+  await expect(page.locator('.msg.assistant')).toContainText(
+    'Mock provider completed the turn after local inspection.'
+  );
+
+  await page.goto('/transit');
   const nodes = page.locator('#trace-board .trace-node');
-  await expect(nodes).toHaveCount(4);
+  await expect(nodes).not.toHaveCount(0);
   await expect(page.locator('#trace-transit-meta')).toContainText('significant steps');
 
   await page.getByRole('button', { name: 'Full Trace' }).click();
-  await expect(nodes).toHaveCount(6);
   await expect(page.locator('#trace-transit-meta')).toContainText('full trace');
 });
 
@@ -43,8 +54,17 @@ test('transit route adapts detail density as the trace zoom changes', async ({ p
 });
 
 test('manifold route boots the dedicated shell', async ({ page }) => {
-  await page.goto('/manifold');
+  await page.goto('/');
+  await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
+  await page.locator('#send').click();
+  await expect(page.locator('.msg.assistant')).toContainText(
+    'Mock provider completed the turn after local inspection.'
+  );
 
+  await page.goto('/manifold');
   await expect(page.locator('#manifold-canvas')).toBeVisible();
-  await expect(page.locator('#manifold-stage-meta')).toContainText('Awaiting replay-backed manifold frames');
+  await expect(page.locator('#manifold-stage-meta')).not.toContainText(
+    'Awaiting replay-backed manifold frames'
+  );
+  await expect(page.locator('.manifold-node')).not.toHaveCount(0);
 });

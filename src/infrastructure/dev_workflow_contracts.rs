@@ -59,6 +59,25 @@ fn just_test_runs_frontend_workspace_test_checks() {
 }
 
 #[test]
+fn just_paddles_rebuilds_runtime_frontend_before_launching_cli() {
+    let justfile = read_repo_file("justfile");
+    let paddles_section = justfile
+        .split("\n# Standard mission path for verification.")
+        .next()
+        .and_then(|prefix| prefix.split("\n# Run the paddles CLI. Use --cuda to enable GPU support.\npaddles *args:\n").nth(1))
+        .expect("justfile should contain a paddles recipe");
+
+    assert!(
+        paddles_section.contains("just frontend-install"),
+        "paddles should install frontend workspace dependencies before launching the CLI",
+    );
+    assert!(
+        paddles_section.contains("just frontend-build"),
+        "paddles should rebuild the runtime frontend workspace before launching the CLI",
+    );
+}
+
+#[test]
 fn root_workspace_package_defines_shared_scripts_and_workspaces() {
     let package_json = read_repo_file("package.json");
     let package: Value = serde_json::from_str(&package_json).expect("package.json should parse");
@@ -185,5 +204,20 @@ fn runtime_web_playwright_config_exists() {
     assert!(
         repo_file("apps/web/playwright.config.mjs").exists(),
         "runtime web app should define a Playwright config for browser e2e",
+    );
+}
+
+#[test]
+fn runtime_web_app_defines_a_build_script() {
+    let package_json = read_repo_file("apps/web/package.json");
+    let package: Value =
+        serde_json::from_str(&package_json).expect("apps/web/package.json should parse");
+    let scripts = package["scripts"]
+        .as_object()
+        .expect("apps/web/package.json scripts should be an object");
+
+    assert!(
+        scripts.contains_key("build"),
+        "runtime web app should define a build script for the paddles launch path",
     );
 }
