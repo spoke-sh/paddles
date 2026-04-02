@@ -27,12 +27,12 @@ started_at: 2026-04-02T05:59:25
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/5 stories complete
+**Progress:** 3/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Add Inception Provider Catalog And Authentication Support](../../../../stories/VFc2mxZgj/README.md) | feat | done |
-| [Expose Inception Defaults And Operator Guidance](../../../../stories/VFc2my2gi/README.md) | chore | backlog |
+| [Expose Inception Defaults And Operator Guidance](../../../../stories/VFc2my2gi/README.md) | chore | done |
 | [Add Inception Streaming And Diffusion Visualization Support](../../../../stories/VFc2myPgh/README.md) | feat | backlog |
 | [Wire Mercury-2 Through The OpenAI-Compatible HTTP Adapter](../../../../stories/VFc2mykgg/README.md) | feat | done |
 | [Support Inception Edit-Native Endpoints](../../../../stories/VFc2myzhw/README.md) | feat | backlog |

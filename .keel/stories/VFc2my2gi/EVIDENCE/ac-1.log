@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T06:13:17.412563815-07:00
+mode: manual
+---
+Updated README Current Runtime Lanes and CONFIGURATION auth guidance to document /login inception and /model synthesizer|planner inception mercury-2. Verified with cargo test -q readme_documents_inception_authentication_and_model_selection.

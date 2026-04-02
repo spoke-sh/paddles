@@ -229,6 +229,12 @@ does not use API-key login.
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
 
+For Inception, the supported core model path is `mercury-2`. Authenticate with
+`/login inception`, then select it with `/model synthesizer inception mercury-2`
+or `/model planner inception mercury-2`. That chat-completions compatibility
+path is usable today without provider-native streaming/diffusion views or
+edit-native endpoints.
+
 ### Final Answer Render Capability
 
 Paddles resolves final-answer rendering capability at boot from the selected
@@ -238,12 +244,21 @@ synthesizer lane:
 - `openai`: native JSON Schema via Chat Completions `response_format`
 - `anthropic`: native structured tool use with a forced render tool
 - `google`: native JSON Schema via Gemini `generationConfig`
+- `inception`: OpenAI-compatible JSON Schema via the `mercury-2` chat completions path
 - `moonshot`, `ollama`, and local `sift`: prompt-enveloped JSON with post-response normalization
 
 All providers still normalize into the same transcript-safe render envelope
 (`paragraph`, `bullet_list`, `code_block`, `citations`), and slightly
 inconsistent envelopes are repaired from the emitted `blocks` rather than shown
 raw.
+
+### Inception Capability Boundary
+
+The first supported Inception slice is intentionally narrow:
+
+- Core compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
+- Optional native capabilities: provider-specific streaming/diffusion behavior and edit-native endpoints remain follow-on slices.
+- Operator expectation: Inception is usable today for planner or synthesizer lanes without waiting for those optional native capabilities.
 
 ### Experimental Context-1 Boundary
 

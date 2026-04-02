@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T06:13:17.471698690-07:00
+mode: manual
+---
+Added CONFIGURATION guidance that frames mercury-2 as the core compatibility slice and streaming/diffusion plus edit-native endpoints as optional follow-on capabilities. Verified with cargo test -q configuration_guidance_distinguishes_core_inception_support_from_optional_capabilities.

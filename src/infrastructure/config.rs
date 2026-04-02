@@ -106,6 +106,12 @@ fn config_search_paths(workspace_root: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
+
+    fn repo_doc(path: &str) -> String {
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|err| panic!("read {path}: {err}"))
+    }
 
     #[test]
     fn default_config_uses_sift_and_qwen() {
@@ -172,5 +178,33 @@ port = 8080
             "sift-direct"
         );
         assert_eq!(normalize_gatherer_provider_alias("context1"), "context1");
+    }
+
+    #[test]
+    fn readme_documents_inception_authentication_and_model_selection() {
+        let readme = repo_doc("README.md");
+        assert!(readme.contains("Inception"));
+        assert!(readme.contains("/login inception"));
+        assert!(readme.contains("/model synthesizer inception mercury-2"));
+        assert!(readme.contains("mercury-2"));
+    }
+
+    #[test]
+    fn configuration_guidance_distinguishes_core_inception_support_from_optional_capabilities() {
+        let configuration = repo_doc("CONFIGURATION.md");
+        assert!(configuration.contains("Inception"));
+        assert!(configuration.contains("mercury-2"));
+        assert!(configuration.contains("streaming/diffusion"));
+        assert!(configuration.contains("edit-native"));
+        assert!(configuration.contains("optional"));
+    }
+
+    #[test]
+    fn configuration_guidance_marks_inception_core_path_as_immediately_usable() {
+        let configuration = repo_doc("CONFIGURATION.md");
+        assert!(configuration.contains("usable today"));
+        assert!(configuration.contains("without"));
+        assert!(configuration.contains("streaming/diffusion"));
+        assert!(configuration.contains("edit-native"));
     }
 }

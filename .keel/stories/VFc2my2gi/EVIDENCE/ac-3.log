@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T06:13:17.528300317-07:00
+mode: manual
+---
+Documented that the Inception mercury-2 path is usable today without the optional native capabilities. Verified with cargo test -q configuration_guidance_marks_inception_core_path_as_immediately_usable.
