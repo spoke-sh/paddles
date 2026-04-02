@@ -254,6 +254,15 @@ pub fn final_answer_contract_prompt(
             "Use the render_final_answer tool exactly once with arguments that satisfy the schema."
         }
     };
+    let grounded_rule = if require_citations {
+        "- The attached evidence came from actions Paddles already executed locally.\n\
+- Report what those completed actions found.\n\
+- Do not say you will run tools or inspect the workspace later.\n\
+- Do not ask the user for logs, file contents, or repository state that the harness could already inspect.\n\
+"
+    } else {
+        ""
+    };
     format!(
         "Final answer rendering contract:\n\
 {transport_rule}\n\
@@ -266,6 +275,7 @@ Rules:\n\
 - Do not wrap the JSON in markdown fences, prose, or commentary.\n\
 - Do not emit partial blocks, truncated arrays, or unfinished objects.\n\
 - `render_types` must list the exact block types used in `blocks`.\n\
+{grounded_rule}\
 - Use `paragraph` for normal prose.\n\
 - A `paragraph` block must include `text`.\n\
 - Use `bullet_list` for short flat lists.\n\
@@ -876,6 +886,19 @@ mod tests {
         let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, false);
         assert!(prompt.contains("transport enforces a JSON schema"));
         assert!(prompt.contains("do not emit partial JSON"));
+    }
+
+    #[test]
+    fn grounded_contract_prompt_forbids_future_intent_language() {
+        let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, true);
+
+        assert!(
+            prompt.contains(
+                "The attached evidence came from actions Paddles already executed locally."
+            )
+        );
+        assert!(prompt.contains("Do not say you will run tools"));
+        assert!(prompt.contains("Do not ask the user for logs"));
     }
 
     #[test]

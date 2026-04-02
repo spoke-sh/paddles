@@ -2389,8 +2389,19 @@ impl MechSuitService {
                             stop_reason = Some("inspect-budget-exhausted".to_string());
                             "planner inspect budget exhausted".to_string()
                         } else {
+                            let call_id = format!("planner-tool-{sequence}");
+                            trace.emit(TurnEvent::ToolCalled {
+                                call_id: call_id.clone(),
+                                tool_name: "inspect".to_string(),
+                                invocation: command.clone(),
+                            });
                             match run_planner_inspect_command(&self.workspace_root, command) {
                                 Ok(output) => {
+                                    trace.emit(TurnEvent::ToolFinished {
+                                        call_id,
+                                        tool_name: "inspect".to_string(),
+                                        summary: output.clone(),
+                                    });
                                     append_evidence_item(
                                         &mut loop_state.evidence_items,
                                         EvidenceItem {
@@ -2405,6 +2416,11 @@ impl MechSuitService {
                                     format!("inspected {command}")
                                 }
                                 Err(err) => {
+                                    trace.emit(TurnEvent::ToolFinished {
+                                        call_id,
+                                        tool_name: "inspect".to_string(),
+                                        summary: format!("inspect failed: {err:#}"),
+                                    });
                                     format!("inspect failed: {err:#}")
                                 }
                             }
@@ -6501,6 +6517,74 @@ mod tests {
             executed_actions.first(),
             Some(WorkspaceAction::Read { path }) if path == "src/two.rs"
         ));
+    }
+
+    #[test]
+    fn inspect_actions_emit_tool_execution_events() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "cat README.md".to_string(),
+                    },
+                },
+                "inspect the local file before answering",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "inspection was enough".to_string(),
+                },
+                rationale: "stop after the inspect".to_string(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("inspect the workspace", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, invocation, .. }
+                if tool_name == "inspect" && invocation == "cat README.md"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolFinished { tool_name, summary, .. }
+                if tool_name == "inspect" && summary.contains("# Workspace")
+        )));
     }
 
     #[test]

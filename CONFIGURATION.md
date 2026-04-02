@@ -235,6 +235,11 @@ is restored even when a project-local `./paddles.toml` also sets `provider` or
 `model`. Other settings such as `port`, verbosity, gatherer configuration, and
 CLI flags keep their normal precedence.
 
+For OpenAI-compatible remote providers, planner turns now use native tool calls
+to select the next bounded workspace action. The provider chooses the action
+through the planner tool, and Paddles executes that action locally in the
+workspace harness.
+
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
 

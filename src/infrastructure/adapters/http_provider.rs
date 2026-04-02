@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 const MAX_CITATIONS: usize = 4;
 const MAX_RETRIES: u32 = 3;
 const RETRY_BASE_DELAY_MS: u64 = 2000;
+const OPENAI_PLANNER_TOOL_NAME: &str = "select_planner_action";
 
 #[derive(Clone)]
 struct ExchangeCapture<'a> {
@@ -445,6 +446,84 @@ impl HttpProviderAdapter {
         Ok((content, raw_response_artifact_id))
     }
 
+    async fn send_openai_planner_tool_call(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let body = json!({
+            "model": self.model_id,
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": user },
+            ],
+            "max_tokens": 4096,
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": OPENAI_PLANNER_TOOL_NAME,
+                    "description": "Select the next bounded planner action for local execution in the Paddles harness.",
+                    "parameters": planner_action_json_schema(),
+                    "strict": true
+                }
+            }],
+            "tool_choice": {
+                "type": "function",
+                "function": {
+                    "name": OPENAI_PLANNER_TOOL_NAME
+                }
+            }
+        });
+
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "OpenAI",
+                &url,
+                &[
+                    (
+                        "Authorization".to_string(),
+                        format!("Bearer {}", self.api_key),
+                    ),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
+
+        let parsed: OpenAiResponse = serde_json::from_str(&text)?;
+        if let Some(arguments) = parsed
+            .choices
+            .first()
+            .and_then(|choice| choice.message.tool_calls.as_ref())
+            .and_then(|calls| {
+                calls.iter().find(|call| {
+                    call.kind.as_deref().unwrap_or("function") == "function"
+                        && call.function.name == OPENAI_PLANNER_TOOL_NAME
+                })
+            })
+            .map(|call| call.function.arguments.clone())
+        {
+            return Ok((arguments, raw_response_artifact_id));
+        }
+
+        let content = parsed
+            .choices
+            .first()
+            .and_then(|c| c.message.content.clone())
+            .ok_or_else(|| anyhow!("empty OpenAI response"))?;
+        Ok((content, raw_response_artifact_id))
+    }
+
     async fn send_openai_structured_answer(
         &self,
         system: &str,
@@ -687,7 +766,10 @@ impl HttpProviderAdapter {
     fn build_planner_system_prompt(&self, interpretation: &InterpretationContext) -> String {
         let mut system = self.build_system_prompt(interpretation);
         let transport_rule = match self.format {
-            ApiFormat::OpenAi | ApiFormat::Gemini => {
+            ApiFormat::OpenAi => {
+                "The transport exposes a native tool named `select_planner_action`; call it exactly once and put the complete action envelope in the tool arguments."
+            }
+            ApiFormat::Gemini => {
                 "The transport enforces a JSON schema, but you must still produce one complete action envelope."
             }
             ApiFormat::Anthropic => {
@@ -764,14 +846,8 @@ Rules:
     ) -> Result<(String, Option<TraceArtifactId>)> {
         match self.format {
             ApiFormat::OpenAi => {
-                self.send_openai_json_schema(
-                    system,
-                    user,
-                    "planner_action",
-                    planner_action_json_schema(),
-                    capture,
-                )
-                .await
+                self.send_openai_planner_tool_call(system, user, capture)
+                    .await
             }
             ApiFormat::Gemini => {
                 self.send_gemini_json_schema(system, user, planner_action_json_schema(), capture)
@@ -1173,6 +1249,11 @@ impl SynthesizerEngine for HttpProviderAdapter {
             Some(capture.clone()),
         )?;
         let mut response = normalize_assistant_response(&raw_response);
+        if let Some(evidence) = gathered_evidence
+            && grounded_response_defers_executed_command_work(&response, evidence)
+        {
+            response = grounded_command_evidence_fallback(evidence);
+        }
         let citations = gathered_evidence.map(citation_sources).unwrap_or_default();
         response = ensure_citation_section(&response, &citations);
         self.record_rendered_response(&capture, &response, raw_response_artifact_id);
@@ -1268,7 +1349,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         let system = self
             .engine
             .build_planner_system_prompt(&request.interpretation);
-        let mut user = build_http_initial_action_prompt(request);
+        let mut user = build_http_initial_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
             TraceModelExchangeCategory::InitialAction,
@@ -1288,7 +1369,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 stage: "initial-action-retry".to_string(),
                 reason: "missing or invalid initial action response; asking the planner to restate the action inside the harness state space".to_string(),
             });
-            user = build_http_initial_action_retry_prompt(request);
+            user = build_http_initial_action_retry_prompt(request, self.engine.format);
             capture = self.exchange_capture(
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::InitialAction,
@@ -1309,7 +1390,8 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 stage: "initial-action-redecision".to_string(),
                 reason: "asking the planner for one final constrained initial action inside the harness state space".to_string(),
             });
-            user = build_http_initial_action_redecision_prompt(request, &response);
+            user =
+                build_http_initial_action_redecision_prompt(request, &response, self.engine.format);
             capture = self.exchange_capture(
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::InitialAction,
@@ -1353,7 +1435,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         let system = self
             .engine
             .build_planner_system_prompt(&request.interpretation);
-        let mut user = build_http_planner_action_prompt(request);
+        let mut user = build_http_planner_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
             TraceModelExchangeCategory::PlannerAction,
@@ -1368,7 +1450,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 stage: "planner-retry".to_string(),
                 reason: "missing or invalid planner action response; asking the planner to restate the next action inside the harness state space".to_string(),
             });
-            user = build_http_planner_retry_prompt(request);
+            user = build_http_planner_retry_prompt(request, self.engine.format);
             capture = self.exchange_capture(
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::PlannerAction,
@@ -1384,7 +1466,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 stage: "planner-redecision".to_string(),
                 reason: "asking the planner for one final constrained next action inside the harness state space".to_string(),
             });
-            user = build_http_planner_redecision_prompt(request, &response);
+            user = build_http_planner_redecision_prompt(request, &response, self.engine.format);
             capture = self.exchange_capture(
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::PlannerAction,
@@ -1580,7 +1662,23 @@ struct OpenAiChoice {
 
 #[derive(Deserialize)]
 struct OpenAiMessage {
+    #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<OpenAiToolCall>>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiToolCall {
+    #[serde(rename = "type", default)]
+    kind: Option<String>,
+    function: OpenAiFunctionCall,
+}
+
+#[derive(Deserialize)]
+struct OpenAiFunctionCall {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Deserialize)]
@@ -1821,29 +1919,29 @@ fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
     )
 }
 
-fn build_http_initial_action_prompt(request: &PlannerRequest) -> String {
+fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "User prompt: {}\n\n{}\nSelect your first action.\n\
 If the user is asking to debug a repository failure like CI, build, test, workflow, or lint breakage, do not answer directly before at least one local workspace action unless the interpretation context already contains the exact failure evidence.\n\
 When the user is asking for a code or file change, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.\n\
-Respond with JSON only.",
+{}",
         request.user_prompt,
-        build_http_planner_runtime_context(request)
+        build_http_planner_runtime_context(request),
+        planner_transport_reply_instruction(format)
     )
 }
 
-fn build_http_initial_action_retry_prompt(request: &PlannerRequest) -> String {
+fn build_http_initial_action_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "Your last planner reply was empty or invalid.\n\
 {}\n\
-Return ONLY one valid JSON initial action.\n\
-Do not answer the user directly in prose.\n\
-The first key must be `action`.\n\
+{}\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
 If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
 \n\
 User prompt: {}",
         build_http_planner_runtime_context(request),
+        planner_transport_retry_instruction(format, true),
         request.user_prompt
     )
 }
@@ -1851,13 +1949,13 @@ User prompt: {}",
 fn build_http_initial_action_redecision_prompt(
     request: &PlannerRequest,
     invalid_reply: &str,
+    format: ApiFormat,
 ) -> String {
     format!(
         "Your previous initial-action replies were invalid.\n\
 {}\n\
 Make one final constrained routing decision.\n\
-Return ONLY one valid JSON object.\n\
-The first key must be `action`.\n\
+{}\n\
 Do not ask the user for logs or repository state that the harness can inspect locally.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
 If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
@@ -1867,12 +1965,13 @@ Invalid reply to correct:\n\
 \n\
 User prompt: {}",
         build_http_planner_runtime_context(request),
+        planner_transport_retry_instruction(format, true),
         truncate(invalid_reply, 800),
         request.user_prompt
     )
 }
 
-fn build_http_planner_action_prompt(request: &PlannerRequest) -> String {
+fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     let steps_used = request.loop_state.steps.len();
     let steps_remaining = request.budget.max_steps.saturating_sub(steps_used);
     let mut user = format!(
@@ -1892,43 +1991,46 @@ fn build_http_planner_action_prompt(request: &PlannerRequest) -> String {
             ));
         }
     }
-    user.push_str(
+    user.push_str(&format!(
         "\nSelect your next action.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
-Respond with JSON only.",
-    );
+{}",
+        planner_transport_reply_instruction(format)
+    ));
     user
 }
 
-fn build_http_planner_retry_prompt(request: &PlannerRequest) -> String {
+fn build_http_planner_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "Your last planner reply was empty or invalid.\n\
 {}\n\
-Return ONLY one valid JSON planner action.\n\
-Do not answer the user directly in prose.\n\
-The first key must be `action`.\n\
+{}\n\
 \n\
 Current user request: {}",
         build_http_planner_runtime_context(request),
+        planner_transport_retry_instruction(format, false),
         request.user_prompt
     )
 }
 
-fn build_http_planner_redecision_prompt(request: &PlannerRequest, invalid_reply: &str) -> String {
+fn build_http_planner_redecision_prompt(
+    request: &PlannerRequest,
+    invalid_reply: &str,
+    format: ApiFormat,
+) -> String {
     format!(
         "Your previous planner replies were invalid.\n\
 {}\n\
 Make one final constrained next-action decision.\n\
-Return ONLY one valid JSON planner action.\n\
-The first key must be `action`.\n\
-Do not answer the user directly in prose.\n\
+{}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
 Current user request: {}",
         build_http_planner_runtime_context(request),
+        planner_transport_retry_instruction(format, false),
         truncate(invalid_reply, 800),
         request.user_prompt
     )
@@ -2014,7 +2116,10 @@ fn command_looks_read_only(command: &str) -> bool {
 fn extract_json(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if trimmed.starts_with('{') {
-        return Some(trimmed.split_once('\n').map(|(l, _)| l).unwrap_or(trimmed));
+        if let Some(end) = trimmed.rfind('}') {
+            return Some(&trimmed[..=end]);
+        }
+        return Some(trimmed);
     }
     if let Some(start) = trimmed.find("```json") {
         let after = &trimmed[start + 7..];
@@ -2029,6 +2134,31 @@ fn extract_json(text: &str) -> Option<&str> {
         }
     }
     None
+}
+
+fn planner_transport_reply_instruction(format: ApiFormat) -> &'static str {
+    match format {
+        ApiFormat::OpenAi => {
+            "Use the `select_planner_action` tool exactly once. Put the action envelope in the tool arguments and do not answer in prose."
+        }
+        ApiFormat::Gemini | ApiFormat::Anthropic => "Respond with JSON only.",
+    }
+}
+
+fn planner_transport_retry_instruction(format: ApiFormat, initial: bool) -> String {
+    let label = if initial {
+        "initial action"
+    } else {
+        "planner action"
+    };
+    match format {
+        ApiFormat::OpenAi => format!(
+            "Use the `select_planner_action` tool exactly once with one valid {label}.\nDo not answer the user directly in prose.\nThe tool arguments must include `action`."
+        ),
+        ApiFormat::Gemini | ApiFormat::Anthropic => format!(
+            "Return ONLY one valid JSON {label}.\nDo not answer the user directly in prose.\nThe first key must be `action`."
+        ),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2208,18 +2338,74 @@ fn citation_sources(evidence: &EvidenceBundle) -> Vec<String> {
     citations
 }
 
+fn grounded_response_defers_executed_command_work(reply: &str, evidence: &EvidenceBundle) -> bool {
+    if !evidence
+        .items
+        .iter()
+        .any(|item| item.source.starts_with("command: "))
+    {
+        return false;
+    }
+
+    let normalized = reply.trim().to_ascii_lowercase();
+    normalized.starts_with("i will ")
+        || normalized.starts_with("i'll ")
+        || normalized.starts_with("let me ")
+        || normalized.starts_with("use the github cli")
+        || normalized.contains("please provide the specific error")
+        || normalized.contains("please share the error")
+        || normalized.contains("please provide the error log")
+}
+
+fn grounded_command_evidence_fallback(evidence: &EvidenceBundle) -> String {
+    let mut lines = vec![
+        "I already ran local inspection commands in the harness. Here is what they showed:"
+            .to_string(),
+        evidence.summary.clone(),
+    ];
+
+    let mut added = 0usize;
+    for item in evidence
+        .items
+        .iter()
+        .filter(|item| item.source.starts_with("command: "))
+    {
+        lines.push(format!(
+            "- {}: {}",
+            item.source,
+            truncate(item.snippet.trim(), 180)
+        ));
+        added += 1;
+        if added >= 4 {
+            break;
+        }
+    }
+
+    if added == 0 {
+        for item in evidence.items.iter().take(4) {
+            lines.push(format!(
+                "- {}: {}",
+                item.source,
+                truncate(item.snippet.trim(), 180)
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::{
         TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
-        TraceRecordKind, TurnEvent, TurnEventSink,
+        TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        InitialAction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
-        PlannerBudget, PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
-        SynthesizerEngine, TraceRecorder, WorkspaceAction,
+        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, ModelPaths,
+        ModelRegistry, PlannerAction, PlannerBudget, PlannerRequest, RecursivePlanner,
+        RecursivePlannerDecision, SynthesizerEngine, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -2405,6 +2591,29 @@ mod tests {
             })
             .to_string(),
         }
+    }
+
+    fn openai_tool_call_response(name: &str, arguments: &str) -> String {
+        json!({
+            "choices": [
+                {
+                    "message": {
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "id": "call_test",
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": arguments
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        })
+        .to_string()
     }
 
     fn planner_json_answer() -> String {
@@ -2646,13 +2855,31 @@ mod tests {
                 .expect("planner system prompt")
                 .contains("Action Schema")
         );
-        assert_eq!(
-            requests[0].body["response_format"]["type"].as_str(),
-            Some("json_schema")
+        assert!(
+            requests[0].body["messages"][0]["content"]
+                .as_str()
+                .expect("planner system prompt")
+                .contains("select_planner_action")
         );
         assert_eq!(
-            requests[0].body["response_format"]["json_schema"]["name"].as_str(),
-            Some("planner_action")
+            requests[0].body["tools"][0]["type"].as_str(),
+            Some("function")
+        );
+        assert_eq!(
+            requests[0].body["tools"][0]["function"]["name"].as_str(),
+            Some(super::OPENAI_PLANNER_TOOL_NAME)
+        );
+        assert_eq!(
+            requests[0].body["tools"][0]["function"]["strict"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            requests[0].body["tool_choice"]["type"].as_str(),
+            Some("function")
+        );
+        assert_eq!(
+            requests[0].body["tool_choice"]["function"]["name"].as_str(),
+            Some(super::OPENAI_PLANNER_TOOL_NAME)
         );
         assert!(
             requests[0].body["messages"][1]["content"]
@@ -2719,12 +2946,16 @@ mod tests {
         assert_eq!(requests[1].uri, "/v1/chat/completions");
         assert_eq!(requests[0].body["model"].as_str(), Some(model_id));
         assert_eq!(
-            requests[0].body["response_format"]["type"].as_str(),
-            Some("json_schema")
+            requests[0].body["tools"][0]["type"].as_str(),
+            Some("function")
         );
         assert_eq!(
-            requests[0].body["response_format"]["json_schema"]["name"].as_str(),
-            Some("planner_action")
+            requests[0].body["tools"][0]["function"]["name"].as_str(),
+            Some(super::OPENAI_PLANNER_TOOL_NAME)
+        );
+        assert_eq!(
+            requests[0].body["tool_choice"]["function"]["name"].as_str(),
+            Some(super::OPENAI_PLANNER_TOOL_NAME)
         );
         assert_eq!(
             requests[1].body["response_format"]["type"].as_str(),
@@ -3009,6 +3240,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_planner_action_accepts_pretty_printed_multiline_json() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_planner_action(
+                "{\n  \"action\": \"inspect\",\n  \"command\": \"git status --short\",\n  \"rationale\": \"check the local workspace state before deeper diagnosis\"\n}",
+            )
+            .expect("planner decision");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "git status --short".to_string(),
+                    },
+                },
+                rationale: "check the local workspace state before deeper diagnosis".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn planner_system_prompt_demands_complete_json_action_envelopes() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
@@ -3029,6 +3292,7 @@ mod tests {
         assert!(prompt.contains("Do not wrap the JSON in markdown fences"));
         assert!(prompt.contains("Do not emit partial, truncated, or streaming JSON"));
         assert!(prompt.contains("Paddles executes your selected action locally"));
+        assert!(prompt.contains("select_planner_action"));
         assert!(prompt.contains("Do not ask the user for logs"));
     }
 
@@ -3086,6 +3350,68 @@ mod tests {
                 .expect("retry prompt")
                 .contains("Your last planner reply was empty or invalid.")
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_planner_uses_native_action_tool_and_parses_tool_calls() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: openai_tool_call_response(
+                "select_planner_action",
+                r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis"}"#,
+            ),
+        }])
+        .await;
+        let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        )));
+        let request = PlannerRequest::new(
+            "CI is failing can you debug it?",
+            workspace.path(),
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        );
+
+        let decision = planner
+            .select_initial_action(&request, Arc::new(RecordingTurnEventSink::default()))
+            .await
+            .expect("initial action");
+
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "git status --short".to_string(),
+                },
+            }
+        );
+
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].body["tools"][0]["type"].as_str(),
+            Some("function")
+        );
+        assert_eq!(
+            requests[0].body["tools"][0]["function"]["name"].as_str(),
+            Some("select_planner_action")
+        );
+        assert_eq!(
+            requests[0].body["tool_choice"]["type"].as_str(),
+            Some("function")
+        );
+        assert_eq!(
+            requests[0].body["tool_choice"]["function"]["name"].as_str(),
+            Some("select_planner_action")
+        );
+        assert!(requests[0].body.get("response_format").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -3424,6 +3750,61 @@ mod tests {
         .await;
 
         assert_eq!(response, "Hey! How can I help you today?");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn grounded_http_responses_fall_back_when_they_promise_future_command_work() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: final_answer_response(
+                ApiFormat::OpenAi,
+                &structured_answer_json(
+                    "I will query the recent GitHub Actions runs that failed to retrieve details about the CI failure.",
+                ),
+            ),
+        }])
+        .await;
+
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let evidence = EvidenceBundle::new(
+            "Recent local inspection commands already ran against the workspace and CI surface.",
+            vec![
+                EvidenceItem {
+                    source: "command: gh run list --limit 5".to_string(),
+                    snippet: "completed run listing".to_string(),
+                    rationale: "recent CI runs".to_string(),
+                    rank: 0,
+                },
+                EvidenceItem {
+                    source: "command: gh run view 123 --log-failed".to_string(),
+                    snippet: "log excerpt".to_string(),
+                    rationale: "failing job details".to_string(),
+                    rank: 1,
+                },
+            ],
+        );
+
+        let response = adapter
+            .respond_for_turn(
+                "CI is failing. Can you debug it on this machine?",
+                TurnIntent::Planned,
+                Some(&evidence),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .expect("grounded response");
+
+        assert!(!response.contains("I will query"));
+        assert!(response.contains("I already ran local inspection commands in the harness."));
+        assert!(response.contains("command: gh run list --limit 5"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

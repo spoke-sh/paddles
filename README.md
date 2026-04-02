@@ -201,6 +201,7 @@ A few areas are still maturing:
 - The synthesizer lane defaults to `qwen-1.5b` on the local `sift` provider.
 - The planner lane defaults to the synthesizer provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
 - Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect or switch planner/synthesizer lanes.
+- OpenAI-compatible remote planners now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
 - Successful `/model` changes persist to the machine-managed runtime state file at `~/.local/state/paddles/runtime-lanes.toml` so they survive restarts without rewriting authored `paddles.toml`.
 - That runtime lane state overrides authored config for planner/synthesizer lane selection on startup, while non-lane settings like `port` still come from layered config and CLI flags still win over everything.
 - Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model synthesizer inception mercury-2` or `/model planner inception mercury-2`.
