@@ -827,6 +827,7 @@ Rules:
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
 - When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
 - When the user requests a concrete code change, prefer `write_file`, `replace_in_file`, or `apply_patch` over describing the edit in prose.
+- If the loop-state notes contain a `Pressure review`, judge the proposed move against the gathered sources and return the action that should actually execute next.
 - Respond ONLY with the JSON object, no prose.
 "#
         ));
@@ -1927,6 +1928,56 @@ fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
     )
 }
 
+fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
+    let mut lines = vec![format!(
+        "Budget remaining: steps={}, evidence_limit={}, pending_branches={}",
+        request
+            .budget
+            .max_steps
+            .saturating_sub(request.loop_state.steps.len()),
+        request.budget.max_evidence_items,
+        request.loop_state.pending_branches.len()
+    )];
+
+    if request.loop_state.steps.is_empty() {
+        lines.push("No planner steps have executed yet.".to_string());
+    } else {
+        for step in &request.loop_state.steps {
+            lines.push(format!(
+                "- Step {}: {} -> {}",
+                step.sequence,
+                step.action.summary(),
+                truncate(&step.outcome, 180)
+            ));
+        }
+    }
+
+    if !request.loop_state.evidence_items.is_empty() {
+        lines.push("Current evidence:".to_string());
+        for item in request
+            .loop_state
+            .evidence_items
+            .iter()
+            .take(request.budget.max_evidence_items.min(4))
+        {
+            lines.push(format!(
+                "- {}: {}",
+                item.source,
+                truncate(&item.snippet, 180)
+            ));
+        }
+    }
+
+    if !request.loop_state.notes.is_empty() {
+        lines.push("Current notes:".to_string());
+        for note in request.loop_state.notes.iter().take(4) {
+            lines.push(format!("- {}", truncate(note, 220)));
+        }
+    }
+
+    lines.join("\n")
+}
+
 fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "User prompt: {}\n\n{}\nSelect your first action.\n\
@@ -1988,21 +2039,14 @@ fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat)
         build_http_planner_runtime_context(request),
         request.budget.max_steps
     );
-    if !request.loop_state.steps.is_empty() {
-        user.push_str("\n## Previous steps\n");
-        for step in &request.loop_state.steps {
-            user.push_str(&format!(
-                "- Step {}: {} -> {}\n",
-                step.sequence,
-                step.action.summary(),
-                step.outcome
-            ));
-        }
-    }
+    user.push_str("\n## Current loop state\n");
+    user.push_str(&build_http_planner_loop_state_digest(request));
+    user.push('\n');
     user.push_str(&format!(
         "\nSelect your next action.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
+If the loop-state notes contain a pressure review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
 {}",
         planner_transport_reply_instruction(format)
     ));
@@ -2013,10 +2057,13 @@ fn build_http_planner_retry_prompt(request: &PlannerRequest, format: ApiFormat) 
     format!(
         "Your last planner reply was empty or invalid.\n\
 {}\n\
+Current loop state:\n\
+{}\n\
 {}\n\
 \n\
 Current user request: {}",
         build_http_planner_runtime_context(request),
+        build_http_planner_loop_state_digest(request),
         planner_transport_retry_instruction(format, false),
         request.user_prompt
     )
@@ -2030,14 +2077,17 @@ fn build_http_planner_redecision_prompt(
     format!(
         "Your previous planner replies were invalid.\n\
 {}\n\
+Current loop state:\n\
+{}\n\
 Make one final constrained next-action decision.\n\
 {}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
-Current user request: {}",
+        Current user request: {}",
         build_http_planner_runtime_context(request),
+        build_http_planner_loop_state_digest(request),
         planner_transport_retry_instruction(format, false),
         truncate(invalid_reply, 800),
         request.user_prompt
@@ -2497,8 +2547,9 @@ mod tests {
     };
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, ModelPaths,
-        ModelRegistry, PlannerAction, PlannerBudget, PlannerRequest, RecursivePlanner,
-        RecursivePlannerDecision, SynthesizerEngine, TraceRecorder, WorkspaceAction,
+        ModelRegistry, PlannerAction, PlannerBudget, PlannerLoopState, PlannerRequest,
+        RecursivePlanner, RecursivePlannerDecision, SynthesizerEngine, TraceRecorder,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -3388,6 +3439,50 @@ mod tests {
         assert!(prompt.contains("working hypotheses until local evidence confirms them"));
         assert!(prompt.contains("select_planner_action"));
         assert!(prompt.contains("Do not ask the user for logs"));
+    }
+
+    #[test]
+    fn http_planner_action_prompt_includes_evidence_and_pressure_notes() {
+        let request = PlannerRequest::new(
+            "CI is failing. Can you debug it on this machine?",
+            "/workspace",
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        )
+        .with_loop_state(PlannerLoopState {
+            steps: vec![crate::domain::ports::PlannerStepRecord {
+                step_id: "planner-step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "gh run list --limit 10".to_string(),
+                    },
+                },
+                outcome: "inspected recent CI runs".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "command: gh run list --limit 10 --json status,conclusion,name,headBranch,workflowName,url"
+                    .to_string(),
+                snippet: r#"[{"conclusion":"success","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23910509164","workflowName":"CI"}]"#.to_string(),
+                rationale: "recent CI status listing".to_string(),
+                rank: 1,
+            }],
+            notes: vec![
+                "Pressure review [evidence-pressure]\nTreat the reported failure as a hypothesis and judge the gathered sources before repeating the same probe."
+                    .to_string(),
+            ],
+            ..PlannerLoopState::default()
+        });
+
+        let prompt = super::build_http_planner_action_prompt(&request, ApiFormat::OpenAi);
+
+        assert!(prompt.contains("Current loop state"));
+        assert!(prompt.contains("Current evidence"));
+        assert!(prompt.contains("Current notes"));
+        assert!(prompt.contains("Pressure review [evidence-pressure]"));
+        assert!(prompt.contains("gh run list --limit 10"));
+        assert!(prompt.contains("\"conclusion\":\"success\""));
     }
 
     #[tokio::test(flavor = "multi_thread")]

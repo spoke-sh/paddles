@@ -32,9 +32,9 @@ The key rule is simple: the user can supply the starting premise, but gathered s
 | System | Trigger | Effect |
 |-------|---------|--------|
 | **Context pressure** | Truncation during context assembly | Surfaces degraded context quality |
-| **Execution pressure** | Mutation turn is still avoiding file action | Redirects to a likely target file |
-| **Evidence pressure** | Quiet steps or evidence weakens the original premise | Refines interpretation or stops redundant probing |
-| **Compaction pressure** | Active context is getting noisy | Summarizes/prunes low-value artifacts while preserving locators |
+| **Execution pressure** | Mutation turn is still avoiding file action | Adds a planner review note that biases the next move toward a likely target file |
+| **Evidence pressure** | Quiet steps or evidence weakens the original premise | Adds a planner review note or refinement trigger so the model must judge the sources explicitly |
+| **Compaction pressure** | Active context is getting noisy | Summarizes/prunes low-value artifacts while preserving locators; today this is still mostly heuristic |
 | **Budget pressure** | Hard recursion caps are reached | Stops the loop and forces an honest answer |
 
 ## Context Pressure
@@ -60,7 +60,7 @@ When pressure is non-nominal, the system emits a `ContextPressure` turn event. T
 
 Execution pressure encodes the principle that action produces information.
 
-On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller can redirect those non-file actions into a file read so the loop stops drifting.
+On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller now adds an execution-pressure review note back into the planner loop, and the planner must judge whether the proposed move should stand or be replaced by a file-targeting action.
 
 ## Evidence Pressure
 
@@ -69,13 +69,15 @@ Evidence pressure is what makes the harness intellectually honest.
 It operates in two modes:
 
 - **Quiet-step refinement** — if the loop has real evidence but several steps add nothing new, the controller derives a refined interpretation context.
-- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller stops redundant confirmatory probes and forces synthesis to judge the sources.
+- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller adds an evidence-pressure review note and asks the planner to judge the sources before spending more budget.
 
 This is how Paddles avoids blindly trusting the operator once the evidence says otherwise.
 
 ## Compaction Pressure
 
 Compaction pressure keeps the active context small enough to stay useful. The controller can summarize or prune low-value retained artifacts while preserving typed locators to the deeper records in transit or on disk.
+
+Today that compaction path is still mostly heuristic. The interface is designed for deeper recursive self-assessment, but the current adapters do not yet fully delegate compaction judgement back to the model.
 
 ## Budget Pressure
 

@@ -116,9 +116,9 @@ flowchart LR
 | System | Trigger | What it does | Trace surface |
 |-------|---------|--------------|---------------|
 | **Context pressure** | Truncated memory, artifacts, thread summaries, or evidence-budget loss | Warns that the assembled context is degraded | `TurnEvent::ContextPressure`, `TraceForceKind::ContextPressure` |
-| **Execution pressure** | Mutation/known-edit turns with no file-targeting action yet | Redirects broad non-file work toward a plausible file read/edit | `Fallback(stage = execution-pressure)`, `TraceForceKind::ExecutionPressure` |
-| **Evidence pressure** | Enough evidence but too many quiet steps, or evidence weakens the prompt's premise | Refines interpretation or stops redundant probes so synthesis judges the sources | `RefinementApplied`, `PlannerSummary(stop_reason = evidence-pressure...)`, `TraceForceKind::Budget` |
-| **Compaction pressure** | Active context is getting too noisy for useful next actions | Summarizes/prunes low-value artifacts while preserving locators | `TraceForceKind::Compaction` |
+| **Execution pressure** | Mutation/known-edit turns with no file-targeting action yet | Adds a planner review note that biases broad non-file work toward a plausible file read/edit | `Fallback(stage = execution-pressure)`, `TraceForceKind::ExecutionPressure` |
+| **Evidence pressure** | Enough evidence but too many quiet steps, or evidence weakens the prompt's premise | Adds a planner review note or refinement trigger so the planner must judge the sources explicitly | `RefinementApplied`, `PlannerSummary(stop_reason = evidence-pressure...)`, `TraceForceKind::Budget` |
+| **Compaction pressure** | Active context is getting too noisy for useful next actions | Summarizes/prunes low-value artifacts while preserving locators; today this remains mostly heuristic | `TraceForceKind::Compaction` |
 | **Budget pressure** | Step, search, inspect, or read caps are reached | Terminates recursion honestly | `PlannerSummary(stop_reason = *-budget-exhausted)`, `TraceForceKind::Budget` |
 
 ### Context Pressure
@@ -134,7 +134,7 @@ This pressure is observational. It tells the operator and the trace that the cur
 
 ### Execution Pressure
 
-Execution pressure exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it redirects non-file actions to a concrete file read.
+Execution pressure exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it re-enters the planner with an execution-pressure review note so the model can judge whether to read, diff, or edit that likely file now.
 
 This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
 
@@ -147,13 +147,13 @@ It has two important modes:
 1. **Quiet-step refinement**
    After evidence has accumulated but several steps fail to add anything new, the controller derives a refined interpretation context. This is how the loop resists thrashing.
 2. **Premise judgement**
-   A user can supply the initial hypothesis, but gathered sources must be allowed to overturn it. When the prompt says a failure exists but the accumulated evidence shows only success, cancelled runs, or otherwise weakens that premise, the controller stops redundant confirmatory probes and forces synthesis to judge the actual sources.
+   A user can supply the initial hypothesis, but gathered sources must be allowed to overturn it. When the turn has enough source material to question the premise, the controller re-enters the planner with an explicit evidence-pressure review note. The planner then chooses whether to stop, revise the premise, or continue with one more specific action.
 
-This is the pressure family that prevents the planner from repeatedly shrinking `gh run list --limit N` instead of admitting that the current evidence does not confirm the original claim.
+This is the pressure family that prevents the planner from repeatedly shrinking `gh run list --limit N` instead of admitting that the current evidence does not confirm the original claim. The important detail is that the stop or revision now comes from a planner review pass over the evidence, not from a CI-specific controller hard stop.
 
 ### Compaction Pressure
 
-Compaction is how the harness stays sharp under depth. The planner can evaluate its own retained evidence, produce a compaction plan, and keep only the most relevant artifacts in active context. Pruned material is not lost; typed locators preserve reachability into transit and filesystem tiers.
+Compaction is how the harness stays sharp under depth. The interface is designed for planner-driven compaction, but the current adapters still implement compaction with bounded heuristics. Pruned material is not lost; typed locators preserve reachability into transit and filesystem tiers.
 
 ### Budget Pressure
 
@@ -280,9 +280,9 @@ Every `ArtifactEnvelope` carries an optional typed `ContextLocator` that encodes
 
 Resolution follows a local-first ordering: inline content returns immediately, transit replays local streams, filesystem reads local disk. When a tier is unavailable or a record is missing, resolution fails closed with an explicit error naming the tier and locator details.
 
-### Recursive Self-Assessing Compaction
+### Compaction Planning Today
 
-The planner can evaluate its own accumulated context state and produce a structured compaction plan. A `CompactionEngine` walks the planner's retained evidence, evaluates relevance against the current query, and produces a `CompactionPlan` that prunes low-value artifacts while preserving addressable locators to the pruned content. This keeps the working context tight without losing depth — pruned artifacts remain reachable through their transit locators.
+The compaction interface is shaped for recursive self-assessment, but the current planner adapters do not yet fully earn that label. Today a `CompactionEngine` walks retained evidence and applies bounded keep/compact/discard heuristics while preserving addressable locators to the pruned content. This keeps the working context tight without losing depth, but it is still more policy-driven than planner-judged.
 
 ### Context Pressure Signals
 

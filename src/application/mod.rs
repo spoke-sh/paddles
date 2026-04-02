@@ -2222,6 +2222,7 @@ impl MechSuitService {
 
         for sequence in 1..=budget.max_steps {
             let evidence_count_before = loop_state.evidence_items.len();
+            let planner_selected_this_step = pending_initial_decision.is_none();
             let mut decision = if let Some(decision) = pending_initial_decision.take() {
                 decision
             } else {
@@ -2234,56 +2235,29 @@ impl MechSuitService {
                 .with_recent_turns(context.recent_turns.clone())
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone());
-                let decision = context
+                context
                     .planner_engine
                     .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
-                    .await?;
+                    .await?
+            };
+
+            if planner_selected_this_step {
+                decision = review_decision_under_pressure(
+                    prompt,
+                    &context,
+                    &budget,
+                    &loop_state,
+                    decision,
+                    &self.workspace_root,
+                    trace.clone(),
+                )
+                .await?;
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence,
                     action: decision.action.summary(),
                     rationale: decision.rationale.clone(),
                 });
                 trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
-                decision
-            };
-
-            if let Some(forced_decision) = coerce_hypothesis_judgement_action(
-                prompt,
-                &context.interpretation,
-                &loop_state,
-                &decision,
-            ) {
-                let reason = format!(
-                    "evidence pressure redirected `{}` to `{}` because the gathered sources already weaken the reported premise",
-                    decision.action.summary(),
-                    forced_decision.action.summary()
-                );
-                trace.emit(TurnEvent::Fallback {
-                    stage: "evidence-pressure".to_string(),
-                    reason: reason.clone(),
-                });
-                loop_state.notes.push(reason);
-                decision = forced_decision;
-            }
-
-            if let Some(forced_decision) = coerce_execution_pressure_action(
-                prompt,
-                &context.interpretation,
-                &loop_state,
-                &decision,
-                &self.workspace_root,
-            ) {
-                let reason = format!(
-                    "execution pressure redirected `{}` to `{}` because acting on a likely file is more informative than more retrieval",
-                    decision.action.summary(),
-                    forced_decision.action.summary()
-                );
-                trace.emit(TurnEvent::Fallback {
-                    stage: "execution-pressure".to_string(),
-                    reason: reason.clone(),
-                });
-                loop_state.notes.push(reason);
-                decision = forced_decision;
             }
 
             trace.emit(TurnEvent::PlannerStepProgress {
@@ -2305,15 +2279,6 @@ impl MechSuitService {
                         if search_steps(&loop_state) >= budget.max_searches {
                             stop_reason = Some("search-budget-exhausted".to_string());
                             "planner search budget exhausted".to_string()
-                        } else if mutation_turn_requires_execution_pressure(
-                            prompt,
-                            &context.interpretation,
-                        ) && search_steps(&loop_state) >= 1
-                            && !has_file_targeting_step(&loop_state)
-                        {
-                            let message = "execution pressure requires reading or editing a likely file after the initial search instead of continuing broad retrieval".to_string();
-                            loop_state.notes.push(message.clone());
-                            message
                         } else if let Some(gatherer) = context.gatherer.as_ref() {
                             trace.emit(TurnEvent::GathererCapability {
                                 provider: gatherer_provider.clone(),
@@ -2521,14 +2486,6 @@ impl MechSuitService {
                     if search_steps(&loop_state) >= budget.max_searches {
                         stop_reason = Some("search-budget-exhausted".to_string());
                         "planner refine budget exhausted".to_string()
-                    } else if mutation_turn_requires_execution_pressure(
-                        prompt,
-                        &context.interpretation,
-                    ) && !has_file_targeting_step(&loop_state)
-                    {
-                        let message = "execution pressure blocks refine until the planner reads or edits a likely target file".to_string();
-                        loop_state.notes.push(message.clone());
-                        message
                     } else if let Some(gatherer) = context.gatherer.as_ref() {
                         trace.emit(TurnEvent::GathererCapability {
                             provider: gatherer_provider.clone(),
@@ -3692,197 +3649,199 @@ fn has_file_targeting_step(loop_state: &PlannerLoopState) -> bool {
     })
 }
 
-fn coerce_execution_pressure_action(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PressureReviewKind {
+    Evidence,
+    Execution,
+}
+
+impl PressureReviewKind {
+    fn stage(self) -> &'static str {
+        match self {
+            Self::Evidence => "evidence-pressure",
+            Self::Execution => "execution-pressure",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PressureReviewNote {
+    kind: PressureReviewKind,
+    note: String,
+}
+
+async fn review_decision_under_pressure(
+    prompt: &str,
+    context: &PlannerLoopContext,
+    budget: &PlannerBudget,
+    loop_state: &PlannerLoopState,
+    decision: RecursivePlannerDecision,
+    workspace_root: &Path,
+    trace: Arc<StructuredTurnTrace>,
+) -> Result<RecursivePlannerDecision> {
+    let pressure_notes = collect_pressure_review_notes(
+        prompt,
+        &context.interpretation,
+        loop_state,
+        &decision,
+        workspace_root,
+    );
+    if pressure_notes.is_empty() {
+        return Ok(decision);
+    }
+
+    let mut review_loop_state = loop_state.clone();
+    for note in &pressure_notes {
+        review_loop_state.notes.push(note.note.clone());
+    }
+
+    let request = PlannerRequest::new(
+        prompt,
+        workspace_root.to_path_buf(),
+        context.interpretation.clone(),
+        budget.clone(),
+    )
+    .with_recent_turns(context.recent_turns.clone())
+    .with_loop_state(review_loop_state)
+    .with_resolver(context.resolver.clone());
+
+    let reviewed = context
+        .planner_engine
+        .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
+        .await?;
+
+    if pressure_review_failed_closed(&reviewed) {
+        return Ok(decision);
+    }
+
+    if reviewed != decision {
+        let stage = pressure_review_stage(&pressure_notes, &reviewed);
+        trace.emit(TurnEvent::Fallback {
+            stage: stage.to_string(),
+            reason: format!(
+                "{stage} replaced `{}` with `{}` after judging the current sources",
+                decision.action.summary(),
+                reviewed.action.summary()
+            ),
+        });
+    }
+
+    Ok(reviewed)
+}
+
+fn collect_pressure_review_notes(
     prompt: &str,
     interpretation: &InterpretationContext,
     loop_state: &PlannerLoopState,
     decision: &RecursivePlannerDecision,
     workspace_root: &Path,
-) -> Option<RecursivePlannerDecision> {
-    if !mutation_turn_requires_execution_pressure(prompt, interpretation)
-        || has_file_targeting_step(loop_state)
+) -> Vec<PressureReviewNote> {
+    let mut notes = Vec::new();
+
+    if prompt_requires_verifiable_hypothesis(prompt)
+        && !loop_state.evidence_items.is_empty()
+        && !decision.action.is_terminal()
+        && !decision_targets_file(&decision.action)
     {
-        return None;
+        notes.push(PressureReviewNote {
+            kind: PressureReviewKind::Evidence,
+            note: format_evidence_pressure_review_note(decision, loop_state),
+        });
     }
 
-    if decision_targets_file(&decision.action) {
-        return None;
-    }
-
-    let path = likely_execution_pressure_targets(loop_state, workspace_root, 3)
-        .into_iter()
-        .next()
-        .or_else(|| {
+    if mutation_turn_requires_execution_pressure(prompt, interpretation)
+        && !has_file_targeting_step(loop_state)
+        && !decision_targets_file(&decision.action)
+    {
+        let likely_targets = likely_execution_pressure_targets(loop_state, workspace_root, 3);
+        let likely_targets = if likely_targets.is_empty() {
             known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3)
-                .into_iter()
-                .next()
-        })?;
-    Some(RecursivePlannerDecision {
-        action: PlannerAction::Workspace {
-            action: WorkspaceAction::Read { path: path.clone() },
-        },
-        rationale: format!(
-            "action produces information; read likely target file `{path}` before further non-file actions"
-        ),
-    })
+        } else {
+            likely_targets
+        };
+        notes.push(PressureReviewNote {
+            kind: PressureReviewKind::Execution,
+            note: format_execution_pressure_review_note(decision, &likely_targets),
+        });
+    }
+
+    notes
 }
 
-fn coerce_hypothesis_judgement_action(
-    prompt: &str,
-    _interpretation: &InterpretationContext,
-    loop_state: &PlannerLoopState,
+fn format_evidence_pressure_review_note(
     decision: &RecursivePlannerDecision,
-) -> Option<RecursivePlannerDecision> {
-    if !prompt_asserts_failure_premise(prompt)
-        || decision.action.is_terminal()
-        || !evidence_weakens_failure_premise(loop_state)
-        || evidence_confirms_failure_premise(loop_state)
-        || !(decision_repeats_prior_probe(&decision.action, loop_state)
-            || redundant_github_run_list_probe(&decision.action, loop_state))
-    {
-        return None;
+    loop_state: &PlannerLoopState,
+) -> String {
+    let mut lines = vec![
+        "Pressure review [evidence-pressure]".to_string(),
+        format!("Proposed action under review: {}", decision.action.summary()),
+        "Treat the reported failure as a hypothesis and judge the gathered sources before spending more budget.".to_string(),
+        "If the current sources already weaken or resolve the premise, choose `stop` and let synthesis judge them. Otherwise choose the single most informative next action.".to_string(),
+        "Source snapshot:".to_string(),
+    ];
+
+    for item in loop_state.evidence_items.iter().take(3) {
+        lines.push(format!(
+            "- {}: {}",
+            item.source,
+            trim_for_planner(&item.snippet, 180)
+        ));
     }
 
-    Some(RecursivePlannerDecision {
-        action: PlannerAction::Stop {
-            reason: "evidence-pressure: reported failure not confirmed by gathered sources"
-                .to_string(),
-        },
-        rationale: "action produces information; the gathered sources already weaken the reported failure premise, so stop probing and judge the evidence".to_string(),
-    })
+    lines.join("\n")
 }
 
-fn prompt_asserts_failure_premise(prompt: &str) -> bool {
-    let prompt_lower = prompt.to_ascii_lowercase();
-    [
-        "failing",
-        "failure",
-        "broken",
-        "regression",
-        "panic",
-        "crash",
-        "ci is failing",
-        "pipeline is failing",
-        "workflow is failing",
-        "build is failing",
-        "tests are failing",
-    ]
-    .iter()
-    .any(|signal| prompt_lower.contains(signal))
-}
+fn format_execution_pressure_review_note(
+    decision: &RecursivePlannerDecision,
+    likely_targets: &[String],
+) -> String {
+    let mut lines = vec![
+        "Pressure review [execution-pressure]".to_string(),
+        format!("Proposed action under review: {}", decision.action.summary()),
+        "This turn is edit-oriented. Action produces information.".to_string(),
+        "If there is a plausible target file, prefer read/diff/edit over another broad search or generic inspect.".to_string(),
+    ];
 
-fn evidence_confirms_failure_premise(loop_state: &PlannerLoopState) -> bool {
-    loop_state.evidence_items.iter().any(|item| {
-        let snippet = item.snippet.to_ascii_lowercase();
-        snippet.contains("completed\tfailure")
-            || snippet.contains("\"conclusion\":\"failure\"")
-            || snippet.contains("\"status\":\"failure\"")
-            || snippet.contains("test result: failed")
-            || snippet.contains("build failed")
-            || snippet.contains("error[")
-            || (snippet.contains("thread '") && snippet.contains("panicked"))
-            || snippet.contains("failing test")
-            || snippet.contains("failed tests:")
-            || snippet.contains("failures:")
-    })
-}
-
-fn evidence_weakens_failure_premise(loop_state: &PlannerLoopState) -> bool {
-    if evidence_confirms_failure_premise(loop_state) {
-        return false;
+    if !likely_targets.is_empty() {
+        lines.push("Likely target files:".to_string());
+        for path in likely_targets.iter().take(3) {
+            lines.push(format!("- {}", path));
+        }
     }
 
-    loop_state.evidence_items.iter().any(|item| {
-        let snippet = item.snippet.to_ascii_lowercase();
-        let looks_like_run_listing = snippet.contains("\"workflowname\"")
-            || snippet.contains("\"headbranch\"")
-            || snippet.contains("\"url\":\"https://github.com/")
-            || snippet.contains("\tci\t")
-            || snippet.contains("actions/runs/");
-        let shows_non_failure = snippet.contains("\"conclusion\":\"success\"")
-            || snippet.contains("\"conclusion\":\"cancelled\"")
-            || snippet.contains("completed\tsuccess")
-            || snippet.contains("completed\tcancelled");
-        looks_like_run_listing && shows_non_failure
-    })
+    lines.join("\n")
 }
 
-fn decision_repeats_prior_probe(action: &PlannerAction, loop_state: &PlannerLoopState) -> bool {
-    let Some(signature) = diagnostic_probe_signature(action) else {
-        return false;
-    };
-
-    loop_state.steps.iter().any(|step| {
-        diagnostic_probe_signature(&step.action)
-            .map(|prior| prior == signature)
-            .unwrap_or(false)
-    })
+fn pressure_review_failed_closed(decision: &RecursivePlannerDecision) -> bool {
+    matches!(
+        decision.action,
+        PlannerAction::Stop { ref reason }
+            if reason.contains("planner-action-unavailable")
+    )
 }
 
-fn redundant_github_run_list_probe(action: &PlannerAction, loop_state: &PlannerLoopState) -> bool {
-    if !action_is_github_run_list_probe(action) {
-        return false;
-    }
-
-    loop_state
-        .steps
-        .iter()
-        .any(|step| action_is_github_run_list_probe(&step.action))
-        || loop_state
-            .evidence_items
+fn pressure_review_stage(
+    notes: &[PressureReviewNote],
+    reviewed: &RecursivePlannerDecision,
+) -> &'static str {
+    if decision_targets_file(&reviewed.action)
+        && notes
             .iter()
-            .any(|item| source_is_github_run_list_probe(&item.source))
-}
-
-fn diagnostic_probe_signature(action: &PlannerAction) -> Option<String> {
-    match action {
-        PlannerAction::Workspace {
-            action: WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command },
-        } => Some(normalize_probe_signature(command)),
-        PlannerAction::Workspace {
-            action: WorkspaceAction::Search { query, .. },
-        }
-        | PlannerAction::Refine { query, .. } => {
-            Some(format!("query:{}", query.trim().to_ascii_lowercase()))
-        }
-        _ => None,
-    }
-}
-
-fn normalize_probe_signature(command: &str) -> String {
-    let tokens = command
-        .split_whitespace()
-        .skip_while(|token| token.contains('=') && !token.starts_with('/'))
-        .take(3)
-        .map(|token| token.trim_matches(|ch| ch == '"' || ch == '\''))
-        .map(|token| token.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-
-    if tokens.is_empty() {
-        command.trim().to_ascii_lowercase()
+            .any(|note| note.kind == PressureReviewKind::Execution)
+    {
+        PressureReviewKind::Execution.stage()
+    } else if reviewed.action.is_terminal()
+        && notes
+            .iter()
+            .any(|note| note.kind == PressureReviewKind::Evidence)
+    {
+        PressureReviewKind::Evidence.stage()
     } else {
-        tokens.join(" ")
+        notes
+            .first()
+            .map(|note| note.kind.stage())
+            .unwrap_or("pressure-review")
     }
-}
-
-fn action_is_github_run_list_probe(action: &PlannerAction) -> bool {
-    match action {
-        PlannerAction::Workspace {
-            action: WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command },
-        } => command_is_github_run_list_probe(command),
-        _ => false,
-    }
-}
-
-fn source_is_github_run_list_probe(source: &str) -> bool {
-    source
-        .strip_prefix("command: ")
-        .map(command_is_github_run_list_probe)
-        .unwrap_or(false)
-}
-
-fn command_is_github_run_list_probe(command: &str) -> bool {
-    normalize_probe_signature(command) == "gh run list"
 }
 
 fn decision_targets_file(action: &PlannerAction) -> bool {
@@ -6365,21 +6324,19 @@ mod tests {
             rationale: "run a check first".to_string(),
         };
 
-        let redirected = super::coerce_execution_pressure_action(
+        let notes = super::collect_pressure_review_notes(
             "fix the execution pressure behavior",
             &InterpretationContext::default(),
             &loop_state,
             &decision,
             Path::new("/workspace"),
-        )
-        .expect("redirected decision");
+        );
 
-        assert!(matches!(
-            redirected.action,
-            PlannerAction::Workspace {
-                action: WorkspaceAction::Read { path }
-            } if path == "src/application/mod.rs"
-        ));
+        assert!(notes.iter().any(|note| {
+            note.kind == super::PressureReviewKind::Execution
+                && note.note.contains("Pressure review [execution-pressure]")
+                && note.note.contains("src/application/mod.rs")
+        }));
     }
 
     #[test]
@@ -6437,6 +6394,14 @@ mod tests {
                     rationale: "continue exploring".to_string(),
                 },
                 RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "src/application/mod.rs".to_string(),
+                        },
+                    },
+                    rationale: "read the likely target file before more retrieval".to_string(),
+                },
+                RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "enough information".to_string(),
                     },
@@ -6485,6 +6450,20 @@ mod tests {
 
         let gatherer_requests = gatherer_requests.lock().expect("gatherer requests");
         assert_eq!(gatherer_requests.len(), 1);
+        let planner_requests = request_log.lock().expect("planner request log");
+        let review_request = planner_requests
+            .iter()
+            .find(|request| {
+                request
+                    .loop_state
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("Pressure review [execution-pressure]"))
+            })
+            .expect("execution pressure review request should be recorded");
+        assert!(review_request.loop_state.notes.iter().any(|note| {
+            note.contains("Likely target files") && note.contains("src/application/mod.rs")
+        }));
 
         let executed_actions = synthesizer
             .executed_actions
@@ -6829,20 +6808,125 @@ mod tests {
             rationale: "get the run id for the failing job".to_string(),
         };
 
-        let redirected = super::coerce_hypothesis_judgement_action(
+        let notes = super::collect_pressure_review_notes(
             "CI is failing. Can you debug it on this machine?",
             &InterpretationContext::default(),
             &loop_state,
             &decision,
-        )
-        .expect("redirected decision");
+            Path::new("/workspace"),
+        );
 
-        assert!(matches!(
-            redirected.action,
-            PlannerAction::Stop { ref reason }
-                if reason.contains("evidence-pressure")
-                    && reason.contains("not confirmed")
+        assert!(notes.iter().any(|note| {
+            note.kind == super::PressureReviewKind::Evidence
+                && note.note.contains("Pressure review [evidence-pressure]")
+                && note.note.contains("\"conclusion\":\"success\"")
+        }));
+    }
+
+    #[test]
+    fn diagnostic_turn_requests_recursive_evidence_review_before_stopping() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nVerify failures from first principles.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let inspect_command = r#"printf '%s' '[{"conclusion":"success","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23910509164","workflowName":"CI"},{"conclusion":"cancelled","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23902835068","workflowName":"CI"}]'"#.to_string();
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: inspect_command.clone(),
+                    },
+                },
+                "inspect the recent CI runs",
+            ),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: inspect_command.clone(),
+                        },
+                    },
+                    rationale: "repeat the same status probe".to_string(),
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "reviewed evidence: recent CI runs are success/cancelled"
+                            .to_string(),
+                    },
+                    rationale: "the gathered sources weaken the premise, so stop and judge them"
+                        .to_string(),
+                },
+            ],
+            Arc::clone(&recorded_requests),
         ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "CI is failing. Can you debug it on this machine?",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        let review_request = requests
+            .last()
+            .expect("pressure review request should be recorded");
+        assert!(review_request.loop_state.notes.iter().any(|note| {
+            note.contains("Pressure review [evidence-pressure]")
+                && note.contains("Treat the reported failure as a hypothesis")
+        }));
+        let events = sink.recorded();
+        let inspect_calls = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    TurnEvent::ToolCalled { tool_name, .. } if tool_name == "inspect"
+                )
+            })
+            .count();
+        assert_eq!(inspect_calls, 1);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress { step_number, action, .. }
+                if *step_number == 2
+                    && action.contains("stop (reviewed evidence: recent CI runs are success/cancelled)")
+        )));
     }
 
     #[test]
@@ -6876,20 +6960,19 @@ mod tests {
             rationale: "check a smaller recent window".to_string(),
         };
 
-        let redirected = super::coerce_hypothesis_judgement_action(
+        let notes = super::collect_pressure_review_notes(
             "CI is failing. Can you debug it on this machine?",
             &InterpretationContext::default(),
             &loop_state,
             &decision,
-        )
-        .expect("redirected decision");
+            Path::new("/workspace"),
+        );
 
-        assert!(matches!(
-            redirected.action,
-            PlannerAction::Stop { ref reason }
-                if reason.contains("evidence-pressure")
-                    && reason.contains("not confirmed")
-        ));
+        assert!(notes.iter().any(|note| {
+            note.kind == super::PressureReviewKind::Evidence
+                && note.note.contains("Pressure review [evidence-pressure]")
+                && note.note.contains("completed\tsuccess")
+        }));
     }
 
     #[test]
@@ -6926,14 +7009,24 @@ mod tests {
                 },
                 "inspect the recent CI runs",
             ),
-            vec![RecursivePlannerDecision {
-                action: PlannerAction::Workspace {
-                    action: WorkspaceAction::Inspect {
-                        command: inspect_command.clone(),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: inspect_command.clone(),
+                        },
                     },
+                    rationale: "repeat the same status probe".to_string(),
                 },
-                rationale: "repeat the same status probe".to_string(),
-            }],
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "reviewed evidence: recent CI runs are success/cancelled"
+                            .to_string(),
+                    },
+                    rationale: "the gathered sources weaken the premise, so stop and judge them"
+                        .to_string(),
+                },
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
@@ -6975,7 +7068,7 @@ mod tests {
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
                 if *step_number == 2
-                    && action.contains("stop (evidence-pressure")
+                    && action.contains("stop (reviewed evidence: recent CI runs are success/cancelled)")
         )));
     }
 
@@ -7029,14 +7122,24 @@ mod tests {
                 },
                 "inspect the recent CI runs",
             ),
-            vec![RecursivePlannerDecision {
-                action: PlannerAction::Workspace {
-                    action: WorkspaceAction::Inspect {
-                        command: "gh run list --limit 10".to_string(),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "gh run list --limit 10".to_string(),
+                        },
                     },
+                    rationale: "narrow the list size".to_string(),
                 },
-                rationale: "narrow the list size".to_string(),
-            }],
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "reviewed evidence: current CI listing does not confirm a failure"
+                            .to_string(),
+                    },
+                    rationale: "the gathered sources weaken the premise, so stop and judge them"
+                        .to_string(),
+                },
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
@@ -7078,7 +7181,7 @@ mod tests {
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
                 if *step_number == 2
-                    && action.contains("stop (evidence-pressure")
+                    && action.contains("stop (reviewed evidence: current CI listing does not confirm a failure)")
         )));
     }
 
@@ -7101,21 +7204,19 @@ mod tests {
             rationale: "run a check first".to_string(),
         };
 
-        let redirected = super::coerce_execution_pressure_action(
+        let notes = super::collect_pressure_review_notes(
             "fix the planner loop",
             &InterpretationContext::default(),
             &PlannerLoopState::default(),
             &decision,
             workspace.path(),
-        )
-        .expect("redirected decision");
+        );
 
-        assert!(matches!(
-            redirected.action,
-            PlannerAction::Workspace {
-                action: WorkspaceAction::Read { path }
-            } if path == "src/application/mod.rs"
-        ));
+        assert!(notes.iter().any(|note| {
+            note.kind == super::PressureReviewKind::Execution
+                && note.note.contains("Pressure review [execution-pressure]")
+                && note.note.contains("src/application/mod.rs")
+        }));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

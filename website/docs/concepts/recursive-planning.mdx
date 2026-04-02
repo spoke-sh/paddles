@@ -69,8 +69,8 @@ The planner is not left alone once evidence starts to accumulate. The controller
 
 | Pressure | What it changes |
 |----------|-----------------|
-| **Execution pressure** | Redirects edit-oriented turns toward likely file action instead of repeated broad retrieval |
-| **Evidence pressure** | Refines context after quiet steps, or stops redundant confirmatory probes when sources already weaken the original premise |
+| **Execution pressure** | Adds a planner review note that biases edit-oriented turns toward likely file action instead of repeated broad retrieval |
+| **Evidence pressure** | Adds a planner review note when sources start to outweigh the original premise, so the planner must refine, stop, or continue explicitly |
 | **Compaction pressure** | Keeps retained context small enough to stay actionable |
 | **Budget pressure** | Terminates recursion when the hard caps are reached |
 
@@ -81,9 +81,11 @@ Two evidence-pressure cases matter most:
 2. **Premise judgement**
    If the user says "CI is failing" but the gathered sources show only `success`, `cancelled`, or an unconfirmed `in_progress` run, repeating `gh run list --limit 20`, then `--limit 10`, then `--limit 5` is not intelligent work. The controller should stop and make synthesis judge those sources directly.
 
-## Recursive Self-Assessing Compaction
+## Compaction Planning Today
 
-As the planner accumulates evidence across many steps, the working context can grow large. A compaction engine evaluates the planner's retained evidence for relevance against the current query and produces a structured compaction plan.
+As the planner accumulates evidence across many steps, the working context can grow large. A compaction engine evaluates the planner's retained evidence and produces a structured compaction plan.
+
+That interface is shaped for recursive self-assessment, but the current adapters still rely mostly on bounded heuristics rather than a fully model-judged compaction pass.
 
 Low-value artifacts are pruned from working context, but their content remains reachable through typed locators pointing to the transit tier. This keeps the active context tight without losing depth.
 
