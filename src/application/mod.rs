@@ -8,15 +8,15 @@ use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
     ConversationForensicProjection, ConversationForensicUpdate, ConversationThreadRef,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
-    ForensicTraceSink, ForensicUpdateSink, MultiplexEventSink, PressureFactor, PressureLevel,
+    ForensicTraceSink, ForensicUpdateSink, MultiplexEventSink, StrainFactor, StrainLevel,
     TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
     ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceForceContribution, TraceForceKind,
-    TraceForceSnapshot, TraceLineage, TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef,
-    TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord,
-    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot,
-    TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent,
-    TurnTraceId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge,
+    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -264,13 +264,13 @@ struct SynthesisTraceState {
     insufficient_evidence: bool,
 }
 
-struct ForceSnapshotRecord {
-    kind: TraceForceKind,
+struct SignalSnapshotRecord {
+    kind: TraceSignalKind,
     summary: String,
     level: String,
     magnitude_percent: u8,
     applies_to: Option<TraceLineageNodeRef>,
-    contributions: Vec<TraceForceContribution>,
+    contributions: Vec<TraceSignalContribution>,
     details: serde_json::Value,
 }
 
@@ -352,10 +352,10 @@ impl StructuredTurnTrace {
         }
     }
 
-    fn force_node(&self, kind: TraceForceKind, record_id: &TraceRecordId) -> TraceLineageNodeRef {
+    fn signal_node(&self, kind: TraceSignalKind, record_id: &TraceRecordId) -> TraceLineageNodeRef {
         TraceLineageNodeRef {
-            kind: TraceLineageNodeKind::Force,
-            id: format!("force:{}", record_id.as_str()),
+            kind: TraceLineageNodeKind::Signal,
+            id: format!("signal:{}", record_id.as_str()),
             label: kind.label().to_string(),
         }
     }
@@ -720,7 +720,7 @@ impl StructuredTurnTrace {
         );
     }
 
-    fn record_force_snapshot(&self, record: ForceSnapshotRecord) {
+    fn record_signal_snapshot(&self, record: SignalSnapshotRecord) {
         let summary = record.summary;
         let artifact = self.exact_artifact(
             ArtifactKind::PlannerTrace,
@@ -728,9 +728,9 @@ impl StructuredTurnTrace {
             record.details.to_string(),
             "application/json",
         );
-        let force_record_id = self.record_kind(
+        let signal_record_id = self.record_kind(
             self.default_branch_id(),
-            TraceRecordKind::ForceSnapshot(TraceForceSnapshot {
+            TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                 kind: record.kind,
                 summary: summary.clone(),
                 level: record.level,
@@ -740,22 +740,22 @@ impl StructuredTurnTrace {
                 artifact,
             }),
         );
-        let force_node = self.force_node(record.kind, &force_record_id);
+        let signal_node = self.signal_node(record.kind, &signal_record_id);
         self.record_lineage_edge(
             self.default_branch_id(),
             self.turn_node(),
-            force_node.clone(),
+            signal_node.clone(),
             TraceLineageRelation::Contains,
-            format!("turn carries {} force", record.kind.label()),
+            format!("turn carries {} steering signal", record.kind.label()),
         );
         if let Some(target) = record.applies_to {
             self.record_lineage_edge(
                 self.default_branch_id(),
-                force_node,
+                signal_node,
                 target.clone(),
                 TraceLineageRelation::Constrains,
                 format!(
-                    "{} force constrains {}",
+                    "{} steering signal constrains {}",
                     record.kind.label(),
                     target.kind.label()
                 ),
@@ -879,32 +879,32 @@ impl TurnEventSink for StructuredTurnTrace {
             } => {
                 self.remember_synthesis(grounded, citations, insufficient_evidence);
             }
-            TurnEvent::ContextPressure { pressure } => {
-                let contributions = pressure_force_contributions(&pressure);
-                self.record_force_snapshot(ForceSnapshotRecord {
-                    kind: TraceForceKind::ContextPressure,
-                    summary: format!("context pressure reached {}", pressure.level.label()),
-                    level: pressure.level.label().to_string(),
-                    magnitude_percent: pressure_level_magnitude(pressure.level),
+            TurnEvent::ContextStrain { strain } => {
+                let contributions = strain_signal_contributions(&strain);
+                self.record_signal_snapshot(SignalSnapshotRecord {
+                    kind: TraceSignalKind::ContextStrain,
+                    summary: format!("context strain reached {}", strain.level.label()),
+                    level: strain.level.label().to_string(),
+                    magnitude_percent: strain_level_magnitude(strain.level),
                     applies_to: Some(self.turn_node()),
                     contributions,
                     details: serde_json::json!({
-                        "level": pressure.level.label(),
-                        "truncation_count": pressure.truncation_count,
-                        "factors": pressure.factors.iter().map(|factor| factor.label()).collect::<Vec<_>>(),
+                        "level": strain.level.label(),
+                        "truncation_count": strain.truncation_count,
+                        "factors": strain.factors.iter().map(|factor| factor.label()).collect::<Vec<_>>(),
                     }),
                 });
             }
             TurnEvent::Fallback { stage, reason } => {
-                let force_kind = if stage == "execution-pressure" {
-                    TraceForceKind::ExecutionPressure
+                let signal_kind = if stage == "action-bias" {
+                    TraceSignalKind::ActionBias
                 } else {
-                    TraceForceKind::Fallback
+                    TraceSignalKind::Fallback
                 };
                 let (level, magnitude_percent, contributions) =
-                    fallback_force_details(stage.as_str(), reason.as_str());
-                self.record_force_snapshot(ForceSnapshotRecord {
-                    kind: force_kind,
+                    fallback_signal_details(stage.as_str(), reason.as_str());
+                self.record_signal_snapshot(SignalSnapshotRecord {
+                    kind: signal_kind,
                     summary: format!("{stage} fallback"),
                     level: level.to_string(),
                     magnitude_percent,
@@ -921,13 +921,13 @@ impl TurnEventSink for StructuredTurnTrace {
                 before_summary,
                 after_summary,
             } => {
-                self.record_force_snapshot(ForceSnapshotRecord {
-                    kind: TraceForceKind::Compaction,
+                self.record_signal_snapshot(SignalSnapshotRecord {
+                    kind: TraceSignalKind::CompactionCue,
                     summary: "context refinement applied".to_string(),
                     level: "medium".to_string(),
                     magnitude_percent: 58,
                     applies_to: Some(self.turn_node()),
-                    contributions: compaction_force_contributions(),
+                    contributions: compaction_signal_contributions(),
                     details: serde_json::json!({
                         "reason": reason,
                         "before_summary": before_summary,
@@ -936,13 +936,15 @@ impl TurnEventSink for StructuredTurnTrace {
                 });
             }
             TurnEvent::PlannerSummary { stop_reason, .. } => {
-                if let Some(stop_reason) = stop_reason
-                    .filter(|reason| reason.contains("budget") || reason.contains("pressure"))
-                {
+                if let Some(stop_reason) = stop_reason.filter(|reason| {
+                    reason.contains("budget")
+                        || reason.contains("boundary")
+                        || reason.contains("challenge")
+                }) {
                     let (level, magnitude_percent, contributions) =
-                        budget_force_details(stop_reason.as_str());
-                    self.record_force_snapshot(ForceSnapshotRecord {
-                        kind: TraceForceKind::Budget,
+                        budget_signal_details(stop_reason.as_str());
+                    self.record_signal_snapshot(SignalSnapshotRecord {
+                        kind: TraceSignalKind::BudgetBoundary,
                         summary: format!("planner stop reason `{stop_reason}`"),
                         level: level.to_string(),
                         magnitude_percent,
@@ -1068,34 +1070,34 @@ impl ForensicTraceSink for StructuredTurnTrace {
     }
 }
 
-fn pressure_level_magnitude(level: PressureLevel) -> u8 {
+fn strain_level_magnitude(level: StrainLevel) -> u8 {
     match level {
-        PressureLevel::Low => 10,
-        PressureLevel::Medium => 45,
-        PressureLevel::High => 72,
-        PressureLevel::Critical => 92,
+        StrainLevel::Low => 10,
+        StrainLevel::Medium => 45,
+        StrainLevel::High => 72,
+        StrainLevel::Critical => 92,
     }
 }
 
-fn pressure_force_contributions(
-    pressure: &crate::domain::model::ContextPressure,
-) -> Vec<TraceForceContribution> {
-    if pressure.factors.is_empty() {
-        return vec![TraceForceContribution {
+fn strain_signal_contributions(
+    strain: &crate::domain::model::ContextStrain,
+) -> Vec<TraceSignalContribution> {
+    if strain.factors.is_empty() {
+        return vec![TraceSignalContribution {
             source: "context".to_string(),
             share_percent: 100,
-            rationale: "No specific factor was isolated, so the pressure is attributed to the overall assembled context.".to_string(),
+            rationale: "No specific factor was isolated, so the strain is attributed to the overall assembled context.".to_string(),
         }];
     }
 
-    let share = (100 / pressure.factors.len()).max(1) as u8;
+    let share = (100 / strain.factors.len()).max(1) as u8;
     let mut remaining = 100u8;
-    pressure
+    strain
         .factors
         .iter()
         .enumerate()
         .map(|(index, factor)| {
-            let assigned = if index + 1 == pressure.factors.len() {
+            let assigned = if index + 1 == strain.factors.len() {
                 remaining
             } else {
                 let value = share.min(remaining);
@@ -1103,24 +1105,24 @@ fn pressure_force_contributions(
                 value
             };
             let (source, rationale) = match factor {
-                PressureFactor::MemoryTruncated => (
+                StrainFactor::MemoryTruncated => (
                     "operator_memory",
-                    "Operator memory truncation raised context pressure.",
+                    "Operator memory truncation raised context strain.",
                 ),
-                PressureFactor::ArtifactTruncated => (
+                StrainFactor::ArtifactTruncated => (
                     "retained_artifacts",
                     "Retained artifacts were truncated to fit the active context budget.",
                 ),
-                PressureFactor::ThreadSummaryTrimmed => (
+                StrainFactor::ThreadSummaryTrimmed => (
                     "thread_summaries",
                     "Thread summaries were trimmed, reducing recalled state.",
                 ),
-                PressureFactor::EvidenceBudgetExhausted => (
+                StrainFactor::EvidenceBudgetExhausted => (
                     "evidence_budget",
                     "Evidence budget exhaustion constrained how much supporting context could be retained.",
                 ),
             };
-            TraceForceContribution {
+            TraceSignalContribution {
                 source: source.to_string(),
                 share_percent: assigned,
                 rationale: rationale.to_string(),
@@ -1129,14 +1131,14 @@ fn pressure_force_contributions(
         .collect()
 }
 
-fn compaction_force_contributions() -> Vec<TraceForceContribution> {
+fn compaction_signal_contributions() -> Vec<TraceSignalContribution> {
     vec![
-        TraceForceContribution {
+        TraceSignalContribution {
             source: "controller_policy".to_string(),
             share_percent: 60,
             rationale: "The controller compacted or refined context to preserve actionability under budget.".to_string(),
         },
-        TraceForceContribution {
+        TraceSignalContribution {
             source: "retained_artifacts".to_string(),
             share_percent: 40,
             rationale: "Existing retained artifacts shaped what was summarized or dropped.".to_string(),
@@ -1144,26 +1146,26 @@ fn compaction_force_contributions() -> Vec<TraceForceContribution> {
     ]
 }
 
-fn fallback_force_details(
+fn fallback_signal_details(
     stage: &str,
     reason: &str,
-) -> (&'static str, u8, Vec<TraceForceContribution>) {
-    if stage == "execution-pressure" {
+) -> (&'static str, u8, Vec<TraceSignalContribution>) {
+    if stage == "action-bias" {
         return (
             "high",
             84,
             vec![
-                TraceForceContribution {
+                TraceSignalContribution {
                     source: "controller_policy".to_string(),
                     share_percent: 45,
-                    rationale: "Execution pressure is a controller-enforced policy to act on likely target files quickly.".to_string(),
+                    rationale: "Action bias nudged the planner toward likely target files quickly.".to_string(),
                 },
-                TraceForceContribution {
+                TraceSignalContribution {
                     source: "prompt_edit_signal".to_string(),
                     share_percent: 30,
                     rationale: "The turn was interpreted as an edit-oriented request requiring file action.".to_string(),
                 },
-                TraceForceContribution {
+                TraceSignalContribution {
                     source: "candidate_file_evidence".to_string(),
                     share_percent: 25,
                     rationale: format!("The controller had plausible file evidence: {reason}"),
@@ -1176,12 +1178,12 @@ fn fallback_force_details(
         "medium",
         56,
         vec![
-            TraceForceContribution {
+            TraceSignalContribution {
                 source: "provider_or_parser".to_string(),
                 share_percent: 60,
                 rationale: format!("The fallback was triggered at `{stage}` because `{reason}`."),
             },
-            TraceForceContribution {
+            TraceSignalContribution {
                 source: "controller_safety".to_string(),
                 share_percent: 40,
                 rationale: "The controller substituted a safer path to keep the turn recoverable."
@@ -1191,33 +1193,33 @@ fn fallback_force_details(
     )
 }
 
-fn budget_force_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceForceContribution>) {
+fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSignalContribution>) {
     let source = if stop_reason.contains("search-budget") {
         "search_budget"
     } else if stop_reason.contains("inspect-budget") {
         "inspect_budget"
     } else if stop_reason.contains("read-budget") {
         "read_budget"
-    } else if stop_reason.contains("evidence-pressure") {
-        "evidence_pressure"
+    } else if stop_reason.contains("premise-challenge") {
+        "premise_challenge"
     } else {
         "planner_budget"
     };
 
     (
         "high",
-        if stop_reason.contains("pressure") {
+        if stop_reason.contains("challenge") || stop_reason.contains("bias") {
             68
         } else {
             78
         },
         vec![
-            TraceForceContribution {
+            TraceSignalContribution {
                 source: source.to_string(),
                 share_percent: 65,
                 rationale: format!("The planner stopped because `{stop_reason}`."),
             },
-            TraceForceContribution {
+            TraceSignalContribution {
                 source: "planner_budget".to_string(),
                 share_percent: 35,
                 rationale: "The planner budget bounded additional recursion and retrieval."
@@ -1376,12 +1378,12 @@ fn render_turn_event(event: &TurnEvent) -> String {
         } => format!(
             "• Assembled workspace context ({label})\n  └ {hits} hit(s), retained {retained_artifacts}, pruned {pruned_artifacts}"
         ),
-        TurnEvent::ContextPressure { pressure } => {
-            let factors: Vec<_> = pressure.factors.iter().map(|f| f.label()).collect();
+        TurnEvent::ContextStrain { strain } => {
+            let factors: Vec<_> = strain.factors.iter().map(|f| f.label()).collect();
             format!(
-                "• Context pressure: {}\n  └ {} truncation(s), factors: [{}]",
-                pressure.level.label(),
-                pressure.truncation_count,
+                "• Context strain: {}\n  └ {} truncation(s), factors: [{}]",
+                strain.level.label(),
+                strain.truncation_count,
                 factors.join(", ")
             )
         }
@@ -2012,8 +2014,7 @@ impl MechSuitService {
         gatherer: Option<&Arc<dyn ContextGatherer>>,
         decision: &InitialActionDecision,
     ) -> Result<Option<InitialActionDecision>> {
-        if !decision.edit.known_edit
-            && !mutation_turn_requires_execution_pressure(prompt, interpretation)
+        if !decision.edit.known_edit && !mutation_turn_requires_action_bias(prompt, interpretation)
         {
             return Ok(None);
         }
@@ -2057,7 +2058,7 @@ impl MechSuitService {
             ),
             edit: crate::domain::ports::InitialEditInstruction {
                 known_edit: decision.edit.known_edit
-                    || mutation_turn_requires_execution_pressure(prompt, interpretation),
+                    || mutation_turn_requires_action_bias(prompt, interpretation),
                 candidate_files: ranked_candidates,
             },
         }))
@@ -2242,7 +2243,7 @@ impl MechSuitService {
             };
 
             if planner_selected_this_step {
-                decision = review_decision_under_pressure(
+                decision = review_decision_under_signals(
                     prompt,
                     &context,
                     &budget,
@@ -2771,7 +2772,7 @@ impl MechSuitService {
 
         if steps_without_new_evidence >= policy.trigger.min_steps_without_new_evidence {
             Some(format!(
-                "evidence-pressure ({} evidence items after {} quiet steps)",
+                "premise-challenge ({} evidence items after {} quiet steps)",
                 loop_state.evidence_items.len(),
                 steps_without_new_evidence
             ))
@@ -3086,7 +3087,7 @@ async fn build_planner_prior_context(
 }
 
 fn planner_budget_for_turn(prompt: &str, interpretation: &InterpretationContext) -> PlannerBudget {
-    if mutation_turn_requires_execution_pressure(prompt, interpretation) {
+    if mutation_turn_requires_action_bias(prompt, interpretation) {
         PlannerBudget {
             max_steps: 8,
             max_reads: 4,
@@ -3421,7 +3422,7 @@ fn prompt_requires_workspace_engagement(
     prompt: &str,
     interpretation: &InterpretationContext,
 ) -> bool {
-    if mutation_turn_requires_execution_pressure(prompt, interpretation) {
+    if mutation_turn_requires_action_bias(prompt, interpretation) {
         return true;
     }
 
@@ -3432,7 +3433,7 @@ fn prompt_requires_workspace_engagement(
     false
 }
 
-fn mutation_turn_requires_execution_pressure(
+fn mutation_turn_requires_action_bias(
     prompt: &str,
     interpretation: &InterpretationContext,
 ) -> bool {
@@ -3516,7 +3517,7 @@ fn known_edit_bootstrap_candidates(
     for (index, path) in normalized_hints.iter().enumerate() {
         scored.insert(
             path.clone(),
-            400 + score_execution_pressure_path(path) - index as i32 * 10,
+            400 + score_action_bias_path(path) - index as i32 * 10,
         );
     }
 
@@ -3591,7 +3592,7 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
     }
 
     for item in &bundle.items {
-        let Some(path) = normalize_execution_pressure_source(&item.source, workspace_root) else {
+        let Some(path) = normalize_action_bias_source(&item.source, workspace_root) else {
             continue;
         };
         if let Some(score) = scored.get_mut(&path) {
@@ -3601,8 +3602,7 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
 
     if let Some(trace) = &bundle.planner {
         for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
-            let Some(path) = normalize_execution_pressure_source(&artifact.source, workspace_root)
-            else {
+            let Some(path) = normalize_action_bias_source(&artifact.source, workspace_root) else {
                 continue;
             };
             if let Some(score) = scored.get_mut(&path) {
@@ -3650,27 +3650,27 @@ fn has_file_targeting_step(loop_state: &PlannerLoopState) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PressureReviewKind {
+enum SteeringReviewKind {
     Evidence,
     Execution,
 }
 
-impl PressureReviewKind {
+impl SteeringReviewKind {
     fn stage(self) -> &'static str {
         match self {
-            Self::Evidence => "evidence-pressure",
-            Self::Execution => "execution-pressure",
+            Self::Evidence => "premise-challenge",
+            Self::Execution => "action-bias",
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct PressureReviewNote {
-    kind: PressureReviewKind,
+struct SteeringReviewNote {
+    kind: SteeringReviewKind,
     note: String,
 }
 
-async fn review_decision_under_pressure(
+async fn review_decision_under_signals(
     prompt: &str,
     context: &PlannerLoopContext,
     budget: &PlannerBudget,
@@ -3679,19 +3679,19 @@ async fn review_decision_under_pressure(
     workspace_root: &Path,
     trace: Arc<StructuredTurnTrace>,
 ) -> Result<RecursivePlannerDecision> {
-    let pressure_notes = collect_pressure_review_notes(
+    let steering_notes = collect_steering_review_notes(
         prompt,
         &context.interpretation,
         loop_state,
         &decision,
         workspace_root,
     );
-    if pressure_notes.is_empty() {
+    if steering_notes.is_empty() {
         return Ok(decision);
     }
 
     let mut review_loop_state = loop_state.clone();
-    for note in &pressure_notes {
+    for note in &steering_notes {
         review_loop_state.notes.push(note.note.clone());
     }
 
@@ -3710,12 +3710,12 @@ async fn review_decision_under_pressure(
         .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
         .await?;
 
-    if pressure_review_failed_closed(&reviewed) {
+    if steering_review_failed_closed(&reviewed) {
         return Ok(decision);
     }
 
     if reviewed != decision {
-        let stage = pressure_review_stage(&pressure_notes, &reviewed);
+        let stage = steering_review_stage(&steering_notes, &reviewed);
         trace.emit(TurnEvent::Fallback {
             stage: stage.to_string(),
             reason: format!(
@@ -3729,13 +3729,13 @@ async fn review_decision_under_pressure(
     Ok(reviewed)
 }
 
-fn collect_pressure_review_notes(
+fn collect_steering_review_notes(
     prompt: &str,
     interpretation: &InterpretationContext,
     loop_state: &PlannerLoopState,
     decision: &RecursivePlannerDecision,
     workspace_root: &Path,
-) -> Vec<PressureReviewNote> {
+) -> Vec<SteeringReviewNote> {
     let mut notes = Vec::new();
 
     if prompt_requires_verifiable_hypothesis(prompt)
@@ -3743,37 +3743,37 @@ fn collect_pressure_review_notes(
         && !decision.action.is_terminal()
         && !decision_targets_file(&decision.action)
     {
-        notes.push(PressureReviewNote {
-            kind: PressureReviewKind::Evidence,
-            note: format_evidence_pressure_review_note(decision, loop_state),
+        notes.push(SteeringReviewNote {
+            kind: SteeringReviewKind::Evidence,
+            note: format_premise_challenge_review_note(decision, loop_state),
         });
     }
 
-    if mutation_turn_requires_execution_pressure(prompt, interpretation)
+    if mutation_turn_requires_action_bias(prompt, interpretation)
         && !has_file_targeting_step(loop_state)
         && !decision_targets_file(&decision.action)
     {
-        let likely_targets = likely_execution_pressure_targets(loop_state, workspace_root, 3);
+        let likely_targets = likely_action_bias_targets(loop_state, workspace_root, 3);
         let likely_targets = if likely_targets.is_empty() {
             known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3)
         } else {
             likely_targets
         };
-        notes.push(PressureReviewNote {
-            kind: PressureReviewKind::Execution,
-            note: format_execution_pressure_review_note(decision, &likely_targets),
+        notes.push(SteeringReviewNote {
+            kind: SteeringReviewKind::Execution,
+            note: format_action_bias_review_note(decision, &likely_targets),
         });
     }
 
     notes
 }
 
-fn format_evidence_pressure_review_note(
+fn format_premise_challenge_review_note(
     decision: &RecursivePlannerDecision,
     loop_state: &PlannerLoopState,
 ) -> String {
     let mut lines = vec![
-        "Pressure review [evidence-pressure]".to_string(),
+        "Steering review [premise-challenge]".to_string(),
         format!("Proposed action under review: {}", decision.action.summary()),
         "Treat the reported failure as a hypothesis and judge the gathered sources before spending more budget.".to_string(),
         "If the current sources already weaken or resolve the premise, choose `stop` and let synthesis judge them. Otherwise choose the single most informative next action.".to_string(),
@@ -3791,12 +3791,12 @@ fn format_evidence_pressure_review_note(
     lines.join("\n")
 }
 
-fn format_execution_pressure_review_note(
+fn format_action_bias_review_note(
     decision: &RecursivePlannerDecision,
     likely_targets: &[String],
 ) -> String {
     let mut lines = vec![
-        "Pressure review [execution-pressure]".to_string(),
+        "Steering review [action-bias]".to_string(),
         format!("Proposed action under review: {}", decision.action.summary()),
         "This turn is edit-oriented. Action produces information.".to_string(),
         "If there is a plausible target file, prefer read/diff/edit over another broad search or generic inspect.".to_string(),
@@ -3812,7 +3812,7 @@ fn format_execution_pressure_review_note(
     lines.join("\n")
 }
 
-fn pressure_review_failed_closed(decision: &RecursivePlannerDecision) -> bool {
+fn steering_review_failed_closed(decision: &RecursivePlannerDecision) -> bool {
     matches!(
         decision.action,
         PlannerAction::Stop { ref reason }
@@ -3820,27 +3820,27 @@ fn pressure_review_failed_closed(decision: &RecursivePlannerDecision) -> bool {
     )
 }
 
-fn pressure_review_stage(
-    notes: &[PressureReviewNote],
+fn steering_review_stage(
+    notes: &[SteeringReviewNote],
     reviewed: &RecursivePlannerDecision,
 ) -> &'static str {
     if decision_targets_file(&reviewed.action)
         && notes
             .iter()
-            .any(|note| note.kind == PressureReviewKind::Execution)
+            .any(|note| note.kind == SteeringReviewKind::Execution)
     {
-        PressureReviewKind::Execution.stage()
+        SteeringReviewKind::Execution.stage()
     } else if reviewed.action.is_terminal()
         && notes
             .iter()
-            .any(|note| note.kind == PressureReviewKind::Evidence)
+            .any(|note| note.kind == SteeringReviewKind::Evidence)
     {
-        PressureReviewKind::Evidence.stage()
+        SteeringReviewKind::Evidence.stage()
     } else {
         notes
             .first()
             .map(|note| note.kind.stage())
-            .unwrap_or("pressure-review")
+            .unwrap_or("steering-review")
     }
 }
 
@@ -3858,7 +3858,7 @@ fn decision_targets_file(action: &PlannerAction) -> bool {
     )
 }
 
-fn likely_execution_pressure_targets(
+fn likely_action_bias_targets(
     loop_state: &PlannerLoopState,
     workspace_root: &Path,
     limit: usize,
@@ -3866,10 +3866,10 @@ fn likely_execution_pressure_targets(
     let mut scored = HashMap::<String, i32>::new();
 
     for item in &loop_state.evidence_items {
-        let Some(path) = normalize_execution_pressure_source(&item.source, workspace_root) else {
+        let Some(path) = normalize_action_bias_source(&item.source, workspace_root) else {
             continue;
         };
-        let score = score_execution_pressure_path(&path) + evidence_rank_bonus(item.rank);
+        let score = score_action_bias_path(&path) + evidence_rank_bonus(item.rank);
         match scored.entry(path) {
             Entry::Occupied(mut entry) => {
                 if score > *entry.get() {
@@ -3884,11 +3884,10 @@ fn likely_execution_pressure_targets(
 
     if let Some(trace) = &loop_state.latest_gatherer_trace {
         for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
-            let Some(path) = normalize_execution_pressure_source(&artifact.source, workspace_root)
-            else {
+            let Some(path) = normalize_action_bias_source(&artifact.source, workspace_root) else {
                 continue;
             };
-            let score = score_execution_pressure_path(&path) + (40 - index as i32 * 5);
+            let score = score_action_bias_path(&path) + (40 - index as i32 * 5);
             match scored.entry(path) {
                 Entry::Occupied(mut entry) => {
                     if score > *entry.get() {
@@ -3914,7 +3913,7 @@ fn likely_execution_pressure_targets(
 }
 
 fn normalize_known_edit_candidate(workspace_root: &Path, path: &str) -> Option<String> {
-    let normalized = normalize_execution_pressure_source(path, workspace_root)?;
+    let normalized = normalize_action_bias_source(path, workspace_root)?;
     workspace_root
         .join(&normalized)
         .is_file()
@@ -3997,7 +3996,7 @@ fn visit_known_edit_candidates(
 }
 
 fn known_edit_candidate_score(path: &str, tokens: &[String], normalized_hints: &[String]) -> i32 {
-    let mut score = score_execution_pressure_path(path);
+    let mut score = score_action_bias_path(path);
     let path_lower = path.to_ascii_lowercase();
 
     for (index, hint) in normalized_hints.iter().enumerate() {
@@ -4059,7 +4058,7 @@ fn known_edit_search_tokens(prompt: &str, hinted_paths: &[String]) -> Vec<String
     tokens
 }
 
-fn normalize_execution_pressure_source(source: &str, workspace_root: &Path) -> Option<String> {
+fn normalize_action_bias_source(source: &str, workspace_root: &Path) -> Option<String> {
     if source.trim().is_empty() || source.starts_with("command: ") {
         return None;
     }
@@ -4101,7 +4100,7 @@ fn evidence_rank_bonus(rank: usize) -> i32 {
     }
 }
 
-fn score_execution_pressure_path(path: &str) -> i32 {
+fn score_action_bias_path(path: &str) -> i32 {
     let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
     let mut score = match extension {
         Some("rs" | "ts" | "tsx" | "js" | "jsx" | "vue" | "svelte") => 80,
@@ -4497,12 +4496,12 @@ mod tests {
     };
     use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
-        ContextPressure, ConversationForensicUpdate, ConversationThreadRef,
+        ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
         ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicLifecycle,
-        ForensicTraceSink, ForensicUpdateSink, PressureFactor, TaskTraceId, ThreadDecision,
-        ThreadDecisionId, ThreadDecisionKind, TraceForceKind, TraceLineageNodeKind,
-        TraceLineageRelation, TraceModelExchangeCategory, TraceModelExchangeLane,
-        TraceModelExchangePhase, TraceRecordKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+        ForensicTraceSink, ForensicUpdateSink, StrainFactor, TaskTraceId, ThreadDecision,
+        ThreadDecisionId, ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation,
+        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
+        TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
@@ -5647,7 +5646,7 @@ mod tests {
     }
 
     #[test]
-    fn structured_turn_trace_records_force_snapshots_with_contribution_estimates() {
+    fn structured_turn_trace_records_signal_snapshots_with_contribution_estimates() {
         let session = ConversationSession::new(TaskTraceId::new("task-force").expect("task id"));
         let turn_id = session.allocate_turn_id();
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -5676,21 +5675,21 @@ mod tests {
         };
 
         trace.record_turn_start(
-            "Investigate context pressure",
+            "Investigate context strain",
             &InterpretationContext::default(),
             &prepared,
         );
-        trace.emit(TurnEvent::ContextPressure {
-            pressure: ContextPressure::new(
+        trace.emit(TurnEvent::ContextStrain {
+            strain: ContextStrain::new(
                 vec![
-                    PressureFactor::MemoryTruncated,
-                    PressureFactor::ArtifactTruncated,
+                    StrainFactor::MemoryTruncated,
+                    StrainFactor::ArtifactTruncated,
                 ],
                 3,
             ),
         });
         trace.emit(TurnEvent::Fallback {
-            stage: "execution-pressure".to_string(),
+            stage: "action-bias".to_string(),
             reason: "acting on the likely file is more informative".to_string(),
         });
         trace.emit(TurnEvent::Fallback {
@@ -5717,17 +5716,17 @@ mod tests {
         });
 
         let replay = recorder.replay(&session.task_id()).expect("replay");
-        let force_snapshots = replay
+        let signal_snapshots = replay
             .records
             .iter()
             .filter_map(|record| match &record.kind {
-                TraceRecordKind::ForceSnapshot(snapshot) => Some(snapshot),
+                TraceRecordKind::SignalSnapshot(snapshot) => Some(snapshot),
                 _ => None,
             })
             .collect::<Vec<_>>();
 
-        assert!(force_snapshots.iter().any(|snapshot| {
-            snapshot.kind == TraceForceKind::ContextPressure
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceSignalKind::ContextStrain
                 && snapshot
                     .contributions
                     .iter()
@@ -5737,47 +5736,47 @@ mod tests {
                     .iter()
                     .any(|item| item.source == "retained_artifacts")
         }));
-        assert!(force_snapshots.iter().any(|snapshot| {
-            snapshot.kind == TraceForceKind::ExecutionPressure
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceSignalKind::ActionBias
                 && snapshot
                     .contributions
                     .iter()
                     .any(|item| item.source == "controller_policy")
         }));
-        assert!(force_snapshots.iter().any(|snapshot| {
-            snapshot.kind == TraceForceKind::Fallback
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceSignalKind::Fallback
                 && snapshot
                     .contributions
                     .iter()
                     .any(|item| item.source == "provider_or_parser")
         }));
-        assert!(force_snapshots.iter().any(|snapshot| {
-            snapshot.kind == TraceForceKind::Compaction
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceSignalKind::CompactionCue
                 && snapshot
                     .contributions
                     .iter()
                     .any(|item| item.source == "controller_policy")
         }));
-        assert!(force_snapshots.iter().any(|snapshot| {
-            snapshot.kind == TraceForceKind::Budget
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            snapshot.kind == TraceSignalKind::BudgetBoundary
                 && snapshot
                     .contributions
                     .iter()
                     .any(|item| item.source == "planner_budget")
         }));
 
-        let ordered_kinds = force_snapshots
+        let ordered_kinds = signal_snapshots
             .iter()
             .map(|snapshot| snapshot.kind)
             .collect::<Vec<_>>();
         assert_eq!(
             ordered_kinds,
             vec![
-                TraceForceKind::ContextPressure,
-                TraceForceKind::ExecutionPressure,
-                TraceForceKind::Fallback,
-                TraceForceKind::Compaction,
-                TraceForceKind::Budget,
+                TraceSignalKind::ContextStrain,
+                TraceSignalKind::ActionBias,
+                TraceSignalKind::Fallback,
+                TraceSignalKind::CompactionCue,
+                TraceSignalKind::BudgetBoundary,
             ]
         );
     }
@@ -6267,7 +6266,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_pressure_targets_code_files_before_docs() {
+    fn action_bias_targets_code_files_before_docs() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             evidence_items: vec![
                 EvidenceItem {
@@ -6292,8 +6291,7 @@ mod tests {
             ..Default::default()
         };
 
-        let ranked =
-            super::likely_execution_pressure_targets(&loop_state, Path::new("/workspace"), 3);
+        let ranked = super::likely_action_bias_targets(&loop_state, Path::new("/workspace"), 3);
 
         assert_eq!(
             ranked,
@@ -6305,7 +6303,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_pressure_redirects_non_file_actions_before_any_search_step() {
+    fn action_bias_redirects_non_file_actions_before_any_search_step() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             evidence_items: vec![EvidenceItem {
                 source: "src/application/mod.rs".to_string(),
@@ -6324,8 +6322,8 @@ mod tests {
             rationale: "run a check first".to_string(),
         };
 
-        let notes = super::collect_pressure_review_notes(
-            "fix the execution pressure behavior",
+        let notes = super::collect_steering_review_notes(
+            "fix the action bias behavior",
             &InterpretationContext::default(),
             &loop_state,
             &decision,
@@ -6333,14 +6331,14 @@ mod tests {
         );
 
         assert!(notes.iter().any(|note| {
-            note.kind == super::PressureReviewKind::Execution
-                && note.note.contains("Pressure review [execution-pressure]")
+            note.kind == super::SteeringReviewKind::Execution
+                && note.note.contains("Steering review [action-bias]")
                 && note.note.contains("src/application/mod.rs")
         }));
     }
 
     #[test]
-    fn execution_pressure_reads_best_candidate_after_initial_search() {
+    fn action_bias_reads_best_candidate_after_initial_search() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
             workspace.path().join("AGENTS.md"),
@@ -6419,7 +6417,7 @@ mod tests {
                 vec![
                     EvidenceItem {
                         source: "src/application/mod.rs".to_string(),
-                        snippet: "planner loop handles execution pressure".to_string(),
+                        snippet: "planner loop handles action bias".to_string(),
                         rationale: "best candidate".to_string(),
                         rank: 1,
                     },
@@ -6443,7 +6441,7 @@ mod tests {
                 gatherer: Some(gatherer),
             });
             service
-                .process_prompt("Fix the execution-pressure behavior")
+                .process_prompt("Fix the action-bias behavior")
                 .await
                 .expect("process prompt")
         });
@@ -6458,9 +6456,9 @@ mod tests {
                     .loop_state
                     .notes
                     .iter()
-                    .any(|note| note.contains("Pressure review [execution-pressure]"))
+                    .any(|note| note.contains("Steering review [action-bias]"))
             })
-            .expect("execution pressure review request should be recorded");
+            .expect("action bias review request should be recorded");
         assert!(review_request.loop_state.notes.iter().any(|note| {
             note.contains("Likely target files") && note.contains("src/application/mod.rs")
         }));
@@ -6776,7 +6774,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_pressure_stops_redundant_ci_probe_after_non_failing_run_evidence() {
+    fn premise_challenge_stops_redundant_ci_probe_after_non_failing_run_evidence() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             steps: vec![PlannerStepRecord {
                 step_id: "planner-step-1".to_string(),
@@ -6808,7 +6806,7 @@ mod tests {
             rationale: "get the run id for the failing job".to_string(),
         };
 
-        let notes = super::collect_pressure_review_notes(
+        let notes = super::collect_steering_review_notes(
             "CI is failing. Can you debug it on this machine?",
             &InterpretationContext::default(),
             &loop_state,
@@ -6817,8 +6815,8 @@ mod tests {
         );
 
         assert!(notes.iter().any(|note| {
-            note.kind == super::PressureReviewKind::Evidence
-                && note.note.contains("Pressure review [evidence-pressure]")
+            note.kind == super::SteeringReviewKind::Evidence
+                && note.note.contains("Steering review [premise-challenge]")
                 && note.note.contains("\"conclusion\":\"success\"")
         }));
     }
@@ -6905,9 +6903,9 @@ mod tests {
             .clone();
         let review_request = requests
             .last()
-            .expect("pressure review request should be recorded");
+            .expect("steering review request should be recorded");
         assert!(review_request.loop_state.notes.iter().any(|note| {
-            note.contains("Pressure review [evidence-pressure]")
+            note.contains("Steering review [premise-challenge]")
                 && note.contains("Treat the reported failure as a hypothesis")
         }));
         let events = sink.recorded();
@@ -6930,7 +6928,7 @@ mod tests {
     }
 
     #[test]
-    fn evidence_pressure_stops_redundant_plain_ci_run_list_probe() {
+    fn premise_challenge_stops_redundant_plain_ci_run_list_probe() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             steps: vec![PlannerStepRecord {
                 step_id: "planner-step-1".to_string(),
@@ -6960,7 +6958,7 @@ mod tests {
             rationale: "check a smaller recent window".to_string(),
         };
 
-        let notes = super::collect_pressure_review_notes(
+        let notes = super::collect_steering_review_notes(
             "CI is failing. Can you debug it on this machine?",
             &InterpretationContext::default(),
             &loop_state,
@@ -6969,8 +6967,8 @@ mod tests {
         );
 
         assert!(notes.iter().any(|note| {
-            note.kind == super::PressureReviewKind::Evidence
-                && note.note.contains("Pressure review [evidence-pressure]")
+            note.kind == super::SteeringReviewKind::Evidence
+                && note.note.contains("Steering review [premise-challenge]")
                 && note.note.contains("completed\tsuccess")
         }));
     }
@@ -7186,7 +7184,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_pressure_falls_back_to_prompt_derived_file_candidates() {
+    fn action_bias_falls_back_to_prompt_derived_file_candidates() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
         fs::write(
@@ -7204,7 +7202,7 @@ mod tests {
             rationale: "run a check first".to_string(),
         };
 
-        let notes = super::collect_pressure_review_notes(
+        let notes = super::collect_steering_review_notes(
             "fix the planner loop",
             &InterpretationContext::default(),
             &PlannerLoopState::default(),
@@ -7213,8 +7211,8 @@ mod tests {
         );
 
         assert!(notes.iter().any(|note| {
-            note.kind == super::PressureReviewKind::Execution
-                && note.note.contains("Pressure review [execution-pressure]")
+            note.kind == super::SteeringReviewKind::Execution
+                && note.note.contains("Steering review [action-bias]")
                 && note.note.contains("src/application/mod.rs")
         }));
     }

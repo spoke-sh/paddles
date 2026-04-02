@@ -1,4 +1,4 @@
-use super::context_quality::ContextPressure;
+use super::context_quality::ContextStrain;
 use super::interpretation::InterpretationContext;
 use super::traces::{TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase};
 use paddles_conversation::TraceArtifactId;
@@ -149,8 +149,9 @@ pub enum TurnEvent {
         stage: String,
         reason: String,
     },
-    ContextPressure {
-        pressure: ContextPressure,
+    #[serde(rename = "context_strain")]
+    ContextStrain {
+        strain: ContextStrain,
     },
     SynthesisReady {
         grounded: bool,
@@ -181,7 +182,7 @@ impl TurnEvent {
             Self::ToolCalled { .. } => "tool_called",
             Self::ToolFinished { .. } => "tool_finished",
             Self::Fallback { .. } => "fallback",
-            Self::ContextPressure { .. } => "context_pressure",
+            Self::ContextStrain { .. } => "context_strain",
             Self::SynthesisReady { .. } => "synthesis_ready",
         }
     }
@@ -201,7 +202,7 @@ impl TurnEvent {
             | Self::GathererSummary { .. }
             | Self::PlannerSummary { .. }
             | Self::ContextAssembly { .. }
-            | Self::ContextPressure { .. }
+            | Self::ContextStrain { .. }
             | Self::RefinementApplied { .. }
             | Self::ThreadDecisionApplied { .. }
             | Self::GuidanceGraphExpanded { .. }
@@ -274,5 +275,20 @@ impl TurnEventSink for MultiplexEventSink {
         for sink in &self.sinks {
             sink.emit(event.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TurnEvent;
+    use crate::domain::model::{ContextStrain, StrainFactor};
+
+    #[test]
+    fn context_pressure_event_uses_context_strain_key() {
+        let event = TurnEvent::ContextStrain {
+            strain: ContextStrain::new(vec![StrainFactor::MemoryTruncated], 1),
+        };
+
+        assert_eq!(event.event_type_key(), "context_strain");
     }
 }

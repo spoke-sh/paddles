@@ -727,7 +727,7 @@ fn in_flight_label(last_event: &TurnEvent) -> &'static str {
         TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. } => "Searching",
 
         // Context assembly → model is about to think.
-        TurnEvent::ContextAssembly { .. } | TurnEvent::ContextPressure { .. } => "Thinking",
+        TurnEvent::ContextAssembly { .. } | TurnEvent::ContextStrain { .. } => "Thinking",
         TurnEvent::RefinementApplied { .. } => "Applying refinement",
 
         // Tool is running.
@@ -2600,14 +2600,14 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             "• Fell back",
             format!("{stage}: {reason}"),
         ),
-        TurnEvent::ContextPressure { pressure } => {
-            let factors: Vec<_> = pressure.factors.iter().map(|f| f.label()).collect();
+        TurnEvent::ContextStrain { strain } => {
+            let factors: Vec<_> = strain.factors.iter().map(|f| f.label()).collect();
             TranscriptRow::new(
                 TranscriptRowKind::Event,
-                format!("• Context pressure: {}", pressure.level.label()),
+                format!("• Context strain: {}", strain.level.label()),
                 format!(
                     "{} truncation(s), factors: [{}]",
-                    pressure.truncation_count,
+                    strain.truncation_count,
                     factors.join(", ")
                 ),
             )

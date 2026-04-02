@@ -31,7 +31,7 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, context pressure, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
+**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, context strain, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
@@ -81,7 +81,7 @@ flowchart TD
 
 The planner operates within bounded action and budget contracts. Every action is validated before execution, every output is recorded, and the operator can observe the full trace.
 
-## Pressure Systems
+## Steering Signals
 
 Pressure in Paddles is a controller layer, not a loose metaphor. The runtime uses it to decide when the loop should keep investigating, when it should compress context, and when the evidence already justifies stopping.
 
@@ -89,15 +89,15 @@ Pressure in Paddles is a controller layer, not a loose metaphor. The runtime use
 flowchart LR
     Prior["Prompt prior<br/>user report · operator intent"]
     Planner["Planner proposal<br/>next bounded action"]
-    Controller["Controller pressure checks"]
+    Controller["Controller steering checks"]
     Loop["Loop state<br/>evidence · steps · retained context"]
     Outcome["Next action / stop / synthesis"]
 
-    Context["Context pressure<br/>truncation + loss"]
-    Execution["Execution pressure<br/>act on likely file"]
-    Evidence["Evidence pressure<br/>quiet steps / premise weakened"]
-    Compaction["Compaction pressure<br/>refine and retain locators"]
-    Budget["Budget pressure<br/>hard caps"]
+    Context["Context strain<br/>truncation + loss"]
+    Execution["Action bias<br/>act on likely file"]
+    Evidence["Premise challenge<br/>quiet steps / premise weakened"]
+    Compaction["Compaction cue<br/>refine and retain locators"]
+    Budget["Budget boundary<br/>hard caps"]
 
     Prior --> Loop
     Loop --> Planner --> Controller --> Outcome
@@ -115,58 +115,58 @@ flowchart LR
 
 | System | Trigger | What it does | Trace surface |
 |-------|---------|--------------|---------------|
-| **Context pressure** | Truncated memory, artifacts, thread summaries, or evidence-budget loss | Warns that the assembled context is degraded | `TurnEvent::ContextPressure`, `TraceForceKind::ContextPressure` |
-| **Execution pressure** | Mutation/known-edit turns with no file-targeting action yet | Adds a planner review note that biases broad non-file work toward a plausible file read/edit | `Fallback(stage = execution-pressure)`, `TraceForceKind::ExecutionPressure` |
-| **Evidence pressure** | Enough evidence but too many quiet steps, or evidence weakens the prompt's premise | Adds a planner review note or refinement trigger so the planner must judge the sources explicitly | `RefinementApplied`, `PlannerSummary(stop_reason = evidence-pressure...)`, `TraceForceKind::Budget` |
-| **Compaction pressure** | Active context is getting too noisy for useful next actions | Summarizes/prunes low-value artifacts while preserving locators; today this remains mostly heuristic | `TraceForceKind::Compaction` |
-| **Budget pressure** | Step, search, inspect, or read caps are reached | Terminates recursion honestly | `PlannerSummary(stop_reason = *-budget-exhausted)`, `TraceForceKind::Budget` |
+| **Context strain** | Truncated memory, artifacts, thread summaries, or evidence-budget loss | Warns that the assembled context is degraded | `TurnEvent::ContextStrain`, `TraceSignalKind::ContextStrain` |
+| **Action bias** | Mutation/known-edit turns with no file-targeting action yet | Adds a planner review note that biases broad non-file work toward a plausible file read/edit | `Fallback(stage = action-bias)`, `TraceSignalKind::ActionBias` |
+| **Premise challenge** | Enough evidence but too many quiet steps, or evidence weakens the prompt's premise | Adds a planner review note or refinement trigger so the planner must judge the sources explicitly | `RefinementApplied`, `PlannerSummary(stop_reason = premise-challenge...)`, `TraceSignalKind::BudgetBoundary` |
+| **Compaction cue** | Active context is getting too noisy for useful next actions | Summarizes/prunes low-value artifacts while preserving locators; today this remains mostly heuristic | `TraceSignalKind::CompactionCue` |
+| **Budget boundary** | Step, search, inspect, or read caps are reached | Terminates recursion honestly | `PlannerSummary(stop_reason = *-budget-exhausted)`, `TraceSignalKind::BudgetBoundary` |
 
-### Context Pressure
+### Context Strain
 
-`PressureTracker` accumulates truncation events during context assembly and emits a `ContextPressure` turn event when the result is non-nominal. The factors are explicit:
+`StrainTracker` accumulates truncation events during context assembly and emits a `ContextStrain` turn event when the result is non-nominal. The factors are explicit:
 
 - `memory-truncated`
 - `artifact-truncated`
 - `thread-summary-trimmed`
 - `evidence-budget-exhausted`
 
-This pressure is observational. It tells the operator and the trace that the current answer may be operating with a degraded working set.
+This steering signal is observational. It tells the operator and the trace that the current answer may be operating with a degraded working set.
 
-### Execution Pressure
+### Action Bias
 
-Execution pressure exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it re-enters the planner with an execution-pressure review note so the model can judge whether to read, diff, or edit that likely file now.
+Action bias exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it re-enters the planner with an action-bias review note so the model can judge whether to read, diff, or edit that likely file now.
 
 This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
 
-### Evidence Pressure
+### Premise Challenge
 
-Evidence pressure is the system that keeps the harness intellectually honest.
+Premise challenge is the system that keeps the harness intellectually honest.
 
 It has two important modes:
 
 1. **Quiet-step refinement**
    After evidence has accumulated but several steps fail to add anything new, the controller derives a refined interpretation context. This is how the loop resists thrashing.
 2. **Premise judgement**
-   A user can supply the initial hypothesis, but gathered sources must be allowed to overturn it. When the turn has enough source material to question the premise, the controller re-enters the planner with an explicit evidence-pressure review note. The planner then chooses whether to stop, revise the premise, or continue with one more specific action.
+   A user can supply the initial hypothesis, but gathered sources must be allowed to overturn it. When the turn has enough source material to question the premise, the controller re-enters the planner with an explicit premise-challenge review note. The planner then chooses whether to stop, revise the premise, or continue with one more specific action.
 
-This is the pressure family that prevents the planner from repeatedly shrinking `gh run list --limit N` instead of admitting that the current evidence does not confirm the original claim. The important detail is that the stop or revision now comes from a planner review pass over the evidence, not from a CI-specific controller hard stop.
+This is the steering-signal family that prevents the planner from repeatedly shrinking `gh run list --limit N` instead of admitting that the current evidence does not confirm the original claim. The important detail is that the stop or revision now comes from a planner review pass over the evidence, not from a CI-specific controller hard stop.
 
-### Compaction Pressure
+### Compaction Cue
 
 Compaction is how the harness stays sharp under depth. The interface is designed for planner-driven compaction, but the current adapters still implement compaction with bounded heuristics. Pruned material is not lost; typed locators preserve reachability into transit and filesystem tiers.
 
-### Budget Pressure
+### Budget Boundary
 
-Budget pressure is the hard outer wall around recursion. Even if the planner keeps wanting more steps, the controller stops after bounded step, search, inspect, or read limits. Those stop reasons are part of the recorded force model, not silent control flow.
+Budget boundary is the hard outer wall around recursion. Even if the planner keeps wanting more steps, the controller stops after bounded step, search, inspect, or read limits. Those stop reasons are part of the recorded influence model, not silent control flow.
 
-### Pressure And Force Snapshots
+### Steering Signals And Influence Snapshots
 
-The trace model records force snapshots so the operator can inspect not just what happened, but what shaped the turn:
+The trace model records influence snapshots so the operator can inspect not just what happened, but what shaped the turn:
 
-- `context_pressure`
-- `execution_pressure`
-- `compaction`
-- `budget`
+- `context_strain`
+- `action_bias`
+- `compaction_cue`
+- `budget_boundary`
 - `fallback`
 
 Each snapshot carries a magnitude, a summary, and source-attributed contribution estimates. The web forensic inspector uses these as first-class visualization inputs.
@@ -225,7 +225,7 @@ The target architecture is implemented across these modules:
 | **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
 | **Recorder Adapters** | [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs) | Noop, in-memory, embedded transit-core |
 | **Thread Replay** | [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs) | Replay/projection layer for conversation traces |
-| **Context Quality** | [src/domain/model/context_quality.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/context_quality.rs) | ContextPressure, PressureTracker, PressureLevel types |
+| **Context Quality** | [src/domain/model/context_quality.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/context_quality.rs) | `ContextStrain`, `StrainTracker`, `StrainLevel` types |
 | **Context Resolution** | [src/domain/ports/context_resolution.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/context_resolution.rs) | ContextResolver port for cross-tier locator resolution |
 | **Transit Resolver** | [src/infrastructure/adapters/transit_resolver.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/transit_resolver.rs) | TransitContextResolver — inline, transit, filesystem dispatch |
 | **Conversation Crate** | [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs) | ContextTier, ContextLocator, ArtifactEnvelope, conversation primitives |
@@ -238,7 +238,7 @@ The runtime follows the backbone narrative from above:
 1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid initial replies get one constrained re-decision pass before the controller fails closed.
 2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode and strategy into the gatherer boundary. The `sift-direct` gatherer executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second planner.
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
-4. **Context quality** — a `PressureTracker` accumulates truncation events during context assembly and emits `ContextPressure` as a turn event when pressure is non-nominal.
+4. **Context quality** — a `StrainTracker` accumulates truncation events during context assembly and emits `ContextStrain` as a turn event when strain is non-nominal.
 5. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
 
 ### Growing Edges
@@ -284,11 +284,11 @@ Resolution follows a local-first ordering: inline content returns immediately, t
 
 The compaction interface is shaped for recursive self-assessment, but the current planner adapters do not yet fully earn that label. Today a `CompactionEngine` walks retained evidence and applies bounded keep/compact/discard heuristics while preserving addressable locators to the pruned content. This keeps the working context tight without losing depth, but it is still more policy-driven than planner-judged.
 
-### Context Pressure Signals
+### Context Strain Signals
 
-Context budget exhaustion is modeled as a first-class capability signal through `ContextPressure`. A `PressureTracker` accumulates truncation events during context assembly — memory documents exceeding the 12k character cap, truncated artifact envelopes, trimmed thread summaries. The tracker computes a `PressureLevel` (Low / Medium / High / Critical) from the count of truncation events and emits a `TurnEvent::ContextPressure` when pressure is non-nominal.
+Context budget exhaustion is modeled as a first-class capability signal through `ContextStrain`. A `StrainTracker` accumulates truncation events during context assembly — memory documents exceeding the 12k character cap, truncated artifact envelopes, trimmed thread summaries. The tracker computes a `StrainLevel` (Low / Medium / High / Critical) from the count of truncation events and emits a `TurnEvent::ContextStrain` when strain is non-nominal.
 
-These signals are informational at the context-quality layer — they surface context degradation in the turn event stream and into force snapshots. Higher-order controller pressures, such as execution pressure and evidence pressure, are what actually redirect or stop the recursive loop.
+These signals are informational at the context-quality layer — they surface context degradation in the turn event stream and into influence snapshots. Higher-order controller pressures, such as action bias and premise challenge, are what actually redirect or stop the recursive loop.
 
 ### In-Flight Visibility
 

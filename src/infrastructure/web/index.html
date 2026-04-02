@@ -368,32 +368,32 @@ body {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.forensic-force-list,
+.forensic-signal-list,
 .forensic-shadow-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.forensic-force-row,
+.forensic-signal-row,
 .forensic-shadow-row {
   display: grid;
   gap: 6px;
 }
-.forensic-force-row {
+.forensic-signal-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
-.forensic-force-label,
+.forensic-signal-label,
 .forensic-shadow-label {
   font-size: 11px;
   font-weight: 700;
   color: #304250;
 }
-.forensic-force-meta,
+.forensic-signal-meta,
 .forensic-shadow-meta {
   font-size: 11px;
   color: var(--muted);
 }
-.forensic-force-bar {
+.forensic-signal-bar {
   grid-column: 1 / -1;
   height: 10px;
   border-radius: 999px;
@@ -403,7 +403,7 @@ body {
     inset 1px 1px 0 rgba(255,255,255,0.7),
     inset -1px -1px 0 rgba(108, 123, 136, 0.08);
 }
-.forensic-force-bar > span {
+.forensic-signal-bar > span {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -475,27 +475,27 @@ body {
   gap: 6px;
   margin-top: 10px;
 }
-.forensic-force-hero {
+.forensic-signal-hero {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   margin-bottom: 12px;
 }
-.forensic-force-gauge {
+.forensic-signal-gauge {
   position: relative;
   width: 112px;
   height: 112px;
   border-radius: 999px;
   background:
     radial-gradient(circle at 35% 28%, rgba(255,255,255,0.7), rgba(255,255,255,0) 34%),
-    conic-gradient(var(--force-color, #2d90c8) var(--force-sweep, 0%), rgba(200, 211, 219, 0.46) 0);
+    conic-gradient(var(--signal-color, #2d90c8) var(--signal-sweep, 0%), rgba(200, 211, 219, 0.46) 0);
   box-shadow:
     inset 1px 1px 0 rgba(255,255,255,0.82),
     inset -2px -2px 0 rgba(111, 128, 142, 0.1),
     0 12px 22px rgba(88, 105, 118, 0.16);
 }
-.forensic-force-gauge::after {
+.forensic-signal-gauge::after {
   content: "";
   position: absolute;
   inset: 14px;
@@ -507,7 +507,7 @@ body {
     inset 1px 1px 0 rgba(255,255,255,0.84),
     inset -1px -1px 0 rgba(102, 118, 131, 0.08);
 }
-.forensic-force-gauge-content {
+.forensic-signal-gauge-content {
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -517,24 +517,24 @@ body {
   justify-content: center;
   gap: 2px;
 }
-.forensic-force-gauge-value {
+.forensic-signal-gauge-value {
   font-size: 24px;
   font-weight: 800;
   color: #233544;
   letter-spacing: -0.04em;
 }
-.forensic-force-gauge-label {
+.forensic-signal-gauge-label {
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #617280;
 }
-.forensic-force-summary {
+.forensic-signal-summary {
   display: grid;
   gap: 8px;
 }
-.forensic-force-summary-row {
+.forensic-signal-summary-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -542,7 +542,7 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
-.forensic-force-summary-row strong {
+.forensic-signal-summary-row strong {
   font-size: 12px;
   color: #2d4050;
 }
@@ -1314,7 +1314,7 @@ body {
   <div class="trace-view trace-view--active forensic-view" id="forensic-view">
     <div class="forensic-overview" id="forensic-overview">
       <section class="forensic-overview-card" id="forensic-topology-overview"></section>
-      <section class="forensic-overview-card" id="forensic-force-overview"></section>
+      <section class="forensic-overview-card" id="forensic-signal-overview"></section>
       <section class="forensic-overview-card" id="forensic-shadow-overview"></section>
     </div>
     <div class="forensic-shell">
@@ -1385,15 +1385,15 @@ const KIND_COLORS = {
   thread: '#70808d',
   forensic: '#2d90c8',
   lineage: '#5376a3',
-  force: '#f08a24'
+  signal: '#f08a24'
 };
 
 const FORCE_KIND_COLORS = {
-  context_pressure: '#f08a24',
-  compaction: '#5376a3',
-  execution_pressure: '#d65f4a',
+  context_strain: '#f08a24',
+  compaction_cue: '#5376a3',
+  action_bias: '#d65f4a',
   fallback: '#9b5de5',
-  budget: '#dfb23f'
+  budget_boundary: '#dfb23f'
 };
 
 const FORCE_LEVEL_COLORS = {
@@ -1416,7 +1416,7 @@ const FORCE_SOURCE_LABELS = {
   search_budget: 'Search budget',
   inspect_budget: 'Inspect budget',
   read_budget: 'Read budget',
-  evidence_pressure: 'Evidence pressure',
+  premise_challenge: 'Premise challenge',
   planner_budget: 'Planner budget',
   context: 'Context'
 };
@@ -1436,7 +1436,7 @@ const FORENSIC_KIND_LABELS = {
   SelectionArtifact: 'selection artifact',
   ModelExchangeArtifact: 'model exchange',
   LineageEdge: 'lineage edge',
-  ForceSnapshot: 'force snapshot',
+  SignalSnapshot: 'influence snapshot',
   ToolCallRequested: 'tool call',
   ToolCallCompleted: 'tool result',
   CompletionCheckpoint: 'completion',
@@ -1479,8 +1479,8 @@ function sourceColor(source) {
   return FORCE_SOURCE_PALETTE[hash % FORCE_SOURCE_PALETTE.length];
 }
 
-function forceKindLabel(kind) {
-  return titleCase(kind || 'force');
+function signalKindLabel(kind) {
+  return titleCase(kind || 'signal');
 }
 
 function truncate(s, n) {
@@ -2053,7 +2053,7 @@ function previousArtifactBaseline(turn, recordProjection) {
   return null;
 }
 
-function strongestForceSnapshot(forceRecords) {
+function strongestSignalSnapshot(forceRecords) {
   if (!forceRecords.length) {
     return null;
   }
@@ -2064,7 +2064,7 @@ function strongestForceSnapshot(forceRecords) {
   });
 }
 
-function aggregateForceContributions(forceRecords) {
+function aggregateSignalContributions(forceRecords) {
   const totals = new Map();
   let totalShare = 0;
 
@@ -2114,11 +2114,11 @@ function aggregateForceContributions(forceRecords) {
   return items;
 }
 
-function forceSnapshotsForTurn(turn, recordProjection) {
+function signalSnapshotsForTurn(turn, recordProjection) {
   if (!turn) {
     return [];
   }
-  const forceRecords = turn.records.filter((candidate) => kindEntry(candidate).key === 'ForceSnapshot');
+  const forceRecords = turn.records.filter((candidate) => kindEntry(candidate).key === 'SignalSnapshot');
   if (!forceRecords.length) {
     return [];
   }
@@ -2145,14 +2145,14 @@ function forceSnapshotsForTurn(turn, recordProjection) {
   return scoped.length ? scoped : forceRecords;
 }
 
-function forceSnapshotsForSelection() {
+function signalSnapshotsForSelection() {
   const comparisonRecord = currentTurn() ? selectedComparisonRecord(currentTurn()) : null;
   return selectionScopeTurns().reduce((allSnapshots, turn) => {
     const turnComparisonRecord =
       comparisonRecord && turn.turn_id === comparisonRecord.record.lineage.turn_id
         ? comparisonRecord
         : null;
-    return allSnapshots.concat(forceSnapshotsForTurn(turn, turnComparisonRecord));
+    return allSnapshots.concat(signalSnapshotsForTurn(turn, turnComparisonRecord));
   }, []);
 }
 
@@ -2236,8 +2236,8 @@ function nodeIdsForRecord(recordProjection) {
     ids.add('planner-step:' + recordProjection.record.record_id);
   } else if (entry.key === 'CompletionCheckpoint' && entry.value.response && entry.value.response.artifact_id) {
     ids.add('output:' + entry.value.response.artifact_id);
-  } else if (entry.key === 'ForceSnapshot') {
-    ids.add('force:' + recordProjection.record.record_id);
+  } else if (entry.key === 'SignalSnapshot') {
+    ids.add('signal:' + recordProjection.record.record_id);
     if (entry.value.applies_to && entry.value.applies_to.id) {
       ids.add(entry.value.applies_to.id);
     }
@@ -2260,7 +2260,7 @@ function recordMatchesFocus(recordProjection, focus) {
     if (entry.key === 'LineageEdge') {
       return entry.value.source.id === 'model-call:' + focus.id || entry.value.target.id === 'model-call:' + focus.id;
     }
-    if (entry.key === 'ForceSnapshot' && entry.value.applies_to) {
+    if (entry.key === 'SignalSnapshot' && entry.value.applies_to) {
       return entry.value.applies_to.id === 'model-call:' + focus.id;
     }
     return false;
@@ -2272,7 +2272,7 @@ function recordMatchesFocus(recordProjection, focus) {
     if (entry.key === 'LineageEdge') {
       return entry.value.source.id === focus.id || entry.value.target.id === focus.id;
     }
-    if (entry.key === 'ForceSnapshot' && entry.value.applies_to) {
+    if (entry.key === 'SignalSnapshot' && entry.value.applies_to) {
       return entry.value.applies_to.id === focus.id;
     }
     return false;
@@ -2372,8 +2372,8 @@ function recordSummary(recordProjection) {
   if (entry.key === 'LineageEdge') {
     return entry.value.summary || 'lineage edge';
   }
-  if (entry.key === 'ForceSnapshot') {
-    return entry.value.summary || 'force snapshot';
+  if (entry.key === 'SignalSnapshot') {
+    return entry.value.summary || 'influence snapshot';
   }
   if (entry.key === 'CompletionCheckpoint') {
     return entry.value.summary || 'completion';
@@ -2405,7 +2405,7 @@ function recordMeta(recordProjection) {
     base.push(entry.value.phase);
     base.push(entry.value.provider + ':' + entry.value.model);
   }
-  if (entry.key === 'ForceSnapshot') {
+  if (entry.key === 'SignalSnapshot') {
     base.push(entry.value.level);
     base.push((entry.value.magnitude_percent || 0) + '%');
   }
@@ -2426,7 +2426,7 @@ function primaryArtifact(recordProjection) {
   if (entry.key === 'ToolCallRequested' || entry.key === 'ToolCallCompleted') {
     return entry.value.payload || null;
   }
-  if (entry.key === 'ForceSnapshot') {
+  if (entry.key === 'SignalSnapshot') {
     return entry.value.artifact || null;
   }
   if (entry.key === 'TurnStarted' || entry.key === 'TaskRootStarted') {
@@ -2473,12 +2473,12 @@ function renderedRecordBody(recordProjection) {
   if (entry.key === 'PlannerAction') {
     return 'action: ' + (entry.value.action || '') + '\n\nrationale: ' + (entry.value.rationale || '');
   }
-  if (entry.key === 'ForceSnapshot') {
+  if (entry.key === 'SignalSnapshot') {
     const contributions = (entry.value.contributions || [])
       .map((contribution) => '- ' + contribution.source + ': ' + contribution.share_percent + '% (' + contribution.rationale + ')')
       .join('\n');
     return [
-      entry.value.summary || 'force snapshot',
+      entry.value.summary || 'influence snapshot',
       '',
       'level: ' + entry.value.level,
       'magnitude: ' + entry.value.magnitude_percent + '%',
@@ -2515,20 +2515,20 @@ function relatedLineageSummaries(turn, recordProjection) {
 
 function renderForensicOverview() {
   const topology = document.getElementById('forensic-topology-overview');
-  const force = document.getElementById('forensic-force-overview');
+  const signalCard = document.getElementById('forensic-signal-overview');
   const shadow = document.getElementById('forensic-shadow-overview');
   const turns = projectionTurns();
   const turn = currentTurn();
   const recordProjection = turn ? selectedComparisonRecord(turn) : null;
   if (!turns.length) {
-    [topology, force, shadow].forEach((card) => {
+    [topology, signalCard, shadow].forEach((card) => {
       card.dataset.card = 'empty';
       card.innerHTML = '<div class="forensic-empty">Forensic replay appears here when transit records exist.</div>';
     });
     return;
   }
 
-  [topology, force, shadow].forEach((card) => delete card.dataset.card);
+  [topology, signalCard, shadow].forEach((card) => delete card.dataset.card);
 
   const scopeTurns = selectionScopeTurns();
   const topologyRecords = (selectedSelectionMode === 'conversation'
@@ -2537,17 +2537,17 @@ function renderForensicOverview() {
       ? recordsForTurn(turn)
       : turn.records);
   const totalScopeRecords = topologyRecords.length;
-  const forceSnapshots = forceSnapshotsForSelection();
-  const strongestForce = strongestForceSnapshot(forceSnapshots);
-  const strongestForceValue = strongestForce ? kindEntry(strongestForce).value : null;
-  const aggregatedContribs = aggregateForceContributions(forceSnapshots);
+  const signalSnapshots = signalSnapshotsForSelection();
+  const strongestSignal = strongestSignalSnapshot(signalSnapshots);
+  const strongestSignalValue = strongestSignal ? kindEntry(strongestSignal).value : null;
+  const aggregatedContribs = aggregateSignalContributions(signalSnapshots);
   const selectedRecordIdForTopology = recordProjection ? recordProjection.record.record_id : null;
   const topologyPoints = topologyRecords.map((recordItem, index) => {
     const entry = kindEntry(recordItem);
     const x = 16 + index * ((312 - 32) / Math.max(topologyRecords.length - 1, 1));
-    const yBand = entry.key === 'ForceSnapshot' ? 0 : entry.key === 'LineageEdge' ? 1 : 2;
+    const yBand = entry.key === 'SignalSnapshot' ? 0 : entry.key === 'LineageEdge' ? 1 : 2;
     const y = 20 + yBand * 22 + ((index % 2) * 6);
-    const recordKind = entry.key === 'ForceSnapshot'
+    const recordKind = entry.key === 'SignalSnapshot'
       ? entry.value.kind
       : entry.key.toLowerCase();
     const color = FORCE_KIND_COLORS[recordKind] || KIND_COLORS[recordKind] || '#2d90c8';
@@ -2556,7 +2556,7 @@ function renderForensicOverview() {
       y,
       color,
       selected: recordItem.record.record_id === selectedRecordIdForTopology,
-      radius: recordItem.record.record_id === selectedRecordIdForTopology ? 7 : entry.key === 'ForceSnapshot' ? 6 : 4.5
+      radius: recordItem.record.record_id === selectedRecordIdForTopology ? 7 : entry.key === 'SignalSnapshot' ? 6 : 4.5
     };
   });
   const topologyPath = topologyPoints.length
@@ -2568,8 +2568,8 @@ function renderForensicOverview() {
       value: selectedSelectionMode === 'conversation' ? 'conversation' : (selectedFocus.kind === 'all' ? 'turn' : selectedFocus.kind.replace('_', ' '))
     },
     {
-      label: 'Force nodes',
-      value: forceSnapshots.length
+      label: 'Signal nodes',
+      value: signalSnapshots.length
     },
     {
       label: 'Selection',
@@ -2595,18 +2595,18 @@ function renderForensicOverview() {
     '<div class="forensic-topology-legend">' +
       '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.forensic + '"></span>lineage path</span>' +
       '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.action + '"></span>model/tool state</span>' +
-      '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.force + '"></span>force snapshots</span>' +
+      '<span class="forensic-chip"><span class="forensic-chip-swatch" style="--chip-color:' + KIND_COLORS.signal + '"></span>steering signals</span>' +
     '</div>';
 
-  if (!forceSnapshots.length) {
-    force.innerHTML =
-      '<div class="forensic-card-title">Forces</div>' +
-      '<div class="forensic-empty">No force snapshots were recorded for the current lineage selection.</div>';
+  if (!signalSnapshots.length) {
+    signalCard.innerHTML =
+      '<div class="forensic-card-title">Steering Signals</div>' +
+      '<div class="forensic-empty">No steering signals were recorded for the current lineage selection.</div>';
   } else {
-    const gaugeColor = FORCE_LEVEL_COLORS[strongestForceValue.level] || FORCE_KIND_COLORS[strongestForceValue.kind] || KIND_COLORS.force;
-    const forceRows = forceSnapshots.slice(0, 4).map((forceProjection) => {
-      const value = kindEntry(forceProjection).value;
-      const rowColor = FORCE_KIND_COLORS[value.kind] || FORCE_LEVEL_COLORS[value.level] || KIND_COLORS.force;
+    const gaugeColor = FORCE_LEVEL_COLORS[strongestSignalValue.level] || FORCE_KIND_COLORS[strongestSignalValue.kind] || KIND_COLORS.signal;
+    const signalRows = signalSnapshots.slice(0, 4).map((signalProjection) => {
+      const value = kindEntry(signalProjection).value;
+      const rowColor = FORCE_KIND_COLORS[value.kind] || FORCE_LEVEL_COLORS[value.level] || KIND_COLORS.signal;
       const chips = (value.contributions || []).slice(0, 3).map((contribution) => (
         '<span class="forensic-chip" title="' + escapeHtml(contribution.rationale || '') + '">' +
           '<span class="forensic-chip-swatch" style="--chip-color:' + sourceColor(contribution.source) + '"></span>' +
@@ -2614,29 +2614,29 @@ function renderForensicOverview() {
         '</span>'
       )).join('');
       return (
-        '<div class="forensic-force-row">' +
-          '<div class="forensic-force-label">' + escapeHtml(value.summary || forceKindLabel(value.kind)) + '</div>' +
-          '<div class="forensic-force-meta">' + escapeHtml(forceKindLabel(value.kind)) + ' · ' + escapeHtml(value.level) + '</div>' +
-          '<div class="forensic-force-bar"><span style="width:' + (value.magnitude_percent || 0) + '%;background:linear-gradient(90deg,' + rowColor + ', rgba(255,255,255,0.92));"></span></div>' +
-          '<div class="forensic-force-meta">' + (value.applies_to ? escapeHtml(value.applies_to.label) : 'turn scope') + '</div>' +
+        '<div class="forensic-signal-row">' +
+          '<div class="forensic-signal-label">' + escapeHtml(value.summary || signalKindLabel(value.kind)) + '</div>' +
+          '<div class="forensic-signal-meta">' + escapeHtml(signalKindLabel(value.kind)) + ' · ' + escapeHtml(value.level) + '</div>' +
+          '<div class="forensic-signal-bar"><span style="width:' + (value.magnitude_percent || 0) + '%;background:linear-gradient(90deg,' + rowColor + ', rgba(255,255,255,0.92));"></span></div>' +
+          '<div class="forensic-signal-meta">' + (value.applies_to ? escapeHtml(value.applies_to.label) : 'turn scope') + '</div>' +
           '<div class="forensic-contribs">' + chips + '</div>' +
         '</div>'
       );
     }).join('');
 
-    force.innerHTML =
-      '<div class="forensic-card-title">Forces</div>' +
-      '<div class="forensic-force-hero">' +
-        '<div class="forensic-force-gauge" style="--force-sweep:' + (strongestForceValue.magnitude_percent || 0) + '%;--force-color:' + gaugeColor + '">' +
-          '<div class="forensic-force-gauge-content">' +
-            '<div class="forensic-force-gauge-value">' + (strongestForceValue.magnitude_percent || 0) + '%</div>' +
-            '<div class="forensic-force-gauge-label">' + escapeHtml(strongestForceValue.level) + '</div>' +
+    signalCard.innerHTML =
+      '<div class="forensic-card-title">Steering Signals</div>' +
+      '<div class="forensic-signal-hero">' +
+        '<div class="forensic-signal-gauge" style="--signal-sweep:' + (strongestSignalValue.magnitude_percent || 0) + '%;--signal-color:' + gaugeColor + '">' +
+          '<div class="forensic-signal-gauge-content">' +
+            '<div class="forensic-signal-gauge-value">' + (strongestSignalValue.magnitude_percent || 0) + '%</div>' +
+            '<div class="forensic-signal-gauge-label">' + escapeHtml(strongestSignalValue.level) + '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="forensic-force-summary">' +
-          '<div class="forensic-force-summary-row"><strong>' + escapeHtml(forceKindLabel(strongestForceValue.kind)) + '</strong><span>' + forceSnapshots.length + ' snapshot' + (forceSnapshots.length === 1 ? '' : 's') + '</span></div>' +
-          '<div class="forensic-force-summary-row"><span>Selection</span><span>' + escapeHtml(recordProjection ? recordSummary(recordProjection) : turn.turn_id) + '</span></div>' +
-          '<div class="forensic-force-summary-row"><span>Scope</span><span>' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : selectedFocus.kind.replace('_', ' ')) + '</span></div>' +
+        '<div class="forensic-signal-summary">' +
+          '<div class="forensic-signal-summary-row"><strong>' + escapeHtml(signalKindLabel(strongestSignalValue.kind)) + '</strong><span>' + signalSnapshots.length + ' snapshot' + (signalSnapshots.length === 1 ? '' : 's') + '</span></div>' +
+          '<div class="forensic-signal-summary-row"><span>Selection</span><span>' + escapeHtml(recordProjection ? recordSummary(recordProjection) : turn.turn_id) + '</span></div>' +
+          '<div class="forensic-signal-summary-row"><span>Scope</span><span>' + escapeHtml(selectedFocus.kind === 'all' ? 'all records' : selectedFocus.kind.replace('_', ' ')) + '</span></div>' +
           '<div class="forensic-contribs forensic-contribs--stacked">' +
             aggregatedContribs.slice(0, 5).map((contribution) => (
               '<span class="forensic-chip" title="' + escapeHtml(contribution.rationale) + '">' +
@@ -2647,7 +2647,7 @@ function renderForensicOverview() {
           '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="forensic-force-list">' + forceRows + '</div>';
+      '<div class="forensic-signal-list">' + signalRows + '</div>';
   }
 
   if (!recordProjection) {

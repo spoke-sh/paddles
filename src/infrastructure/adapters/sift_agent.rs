@@ -1,7 +1,7 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
 use crate::domain::model::{
     CompactionDecision, ConversationThreadRef, ForensicArtifactCapture, NullTurnEventSink,
-    PressureFactor, PressureTracker, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
+    StrainFactor, StrainTracker, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
     ThreadMergeMode, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
     TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
 };
@@ -1301,7 +1301,7 @@ impl SiftAgentAdapter {
             } else {
                 // Heuristic: Discard old history
                 CompactionDecision::Discard {
-                    reason: "Archived due to context pressure".to_string(),
+                    reason: "Archived due to context strain".to_string(),
                 }
             };
             decisions.insert(artifact_id.clone(), decision);
@@ -1389,15 +1389,15 @@ impl SiftAgentAdapter {
         }
         let memory_prompt = memory.render_for_prompt();
 
-        // Track context pressure from memory truncation.
-        let mut pressure_tracker = PressureTracker::new();
+        // Track context strain from memory truncation.
+        let mut strain_tracker = StrainTracker::new();
         let mem_truncation_count = memory.truncation_count();
         if mem_truncation_count > 0 {
-            pressure_tracker.record_many(PressureFactor::MemoryTruncated, mem_truncation_count);
+            strain_tracker.record_many(StrainFactor::MemoryTruncated, mem_truncation_count);
         }
-        let pressure = pressure_tracker.finish();
-        if !pressure.is_nominal() {
-            event_sink.emit(TurnEvent::ContextPressure { pressure });
+        let strain = strain_tracker.finish();
+        if !strain.is_nominal() {
+            event_sink.emit(TurnEvent::ContextStrain { strain });
         }
 
         let mut state = self
@@ -2874,7 +2874,7 @@ Rules:\n\
 - Branch when the investigation should split into multiple subqueries.\n\
 - Stop as soon as you have enough evidence to answer. Do not use remaining budget for redundant or confirmatory searches — efficiency matters more than thoroughness.\n\
 - When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly — never describe the edit for the user to apply manually.\n\
-- If the current loop state notes contain a `Pressure review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
+- If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 - Never answer the user directly here.\n\
 - Inspect commands must stay read-only.\n\
 \n\
@@ -2931,7 +2931,7 @@ Do not answer the user directly.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
-If the current loop state notes contain a `Pressure review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
+If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -2983,7 +2983,7 @@ Invalid reply to correct:\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
-If the current loop state notes contain a `Pressure review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
+If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\

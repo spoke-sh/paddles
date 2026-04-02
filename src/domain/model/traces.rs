@@ -155,7 +155,8 @@ pub enum TraceLineageNodeKind {
     PlannerStep,
     Artifact,
     Output,
-    Force,
+    #[serde(rename = "Signal", alias = "Force")]
+    Signal,
 }
 
 impl TraceLineageNodeKind {
@@ -167,7 +168,7 @@ impl TraceLineageNodeKind {
             Self::PlannerStep => "planner_step",
             Self::Artifact => "artifact",
             Self::Output => "output",
-            Self::Force => "force",
+            Self::Signal => "signal",
         }
     }
 }
@@ -214,41 +215,45 @@ pub struct TraceLineageEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TraceForceKind {
-    ContextPressure,
-    Compaction,
-    ExecutionPressure,
+pub enum TraceSignalKind {
+    #[serde(rename = "ContextStrain", alias = "ContextPressure")]
+    ContextStrain,
+    #[serde(rename = "CompactionCue", alias = "Compaction")]
+    CompactionCue,
+    #[serde(rename = "ActionBias", alias = "ExecutionPressure")]
+    ActionBias,
     Fallback,
-    Budget,
+    #[serde(rename = "BudgetBoundary", alias = "Budget")]
+    BudgetBoundary,
 }
 
-impl TraceForceKind {
+impl TraceSignalKind {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::ContextPressure => "context_pressure",
-            Self::Compaction => "compaction",
-            Self::ExecutionPressure => "execution_pressure",
+            Self::ContextStrain => "context_strain",
+            Self::CompactionCue => "compaction_cue",
+            Self::ActionBias => "action_bias",
             Self::Fallback => "fallback",
-            Self::Budget => "budget",
+            Self::BudgetBoundary => "budget_boundary",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceForceContribution {
+pub struct TraceSignalContribution {
     pub source: String,
     pub share_percent: u8,
     pub rationale: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceForceSnapshot {
-    pub kind: TraceForceKind,
+pub struct TraceSignalSnapshot {
+    pub kind: TraceSignalKind,
     pub summary: String,
     pub level: String,
     pub magnitude_percent: u8,
     pub applies_to: Option<TraceLineageNodeRef>,
-    pub contributions: Vec<TraceForceContribution>,
+    pub contributions: Vec<TraceSignalContribution>,
     pub artifact: ArtifactEnvelope,
 }
 
@@ -301,12 +306,16 @@ pub enum TraceRecordKind {
     ThreadCandidateCaptured(ThreadCandidate),
     ThreadDecisionSelected(ThreadDecision),
     ThreadMerged(ThreadMergeRecord),
-    PlannerAction { action: String, rationale: String },
+    PlannerAction {
+        action: String,
+        rationale: String,
+    },
     PlannerBranchDeclared(TraceBranch),
     SelectionArtifact(TraceSelectionArtifact),
     ModelExchangeArtifact(TraceModelExchangeArtifact),
     LineageEdge(TraceLineageEdge),
-    ForceSnapshot(TraceForceSnapshot),
+    #[serde(rename = "SignalSnapshot", alias = "ForceSnapshot")]
+    SignalSnapshot(TraceSignalSnapshot),
     ToolCallRequested(TraceToolCall),
     ToolCallCompleted(TraceToolCall),
     CompletionCheckpoint(TraceCompletionCheckpoint),
@@ -329,10 +338,12 @@ pub struct TraceReplay {
 #[cfg(test)]
 mod tests {
     use super::{
-        TaskTraceId, TraceBranch, TraceBranchId, TraceBranchStatus, TraceLineage, TraceRecordId,
-        TurnTraceId,
+        TaskTraceId, TraceBranch, TraceBranchId, TraceBranchStatus, TraceLineage,
+        TraceLineageNodeKind, TraceRecordId, TraceRecordKind, TraceSignalContribution,
+        TraceSignalKind, TraceSignalSnapshot, TurnTraceId,
     };
     use paddles_conversation::{ArtifactEnvelope, ArtifactKind, TraceArtifactId};
+    use serde_json::json;
 
     #[test]
     fn artifact_envelope_uses_locator_when_truncated() {
@@ -461,5 +472,71 @@ mod tests {
         // does not reference transit-core or sift-core types directly.
         use paddles_conversation::ContextLocator;
         let _: fn(&ContextLocator) -> ContextLocator = |l| l.clone();
+    }
+
+    #[test]
+    fn trace_signal_kind_labels_use_steering_signal_vocabulary() {
+        assert_eq!(TraceSignalKind::ContextStrain.label(), "context_strain");
+        assert_eq!(TraceSignalKind::ActionBias.label(), "action_bias");
+        assert_eq!(TraceSignalKind::CompactionCue.label(), "compaction_cue");
+        assert_eq!(TraceSignalKind::BudgetBoundary.label(), "budget_boundary");
+    }
+
+    #[test]
+    fn legacy_force_snapshot_records_remain_deserializable() {
+        let legacy = json!({
+            "ForceSnapshot": {
+                "kind": "ContextPressure",
+                "summary": "legacy context pressure",
+                "level": "medium",
+                "magnitude_percent": 45,
+                "applies_to": {
+                    "kind": "Force",
+                    "id": "force:record-1",
+                    "label": "context_pressure"
+                },
+                "contributions": [
+                    {
+                        "source": "operator_memory",
+                        "share_percent": 100,
+                        "rationale": "legacy"
+                    }
+                ],
+                "artifact": ArtifactEnvelope::text(
+                    TraceArtifactId::new("artifact-1").expect("artifact id"),
+                    ArtifactKind::PlannerTrace,
+                    "legacy",
+                    "{}",
+                    10
+                )
+            }
+        });
+
+        let kind: TraceRecordKind =
+            serde_json::from_value(legacy).expect("legacy force snapshot should deserialize");
+
+        match kind {
+            TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
+                kind,
+                applies_to,
+                contributions,
+                ..
+            }) => {
+                assert_eq!(kind, TraceSignalKind::ContextStrain);
+                assert_eq!(
+                    applies_to.expect("applies_to").kind,
+                    TraceLineageNodeKind::Signal
+                );
+                assert_eq!(
+                    contributions,
+                    vec![TraceSignalContribution {
+                        source: "operator_memory".to_string(),
+                        share_percent: 100,
+                        rationale: "legacy".to_string(),
+                    }]
+                );
+            }
+            other => panic!("unexpected trace record kind: {other:?}"),
+        }
     }
 }

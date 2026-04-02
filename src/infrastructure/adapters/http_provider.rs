@@ -827,7 +827,7 @@ Rules:
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
 - When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
 - When the user requests a concrete code change, prefer `write_file`, `replace_in_file`, or `apply_patch` over describing the edit in prose.
-- If the loop-state notes contain a `Pressure review`, judge the proposed move against the gathered sources and return the action that should actually execute next.
+- If the loop-state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.
 - Respond ONLY with the JSON object, no prose.
 "#
         ));
@@ -1541,7 +1541,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 }
             } else {
                 CompactionDecision::Discard {
-                    reason: "Archived due to context pressure".to_string(),
+                    reason: "Archived due to context strain".to_string(),
                 }
             };
             decisions.insert(artifact_id.clone(), decision);
@@ -2046,7 +2046,7 @@ fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat)
         "\nSelect your next action.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
-If the loop-state notes contain a pressure review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
+If the loop-state notes contain a steering review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
 {}",
         planner_transport_reply_instruction(format)
     ));
@@ -3469,7 +3469,7 @@ mod tests {
                 rank: 1,
             }],
             notes: vec![
-                "Pressure review [evidence-pressure]\nTreat the reported failure as a hypothesis and judge the gathered sources before repeating the same probe."
+                "Steering review [premise-challenge]\nTreat the reported failure as a hypothesis and judge the gathered sources before repeating the same probe."
                     .to_string(),
             ],
             ..PlannerLoopState::default()
@@ -3480,7 +3480,7 @@ mod tests {
         assert!(prompt.contains("Current loop state"));
         assert!(prompt.contains("Current evidence"));
         assert!(prompt.contains("Current notes"));
-        assert!(prompt.contains("Pressure review [evidence-pressure]"));
+        assert!(prompt.contains("Steering review [premise-challenge]"));
         assert!(prompt.contains("gh run list --limit 10"));
         assert!(prompt.contains("\"conclusion\":\"success\""));
     }

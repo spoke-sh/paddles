@@ -61,7 +61,8 @@ pub enum PlannerCapability {
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum RefinementTriggerSource {
     #[default]
-    EvidencePressure,
+    #[serde(rename = "premise_challenge", alias = "evidence_pressure")]
+    PremiseChallenge,
     StaleLoopState,
     Manual,
 }
@@ -77,8 +78,8 @@ pub struct RefinementTrigger {
 impl Default for RefinementTrigger {
     fn default() -> Self {
         Self {
-            id: "trigger:evidence-pressure-v1".to_string(),
-            source: RefinementTriggerSource::EvidencePressure,
+            id: "trigger:premise-challenge-v1".to_string(),
+            source: RefinementTriggerSource::PremiseChallenge,
             min_evidence_items: 1,
             min_steps_without_new_evidence: 2,
         }
@@ -546,8 +547,8 @@ mod tests {
         let trigger = RefinementTrigger::default();
         let policy = RefinementPolicy::default();
 
-        assert_eq!(trigger.id, "trigger:evidence-pressure-v1");
-        assert_eq!(trigger.source, RefinementTriggerSource::EvidencePressure);
+        assert_eq!(trigger.id, "trigger:premise-challenge-v1");
+        assert_eq!(trigger.source, RefinementTriggerSource::PremiseChallenge);
         assert_eq!(trigger.min_evidence_items, 1);
         assert_eq!(trigger.min_steps_without_new_evidence, 2);
         assert_eq!(policy.id, "policy:context-refine-v1");

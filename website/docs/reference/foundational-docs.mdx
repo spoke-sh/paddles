@@ -14,10 +14,10 @@ The paddles repository contains a stack of markdown documents that define the pr
 |-------|----------|----------------|
 | 1 | **AGENTS.md** | Operator guidance and the top-level working contract for agents |
 | 2 | **INSTRUCTIONS.md** | The canonical Keel turn loop and procedural checklists |
-| 3 | **README.md** | Backbone architecture narrative, current capabilities, growing edges, and the high-level pressure-system map |
+| 3 | **README.md** | Backbone architecture narrative, current capabilities, growing edges, and the high-level steering-signal map |
 | 4 | **CONSTITUTION.md** | Collaboration philosophy, environmental calibration, and core invariants |
-| 5 | **POLICY.md** | Operational commitments: boot invariants, zero drift, model routing, pressure-system guarantees, mission criteria |
-| 6 | **ARCHITECTURE.md** | Turn loop narrative, implementation map, context architecture, recorder boundary, and the detailed pressure taxonomy |
+| 5 | **POLICY.md** | Operational commitments: boot invariants, zero drift, model routing, steering-signal guarantees, mission criteria |
+| 6 | **ARCHITECTURE.md** | Turn loop narrative, implementation map, context architecture, recorder boundary, and the detailed steering-signal taxonomy |
 | 7 | **PROTOCOL.md** | Communications protocol, message format, routing rules |
 | 8 | **CONFIGURATION.md** | Concrete lane and runtime configuration reference |
 
@@ -42,17 +42,17 @@ The reading order is not the decision hierarchy. When documents disagree:
 
 ## Pressure Reading Route
 
-If you specifically want to understand how Paddles applies pressure inside the harness, read these in order:
+If you specifically want to understand how Paddles applies steering signals inside the harness, read these in order:
 
-1. **README.md** for the high-level pressure families
+1. **README.md** for the high-level steering-signal families
 2. **POLICY.md** for the binding controller commitments
-3. **ARCHITECTURE.md** for the detailed runtime taxonomy and force snapshots
-4. [Pressure Systems](../concepts/context-pressure.mdx) for the public-facing explanation
-5. [Recursive Planning](../concepts/recursive-planning.mdx) for how pressure changes planner behavior
+3. **ARCHITECTURE.md** for the detailed runtime taxonomy and influence snapshots
+4. [Steering Signals](../concepts/context-pressure.mdx) for the public-facing explanation
+5. [Recursive Planning](../concepts/recursive-planning.mdx) for how steering signals change planner behavior
 
 ## What To Read Next
 
 - [Turn Loop](../concepts/turn-loop.mdx) — the architectural narrative explained for newcomers
-- [Pressure Systems](../concepts/context-pressure.mdx) — how pressure shapes the recursive harness
+- [Steering Signals](../concepts/context-pressure.mdx) — how steering signals shape the recursive harness
 - [Context Tiers](../concepts/context-tiers.mdx) — the four-tier context model
 - [Search and Retrieval](../concepts/search-retrieval.mdx) — planner retrieval modes, caps, and trace

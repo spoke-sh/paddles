@@ -448,9 +448,9 @@ fn build_trace_graph(replays: &[crate::domain::model::TraceReplay]) -> TraceGrap
                 TraceRecordKind::LineageEdge(edge) => {
                     ("lineage".to_string(), truncate(&edge.summary, 24))
                 }
-                TraceRecordKind::ForceSnapshot(force) => (
-                    "force".to_string(),
-                    truncate(&format!("{} {}", force.kind.label(), force.level), 24),
+                TraceRecordKind::SignalSnapshot(signal) => (
+                    "signal".to_string(),
+                    truncate(&format!("{} {}", signal.kind.label(), signal.level), 24),
                 ),
                 TraceRecordKind::CompletionCheckpoint(cp) => {
                     ("checkpoint".to_string(), cp.kind.label().to_string())
@@ -744,7 +744,7 @@ mod tests {
         let html = include_str!("index.html");
 
         assert!(html.contains("id=\"forensic-topology-overview\""));
-        assert!(html.contains("id=\"forensic-force-overview\""));
+        assert!(html.contains("id=\"forensic-signal-overview\""));
         assert!(html.contains("id=\"forensic-shadow-overview\""));
         assert!(!html.contains("src=\"https://"));
         assert!(!html.contains("src='https://"));

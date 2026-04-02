@@ -63,18 +63,18 @@ Every planner session runs within a bounded budget:
 
 When any budget is exhausted, the loop stops and synthesis proceeds with whatever evidence has been gathered. This prevents runaway investigation while still allowing deep multi-step reasoning.
 
-## Pressure-Guided Decisions
+## Steering-Signal-Guided Decisions
 
-The planner is not left alone once evidence starts to accumulate. The controller applies pressure systems that bias the loop toward more intelligent moves.
+The planner is not left alone once evidence starts to accumulate. The controller applies steering signals that bias the loop toward more intelligent moves.
 
-| Pressure | What it changes |
+| Signal | What it changes |
 |----------|-----------------|
-| **Execution pressure** | Adds a planner review note that biases edit-oriented turns toward likely file action instead of repeated broad retrieval |
-| **Evidence pressure** | Adds a planner review note when sources start to outweigh the original premise, so the planner must refine, stop, or continue explicitly |
-| **Compaction pressure** | Keeps retained context small enough to stay actionable |
-| **Budget pressure** | Terminates recursion when the hard caps are reached |
+| **Action bias** | Adds a planner review note that biases edit-oriented turns toward likely file action instead of repeated broad retrieval |
+| **Premise challenge** | Adds a planner review note when sources start to outweigh the original premise, so the planner must refine, stop, or continue explicitly |
+| **Compaction cue** | Keeps retained context small enough to stay actionable |
+| **Budget boundary** | Terminates recursion when the hard caps are reached |
 
-Two evidence-pressure cases matter most:
+Two premise-challenge cases matter most:
 
 1. **Quiet-step refinement**
    If the loop has gathered evidence but several steps add nothing new, the controller refreshes interpretation context before asking the planner again.
@@ -92,5 +92,5 @@ Low-value artifacts are pruned from working context, but their content remains r
 ## What To Read Next
 
 - [Context Tiers](./context-tiers.mdx) — how pruned content stays reachable through locators
-- [Pressure Systems](./context-pressure.mdx) — how controller pressure shapes the loop
+- [Steering Signals](./context-pressure.mdx) — how controller steering signals shape the loop
 - [Search and Retrieval](./search-retrieval.mdx) — planner retrieval behavior, modes, and limits

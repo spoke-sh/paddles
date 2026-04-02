@@ -1,12 +1,12 @@
 ---
-title: Pressure Systems
+title: Steering Signals
 sidebar_position: 5
-description: How Paddles applies context, execution, evidence, compaction, and budget pressure inside the recursive harness.
+description: How Paddles applies context strain, action bias, premise challenge, compaction cue, and budget boundary inside the recursive harness.
 ---
 
-# Pressure Systems
+# Steering Signals
 
-Paddles does not use one generic "pressure" score. It applies a family of controller-owned pressure systems that bias the turn loop when evidence starts to matter more than priors.
+Paddles does not use one generic control score. It applies a family of controller-owned steering signals that bias the turn loop when evidence starts to matter more than priors.
 
 ```text
 prompt prior
@@ -15,37 +15,37 @@ interpretation context
    ↓
 planner proposes next action
    ↓
-controller pressure layer
-   ├─ context pressure: context degraded
-   ├─ execution pressure: act on a likely file
-   ├─ evidence pressure: refine or stop and judge
-   ├─ compaction pressure: tighten active context
-   └─ budget pressure: terminate bounded recursion
+controller steering layer
+   ├─ context strain: context degraded
+   ├─ action bias: act on a likely file
+   ├─ premise challenge: refine or stop and judge
+   ├─ compaction cue: tighten active context
+   └─ budget boundary: terminate bounded recursion
    ↓
 next action or grounded synthesis
 ```
 
 The key rule is simple: the user can supply the starting premise, but gathered sources get to revise it.
 
-## Pressure Families
+## Signal Families
 
 | System | Trigger | Effect |
 |-------|---------|--------|
-| **Context pressure** | Truncation during context assembly | Surfaces degraded context quality |
-| **Execution pressure** | Mutation turn is still avoiding file action | Adds a planner review note that biases the next move toward a likely target file |
-| **Evidence pressure** | Quiet steps or evidence weakens the original premise | Adds a planner review note or refinement trigger so the model must judge the sources explicitly |
-| **Compaction pressure** | Active context is getting noisy | Summarizes/prunes low-value artifacts while preserving locators; today this is still mostly heuristic |
-| **Budget pressure** | Hard recursion caps are reached | Stops the loop and forces an honest answer |
+| **Context strain** | Truncation during context assembly | Surfaces degraded context quality |
+| **Action bias** | Mutation turn is still avoiding file action | Adds a planner review note that biases the next move toward a likely target file |
+| **Premise challenge** | Quiet steps or evidence weakens the original premise | Adds a planner review note or refinement trigger so the model must judge the sources explicitly |
+| **Compaction cue** | Active context is getting noisy | Summarizes/prunes low-value artifacts while preserving locators; today this is still mostly heuristic |
+| **Budget boundary** | Hard recursion caps are reached | Stops the loop and forces an honest answer |
 
-## Context Pressure
+## Context Strain
 
-A `PressureTracker` accumulates truncation events during context assembly for each turn. When the turn's context has been fully assembled, the tracker computes a `ContextPressure` value:
+A `StrainTracker` accumulates truncation events during context assembly for each turn. When the turn's context has been fully assembled, the tracker computes a `ContextStrain` value:
 
 - **Level** — Low, Medium, High, or Critical based on the number of truncation events
 - **Truncation count** — total number of individual truncation events
 - **Factors** — which sources were truncated (memory, artifacts, thread summaries, evidence budget)
 
-## Pressure Levels
+## Strain Levels
 
 | Level | Truncation events | Meaning |
 |-------|-------------------|---------|
@@ -54,53 +54,53 @@ A `PressureTracker` accumulates truncation events during context assembly for ea
 | **High** | 3-5 | Significant truncation across multiple sources |
 | **Critical** | 6+ | Severe context degradation |
 
-When pressure is non-nominal, the system emits a `ContextPressure` turn event. This is observational: it tells the operator that the working set was degraded.
+When strain is non-nominal, the system emits a `ContextStrain` turn event. This is observational: it tells the operator that the working set was degraded.
 
-## Execution Pressure
+## Action Bias
 
-Execution pressure encodes the principle that action produces information.
+Action bias encodes the principle that action produces information.
 
-On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller now adds an execution-pressure review note back into the planner loop, and the planner must judge whether the proposed move should stand or be replaced by a file-targeting action.
+On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller now adds an action-bias review note back into the planner loop, and the planner must judge whether the proposed move should stand or be replaced by a file-targeting action.
 
-## Evidence Pressure
+## Premise Challenge
 
-Evidence pressure is what makes the harness intellectually honest.
+Premise challenge is what makes the harness intellectually honest.
 
 It operates in two modes:
 
 - **Quiet-step refinement** — if the loop has real evidence but several steps add nothing new, the controller derives a refined interpretation context.
-- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller adds an evidence-pressure review note and asks the planner to judge the sources before spending more budget.
+- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller adds a premise-challenge review note and asks the planner to judge the sources before spending more budget.
 
 This is how Paddles avoids blindly trusting the operator once the evidence says otherwise.
 
-## Compaction Pressure
+## Compaction Cue
 
-Compaction pressure keeps the active context small enough to stay useful. The controller can summarize or prune low-value retained artifacts while preserving typed locators to the deeper records in transit or on disk.
+Compaction cue keeps the active context small enough to stay useful. The controller can summarize or prune low-value retained artifacts while preserving typed locators to the deeper records in transit or on disk.
 
 Today that compaction path is still mostly heuristic. The interface is designed for deeper recursive self-assessment, but the current adapters do not yet fully delegate compaction judgement back to the model.
 
-## Budget Pressure
+## Budget Boundary
 
-Budget pressure is the hard outer wall. Step, search, inspect, and read limits are all explicit. When they are exhausted, the loop stops and synthesis proceeds from the evidence actually gathered.
+Budget boundary is the hard outer wall. Step, search, inspect, and read limits are all explicit. When they are exhausted, the loop stops and synthesis proceeds from the evidence actually gathered.
 
 ## What Operators See
 
-Pressure is visible in both the transcript and the trace model. In the TUI, context pressure appears as a turn step:
+Steering signals are visible in both the transcript and the trace model. In the TUI, context strain appears as a turn step:
 
 ```
-• Context pressure: medium
+• Context strain: medium
   └ 2 truncation(s), factors: [memory-truncated, artifact-truncated]
 ```
 
-In transit traces and the web forensic inspector, pressure and force snapshots carry:
+In transit traces and the web forensic inspector, steering signals and influence snapshots carry:
 
-- a pressure kind
+- a signal kind
 - a magnitude estimate
 - a summary
 - source-attributed contribution estimates
 
 ## What To Read Next
 
-- [Turn Loop](./turn-loop.mdx) — where the pressure layer sits in the full cycle
-- [Recursive Planning](./recursive-planning.mdx) — how pressure changes planner behavior
+- [Turn Loop](./turn-loop.mdx) — where the steering layer sits in the full cycle
+- [Recursive Planning](./recursive-planning.mdx) — how steering signals change planner behavior
 - [Context Tiers](./context-tiers.mdx) — how content moves between tiers and gets truncated

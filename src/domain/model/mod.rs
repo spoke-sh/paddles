@@ -9,7 +9,7 @@ pub mod traces;
 pub mod transcript;
 pub mod turns;
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
-pub use context_quality::{ContextPressure, PressureFactor, PressureLevel, PressureTracker};
+pub use context_quality::{ContextStrain, StrainFactor, StrainLevel, StrainTracker};
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,
@@ -28,12 +28,12 @@ pub use paddles_conversation::{
 };
 pub use threading::ConversationReplayView;
 pub use traces::{
-    TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceForceContribution, TraceForceKind, TraceForceSnapshot, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
-    TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind, TraceTaskRoot,
-    TraceToolCall, TraceTurnStarted,
+    TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
+    TraceModelExchangePhase, TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted,
 };
 pub use transcript::{
     ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,

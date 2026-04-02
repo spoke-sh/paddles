@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Qualitative measure of context degradation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum PressureLevel {
+pub enum StrainLevel {
     /// No significant truncation detected.
     Low,
     /// Minor truncation (e.g. one factor present).
@@ -13,7 +13,7 @@ pub enum PressureLevel {
     Critical,
 }
 
-impl PressureLevel {
+impl StrainLevel {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Low => "low",
@@ -24,9 +24,9 @@ impl PressureLevel {
     }
 }
 
-/// Specific source of context pressure.
+/// Specific source of context strain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum PressureFactor {
+pub enum StrainFactor {
     /// Operator memory (AGENTS.md) was truncated at the character limit.
     MemoryTruncated,
     /// One or more trace artifacts were truncated.
@@ -37,7 +37,7 @@ pub enum PressureFactor {
     EvidenceBudgetExhausted,
 }
 
-impl PressureFactor {
+impl StrainFactor {
     pub fn label(&self) -> &'static str {
         match self {
             Self::MemoryTruncated => "memory-truncated",
@@ -48,31 +48,31 @@ impl PressureFactor {
     }
 }
 
-/// Aggregated signal of context quality and pressure.
+/// Aggregated signal of context quality and strain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContextPressure {
-    /// Overall pressure level.
-    pub level: PressureLevel,
+pub struct ContextStrain {
+    /// Overall strain level.
+    pub level: StrainLevel,
     /// Total number of individual truncation events.
     pub truncation_count: usize,
     /// Set of unique contributing factors.
-    pub factors: Vec<PressureFactor>,
+    pub factors: Vec<StrainFactor>,
 }
 
-impl ContextPressure {
-    pub fn new(factors: Vec<PressureFactor>, truncation_count: usize) -> Self {
+impl ContextStrain {
+    pub fn new(factors: Vec<StrainFactor>, truncation_count: usize) -> Self {
         // FR-04: 0 factors=Low, 1-2=Medium, 3-5=High, 6+=Critical
         // Note: truncation_count might be higher than factors.len() if multiple artifacts are truncated.
         let unique_factors = factors.len();
 
         let level = if truncation_count == 0 && unique_factors == 0 {
-            PressureLevel::Low
+            StrainLevel::Low
         } else if truncation_count <= 2 {
-            PressureLevel::Medium
+            StrainLevel::Medium
         } else if truncation_count <= 5 {
-            PressureLevel::High
+            StrainLevel::High
         } else {
-            PressureLevel::Critical
+            StrainLevel::Critical
         };
 
         Self {
@@ -83,38 +83,38 @@ impl ContextPressure {
     }
 
     pub fn is_nominal(&self) -> bool {
-        self.level == PressureLevel::Low
+        self.level == StrainLevel::Low
     }
 }
 
-/// Accumulator for context pressure factors during a turn.
+/// Accumulator for context strain factors during a turn.
 #[derive(Clone, Debug, Default)]
-pub struct PressureTracker {
-    factors: std::collections::HashSet<PressureFactor>,
+pub struct StrainTracker {
+    factors: std::collections::HashSet<StrainFactor>,
     truncation_count: usize,
 }
 
-impl PressureTracker {
+impl StrainTracker {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn record(&mut self, factor: PressureFactor) {
+    pub fn record(&mut self, factor: StrainFactor) {
         self.factors.insert(factor);
         self.truncation_count += 1;
     }
 
-    pub fn record_many(&mut self, factor: PressureFactor, count: usize) {
+    pub fn record_many(&mut self, factor: StrainFactor, count: usize) {
         if count > 0 {
             self.factors.insert(factor);
             self.truncation_count += count;
         }
     }
 
-    pub fn finish(self) -> ContextPressure {
+    pub fn finish(self) -> ContextStrain {
         let mut factors: Vec<_> = self.factors.into_iter().collect();
         factors.sort_by_key(|f| f.label());
-        ContextPressure::new(factors, self.truncation_count)
+        ContextStrain::new(factors, self.truncation_count)
     }
 }
 
@@ -123,60 +123,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn computes_correct_pressure_level() {
-        assert_eq!(ContextPressure::new(vec![], 0).level, PressureLevel::Low);
+    fn computes_correct_strain_level() {
+        assert_eq!(ContextStrain::new(vec![], 0).level, StrainLevel::Low);
 
         assert_eq!(
-            ContextPressure::new(vec![PressureFactor::MemoryTruncated], 1).level,
-            PressureLevel::Medium
+            ContextStrain::new(vec![StrainFactor::MemoryTruncated], 1).level,
+            StrainLevel::Medium
         );
 
         assert_eq!(
-            ContextPressure::new(
+            ContextStrain::new(
                 vec![
-                    PressureFactor::MemoryTruncated,
-                    PressureFactor::ArtifactTruncated
+                    StrainFactor::MemoryTruncated,
+                    StrainFactor::ArtifactTruncated
                 ],
                 2
             )
             .level,
-            PressureLevel::Medium
+            StrainLevel::Medium
         );
 
         assert_eq!(
-            ContextPressure::new(vec![PressureFactor::ArtifactTruncated], 3).level,
-            PressureLevel::High
+            ContextStrain::new(vec![StrainFactor::ArtifactTruncated], 3).level,
+            StrainLevel::High
         );
 
         assert_eq!(
-            ContextPressure::new(vec![PressureFactor::ArtifactTruncated], 6).level,
-            PressureLevel::Critical
+            ContextStrain::new(vec![StrainFactor::ArtifactTruncated], 6).level,
+            StrainLevel::Critical
         );
     }
 
     #[test]
     fn serializes_round_trip() {
-        let pressure = ContextPressure::new(
+        let strain = ContextStrain::new(
             vec![
-                PressureFactor::MemoryTruncated,
-                PressureFactor::ArtifactTruncated,
+                StrainFactor::MemoryTruncated,
+                StrainFactor::ArtifactTruncated,
             ],
             2,
         );
-        let serialized = serde_json::to_string(&pressure).expect("serialize");
-        let deserialized: ContextPressure = serde_json::from_str(&serialized).expect("deserialize");
-        assert_eq!(pressure, deserialized);
+        let serialized = serde_json::to_string(&strain).expect("serialize");
+        let deserialized: ContextStrain = serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(strain, deserialized);
     }
 
     #[test]
-    fn pressure_tracker_accumulates_and_finishes() {
-        let mut tracker = PressureTracker::new();
-        tracker.record(PressureFactor::MemoryTruncated);
-        tracker.record_many(PressureFactor::ArtifactTruncated, 2);
+    fn strain_tracker_accumulates_and_finishes() {
+        let mut tracker = StrainTracker::new();
+        tracker.record(StrainFactor::MemoryTruncated);
+        tracker.record_many(StrainFactor::ArtifactTruncated, 2);
 
-        let pressure = tracker.finish();
-        assert_eq!(pressure.truncation_count, 3);
-        assert_eq!(pressure.factors.len(), 2);
-        assert_eq!(pressure.level, PressureLevel::High);
+        let strain = tracker.finish();
+        assert_eq!(strain.truncation_count, 3);
+        assert_eq!(strain.factors.len(), 2);
+        assert_eq!(strain.level, StrainLevel::High);
     }
 }

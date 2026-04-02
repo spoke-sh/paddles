@@ -47,25 +47,25 @@ Three properties compound to raise effective model performance:
 
 ## Visibility
 
-Every step of this process is surfaced through the TUI transcript or plain CLI output: interpretation assembly, planner action selection, gatherer work, tool calls, context pressure, fallback decisions, and synthesis.
+Every step of this process is surfaced through the TUI transcript or plain CLI output: interpretation assembly, planner action selection, gatherer work, tool calls, context strain, fallback decisions, and synthesis.
 
 When a step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
 
-## Where Pressure Intervenes
+## Where Steering Signals Intervene
 
-Pressure is the controller layer between the planner's proposed action and the next loop step.
+Steering signals are the controller layer between the planner's proposed action and the next loop step.
 
 ```text
 interpretation assembled
    ↓
 planner proposes next bounded action
    ↓
-controller checks pressure systems
-   ├─ context pressure: is the working set degraded?
-   ├─ execution pressure: should this turn act on a likely file now?
-   ├─ evidence pressure: do the sources already justify refinement or stop?
-   ├─ compaction pressure: should active context be tightened?
-   └─ budget pressure: have we hit a hard loop cap?
+controller checks steering signals
+   ├─ context strain: is the working set degraded?
+   ├─ action bias: should this turn act on a likely file now?
+   ├─ premise challenge: do the sources already justify refinement or stop?
+   ├─ compaction cue: should active context be tightened?
+   └─ budget boundary: have we hit a hard loop cap?
    ↓
 execute action, refine context, or stop and synthesize
 ```
@@ -75,7 +75,7 @@ This is how the harness stays both model-directed and disciplined. The model cho
 ## What To Read Next
 
 - [Recursive Planning](./recursive-planning.mdx) — the planner loop in detail
-- [Pressure Systems](./context-pressure.mdx) — the pressure families in detail
+- [Steering Signals](./context-pressure.mdx) — the steering-signal families in detail
 - [Context Tiers](./context-tiers.mdx) — how context spans multiple storage tiers
 - [Model Routing](./model-routing.mdx) — how planner and synthesizer roles are assigned
 - [Search and Retrieval](./search-retrieval.mdx) — evidence gathering constraints, progress, and limitations
