@@ -1151,4 +1151,28 @@ mod tests {
         assert!(html.contains("--trace-pan-x"));
         assert!(html.contains("applyTracePanTransform"));
     }
+
+    #[test]
+    fn transit_trace_html_supports_significance_toggles() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("id=\"trace-transit-toolbar\""));
+        assert!(html.contains("data-trace-scope=\"significant\""));
+        assert!(html.contains("data-trace-scope=\"full\""));
+        assert!(html.contains("data-trace-family=\"model_io\""));
+        assert!(html.contains("data-trace-family=\"signals\""));
+        assert!(html.contains("function traceNodeVisible"));
+        assert!(html.contains("function syncTransitTraceControls"));
+    }
+
+    #[test]
+    fn transit_trace_html_adapts_detail_density_to_zoom() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("function traceDetailLevelForZoom"));
+        assert!(html.contains("function traceLayoutForZoom"));
+        assert!(html.contains("data-detail-level"));
+        assert!(html.contains("--trace-column-gap"));
+        assert!(html.contains("--trace-row-gap"));
+    }
 }

@@ -328,6 +328,8 @@ just test
 just quality
 ```
 
+`just quality` now covers both the Rust checks and the website TypeScript lint path, and `just test` covers `cargo nextest`, a production Docusaurus build, and browser E2E for the web shell so frontend regressions stay in the normal verification loop.
+
 Check board health:
 
 ```bash

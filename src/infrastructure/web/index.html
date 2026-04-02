@@ -1351,10 +1351,63 @@ body {
   flex-direction: column;
   min-height: 0;
 }
+.trace-transit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  padding: 0 2px 10px;
+}
+.trace-transit-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.trace-transit-toggle-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(243, 248, 250, 0.78);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(110, 126, 139, 0.08);
+}
+.trace-transit-toggle {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: transparent;
+  color: #5d6b78;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.trace-transit-toggle.is-active {
+  color: #142733;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(230, 237, 242, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    0 8px 14px rgba(101, 117, 132, 0.14);
+}
+.trace-transit-meta {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-align: right;
+}
 .trace-board {
   --trace-scale: 1;
   --trace-pan-x: 0px;
   --trace-pan-y: 0px;
+  --trace-column-gap: calc(14px * var(--trace-scale));
+  --trace-row-gap: calc(14px * var(--trace-scale));
   --tile-base-size: clamp(112px, 12vw, 148px);
   --tile-size: calc(var(--tile-base-size) * var(--trace-scale));
   flex: 1;
@@ -1385,7 +1438,7 @@ body {
   min-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: calc(14px * var(--trace-scale));
+  gap: var(--trace-row-gap);
   padding-bottom: 6px;
   transform: translate(var(--trace-pan-x), var(--trace-pan-y));
   transform-origin: top left;
@@ -1426,7 +1479,7 @@ body {
   position: relative;
   z-index: 1;
   display: flex;
-  gap: calc(14px * var(--trace-scale));
+  gap: var(--trace-column-gap);
   justify-content: flex-start;
   overflow: visible;
 }
@@ -1601,6 +1654,16 @@ body {
   word-break: break-word;
   text-align: center;
 }
+.trace-node__summary {
+  margin-top: calc(8px * var(--trace-scale));
+  font-size: calc(10px * var(--trace-scale));
+  line-height: 1.45;
+  color: #52616e;
+  max-width: calc(100% - 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .trace-node__branch {
   position: absolute;
   left: 50%;
@@ -1613,6 +1676,22 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.trace-board[data-detail-level="focus"] .trace-node__sequence,
+.trace-board[data-detail-level="focus"] .trace-node__kind,
+.trace-board[data-detail-level="focus"] .trace-node__branch,
+.trace-board[data-detail-level="focus"] .trace-node__summary {
+  display: none;
+}
+.trace-board[data-detail-level="focus"] .trace-node__label {
+  -webkit-line-clamp: 3;
+  max-width: calc(100% - 18px);
+}
+.trace-board[data-detail-level="balanced"] .trace-node__summary {
+  display: none;
+}
+.trace-board[data-detail-level="overview"] .trace-node__label {
+  -webkit-line-clamp: 6;
 }
 .trace-node__detail {
   position: absolute;
@@ -1782,6 +1861,22 @@ body {
     </div>
   </div>
   <div class="trace-view trace-view--transit" id="transit-view">
+    <div class="trace-transit-toolbar" id="trace-transit-toolbar">
+      <div class="trace-transit-toggle-row">
+        <div class="trace-transit-toggle-group">
+          <button class="trace-transit-toggle is-active" type="button" data-trace-scope="significant">Significant</button>
+          <button class="trace-transit-toggle" type="button" data-trace-scope="full">Full Trace</button>
+        </div>
+        <div class="trace-transit-toggle-group">
+          <button class="trace-transit-toggle" type="button" data-trace-family="model_io">Model I/O</button>
+          <button class="trace-transit-toggle" type="button" data-trace-family="lineage">Lineage</button>
+          <button class="trace-transit-toggle" type="button" data-trace-family="signals">Signals</button>
+          <button class="trace-transit-toggle" type="button" data-trace-family="threads">Threads</button>
+          <button class="trace-transit-toggle" type="button" data-trace-family="tool_results">Tool Done</button>
+        </div>
+      </div>
+      <div class="trace-transit-meta" id="trace-transit-meta">Showing significant steps · focus detail</div>
+    </div>
     <div id="trace-board" class="trace-board"></div>
     <div class="trace-empty" id="trace-empty">Submit a prompt to see the trace railroad.</div>
   </div>
@@ -1817,6 +1912,7 @@ let manifoldPlaybackLastTick = 0;
 let tracePanState = null;
 let tracePanX = 0;
 let tracePanY = 0;
+let traceReframePending = false;
 
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 const TRACE_TILE_MIN = 128;
@@ -1825,6 +1921,14 @@ const TRACE_ZOOM_MIN = 0.4;
 const TRACE_ZOOM_MAX = 1.85;
 const MANIFOLD_PLAYBACK_STEP_MS = 720;
 let traceZoom = 1;
+let traceScopeMode = 'significant';
+const traceFamilyVisibility = {
+  model_io: false,
+  lineage: false,
+  signals: false,
+  threads: false,
+  tool_results: false
+};
 
 const KIND_COLORS = {
   root: '#2d90c8',
@@ -1840,6 +1944,31 @@ const KIND_COLORS = {
   forensic: '#2d90c8',
   lineage: '#5376a3',
   signal: '#f08a24'
+};
+
+const TRACE_SIGNIFICANT_KINDS = new Set([
+  'root',
+  'turn',
+  'action',
+  'branch',
+  'tool',
+  'evidence',
+  'checkpoint',
+  'merge'
+]);
+
+const TRACE_KIND_FAMILY = {
+  forensic: 'model_io',
+  lineage: 'lineage',
+  signal: 'signals',
+  thread: 'threads',
+  tool_done: 'tool_results'
+};
+
+const TRACE_DETAIL_LEVEL_LABELS = {
+  overview: 'overview detail',
+  balanced: 'balanced detail',
+  focus: 'focus detail'
 };
 
 const FORCE_KIND_COLORS = {
@@ -1970,6 +2099,32 @@ function wireStaticUi() {
     });
   });
 
+  document.querySelectorAll('[data-trace-scope]').forEach((button) => {
+    button.addEventListener('click', () => {
+      traceScopeMode = button.dataset.traceScope || 'significant';
+      traceReframePending = true;
+      syncTransitTraceControls();
+      if (latestTraceGraph) {
+        renderTraceDAG(latestTraceGraph);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-trace-family]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const family = button.dataset.traceFamily;
+      if (!family) {
+        return;
+      }
+      traceFamilyVisibility[family] = !traceFamilyVisibility[family];
+      traceReframePending = true;
+      syncTransitTraceControls();
+      if (latestTraceGraph) {
+        renderTraceDAG(latestTraceGraph);
+      }
+    });
+  });
+
   document.querySelectorAll('.forensic-toggle').forEach((button) => {
     button.addEventListener('click', () => {
       setDetailMode(button.dataset.detailMode);
@@ -1988,6 +2143,7 @@ function wireStaticUi() {
 
   bindTraceZoom(document.getElementById('trace-board'));
   bindTracePan(document.getElementById('trace-board'));
+  syncTransitTraceControls();
 }
 
 function normalizedTracePath(pathname) {
@@ -2035,6 +2191,7 @@ function setTraceView(view, { syncHistory = true } = {}) {
     stopManifoldPlayback();
   }
   if (view === 'transit' && latestTraceGraph) {
+    traceReframePending = true;
     renderTraceDAG(latestTraceGraph);
   }
 }
@@ -2557,6 +2714,83 @@ function clampTraceZoom(value) {
   return Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, value));
 }
 
+function traceNodeFamily(kind) {
+  return TRACE_KIND_FAMILY[kind] || 'significant';
+}
+
+function traceNodeVisible(node) {
+  if (traceScopeMode === 'full') {
+    return true;
+  }
+  if (TRACE_SIGNIFICANT_KINDS.has(node.kind)) {
+    return true;
+  }
+  return !!traceFamilyVisibility[traceNodeFamily(node.kind)];
+}
+
+function traceDetailLevelForZoom(zoom) {
+  if (zoom <= 0.68) {
+    return 'overview';
+  }
+  if (zoom <= 1.14) {
+    return 'balanced';
+  }
+  return 'focus';
+}
+
+function traceLayoutForZoom(zoom) {
+  const detailLevel = traceDetailLevelForZoom(zoom);
+  const zoomCurve = Math.pow(zoom, 0.82);
+  const tileMultiplier = detailLevel === 'overview'
+    ? 0.84
+    : detailLevel === 'balanced'
+      ? 0.96
+      : 1.14;
+  const columnGap = TRACE_TILE_GAP * (
+    detailLevel === 'overview'
+      ? 0.84
+      : detailLevel === 'balanced'
+        ? 1
+        : 1.2
+  ) * Math.max(0.78, zoom * 0.9);
+  const rowGap = TRACE_TILE_GAP * (
+    detailLevel === 'overview'
+      ? 0.94
+      : detailLevel === 'balanced'
+        ? 1.08
+        : 1.28
+  ) * Math.max(0.8, zoom * 0.92);
+  return {
+    detailLevel,
+    tileMin: TRACE_TILE_MIN * zoomCurve * tileMultiplier,
+    columnGap,
+    rowGap
+  };
+}
+
+function syncTransitTraceControls(visibleCount = null, totalCount = null, detailLevel = null) {
+  document.querySelectorAll('[data-trace-scope]').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.traceScope === traceScopeMode);
+  });
+  document.querySelectorAll('[data-trace-family]').forEach((button) => {
+    button.classList.toggle('is-active', !!traceFamilyVisibility[button.dataset.traceFamily]);
+  });
+  const meta = document.getElementById('trace-transit-meta');
+  if (!meta) {
+    return;
+  }
+  const detail = detailLevel || traceDetailLevelForZoom(traceZoom);
+  const scopeLabel = traceScopeMode === 'full' ? 'full trace' : 'significant steps';
+  if (visibleCount == null || totalCount == null) {
+    meta.textContent = 'Showing ' + scopeLabel + ' · ' + (TRACE_DETAIL_LEVEL_LABELS[detail] || detail);
+    return;
+  }
+  meta.textContent =
+    'Showing ' + visibleCount + ' of ' + totalCount + ' steps · ' +
+    scopeLabel + ' · ' +
+    (TRACE_DETAIL_LEVEL_LABELS[detail] || detail);
+}
+
 function applyTracePanTransform(board) {
   if (!board) {
     return;
@@ -2564,6 +2798,12 @@ function applyTracePanTransform(board) {
 
   board.style.setProperty('--trace-pan-x', tracePanX.toFixed(2) + 'px');
   board.style.setProperty('--trace-pan-y', tracePanY.toFixed(2) + 'px');
+}
+
+function resetTraceViewTransform(board) {
+  tracePanX = 0;
+  tracePanY = 0;
+  applyTracePanTransform(board);
 }
 
 function applyTraceZoom(board, nextZoom, anchorClientX = null, anchorClientY = null) {
@@ -4158,23 +4398,42 @@ function renderTraceDAG(graph) {
   latestTraceGraph = graph;
   const board = document.getElementById('trace-board');
   const empty = document.getElementById('trace-empty');
+  const layout = traceLayoutForZoom(traceZoom);
   board.style.setProperty('--trace-scale', traceZoom.toFixed(3));
+  board.style.setProperty('--trace-column-gap', layout.columnGap.toFixed(2) + 'px');
+  board.style.setProperty('--trace-row-gap', layout.rowGap.toFixed(2) + 'px');
+  board.dataset.detailLevel = layout.detailLevel;
   applyTracePanTransform(board);
   if (!graph.nodes.length) {
     board.innerHTML = '';
     empty.style.display = 'block';
+    syncTransitTraceControls(0, 0, layout.detailLevel);
     return;
   }
 
-  empty.style.display = 'none';
   const sorted = [...graph.nodes].sort((a, b) => a.sequence - b.sequence);
+  let visibleNodes = sorted.filter(traceNodeVisible);
+  if (!visibleNodes.length && traceScopeMode === 'significant') {
+    traceScopeMode = 'full';
+    visibleNodes = sorted.slice();
+    traceReframePending = true;
+  }
+  syncTransitTraceControls(visibleNodes.length, sorted.length, layout.detailLevel);
+  if (!visibleNodes.length) {
+    board.innerHTML = '';
+    empty.textContent = 'Current transit toggles hide every step. Re-enable a family or switch to full trace.';
+    empty.style.display = 'block';
+    board.dataset.traceInitialized = 'false';
+    return;
+  }
+
+  empty.textContent = 'Submit a prompt to see the trace railroad.';
+  empty.style.display = 'none';
   const branchLabels = Object.fromEntries((graph.branches || []).map((branch) => [branch.id, branch.label]));
-  const tileMin = TRACE_TILE_MIN * traceZoom;
-  const gap = TRACE_TILE_GAP * traceZoom;
-  const columns = Math.max(2, Math.floor((Math.max(board.clientWidth, 280) + gap) / (tileMin + gap)));
+  const columns = Math.max(2, Math.floor((Math.max(board.clientWidth, 280) + layout.columnGap) / (layout.tileMin + layout.columnGap)));
   const rows = [];
-  for (let i = 0; i < sorted.length; i += columns) {
-    rows.push(sorted.slice(i, i + columns));
+  for (let i = 0; i < visibleNodes.length; i += columns) {
+    rows.push(visibleNodes.slice(i, i + columns));
   }
 
   board.innerHTML =
@@ -4186,10 +4445,15 @@ function renderTraceDAG(graph) {
       '</svg>' +
       rows.map((row, rowIndex) => {
         const reverse = rowIndex % 2 === 1 ? ' reverse' : '';
-        return '<div class="trace-row' + reverse + '">' + row.map((node, nodeIndex) => renderTraceNode(node, branchLabels, sorted.length - (rowIndex * columns + nodeIndex) - 1, sorted.length, traceNodeDirection(rowIndex, nodeIndex, row.length, rows.length))).join('') + '</div>';
+        return '<div class="trace-row' + reverse + '">' + row.map((node, nodeIndex) => renderTraceNode(node, branchLabels, visibleNodes.length - (rowIndex * columns + nodeIndex) - 1, visibleNodes.length, traceNodeDirection(rowIndex, nodeIndex, row.length, rows.length), layout.detailLevel)).join('') + '</div>';
       }).join('') +
     '</div>';
 
+  if (traceReframePending || board.dataset.traceInitialized !== 'true') {
+    resetTraceViewTransform(board);
+    traceReframePending = false;
+    board.dataset.traceInitialized = 'true';
+  }
   applyTracePanTransform(board);
   bindTraceDetailPlacement(board);
   requestAnimationFrame(() => {
@@ -4208,7 +4472,7 @@ function traceNodeDirection(rowIndex, nodeIndex, rowLength, totalRows) {
   return isReverseRow ? 'rtl' : 'ltr';
 }
 
-function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction) {
+function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction, detailLevel) {
   const color = KIND_COLORS[node.kind] || '#8b949e';
   const branchLabel = node.branch_id && branchLabels[node.branch_id] ? branchLabels[node.branch_id] : null;
   const recencyRatio = totalNodes <= 1 ? 1 : 1 - (recencyIndex / Math.max(totalNodes - 1, 1));
@@ -4236,6 +4500,11 @@ function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction
     branchLabel ? 'branch: ' + escapeHtml(branchLabel) : null,
     'record: ' + escapeHtml(node.id)
   ].filter(Boolean).join('<br>');
+  const summary = detailLevel === 'overview'
+    ? escapeHtml(node.id)
+    : branchLabel
+      ? escapeHtml(branchLabel)
+      : escapeHtml(formatTraceKind(node.kind));
 
   return '<div class="' + classes.join(' ') + '" style="' +
     '--node-color:' + color + ';' +
@@ -4255,6 +4524,7 @@ function renderTraceNode(node, branchLabels, recencyIndex, totalNodes, direction
         '<div class="trace-node__sequence">step ' + node.sequence + '</div>' +
         '<div class="trace-node__kind">' + escapeHtml(formatTraceKind(node.kind)) + '</div>' +
         '<div class="trace-node__label">' + escapeHtml(node.label) + '</div>' +
+        '<div class="trace-node__summary">' + summary + '</div>' +
         '<div class="trace-node__branch">' + escapeHtml(branchLabel || 'mainline') + '</div>' +
       '</div>' +
       '<div class="trace-node__detail">' +

@@ -99,7 +99,7 @@ Apply these checks to **every change** before finalizing work:
 3. **Pacemaker Protocol**: The system's heartbeat is derived from Git/worktree activity. Inspect the worktree directly with `git status`, use `keel flow --scene` and `keel doctor` to understand board pressure, and clear open-loop energy by landing the sealing commit. The installed pre-commit hook keeps quality checks and tests tied to the commit boundary, and the commit-msg hook appends `doctor --status` to the message body.
 4. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
 5. **Notification Threshold**: Only request human intervention when you reach a "Manual Lane" that requires design direction or a decision on application behavior (for example, assessing a Bearing, planning a Voyage, or human verification of a complex Story).
-6. **Automated Guardrails**: You no longer need to run `just quality` or `just test` manually before every commit. The git hooks installed via `keel hooks install` automatically enforce these checks. If a commit fails, resolve the reported lints or test failures and try again.
+6. **Automated Guardrails**: You no longer need to run `just quality` or `just test` manually before every commit. The git hooks installed via `keel hooks install` automatically enforce these checks, including the website TypeScript lint/build path and browser E2E coverage. If a commit fails, resolve the reported lints or test failures and try again.
 7. **Lifecycle Before Commit**: Run board-mutating lifecycle commands before the atomic commit when they generate or rewrite `.keel` artifacts (for example `story submit`, `voyage plan`, `voyage done`, `bearing assess`, `mission attach`). After the transition, inspect `git status` and include the resulting `.keel` churn in the same commit.
 8. **Atomic Commits**: Commit once per logical unit of work. Use [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat:` (new feature)
@@ -151,8 +151,8 @@ Use one path for each concern:
 | `just build [profile]` | Build the project (`debug` by default, `release` optional) |
 | `just build-release` | Build the release artifact |
 | `just build-cuda` | Build the release artifact with CUDA support |
-| `just test` | Run test suite (uses nextest) |
-| `just quality` | Run formatting and clippy checks |
+| `just test` | Run Rust tests plus website build and browser E2E verification |
+| `just quality` | Run Rust formatting/clippy plus website TypeScript lint checks |
 | `just paddles [--cuda ...]` | Run the `paddles` CLI |
 | `just mission [--cuda]` | Run the standard verification path |
 

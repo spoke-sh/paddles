@@ -75,6 +75,8 @@
         devShells.default = pkgs.mkShell {
                     buildInputs = [
                       rust
+                      pkgs.nodejs_20
+                      pkgs.chromium
                       pkgs.just
                       pkgs.cargo-nextest
                       pkgs.cargo-llvm-cov
@@ -93,6 +95,8 @@
                               shellHook = ''
                                 # Shared target directory across shell sessions for faster rebuilds.
                                 export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
+                                export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.lib.getExe pkgs.chromium}"
+                                export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
                               ''
 
            + pkgs.lib.optionalString isDarwin ''
