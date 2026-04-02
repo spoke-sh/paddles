@@ -260,6 +260,12 @@
 |--------|--------|
 | [Shared Conversation Transcript Plane](epics/VFYbtfpVG/voyages/VFYc27reW/) | done |
 
+### [Transit-First Web Forensics Inspector](epics/VFbXKEdWb/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Transit Artifact Capture And Inspector Projection](epics/VFbXKEdWb/voyages/VFbXKFBWT/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
