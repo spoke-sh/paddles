@@ -730,9 +730,13 @@ body {
   gap: 14px;
 }
 .manifold-node {
+  width: 100%;
+  border: 1px solid rgba(88, 105, 119, 0.18);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
   padding: 16px;
   border-radius: 18px;
-  border: 1px solid rgba(88, 105, 119, 0.18);
   background:
     linear-gradient(180deg, rgba(255,255,255,0.68), rgba(244,248,250,0.18)),
     linear-gradient(155deg, rgba(227, 236, 242, 0.92), rgba(206, 217, 226, 0.84));
@@ -762,6 +766,10 @@ body {
 .manifold-node[data-phase="accumulating"] {
   transform: translateY(-2px);
   border-color: rgba(45, 144, 200, 0.28);
+}
+.manifold-node.is-selected {
+  outline: 2px solid rgba(45, 144, 200, 0.2);
+  border-color: rgba(45, 144, 200, 0.32);
 }
 .manifold-node[data-phase="stable"] {
   border-color: rgba(64, 120, 84, 0.2);
@@ -853,11 +861,15 @@ body {
 }
 .manifold-conduit {
   display: flex;
+  width: 100%;
+  border: 1px dashed rgba(82, 99, 113, 0.22);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
   border-radius: 16px;
-  border: 1px dashed rgba(82, 99, 113, 0.22);
   background:
     linear-gradient(180deg, rgba(255,255,255,0.54), rgba(241,246,249,0.18)),
     rgba(223, 232, 238, 0.84);
@@ -886,6 +898,9 @@ body {
 .manifold-conduit[data-phase="bleed_off"] {
   opacity: 0.56;
 }
+.manifold-conduit.is-selected {
+  outline: 2px solid rgba(45, 144, 200, 0.18);
+}
 .manifold-conduit strong {
   color: #22313b;
 }
@@ -896,6 +911,12 @@ body {
   text-align: left;
   padding: 0;
   cursor: pointer;
+}
+.manifold-panel-button.is-selected .manifold-panel-row {
+  border-bottom-color: rgba(45, 144, 200, 0.28);
+}
+.manifold-panel-button.is-selected .manifold-panel-row strong {
+  color: #1b5e87;
 }
 .manifold-side {
   display: flex;
@@ -944,6 +965,67 @@ body {
 }
 .manifold-panel-row strong {
   color: #23313b;
+}
+.manifold-source-detail {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(240, 245, 248, 0.44));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(113, 128, 141, 0.08);
+}
+.manifold-source-detail__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.manifold-source-detail__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #21313b;
+}
+.manifold-source-detail__meta {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #5d6e7b;
+}
+.manifold-source-detail__body {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(237, 243, 246, 0.84);
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #22333d;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.manifold-source-detail__actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.manifold-source-detail__button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #153042;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(228, 236, 240, 0.88));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    0 8px 14px rgba(101, 117, 132, 0.14);
 }
 .forensic-nav,
 .forensic-records,
@@ -1728,6 +1810,7 @@ let pendingForensicRefresh = null;
 let manifoldReplayRefreshTimer = null;
 let manifoldFrameIndex = null;
 let manifoldTailMode = true;
+let selectedManifoldSourceRecordId = null;
 let manifoldPlaybackActive = false;
 let manifoldPlaybackHandle = null;
 let manifoldPlaybackLastTick = 0;
@@ -2084,6 +2167,14 @@ function applyManifoldUpdate(payload) {
 
   if (shouldTailCurrentTurn && mergedTurn && Array.isArray(mergedTurn.frames) && mergedTurn.frames.length) {
     manifoldFrameIndex = mergedTurn.frames.length - 1;
+    if (payload.frame && Array.isArray(payload.frame.active_signals)) {
+      const matchingSignal = payload.frame.active_signals.find(
+        (signal) => signal.snapshot_record_id === payload.update.record_id
+      );
+      if (matchingSignal) {
+        selectedManifoldSourceRecordId = matchingSignal.snapshot_record_id;
+      }
+    }
   }
 
   if (activeTraceView === 'manifold') {
@@ -2091,6 +2182,42 @@ function applyManifoldUpdate(payload) {
   }
 
   scheduleManifoldReplayRefresh();
+}
+
+function selectedManifoldSignal(activeSignals) {
+  if (!Array.isArray(activeSignals) || !activeSignals.length) {
+    selectedManifoldSourceRecordId = null;
+    return null;
+  }
+
+  const selectedSignal = activeSignals.find(
+    (signal) => signal.snapshot_record_id === selectedManifoldSourceRecordId
+  );
+  if (selectedSignal) {
+    return selectedSignal;
+  }
+
+  selectedManifoldSourceRecordId = activeSignals[activeSignals.length - 1].snapshot_record_id;
+  return activeSignals[activeSignals.length - 1];
+}
+
+function selectManifoldSource(recordId) {
+  selectedManifoldSourceRecordId = recordId || null;
+  renderManifoldShell();
+}
+
+function openManifoldSourceInInspector(turnId, recordId) {
+  if (!turnId || !recordId) {
+    return;
+  }
+  selectedTurnId = turnId;
+  selectedSelectionMode = 'record';
+  selectedFocus = { kind: 'all', id: null };
+  selectedRecordId = recordId;
+  forensicTailMode = false;
+  normalizeSelection();
+  renderForensics();
+  setTraceView('inspector');
 }
 
 function selectedManifoldFrameIndex(turn) {
@@ -2247,6 +2374,7 @@ function renderManifoldShell() {
   const conduits = frame && Array.isArray(frame.conduits) ? frame.conduits : [];
   const totalFrames = turns.reduce((sum, item) => sum + (Array.isArray(item.frames) ? item.frames.length : 0), 0);
   const currentLifecycle = frame ? frame.lifecycle : (turn ? turn.lifecycle : 'provisional');
+  const selectedSignal = selectedManifoldSignal(activeSignals);
   syncManifoldControls(turn);
 
   if (!turns.length) {
@@ -2285,8 +2413,11 @@ function renderManifoldShell() {
         (primitives.length
           ? primitives.map((primitive) => {
               const phase = primitivePhase(turn, frameIndex, primitive);
+              const selectedClass = primitive.evidence_record_id && primitive.evidence_record_id === selectedManifoldSourceRecordId
+                ? ' is-selected'
+                : '';
               return (
-              '<div class="manifold-node" data-phase="' + escapeHtml(phase) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(currentLifecycle)) + '">' +
+              '<button class="manifold-node' + selectedClass + '" data-phase="' + escapeHtml(phase) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(currentLifecycle)) + '" data-source-record-id="' + escapeHtml(primitive.evidence_record_id || '') + '">' +
                 '<div class="manifold-node__eyebrow"><span>' + escapeHtml(manifoldPrimitiveKindLabel(primitive.kind) + ' · ' + phase.replace('_', ' ')) + '</span>' + manifoldLifecycleBadge(currentLifecycle) + '</div>' +
                 '<div class="manifold-node__title">' + escapeHtml(primitive.label || primitive.primitive_id) + '</div>' +
                 '<div class="manifold-node__meta">' +
@@ -2295,7 +2426,7 @@ function renderManifoldShell() {
                 '</div>' +
                 '<div class="manifold-node__fill"><span style="width:' + escapeHtml(String(Math.max(0, Math.min(100, primitive.magnitude_percent || 0)))) + '%"></span></div>' +
                 '<div class="manifold-node__basis">' + escapeHtml(manifoldPrimitiveBasisLabel(primitive.basis)) + '</div>' +
-              '</div>'
+              '</button>'
             );}).join('')
           : '<div class="manifold-empty-state"><strong>No primitives yet.</strong><p>This frame has signal state but no projected topology.</p></div>') +
       '</div>' +
@@ -2304,11 +2435,14 @@ function renderManifoldShell() {
           ? conduits.map((conduit) => {
               const targetPrimitive = primitives.find((primitive) => primitive.primitive_id === conduit.to_primitive_id) || null;
               const phase = targetPrimitive ? primitivePhase(turn, frameIndex, targetPrimitive) : 'stable';
+              const selectedClass = conduit.evidence_record_id && conduit.evidence_record_id === selectedManifoldSourceRecordId
+                ? ' is-selected'
+                : '';
               return (
-              '<div class="manifold-conduit" data-phase="' + escapeHtml(phase) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(currentLifecycle)) + '">' +
+              '<button class="manifold-conduit' + selectedClass + '" data-phase="' + escapeHtml(phase) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(currentLifecycle)) + '" data-source-record-id="' + escapeHtml(conduit.evidence_record_id || '') + '">' +
                 '<strong>' + escapeHtml(conduit.label || conduit.conduit_id) + '</strong>' +
                 '<span>' + escapeHtml(conduit.from_primitive_id) + ' → ' + escapeHtml(conduit.to_primitive_id) + '</span>' +
-              '</div>'
+              '</button>'
             );}).join('')
           : '<div class="manifold-panel-copy">No conduits were active in the selected frame.</div>') +
       '</div>' +
@@ -2337,19 +2471,53 @@ function renderManifoldShell() {
   sourcePanel.innerHTML =
     '<div class="manifold-panel-title">Sources</div>' +
     '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong> · frame state ' + manifoldLifecycleBadge(currentLifecycle, 'manifold-panel-status') + '</div>' +
+    (selectedSignal
+      ? '<div class="manifold-source-detail">' +
+          '<div class="manifold-source-detail__head">' +
+            '<div>' +
+              '<div class="manifold-source-detail__title">' + escapeHtml(selectedSignal.summary || manifoldSignalLabel(selectedSignal)) + '</div>' +
+              '<div class="manifold-source-detail__meta">' +
+                escapeHtml(manifoldSignalLabel(selectedSignal)) +
+                ' · record ' + escapeHtml(selectedSignal.snapshot_record_id) +
+                ' · anchor ' + escapeHtml(manifoldAnchorLabel(selectedSignal.anchor)) +
+              '</div>' +
+            '</div>' +
+            manifoldLifecycleBadge(selectedSignal.lifecycle, 'manifold-panel-status') +
+          '</div>' +
+          '<div class="manifold-source-detail__body">' +
+            escapeHtml(
+              truncate(
+                artifactText(selectedSignal.artifact) || selectedSignal.summary || 'No inline source payload recorded.',
+                420
+              )
+            ) +
+          '</div>' +
+          '<div class="manifold-source-detail__meta">' +
+            (selectedSignal.contributions || []).map((contribution) =>
+              sourceLabel(contribution.source) + ' ' + (contribution.share_percent || 0) + '%'
+            ).join(' · ') +
+          '</div>' +
+          '<div class="manifold-source-detail__actions">' +
+            '<button class="manifold-source-detail__button" type="button" data-open-forensic-turn-id="' + escapeHtml(turn ? turn.turn_id : '') + '" data-open-forensic-record-id="' + escapeHtml(selectedSignal.snapshot_record_id) + '">Open exact forensic record</button>' +
+          '</div>' +
+        '</div>'
+      : '<div class="manifold-panel-copy">Select a chamber or conduit to inspect the exact trace record behind that manifold state.</div>') +
     '<div class="manifold-panel-list">' +
-      (primitives.length
-        ? primitives.map((primitive) => (
-            '<div class="manifold-panel-row">' +
-              '<strong>' + escapeHtml(primitive.label || primitive.primitive_id) + '</strong>' +
-              '<span>' +
-                escapeHtml(manifoldPrimitiveKindLabel(primitive.kind)) +
-                ' · ' +
-                escapeHtml(manifoldPrimitiveBasisLabel(primitive.basis)) +
-              '</span>' +
-            '</div>'
+      (activeSignals.length
+        ? activeSignals.map((signal) => (
+            '<button class="manifold-panel-button' + (signal.snapshot_record_id === selectedManifoldSourceRecordId ? ' is-selected' : '') + '" type="button" data-source-record-id="' + escapeHtml(signal.snapshot_record_id) + '">' +
+              '<div class="manifold-panel-row">' +
+                '<strong>' + escapeHtml(signal.summary || manifoldSignalLabel(signal)) + '</strong>' +
+                '<span>' +
+                  escapeHtml(manifoldSignalLabel(signal)) +
+                  ' · ' +
+                  escapeHtml((signal.magnitude_percent || 0) + '%') +
+                '</span>' +
+              '</div>' +
+              manifoldLifecycleBadge(signal.lifecycle, 'manifold-panel-status') +
+            '</button>'
           )).join('')
-        : '<div class="manifold-panel-copy">No active steering primitives were present in the current frame.</div>') +
+        : '<div class="manifold-panel-copy">No active steering signals were present in the current frame.</div>') +
     '</div>';
 
   timelinePanel.querySelectorAll('[data-manifold-turn-id]').forEach((button) => {
@@ -2358,7 +2526,29 @@ function renderManifoldShell() {
       selectedTurnId = button.dataset.manifoldTurnId;
       manifoldTailMode = true;
       manifoldFrameIndex = null;
+      selectedManifoldSourceRecordId = null;
       renderManifoldShell();
+    });
+  });
+  canvas.querySelectorAll('[data-source-record-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!button.dataset.sourceRecordId) {
+        return;
+      }
+      selectManifoldSource(button.dataset.sourceRecordId);
+    });
+  });
+  sourcePanel.querySelectorAll('[data-source-record-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectManifoldSource(button.dataset.sourceRecordId);
+    });
+  });
+  sourcePanel.querySelectorAll('[data-open-forensic-record-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openManifoldSourceInInspector(
+        button.dataset.openForensicTurnId,
+        button.dataset.openForensicRecordId
+      );
     });
   });
 }

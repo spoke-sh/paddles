@@ -171,6 +171,19 @@ The trace model records influence snapshots so the operator can inspect not just
 
 Each snapshot carries a magnitude, a summary, and source-attributed contribution estimates. The web forensic inspector uses these as first-class visualization inputs.
 
+### Forensic Inspector And Manifold Route
+
+The web UI now carries two distinct trace projections over the same recorder-backed source of truth:
+
+- the **forensic inspector**, which stays precise and payload-oriented
+- the **steering-signal manifold**, which stays expressive and systemic
+
+The manifold route is intentionally metaphorical. Chambers, reservoirs, valves, conduits, opacity, accumulation, and bleed-off are not hidden runtime entities. They are a visualization layer projected from recorded steering-signal snapshots, lineage anchors, and lifecycle state.
+
+That metaphor is only valid if it remains accountable to exact trace sources. Selecting a manifold state must reveal the exact underlying source record and provide a direct route back to the forensic inspector for raw/rendered payload inspection. The manifold is therefore an expressive overview, not a second source of truth.
+
+This route also remains inside the local-first delivery contract. The current implementation is served from the same embedded web shell and does not add remote visualization libraries, CDNs, or runtime network fetches outside the existing local HTTP surface.
+
 ## Planner Action Vocabulary
 
 The planner expresses its intentions through a constrained action schema:

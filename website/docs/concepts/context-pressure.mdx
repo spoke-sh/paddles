@@ -99,6 +99,24 @@ In transit traces and the web forensic inspector, steering signals and influence
 - a summary
 - source-attributed contribution estimates
 
+## Manifold Route
+
+The web UI also exposes a dedicated `/manifold` route. It is a higher-level projection of the same trace data:
+
+- chambers and reservoirs for accumulated signal families
+- valves and conduits for how those signals steer the loop
+- opacity, accumulation, supersession, and bleed-off for temporal change
+
+That route is intentionally metaphorical. It is not a second reasoning engine and it does not invent hidden runtime state. Every manifold state is projected from exact recorded steering-signal snapshots and lineage anchors.
+
+For that reason, the manifold route must stay accountable to the forensic inspector:
+
+- selecting a manifold state reveals the exact source record behind it
+- the route can jump back to the precise forensic inspector on that record
+- raw and rendered payload inspection still lives in the forensic route, not in the manifold metaphor
+
+The route also stays local-first. It is rendered from the same locally served web shell and does not rely on external visualization CDNs.
+
 ## What To Read Next
 
 - [Turn Loop](./turn-loop.mdx) — where the steering layer sits in the full cycle

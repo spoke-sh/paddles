@@ -147,6 +147,18 @@ The systems serve different jobs:
 
 The important invariant is that steering signals become stronger as real evidence accumulates. A user claim can start the investigation, but gathered sources get the final say.
 
+### Web Trace Routes
+
+The web UI exposes three complementary trace routes:
+
+- `/` — the forensic inspector, which is the precise source-of-truth view over recorded transit artifacts
+- `/manifold` — the steering-signal manifold, which turns influence snapshots into chambers, valves, conduits, and accumulation states
+- `/transit` — the snake-style turn-step trace, optimized for turn lineage and step sequencing
+
+The important architectural limit is that the manifold route is metaphorical. It is a projection over exact recorded trace artifacts, not an extra hidden reasoning layer. Every selected manifold state must be able to reveal its underlying source record and route back to the precise forensic inspector.
+
+The manifold route also stays local-first: it uses the same locally served HTML/CSS/JS shell as the rest of the web UI. There is no remote visualization bundle or CDN dependency hiding behind the route.
+
 ### Trace Recording
 
 Every recursive step produces typed trace records alongside the visible transcript. The UI is a projection; durable lineage lives in the recorder boundary.

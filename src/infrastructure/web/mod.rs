@@ -1097,6 +1097,17 @@ mod tests {
         assert!(html.contains("manifold-panel-status"));
     }
 
+    #[test]
+    fn manifold_route_html_links_selected_sources_back_to_forensics() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("let selectedManifoldSourceRecordId = null;"));
+        assert!(html.contains("function openManifoldSourceInInspector"));
+        assert!(html.contains("data-source-record-id"));
+        assert!(html.contains("data-open-forensic-record-id"));
+        assert!(html.contains("setTraceView('inspector')"));
+    }
+
     #[tokio::test]
     async fn web_router_serves_dedicated_manifold_and_transit_routes() {
         let workspace = tempfile::tempdir().expect("workspace");

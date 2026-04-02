@@ -272,11 +272,11 @@
 |--------|--------|
 | [Plan Inception Provider Delivery](epics/VFc2hwU7e/voyages/VFc2jHVLG/) | done |
 
-### [Steering Signal Manifold Route](epics/VFes0Rhaj/) (active)
+### [Steering Signal Manifold Route](epics/VFes0Rhaj/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Signal Manifold Route And Chamber Projection](epics/VFes0Rhaj/voyages/VFes287sD/) | in-progress |
+| [Signal Manifold Route And Chamber Projection](epics/VFes0Rhaj/voyages/VFes287sD/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
