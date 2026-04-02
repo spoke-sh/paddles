@@ -46,6 +46,13 @@ struct SlashCommandSpec {
     description: &'static str,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SlashSuggestion {
+    insert_text: String,
+    usage: String,
+    description: String,
+}
+
 const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         insert_text: "/login ",
@@ -938,25 +945,95 @@ impl InteractiveApp {
         self.slash_suggestion_index = 0;
     }
 
-    fn slash_command_suggestions(&self) -> Vec<&'static SlashCommandSpec> {
+    fn dynamic_model_slash_suggestions(&self, query: &str) -> Option<Vec<SlashSuggestion>> {
+        const PLANNER_PREFIX: &str = "/model planner ";
+        const SYNTH_PREFIX: &str = "/model synthesizer ";
+
+        let (prefix, remainder) = if let Some(remainder) = query.strip_prefix(PLANNER_PREFIX) {
+            (PLANNER_PREFIX, remainder)
+        } else if let Some(remainder) = query.strip_prefix(SYNTH_PREFIX) {
+            (SYNTH_PREFIX, remainder)
+        } else {
+            return None;
+        };
+
+        if let Some((provider_name, model_query)) = remainder.split_once(' ') {
+            let provider = ModelProvider::from_name(provider_name)?;
+            if provider.supports_freeform_model_id() {
+                return Some(Vec::new());
+            }
+            return Some(
+                provider
+                    .known_model_ids()
+                    .iter()
+                    .copied()
+                    .filter(|model_id| model_id.starts_with(model_query))
+                    .map(|model_id| SlashSuggestion {
+                        insert_text: format!("{prefix}{provider_name} {model_id}"),
+                        usage: format!("{prefix}{provider_name} {model_id}"),
+                        description: format!(
+                            "select the {} model for this lane",
+                            provider.qualified_model_label(model_id)
+                        ),
+                    })
+                    .collect(),
+            );
+        }
+
+        Some(
+            ModelProvider::all()
+                .iter()
+                .copied()
+                .filter(|provider| provider.name().starts_with(remainder))
+                .map(|provider| SlashSuggestion {
+                    insert_text: format!("{prefix}{} ", provider.name()),
+                    usage: format!("{prefix}{} ", provider.name()),
+                    description: format!("choose {} for this lane", provider.display_name()),
+                })
+                .collect(),
+        )
+    }
+
+    fn slash_command_suggestions(&self) -> Vec<SlashSuggestion> {
         if self.is_masked_input() || self.input.contains('\n') || !self.input.starts_with('/') {
             return Vec::new();
         }
         let query = self.input.to_ascii_lowercase();
+        if let Some(provider_query) = query.strip_prefix("/login ") {
+            return ModelProvider::all()
+                .iter()
+                .copied()
+                .filter(|provider| provider.supports_interactive_login())
+                .filter(|provider| provider.name().starts_with(provider_query))
+                .map(|provider| SlashSuggestion {
+                    insert_text: format!("/login {}", provider.name()),
+                    usage: format!("/login {}", provider.name()),
+                    description: format!("store or replace a {} API key", provider.display_name()),
+                })
+                .collect();
+        }
+        if let Some(suggestions) = self.dynamic_model_slash_suggestions(&query) {
+            return suggestions;
+        }
         SLASH_COMMANDS
             .iter()
             .filter(|command| {
                 command.insert_text.starts_with(&query) || command.usage.starts_with(&query)
             })
+            .map(|command| SlashSuggestion {
+                insert_text: command.insert_text.to_string(),
+                usage: command.usage.to_string(),
+                description: command.description.to_string(),
+            })
             .collect()
     }
 
-    fn selected_slash_suggestion(&self) -> Option<&'static SlashCommandSpec> {
+    fn selected_slash_suggestion(&self) -> Option<SlashSuggestion> {
         let suggestions = self.slash_command_suggestions();
         if suggestions.is_empty() {
             None
         } else {
-            Some(suggestions[self.slash_suggestion_index.min(suggestions.len() - 1)])
+            Some(suggestions[self.slash_suggestion_index.min(suggestions.len() - 1)].clone())
         }
     }
 
@@ -1780,9 +1857,9 @@ impl InteractiveApp {
                     self.palette.input_hint
                 };
                 Line::from(vec![
-                    Span::styled(command.usage.to_string(), usage_style),
+                    Span::styled(command.usage.clone(), usage_style),
                     Span::raw("  "),
-                    Span::styled(command.description.to_string(), desc_style),
+                    Span::styled(command.description.clone(), desc_style),
                 ])
             })
             .collect::<Vec<_>>();
@@ -3382,6 +3459,126 @@ mod tests {
     }
 
     #[test]
+    fn slash_command_popup_renders_login_provider_suggestions() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login i".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let buffer = render_buffer(&app, 100, 18);
+        let rendered = buffer_text(&buffer);
+        let suggestions = app
+            .slash_command_suggestions()
+            .into_iter()
+            .map(|command| command.usage)
+            .collect::<Vec<_>>();
+
+        assert!(rendered.contains("Commands"));
+        assert!(rendered.contains("/login inception"));
+        assert_eq!(suggestions, vec!["/login inception"]);
+    }
+
+    #[test]
+    fn slash_command_popup_renders_model_provider_suggestions() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model planner inc".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let buffer = render_buffer(&app, 120, 18);
+        let rendered = buffer_text(&buffer);
+        let suggestions = app
+            .slash_command_suggestions()
+            .into_iter()
+            .map(|command| command.usage)
+            .collect::<Vec<_>>();
+
+        assert!(rendered.contains("Commands"));
+        assert!(rendered.contains("/model planner inception "));
+        assert_eq!(suggestions, vec!["/model planner inception "]);
+    }
+
+    #[test]
+    fn slash_command_popup_renders_model_id_suggestions() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model synthesizer inception m".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let buffer = render_buffer(&app, 120, 18);
+        let rendered = buffer_text(&buffer);
+        let suggestions = app
+            .slash_command_suggestions()
+            .into_iter()
+            .map(|command| command.usage)
+            .collect::<Vec<_>>();
+
+        assert!(rendered.contains("Commands"));
+        assert!(rendered.contains("/model synthesizer inception mercury-2"));
+        assert_eq!(suggestions, vec!["/model synthesizer inception mercury-2"]);
+    }
+
+    #[test]
+    fn slash_command_login_provider_suggestions_skip_non_login_providers() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login s".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.slash_command_suggestions().is_empty());
+    }
+
+    #[test]
+    fn slash_command_model_suggestions_do_not_fake_freeform_model_ids() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model planner ollama ".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.slash_command_suggestions().is_empty());
+    }
+
+    #[test]
     fn slash_command_popup_area_stays_within_offset_frame() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -3443,6 +3640,69 @@ mod tests {
 
         assert!(app.accept_selected_slash_completion());
         assert_eq!(app.input, "/model planner ");
+    }
+
+    #[test]
+    fn slash_command_completion_can_target_login_provider() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login inc".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/login inception");
+        assert_eq!(app.cursor_pos, "/login inception".chars().count());
+    }
+
+    #[test]
+    fn slash_command_completion_can_target_model_provider() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model planner inc".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/model planner inception ");
+        assert_eq!(app.cursor_pos, "/model planner inception ".chars().count());
+    }
+
+    #[test]
+    fn slash_command_completion_can_target_model_id() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model synthesizer inception mer".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/model synthesizer inception mercury-2");
+        assert_eq!(
+            app.cursor_pos,
+            "/model synthesizer inception mercury-2".chars().count()
+        );
     }
 
     #[test]
