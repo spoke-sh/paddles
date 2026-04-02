@@ -1,0 +1,7 @@
+---
+recorded_at: 2026-04-02T15:45:13.974080332-07:00
+command: nix develop --command sh -lc 'just quality && just test'
+---
+
+--- stderr ---
+Command timed out
