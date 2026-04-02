@@ -751,4 +751,15 @@ mod tests {
         assert!(!html.contains("href=\"https://"));
         assert!(!html.contains("href='https://"));
     }
+
+    #[test]
+    fn forensic_inspector_html_subscribes_to_replay_backed_live_updates() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("/forensics/events"));
+        assert!(html.contains("forensic_update"));
+        assert!(html.contains("scheduleForensicRefresh"));
+        assert!(html.contains("await refreshForensics(refreshOptions)"));
+        assert!(html.contains("refreshTraceGraph();"));
+    }
 }

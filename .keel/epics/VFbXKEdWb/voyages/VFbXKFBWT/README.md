@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFbXKFBWT
-status: in-progress
+status: done
 epic: VFbXKEdWb
 created_at: 2026-04-01T21:26:02
 # authored
@@ -9,6 +9,7 @@ title: Transit Artifact Capture And Inspector Projection
 index: 1
 updated_at: 2026-04-01T21:29:42
 started_at: 2026-04-01T21:34:30
+completed_at: 2026-04-01T22:44:16
 ---
 
 # Transit Artifact Capture And Inspector Projection
@@ -22,12 +23,14 @@ started_at: 2026-04-01T21:34:30
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 5/6 stories complete
+**Progress:** 6/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -36,5 +39,5 @@ started_at: 2026-04-01T21:34:30
 | [Expose Web Inspector Replay And Live Projection APIs](../../../../stories/VFbXMCHl6/README.md) | feat | done |
 | [Add Force Overview And Shadow Comparison To The Web Inspector](../../../../stories/VFbXMCVl7/README.md) | feat | done |
 | [Render Context-Lineage-First Forensic Inspector In The Web UI](../../../../stories/VFbXMCkli/README.md) | feat | done |
-| [Stream Provisional Active-Turn Inspector Artifacts](../../../../stories/VFbXMCxlj/README.md) | feat | backlog |
+| [Stream Provisional Active-Turn Inspector Artifacts](../../../../stories/VFbXMCxlj/README.md) | feat | done |
 <!-- END GENERATED -->

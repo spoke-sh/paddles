@@ -1332,6 +1332,7 @@ body {
 let sessionId = null;
 let eventSource = null;
 let transcriptEventSource = null;
+let forensicEventSource = null;
 let transcriptSignature = '';
 let latestTraceGraph = null;
 let latestForensics = null;
@@ -1342,6 +1343,9 @@ let selectedDetailMode = 'rendered';
 let selectedFocus = { kind: 'all', id: null };
 let activeTraceView = 'inspector';
 let graphDebounce = null;
+let forensicTailMode = true;
+let forensicRefreshTimer = null;
+let pendingForensicRefresh = null;
 
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 const TRACE_TILE_MIN = 128;
@@ -1512,9 +1516,42 @@ function setDetailMode(mode) {
   renderForensicDetail();
 }
 
+function scheduleForensicRefresh(options = {}) {
+  const next = {
+    preserveSelection: true,
+    preferProvisionalTurnId: null,
+    preferProvisionalRecordId: null,
+    ...options
+  };
+
+  if (pendingForensicRefresh) {
+    pendingForensicRefresh = {
+      ...pendingForensicRefresh,
+      ...next,
+      preferProvisionalTurnId: next.preferProvisionalTurnId || pendingForensicRefresh.preferProvisionalTurnId,
+      preferProvisionalRecordId: next.preferProvisionalRecordId || pendingForensicRefresh.preferProvisionalRecordId
+    };
+  } else {
+    pendingForensicRefresh = next;
+  }
+
+  if (forensicRefreshTimer) {
+    return;
+  }
+
+  forensicRefreshTimer = window.setTimeout(async () => {
+    const refreshOptions = pendingForensicRefresh || { preserveSelection: true };
+    pendingForensicRefresh = null;
+    forensicRefreshTimer = null;
+    await refreshForensics(refreshOptions);
+    refreshTraceGraph();
+  }, 40);
+}
+
 function connectSSE() {
   if (eventSource) eventSource.close();
   if (transcriptEventSource) transcriptEventSource.close();
+  if (forensicEventSource) forensicEventSource.close();
 
   eventSource = new EventSource('/events');
   eventSource.addEventListener('turn_event', (e) => {
@@ -1527,6 +1564,16 @@ function connectSSE() {
     await refreshConversationTranscript({ reset: true, only_if_changed: true });
     await refreshForensics({ preserveSelection: true });
     refreshTraceGraph();
+  });
+
+  forensicEventSource = new EventSource('/sessions/' + sessionId + '/forensics/events');
+  forensicEventSource.addEventListener('forensic_update', (e) => {
+    const payload = JSON.parse(e.data);
+    scheduleForensicRefresh({
+      preserveSelection: true,
+      preferProvisionalTurnId: payload && payload.update ? payload.update.turn_id : null,
+      preferProvisionalRecordId: payload && payload.record && payload.record.record ? payload.record.record.record_id : null
+    });
   });
 }
 
@@ -2065,6 +2112,7 @@ function recordsForTurn(turn) {
 function selectConversation() {
   selectedSelectionMode = 'conversation';
   selectedRecordId = null;
+  forensicTailMode = true;
   renderForensics();
 }
 
@@ -2073,6 +2121,7 @@ function selectTurn(turnId) {
   selectedSelectionMode = 'turn';
   selectedRecordId = null;
   selectedFocus = { kind: 'all', id: null };
+  forensicTailMode = true;
   normalizeSelection();
   renderForensics();
 }
@@ -2081,6 +2130,7 @@ function selectFocus(kind, id) {
   selectedFocus = { kind, id };
   selectedSelectionMode = 'turn';
   selectedRecordId = null;
+  forensicTailMode = true;
   normalizeSelection();
   renderForensics();
 }
@@ -2088,6 +2138,9 @@ function selectFocus(kind, id) {
 function selectRecord(recordId) {
   selectedSelectionMode = 'record';
   selectedRecordId = recordId;
+  const turn = currentTurn();
+  const records = recordsForTurn(turn);
+  forensicTailMode = !!records.length && records[records.length - 1].record.record_id === recordId;
   renderForensics();
 }
 
@@ -2752,7 +2805,11 @@ function renderForensics() {
   renderForensicDetail();
 }
 
-async function refreshForensics({ preserveSelection = true } = {}) {
+async function refreshForensics({
+  preserveSelection = true,
+  preferProvisionalTurnId = null,
+  preferProvisionalRecordId = null
+} = {}) {
   try {
     if (!sessionId) return false;
     const res = await fetch('/sessions/' + sessionId + '/forensics');
@@ -2764,6 +2821,22 @@ async function refreshForensics({ preserveSelection = true } = {}) {
       selectedRecordId = null;
       selectedSelectionMode = 'record';
       selectedFocus = { kind: 'all', id: null };
+      forensicTailMode = true;
+    } else if (forensicTailMode && selectedSelectionMode !== 'conversation') {
+      if (preferProvisionalTurnId && projectionTurns().some((turn) => turn.turn_id === preferProvisionalTurnId)) {
+        selectedTurnId = preferProvisionalTurnId;
+      }
+      const turn = currentTurn();
+      if (selectedSelectionMode === 'record' && turn) {
+        const scopedRecords = recordsForTurn(turn);
+        if (scopedRecords.length) {
+          const preferredRecordExists = preferProvisionalRecordId
+            && scopedRecords.some((recordProjection) => recordProjection.record.record_id === preferProvisionalRecordId);
+          selectedRecordId = preferredRecordExists
+            ? preferProvisionalRecordId
+            : scopedRecords[scopedRecords.length - 1].record.record_id;
+        }
+      }
     }
     renderForensics();
     return true;

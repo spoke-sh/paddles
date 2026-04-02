@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:43:55.741557397-07:00
+mode: manual
+---
+Verified by review: this slice only changes src/infrastructure/web/index.html and src/infrastructure/web/mod.rs plus board artifacts; no TUI implementation changes were required.

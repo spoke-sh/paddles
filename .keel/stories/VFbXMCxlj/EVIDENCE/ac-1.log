@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:43:55.671742120-07:00
+mode: manual
+---
+Verified in src/infrastructure/web/index.html: connectSSE() now subscribes to /sessions/{id}/forensics/events and schedules replay-backed refreshes that tail provisional turn/record updates, so active turns surface newly recorded forensic artifacts in sequence while the turn is still running.
