@@ -27,7 +27,7 @@ started_at: 2026-04-02T11:15:46
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 4/6 stories complete
+**Progress:** 5/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -35,6 +35,6 @@ started_at: 2026-04-02T11:15:46
 | [Add A Dedicated Steering Signal Manifold Route To The Web UI](../../../../stories/VFesYl8XK/README.md) | feat | done |
 | [Project Steering Signals Into Chambers And Conduits](../../../../stories/VFesYldXL/README.md) | feat | done |
 | [Render Time-Scrubbable Manifold Accumulation And Flow](../../../../stories/VFesYm0Yk/README.md) | feat | done |
-| [Stream Active-Turn Steering Signal Changes Into The Manifold View](../../../../stories/VFesYmKYc/README.md) | feat | backlog |
+| [Stream Active-Turn Steering Signal Changes Into The Manifold View](../../../../stories/VFesYmKYc/README.md) | feat | done |
 | [Link Manifold States Back To Forensic Sources And Document The Route](../../../../stories/VFesYmgZk/README.md) | feat | backlog |
 <!-- END GENERATED -->

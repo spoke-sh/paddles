@@ -1075,6 +1075,28 @@ mod tests {
         assert!(html.contains("manifold-node__fill"));
     }
 
+    #[test]
+    fn manifold_route_html_streams_live_updates_and_reconciles_from_replay() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("let manifoldEventSource = null;"));
+        assert!(html.contains("/manifold/events"));
+        assert!(html.contains("manifold_update"));
+        assert!(html.contains("function applyManifoldUpdate"));
+        assert!(html.contains("function scheduleManifoldReplayRefresh"));
+        assert!(html.contains("await refreshManifold()"));
+    }
+
+    #[test]
+    fn manifold_route_html_surfaces_lifecycle_states_during_live_turns() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("function manifoldLifecycleBadge"));
+        assert!(html.contains("data-lifecycle=\""));
+        assert!(html.contains("manifold-node__badge"));
+        assert!(html.contains("manifold-panel-status"));
+    }
+
     #[tokio::test]
     async fn web_router_serves_dedicated_manifold_and_transit_routes() {
         let workspace = tempfile::tempdir().expect("workspace");

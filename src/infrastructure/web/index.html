@@ -741,6 +741,24 @@ body {
     inset -1px -1px 0 rgba(108, 124, 138, 0.08),
     0 14px 22px rgba(92, 108, 122, 0.12);
 }
+.manifold-node[data-lifecycle="provisional"] {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(240, 138, 36, 0.14);
+}
+.manifold-node[data-lifecycle="final"] {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(23, 149, 108, 0.14);
+}
+.manifold-node[data-lifecycle="superseded"] {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(214, 95, 74, 0.16);
+}
 .manifold-node[data-phase="accumulating"] {
   transform: translateY(-2px);
   border-color: rgba(45, 144, 200, 0.28);
@@ -757,11 +775,43 @@ body {
   filter: saturate(0.78);
 }
 .manifold-node__eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: #60727f;
+}
+.manifold-node__badge,
+.manifold-panel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.manifold-node__badge.is-final,
+.manifold-panel-status.is-final {
+  background: rgba(23, 149, 108, 0.16);
+  color: #166751;
+}
+.manifold-node__badge.is-provisional,
+.manifold-panel-status.is-provisional {
+  background: rgba(240, 138, 36, 0.18);
+  color: #915219;
+}
+.manifold-node__badge.is-superseded,
+.manifold-panel-status.is-superseded {
+  background: rgba(214, 95, 74, 0.16);
+  color: #984739;
 }
 .manifold-node__title {
   margin-top: 8px;
@@ -814,6 +864,15 @@ body {
   font-size: 12px;
   line-height: 1.45;
   color: #4f616e;
+}
+.manifold-conduit[data-lifecycle="provisional"] {
+  border-color: rgba(240, 138, 36, 0.22);
+}
+.manifold-conduit[data-lifecycle="final"] {
+  border-color: rgba(23, 149, 108, 0.22);
+}
+.manifold-conduit[data-lifecycle="superseded"] {
+  border-color: rgba(214, 95, 74, 0.22);
 }
 .manifold-conduit[data-phase="accumulating"] {
   border-color: rgba(45, 144, 200, 0.34);
@@ -1651,6 +1710,7 @@ let sessionId = null;
 let eventSource = null;
 let transcriptEventSource = null;
 let forensicEventSource = null;
+let manifoldEventSource = null;
 let transcriptSignature = '';
 let latestTraceGraph = null;
 let latestForensics = null;
@@ -1665,6 +1725,7 @@ let graphDebounce = null;
 let forensicTailMode = true;
 let forensicRefreshTimer = null;
 let pendingForensicRefresh = null;
+let manifoldReplayRefreshTimer = null;
 let manifoldFrameIndex = null;
 let manifoldTailMode = true;
 let manifoldPlaybackActive = false;
@@ -1938,6 +1999,100 @@ function manifoldPrimitiveBasisLabel(basis) {
   return 'basis: ' + titleCase(basis.kind);
 }
 
+function manifoldLifecycleClass(lifecycle) {
+  return String(lifecycle || 'provisional');
+}
+
+function manifoldLifecycleLabel(lifecycle) {
+  return titleCase(String(lifecycle || 'provisional').replace(/_/g, ' '));
+}
+
+function manifoldLifecycleBadge(lifecycle, className = 'manifold-node__badge') {
+  const lifecycleClass = manifoldLifecycleClass(lifecycle);
+  return '<span class="' + className + ' is-' + escapeHtml(lifecycleClass) + '">' +
+    escapeHtml(manifoldLifecycleLabel(lifecycle)) +
+  '</span>';
+}
+
+function manifoldTurnStartSequence(turn) {
+  if (!turn || !Array.isArray(turn.frames) || !turn.frames.length) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return Number(turn.frames[0].sequence || Number.MAX_SAFE_INTEGER);
+}
+
+function mergeManifoldTurnProjection(turnProjection) {
+  if (!turnProjection) {
+    return null;
+  }
+
+  const taskId =
+    (latestManifold && latestManifold.task_id) ||
+    (latestForensics && latestForensics.task_id) ||
+    sessionId ||
+    '';
+  const turns = latestManifold && Array.isArray(latestManifold.turns)
+    ? latestManifold.turns.slice()
+    : [];
+  const existingIndex = turns.findIndex((turn) => turn.turn_id === turnProjection.turn_id);
+  if (existingIndex >= 0) {
+    turns[existingIndex] = turnProjection;
+  } else {
+    turns.push(turnProjection);
+  }
+  turns.sort((left, right) => manifoldTurnStartSequence(left) - manifoldTurnStartSequence(right));
+  latestManifold = {
+    task_id: taskId,
+    turns
+  };
+  return turnProjection;
+}
+
+function scheduleManifoldReplayRefresh() {
+  if (manifoldReplayRefreshTimer) {
+    return;
+  }
+
+  manifoldReplayRefreshTimer = window.setTimeout(async () => {
+    manifoldReplayRefreshTimer = null;
+    await refreshManifold();
+  }, 120);
+}
+
+function applyManifoldUpdate(payload) {
+  if (!payload || !payload.update) {
+    scheduleManifoldReplayRefresh();
+    return;
+  }
+
+  if (!latestManifold) {
+    latestManifold = {
+      task_id: payload.update.task_id,
+      turns: []
+    };
+  }
+
+  const mergedTurn = payload.turn ? mergeManifoldTurnProjection(payload.turn) : null;
+  const currentTurnId = selectedTurnId;
+  const shouldTailCurrentTurn =
+    manifoldTailMode &&
+    (!currentTurnId || currentTurnId === payload.update.turn_id);
+
+  if (!currentTurnId && mergedTurn) {
+    selectedTurnId = mergedTurn.turn_id;
+  }
+
+  if (shouldTailCurrentTurn && mergedTurn && Array.isArray(mergedTurn.frames) && mergedTurn.frames.length) {
+    manifoldFrameIndex = mergedTurn.frames.length - 1;
+  }
+
+  if (activeTraceView === 'manifold') {
+    renderManifoldShell();
+  }
+
+  scheduleManifoldReplayRefresh();
+}
+
 function selectedManifoldFrameIndex(turn) {
   if (!turn || !Array.isArray(turn.frames) || !turn.frames.length) {
     return 0;
@@ -2091,6 +2246,7 @@ function renderManifoldShell() {
   const primitives = frame && Array.isArray(frame.primitives) ? frame.primitives : [];
   const conduits = frame && Array.isArray(frame.conduits) ? frame.conduits : [];
   const totalFrames = turns.reduce((sum, item) => sum + (Array.isArray(item.frames) ? item.frames.length : 0), 0);
+  const currentLifecycle = frame ? frame.lifecycle : (turn ? turn.lifecycle : 'provisional');
   syncManifoldControls(turn);
 
   if (!turns.length) {
@@ -2109,11 +2265,12 @@ function renderManifoldShell() {
     return;
   }
 
-  stageMeta.textContent =
-    (latestManifold.task_id || 'task') + ' · ' +
-    turns.length + ' turns · ' +
-    totalFrames + ' frames · ' +
-    'selected ' + (frameIndex + 1);
+  stageMeta.innerHTML =
+    escapeHtml(latestManifold.task_id || 'task') + ' · ' +
+    escapeHtml(String(turns.length)) + ' turns · ' +
+    escapeHtml(String(totalFrames)) + ' frames · ' +
+    'selected ' + escapeHtml(String(frameIndex + 1)) + ' ' +
+    manifoldLifecycleBadge(currentLifecycle, 'manifold-panel-status');
 
   canvas.innerHTML =
     '<div class="manifold-machine">' +
@@ -2129,8 +2286,8 @@ function renderManifoldShell() {
           ? primitives.map((primitive) => {
               const phase = primitivePhase(turn, frameIndex, primitive);
               return (
-              '<div class="manifold-node" data-phase="' + escapeHtml(phase) + '">' +
-                '<div class="manifold-node__eyebrow">' + escapeHtml(manifoldPrimitiveKindLabel(primitive.kind) + ' · ' + phase.replace('_', ' ')) + '</div>' +
+              '<div class="manifold-node" data-phase="' + escapeHtml(phase) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(currentLifecycle)) + '">' +
+                '<div class="manifold-node__eyebrow"><span>' + escapeHtml(manifoldPrimitiveKindLabel(primitive.kind) + ' · ' + phase.replace('_', ' ')) + '</span>' + manifoldLifecycleBadge(currentLifecycle) + '</div>' +
                 '<div class="manifold-node__title">' + escapeHtml(primitive.label || primitive.primitive_id) + '</div>' +
                 '<div class="manifold-node__meta">' +
                   'magnitude ' + escapeHtml(String(primitive.magnitude_percent || 0)) + '% · ' +
@@ -2148,7 +2305,7 @@ function renderManifoldShell() {
               const targetPrimitive = primitives.find((primitive) => primitive.primitive_id === conduit.to_primitive_id) || null;
               const phase = targetPrimitive ? primitivePhase(turn, frameIndex, targetPrimitive) : 'stable';
               return (
-              '<div class="manifold-conduit" data-phase="' + escapeHtml(phase) + '">' +
+              '<div class="manifold-conduit" data-phase="' + escapeHtml(phase) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(currentLifecycle)) + '">' +
                 '<strong>' + escapeHtml(conduit.label || conduit.conduit_id) + '</strong>' +
                 '<span>' + escapeHtml(conduit.from_primitive_id) + ' → ' + escapeHtml(conduit.to_primitive_id) + '</span>' +
               '</div>'
@@ -2164,13 +2321,14 @@ function renderManifoldShell() {
       turns.slice().reverse().map((turnItem) => {
         const latestFrame = turnItem.frames && turnItem.frames.length ? turnItem.frames[turnItem.frames.length - 1] : null;
         return (
-          '<button class="manifold-panel-button" data-manifold-turn-id="' + escapeHtml(turnItem.turn_id) + '">' +
+          '<button class="manifold-panel-button" data-manifold-turn-id="' + escapeHtml(turnItem.turn_id) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(turnItem.lifecycle)) + '">' +
             '<div class="manifold-panel-row">' +
               '<strong>' + escapeHtml(truncate(turnItem.turn_id, 28)) + '</strong>' +
               '<span>' + escapeHtml(String((turnItem.frames || []).length)) + ' frames' +
               (latestFrame ? ' · step ' + escapeHtml(String(latestFrame.sequence)) : '') +
               '</span>' +
             '</div>' +
+            manifoldLifecycleBadge(turnItem.lifecycle, 'manifold-panel-status') +
           '</button>'
         );
       }).join('') +
@@ -2178,7 +2336,7 @@ function renderManifoldShell() {
 
   sourcePanel.innerHTML =
     '<div class="manifold-panel-title">Sources</div>' +
-    '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong></div>' +
+    '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong> · frame state ' + manifoldLifecycleBadge(currentLifecycle, 'manifold-panel-status') + '</div>' +
     '<div class="manifold-panel-list">' +
       (primitives.length
         ? primitives.map((primitive) => (
@@ -2394,6 +2552,7 @@ function connectSSE() {
   if (eventSource) eventSource.close();
   if (transcriptEventSource) transcriptEventSource.close();
   if (forensicEventSource) forensicEventSource.close();
+  if (manifoldEventSource) manifoldEventSource.close();
 
   eventSource = new EventSource('/events');
   eventSource.addEventListener('turn_event', (e) => {
@@ -2417,6 +2576,12 @@ function connectSSE() {
       preferProvisionalTurnId: payload && payload.update ? payload.update.turn_id : null,
       preferProvisionalRecordId: payload && payload.record && payload.record.record ? payload.record.record.record_id : null
     });
+  });
+
+  manifoldEventSource = new EventSource('/sessions/' + sessionId + '/manifold/events');
+  manifoldEventSource.addEventListener('manifold_update', (e) => {
+    const payload = JSON.parse(e.data);
+    applyManifoldUpdate(payload);
   });
 }
 
