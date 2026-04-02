@@ -1,13 +1,13 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Parser;
 use std::env;
 use std::io::IsTerminal;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
 use paddles::application::{
-    GathererProvider, MechSuitService, PreparedGathererLane, RuntimeLaneConfig,
+    GathererProvider, MechSuitService, PreparedGathererLane, PreparedModelLane, RuntimeLaneConfig,
 };
 use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
@@ -26,24 +26,9 @@ use paddles::infrastructure::cli::interactive_tui::{
 use paddles::infrastructure::config::{
     PaddlesConfig, normalize_gatherer_provider_alias, normalize_provider_model_alias,
 };
-use paddles::infrastructure::credentials::{ApiKeySource, CredentialStore};
+use paddles::infrastructure::credentials::CredentialStore;
+use paddles::infrastructure::providers::ModelProvider;
 use paddles::infrastructure::rendering::RenderCapability;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
-enum ModelProvider {
-    /// Local Qwen inference via sift (default)
-    Sift,
-    /// OpenAI chat completions API
-    Openai,
-    /// Anthropic messages API
-    Anthropic,
-    /// Google Gemini generateContent API
-    Google,
-    /// Moonshot Kimi (OpenAI-compatible)
-    Moonshot,
-    /// Ollama (OpenAI-compatible, localhost:11434)
-    Ollama,
-}
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -85,6 +70,10 @@ struct Cli {
     #[arg(long)]
     planner_model: Option<String>,
 
+    /// Optional planner provider. Defaults to the synthesizer provider when unset.
+    #[arg(long, value_enum)]
+    planner_provider: Option<ModelProvider>,
+
     /// Optional model ID for the legacy static local context-gathering lane.
     #[arg(long)]
     gatherer_model: Option<String>,
@@ -110,6 +99,138 @@ struct Cli {
     hf_token: Option<String>,
 }
 
+fn resolve_provider_from_name(configured: &str, field_name: &str) -> ModelProvider {
+    match ModelProvider::from_name(configured) {
+        Some(provider) => provider,
+        None => {
+            eprintln!("[WARN] Unsupported {field_name} `{configured}`; using `sift` instead.");
+            ModelProvider::Sift
+        }
+    }
+}
+
+fn provider_api_format(provider: ModelProvider) -> Option<ApiFormat> {
+    match provider {
+        ModelProvider::Openai | ModelProvider::Moonshot | ModelProvider::Ollama => {
+            Some(ApiFormat::OpenAi)
+        }
+        ModelProvider::Anthropic => Some(ApiFormat::Anthropic),
+        ModelProvider::Google => Some(ApiFormat::Gemini),
+        ModelProvider::Sift => None,
+    }
+}
+
+fn resolve_remote_provider_config(
+    provider: ModelProvider,
+    model_id: &str,
+    credential_store: &CredentialStore,
+    provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
+) -> Result<(ApiFormat, String, String, RenderCapability)> {
+    let resolved_api_key = credential_store.resolve_provider_api_key(provider);
+    if provider.auth_requirement()
+        == paddles::infrastructure::providers::ProviderAuthRequirement::RequiredApiKey
+        && resolved_api_key.value.is_empty()
+    {
+        let env_var = provider.credential_env_var().unwrap_or("PROVIDER_API_KEY");
+        bail!(
+            "provider `{}` is not authenticated; set `{}` or use `/login {}` before selecting `{}`",
+            provider.name(),
+            env_var,
+            provider.name(),
+            provider.qualified_model_label(model_id)
+        );
+    }
+
+    let api_format = provider_api_format(provider).ok_or_else(|| {
+        anyhow::anyhow!(
+            "provider `{}` does not use the HTTP adapter",
+            provider.name()
+        )
+    })?;
+    let base_url = provider_url_overrides
+        .get(&provider)
+        .cloned()
+        .or_else(|| provider.default_base_url().map(str::to_string))
+        .ok_or_else(|| {
+            anyhow::anyhow!("provider `{}` does not define a base URL", provider.name())
+        })?;
+    let render_capability = RenderCapability::resolve(provider.name(), model_id);
+    Ok((
+        api_format,
+        base_url,
+        resolved_api_key.value,
+        render_capability,
+    ))
+}
+
+fn build_synthesizer_engine(
+    workspace: &Path,
+    lane: &PreparedModelLane,
+    credential_store: &CredentialStore,
+    provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
+) -> Result<Arc<dyn SynthesizerEngine>> {
+    match lane.provider {
+        ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new(
+            workspace.to_path_buf(),
+            &lane.model_id,
+            RenderCapability::resolve(lane.provider.name(), &lane.model_id),
+        )?) as Arc<dyn SynthesizerEngine>),
+        provider => {
+            let (format, base_url, api_key, render_capability) = resolve_remote_provider_config(
+                provider,
+                &lane.model_id,
+                credential_store,
+                provider_url_overrides,
+            )?;
+            Ok(Arc::new(HttpProviderAdapter::new(
+                workspace.to_path_buf(),
+                lane.model_id.clone(),
+                api_key,
+                base_url,
+                format,
+                render_capability,
+            )) as Arc<dyn SynthesizerEngine>)
+        }
+    }
+}
+
+fn build_planner_engine(
+    workspace: &Path,
+    lane: &PreparedModelLane,
+    credential_store: &CredentialStore,
+    provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
+) -> Result<Arc<dyn paddles::domain::ports::RecursivePlanner>> {
+    match lane.provider {
+        ModelProvider::Sift => {
+            let engine = Arc::new(SiftAgentAdapter::new(
+                workspace.to_path_buf(),
+                &lane.model_id,
+                RenderCapability::resolve(lane.provider.name(), &lane.model_id),
+            )?);
+            Ok(Arc::new(SiftPlannerAdapter::new(engine))
+                as Arc<dyn paddles::domain::ports::RecursivePlanner>)
+        }
+        provider => {
+            let (format, base_url, api_key, render_capability) = resolve_remote_provider_config(
+                provider,
+                &lane.model_id,
+                credential_store,
+                provider_url_overrides,
+            )?;
+            let engine = Arc::new(HttpProviderAdapter::new(
+                workspace.to_path_buf(),
+                lane.model_id.clone(),
+                api_key,
+                base_url,
+                format,
+                render_capability,
+            ));
+            Ok(Arc::new(HttpPlannerAdapter::new(engine))
+                as Arc<dyn paddles::domain::ports::RecursivePlanner>)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -133,26 +254,20 @@ async fn main() -> Result<()> {
     let hf_token = cli.hf_token.or(config.hf_token);
     let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
     let mut planner_model = cli.planner_model.or(config.planner_model);
+    let planner_provider = cli.planner_provider.or_else(|| {
+        config
+            .planner_provider
+            .as_deref()
+            .map(|provider| resolve_provider_from_name(provider, "planner_provider"))
+    });
     let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
     let provider_url = cli.provider_url.or(config.provider_url);
 
-    let provider = cli.provider.unwrap_or(match config.provider.as_str() {
-        "openai" => ModelProvider::Openai,
-        "anthropic" => ModelProvider::Anthropic,
-        "google" => ModelProvider::Google,
-        "moonshot" => ModelProvider::Moonshot,
-        "ollama" => ModelProvider::Ollama,
-        _ => ModelProvider::Sift,
-    });
+    let provider = cli
+        .provider
+        .unwrap_or_else(|| resolve_provider_from_name(&config.provider, "provider"));
 
-    let provider_name = match provider {
-        ModelProvider::Openai => "openai",
-        ModelProvider::Anthropic => "anthropic",
-        ModelProvider::Google => "google",
-        ModelProvider::Moonshot => "moonshot",
-        ModelProvider::Ollama => "ollama",
-        ModelProvider::Sift => "sift",
-    };
+    let provider_name = provider.name();
     let normalized_model = normalize_provider_model_alias(provider_name, &model);
     if normalized_model != model {
         eprintln!(
@@ -160,16 +275,18 @@ async fn main() -> Result<()> {
         );
         model = normalized_model;
     }
+    let normalized_planner_provider = planner_provider.unwrap_or(provider);
     planner_model = planner_model.map(|planner| {
-        let normalized = normalize_provider_model_alias(provider_name, &planner);
+        let normalized =
+            normalize_provider_model_alias(normalized_planner_provider.name(), &planner);
         if normalized != planner {
             eprintln!(
-                "[WARN] Planner model `{planner}` is no longer valid for provider `{provider_name}`; using `{normalized}` instead."
+                "[WARN] Planner model `{planner}` is no longer valid for provider `{}`; using `{normalized}` instead.",
+                normalized_planner_provider.name()
             );
         }
         normalized
     });
-    let render_capability = RenderCapability::resolve(provider_name, &model);
 
     let normalized_gatherer_provider = normalize_gatherer_provider_alias(&config.gatherer_provider);
     if normalized_gatherer_provider != config.gatherer_provider {
@@ -208,111 +325,37 @@ async fn main() -> Result<()> {
     let registry = Arc::new(SiftRegistryAdapter::new());
     let operator_memory = Arc::new(AgentMemory::load(&root_path));
 
-    let (api_format, default_base_url, api_key_env) = match provider {
-        ModelProvider::Openai => (
-            Some(ApiFormat::OpenAi),
-            "https://api.openai.com",
-            "OPENAI_API_KEY",
-        ),
-        ModelProvider::Anthropic => (
-            Some(ApiFormat::Anthropic),
-            "https://api.anthropic.com",
-            "ANTHROPIC_API_KEY",
-        ),
-        ModelProvider::Google => (
-            Some(ApiFormat::Gemini),
-            "https://generativelanguage.googleapis.com",
-            "GOOGLE_API_KEY",
-        ),
-        ModelProvider::Moonshot => (
-            Some(ApiFormat::OpenAi),
-            "https://api.moonshot.ai",
-            "MOONSHOT_API_KEY",
-        ),
-        ModelProvider::Ollama => (
-            Some(ApiFormat::OpenAi),
-            "http://localhost:11434",
-            "OLLAMA_API_KEY",
-        ),
-        ModelProvider::Sift => (None, "", ""),
-    };
-
     // Resolve API key: env var first, then credential store.
     let credential_store = Arc::new(CredentialStore::new());
-    let credential_provider = CredentialStore::provider_for_env(api_key_env).map(str::to_string);
-    let resolved_api_key = if credential_provider.is_some() {
-        credential_store.resolve_api_key(api_key_env)
-    } else {
-        paddles::infrastructure::credentials::ResolvedApiKey {
-            value: String::new(),
-            source: ApiKeySource::Missing {
-                provider: provider_name.to_string(),
-            },
-        }
-    };
-    let credential_status = if matches!(provider, ModelProvider::Sift) {
-        format!("Provider: `{provider_name}` (local-first). Auth: not required.")
-    } else {
-        resolved_api_key.source.interactive_status(provider_name)
-    };
-    let api_key_shared: Arc<RwLock<String>> = Arc::new(RwLock::new(resolved_api_key.value));
+    let mut provider_url_overrides = std::collections::BTreeMap::new();
+    if let Some(base_url) = provider_url.clone() {
+        provider_url_overrides.insert(provider, base_url);
+    }
+    let provider_url_overrides = Arc::new(provider_url_overrides);
 
-    let synthesizer_factory: Box<paddles::application::SynthesizerFactory> = match provider {
-        ModelProvider::Sift => Box::new(move |workspace: &Path, model_id: &str| {
-            let engine =
-                SiftAgentAdapter::new(workspace.to_path_buf(), model_id, render_capability)?;
-            Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
-        }),
-        _ => {
-            let format = api_format.expect("api format set for non-sift providers");
-            let base_url = provider_url
-                .clone()
-                .unwrap_or_else(|| default_base_url.to_string());
-            let key_ref = Arc::clone(&api_key_shared);
-            Box::new(move |workspace: &Path, model_id: &str| {
-                let current_key = key_ref.read().unwrap().clone();
-                let engine = HttpProviderAdapter::new(
-                    workspace.to_path_buf(),
-                    model_id,
-                    current_key,
-                    base_url.clone(),
-                    format,
-                    render_capability,
-                );
-                Ok(Arc::new(engine) as Arc<dyn SynthesizerEngine>)
-            })
-        }
-    };
+    let synth_credentials = Arc::clone(&credential_store);
+    let synth_overrides = Arc::clone(&provider_url_overrides);
+    let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
+        Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
+            build_synthesizer_engine(
+                workspace,
+                lane,
+                synth_credentials.as_ref(),
+                synth_overrides.as_ref(),
+            )
+        });
 
-    let planner_factory: Box<paddles::application::PlannerFactory> = match provider {
-        ModelProvider::Sift => Box::new(move |workspace: &Path, model_id: &str| {
-            let engine = Arc::new(SiftAgentAdapter::new(
-                workspace.to_path_buf(),
-                model_id,
-                render_capability,
-            )?);
-            let adapter = SiftPlannerAdapter::new(engine);
-            Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
-        }),
-        _ => {
-            let format = api_format.expect("api format set for non-sift providers");
-            let base_url = provider_url.unwrap_or_else(|| default_base_url.to_string());
-            let key_ref = Arc::clone(&api_key_shared);
-            Box::new(move |workspace: &Path, model_id: &str| {
-                let current_key = key_ref.read().unwrap().clone();
-                let engine = Arc::new(HttpProviderAdapter::new(
-                    workspace.to_path_buf(),
-                    model_id,
-                    current_key,
-                    base_url.clone(),
-                    format,
-                    render_capability,
-                ));
-                let adapter = HttpPlannerAdapter::new(engine);
-                Ok(Arc::new(adapter) as Arc<dyn paddles::domain::ports::RecursivePlanner>)
-            })
-        }
-    };
+    let planner_credentials = Arc::clone(&credential_store);
+    let planner_overrides = Arc::clone(&provider_url_overrides);
+    let planner_factory: Box<paddles::application::PlannerFactory> =
+        Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
+            build_planner_engine(
+                workspace,
+                lane,
+                planner_credentials.as_ref(),
+                planner_overrides.as_ref(),
+            )
+        });
     let gatherer_factory: Box<paddles::application::GathererFactory> = Box::new(
         |config: &RuntimeLaneConfig,
          workspace: &Path,
@@ -415,10 +458,11 @@ async fn main() -> Result<()> {
         }
     }
     let runtime_lanes = RuntimeLaneConfig::new(model.clone(), gatherer_model.clone())
+        .with_synthesizer_provider(provider)
         .with_planner_model_id(planner_model.clone())
+        .with_planner_provider(planner_provider)
         .with_gatherer_provider(gatherer_provider)
-        .with_context1_harness_ready(context1_harness_ready)
-        .with_requires_local_models(provider == ModelProvider::Sift);
+        .with_context1_harness_ready(context1_harness_ready);
     let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
     if verbose >= 3 {
         println!("[BOOT] Runtime lanes ready.");
@@ -446,14 +490,10 @@ async fn main() -> Result<()> {
             InteractiveFrontend::Tui => {
                 let tui_ctx = TuiContext {
                     credential_store: Arc::clone(&credential_store),
-                    api_key_shared: Arc::clone(&api_key_shared),
                     runtime_lanes: runtime_lanes.clone(),
-                    provider_name: provider_name.to_string(),
-                    credential_provider: credential_provider.clone(),
-                    credential_status: credential_status.clone(),
                     verbose,
                 };
-                run_interactive_tui(service, model.clone(), tui_ctx).await?
+                run_interactive_tui(service, tui_ctx).await?
             }
             InteractiveFrontend::PlainLines => run_plain_interactive_loop(service).await?,
         }

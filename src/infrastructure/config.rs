@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+use crate::infrastructure::providers::ModelProvider;
+
 const CONFIG_FILE_NAME: &str = "paddles.toml";
 const USER_CONFIG_RELATIVE_PATH: &str = ".config/paddles/paddles.toml";
 const SYSTEM_CONFIG_PATH: &str = "/etc/paddles/paddles.toml";
@@ -16,6 +18,7 @@ pub struct PaddlesConfig {
     pub provider_url: Option<String>,
     pub model: String,
     pub planner_model: Option<String>,
+    pub planner_provider: Option<String>,
     pub gatherer_model: Option<String>,
     pub gatherer_provider: String,
     pub port: u16,
@@ -35,6 +38,7 @@ impl Default for PaddlesConfig {
             provider_url: None,
             model: "qwen-1.5b".to_string(),
             planner_model: None,
+            planner_provider: None,
             gatherer_model: None,
             gatherer_provider: "sift-direct".to_string(),
             port: 3000,
@@ -76,10 +80,9 @@ impl PaddlesConfig {
 
 /// Normalizes provider-specific model aliases so legacy configs keep working.
 pub fn normalize_provider_model_alias(provider: &str, model: &str) -> String {
-    match (provider, model) {
-        ("moonshot", "kimi-2.5") => "kimi-k2.5".to_string(),
-        _ => model.to_string(),
-    }
+    ModelProvider::from_name(provider)
+        .map(|provider| provider.normalize_model_alias(model))
+        .unwrap_or_else(|| model.to_string())
 }
 
 /// Normalizes legacy gatherer provider aliases so old configs remain explicit and compatible.
@@ -134,6 +137,7 @@ port = 8080
         // Unset fields use defaults
         assert_eq!(config.weights, 0.5);
         assert!(config.planner_model.is_none());
+        assert!(config.planner_provider.is_none());
     }
 
     #[test]

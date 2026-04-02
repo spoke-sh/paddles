@@ -3,7 +3,8 @@ use crate::domain::model::{
     ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
     ThreadCandidate, TranscriptUpdateSink, TurnEvent, TurnEventSink,
 };
-use crate::infrastructure::credentials::CredentialStore;
+use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
+use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
 use anyhow::Result;
 use crossterm::cursor;
@@ -13,24 +14,20 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size as terminal_si
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, Line, Modifier, Span, Style, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use std::cmp;
 use std::collections::{HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// Context passed from main to the TUI for credential management.
 pub struct TuiContext {
     pub credential_store: Arc<CredentialStore>,
-    pub api_key_shared: Arc<RwLock<String>>,
     pub runtime_lanes: RuntimeLaneConfig,
-    pub provider_name: String,
-    pub credential_provider: Option<String>,
-    pub credential_status: String,
     pub verbose: u8,
 }
 
@@ -42,6 +39,35 @@ const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 9;
 /// Max prose width for assistant responses (accounts for the 4-char body indent).
 const MAX_PROSE_WIDTH: usize = 96;
 const MULTILINE_INLINE_SEPARATOR: &str = " ⏎ ";
+
+struct SlashCommandSpec {
+    insert_text: &'static str,
+    usage: &'static str,
+    description: &'static str,
+}
+
+const SLASH_COMMANDS: &[SlashCommandSpec] = &[
+    SlashCommandSpec {
+        insert_text: "/login ",
+        usage: "/login <provider>",
+        description: "store or replace a provider API key",
+    },
+    SlashCommandSpec {
+        insert_text: "/model",
+        usage: "/model",
+        description: "show the model catalog and auth state",
+    },
+    SlashCommandSpec {
+        insert_text: "/model planner ",
+        usage: "/model planner <provider> <model>",
+        description: "switch the planner lane",
+    },
+    SlashCommandSpec {
+        insert_text: "/model synthesizer ",
+        usage: "/model synthesizer <provider> <model>",
+        description: "switch the synthesizer lane",
+    },
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InteractiveFrontend {
@@ -63,8 +89,7 @@ pub fn select_interactive_frontend(
 
 pub async fn run_interactive_tui(
     service: Arc<MechSuitService>,
-    model_label: impl Into<String>,
-    tui_ctx: TuiContext,
+    mut tui_ctx: TuiContext,
 ) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
@@ -79,15 +104,37 @@ pub async fn run_interactive_tui(
     let session = service.shared_conversation_session();
     service
         .register_transcript_observer(Arc::new(InteractiveTranscriptUpdateSink { tx: tx.clone() }));
+    let provider_availability = tui_ctx.credential_store.all_provider_availability();
     let mut app = InteractiveApp::new(
-        model_label.into(),
+        runtime_lane_summary(&tui_ctx.runtime_lanes),
         detect_palette(),
         session.clone(),
-        tui_ctx.provider_name.clone(),
-        tui_ctx.credential_provider.clone(),
-        tui_ctx.credential_status.clone(),
+        tui_ctx
+            .runtime_lanes
+            .synthesizer_provider()
+            .name()
+            .to_string(),
+        tui_ctx
+            .runtime_lanes
+            .synthesizer_provider()
+            .supports_interactive_login()
+            .then(|| {
+                tui_ctx
+                    .runtime_lanes
+                    .synthesizer_provider()
+                    .name()
+                    .to_string()
+            }),
+        credential_status_line(
+            tui_ctx.runtime_lanes.synthesizer_provider(),
+            availability_for_provider(
+                &provider_availability,
+                tui_ctx.runtime_lanes.synthesizer_provider(),
+            ),
+        ),
         tui_ctx.verbose,
     );
+    app.set_runtime_catalog(tui_ctx.runtime_lanes.clone(), provider_availability);
     if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
         app.load_transcript(&transcript);
     }
@@ -110,30 +157,52 @@ pub async fn run_interactive_tui(
                 .credential_store
                 .save_api_key(&login.provider, &login.api_key)
             {
-                Ok(()) => {
-                    *tui_ctx.api_key_shared.write().unwrap() = login.api_key;
-                    match service.prepare_runtime_lanes(&tui_ctx.runtime_lanes).await {
-                        Ok(_) => {
-                            app.push_event(
-                                "API key saved",
-                                format!(
-                                    "Credentials stored for `{}`. Runtime reconnected.",
-                                    login.provider,
-                                ),
-                            );
-                        }
-                        Err(err) => {
-                            app.push_error(
-                                "Login failed",
-                                format!("Key saved but runtime rebuild failed: {err:#}",),
-                            );
-                        }
+                Ok(()) => match service.prepare_runtime_lanes(&tui_ctx.runtime_lanes).await {
+                    Ok(_) => {
+                        app.set_provider_availability(
+                            tui_ctx.credential_store.all_provider_availability(),
+                        );
+                        app.push_event(
+                            "API key saved",
+                            format!(
+                                "Credentials stored for `{}`. Runtime reconnected.",
+                                login.provider,
+                            ),
+                        );
                     }
-                }
+                    Err(err) => {
+                        app.set_provider_availability(
+                            tui_ctx.credential_store.all_provider_availability(),
+                        );
+                        app.push_error(
+                            "Login failed",
+                            format!("Key saved but runtime rebuild failed: {err:#}",),
+                        );
+                    }
+                },
                 Err(err) => {
                     app.push_error(
                         "Login failed",
                         format!("Could not save credentials: {err:#}"),
+                    );
+                }
+            }
+        }
+
+        if let Some(update) = app.take_pending_runtime_update() {
+            match service.prepare_runtime_lanes(&update.runtime_lanes).await {
+                Ok(_) => {
+                    tui_ctx.runtime_lanes = update.runtime_lanes.clone();
+                    app.set_runtime_catalog(
+                        tui_ctx.runtime_lanes.clone(),
+                        tui_ctx.credential_store.all_provider_availability(),
+                    );
+                    app.push_event("Model selection updated", update.summary);
+                }
+                Err(err) => {
+                    app.push_error(
+                        "Model selection failed",
+                        format!("Could not activate requested runtime lanes: {err:#}"),
                     );
                 }
             }
@@ -202,6 +271,10 @@ fn handle_key_event(
             app.submit_prompt();
             false
         }
+        KeyCode::Tab => {
+            app.accept_selected_slash_completion();
+            false
+        }
         KeyCode::Backspace => {
             if app.cursor_pos > 0 {
                 let byte_pos = app
@@ -218,6 +291,7 @@ fn handle_key_event(
                     .unwrap_or(app.input.len());
                 app.input.replace_range(byte_pos..end_byte, "");
                 app.cursor_pos -= 1;
+                app.reset_slash_suggestion_selection();
             }
             false
         }
@@ -237,6 +311,7 @@ fn handle_key_event(
                     .map(|(i, _)| i)
                     .unwrap_or(app.input.len());
                 app.input.replace_range(byte_pos..end_byte, "");
+                app.reset_slash_suggestion_selection();
             }
             false
         }
@@ -262,12 +337,18 @@ fn handle_key_event(
             false
         }
         KeyCode::Up => {
+            if app.cycle_slash_suggestion(-1) {
+                return false;
+            }
             if !app.cursor_up() && !app.input.contains('\n') {
                 app.history_back();
             }
             false
         }
         KeyCode::Down => {
+            if app.cycle_slash_suggestion(1) {
+                return false;
+            }
             if !app.cursor_down() && !app.input.contains('\n') {
                 app.history_forward();
             }
@@ -276,6 +357,7 @@ fn handle_key_event(
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.input.clear();
             app.cursor_pos = 0;
+            app.reset_slash_suggestion_selection();
             false
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -296,6 +378,7 @@ fn handle_key_event(
             app.input.insert(byte_pos, '\n');
             app.cursor_pos += 1;
             app.history_cursor = None;
+            app.reset_slash_suggestion_selection();
             false
         }
         KeyCode::Char(ch) => {
@@ -309,6 +392,7 @@ fn handle_key_event(
                 app.input.insert(byte_pos, ch);
                 app.cursor_pos += 1;
                 app.history_cursor = None;
+                app.reset_slash_suggestion_selection();
             }
             false
         }
@@ -632,6 +716,8 @@ struct InteractiveApp {
     model_label: String,
     palette: Palette,
     session: ConversationSession,
+    runtime_lanes: RuntimeLaneConfig,
+    provider_availability: Vec<ProviderAvailability>,
     rows: Vec<TranscriptRow>,
     input: String,
     queued_prompts: VecDeque<QueuedPrompt>,
@@ -641,6 +727,8 @@ struct InteractiveApp {
     spinner_index: usize,
     input_mode: InputMode,
     pending_login: Option<PendingLogin>,
+    pending_runtime_update: Option<PendingRuntimeUpdate>,
+    slash_suggestion_index: usize,
     provider_name: String,
     credential_provider: Option<String>,
     active_turn_timing: Option<ActiveTurnTiming>,
@@ -687,6 +775,71 @@ struct PendingLogin {
     api_key: String,
 }
 
+#[derive(Clone, Debug)]
+struct PendingRuntimeUpdate {
+    runtime_lanes: RuntimeLaneConfig,
+    summary: String,
+}
+
+fn runtime_lane_summary(runtime_lanes: &RuntimeLaneConfig) -> String {
+    format!(
+        "P {} · S {}",
+        runtime_lanes.planner_provider().qualified_model_label(
+            runtime_lanes
+                .planner_model_id()
+                .unwrap_or(runtime_lanes.synthesizer_model_id()),
+        ),
+        runtime_lanes
+            .synthesizer_provider()
+            .qualified_model_label(runtime_lanes.synthesizer_model_id())
+    )
+}
+
+fn availability_for_provider(
+    availability: &[ProviderAvailability],
+    provider: ModelProvider,
+) -> ProviderAvailability {
+    availability
+        .iter()
+        .find(|entry| entry.provider == provider)
+        .cloned()
+        .unwrap_or(ProviderAvailability {
+            provider,
+            enabled: matches!(
+                provider.auth_requirement(),
+                crate::infrastructure::providers::ProviderAuthRequirement::None
+                    | crate::infrastructure::providers::ProviderAuthRequirement::OptionalApiKey
+            ),
+            detail: match provider.auth_requirement() {
+                crate::infrastructure::providers::ProviderAuthRequirement::None => {
+                    "auth not required".to_string()
+                }
+                crate::infrastructure::providers::ProviderAuthRequirement::OptionalApiKey => {
+                    "auth not required".to_string()
+                }
+                crate::infrastructure::providers::ProviderAuthRequirement::RequiredApiKey => {
+                    "login required".to_string()
+                }
+            },
+        })
+}
+
+fn credential_status_line(provider: ModelProvider, availability: ProviderAvailability) -> String {
+    match provider.auth_requirement() {
+        crate::infrastructure::providers::ProviderAuthRequirement::None => {
+            format!(
+                "Provider: `{}` (local-first). Auth: not required.",
+                provider.name()
+            )
+        }
+        _ => format!(
+            "Provider: `{}`. Auth: {}.",
+            provider.name(),
+            availability.detail
+        ),
+    }
+}
+
 impl InteractiveApp {
     fn new(
         model_label: String,
@@ -701,19 +854,29 @@ impl InteractiveApp {
             Some(provider) => format!(
                 "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
-                 Type `/login` to set or replace your API key for `{provider}`.",
+                 Type `/login {provider}` to set or replace its API key.\n\
+                 Type `/model` to inspect or switch planner and synthesizer lanes.\n\
+                 Slash commands open a popup; Tab accepts the active completion.",
             ),
             None => format!(
                 "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
-                 No API login required.",
+                 Type `/login <provider>` for any remote provider.\n\
+                 Type `/model` to inspect or switch planner and synthesizer lanes.\n\
+                 Slash commands open a popup; Tab accepts the active completion.",
             ),
         };
         let current_task_id = session.task_id().as_str().to_string();
+        let runtime_lanes = RuntimeLaneConfig::new(model_label.clone(), None)
+            .with_synthesizer_provider(
+                ModelProvider::from_name(&provider_name).unwrap_or(ModelProvider::Sift),
+            );
         Self {
             model_label,
             palette,
             session,
+            runtime_lanes,
+            provider_availability: Vec::new(),
             rows: vec![TranscriptRow::new(
                 TranscriptRowKind::Event,
                 "• Interactive mode ready",
@@ -727,6 +890,8 @@ impl InteractiveApp {
             spinner_index: 0,
             input_mode: InputMode::Normal,
             pending_login: None,
+            pending_runtime_update: None,
+            slash_suggestion_index: 0,
             provider_name,
             credential_provider,
             active_turn_timing: None,
@@ -747,6 +912,79 @@ impl InteractiveApp {
             seen_transcript_record_ids: HashSet::new(),
             pending_turn_total_timing: None,
         }
+    }
+
+    fn set_runtime_catalog(
+        &mut self,
+        runtime_lanes: RuntimeLaneConfig,
+        provider_availability: Vec<ProviderAvailability>,
+    ) {
+        self.runtime_lanes = runtime_lanes;
+        self.model_label = runtime_lane_summary(&self.runtime_lanes);
+        self.provider_name = self.runtime_lanes.synthesizer_provider().name().to_string();
+        self.credential_provider = self
+            .runtime_lanes
+            .synthesizer_provider()
+            .supports_interactive_login()
+            .then(|| self.runtime_lanes.synthesizer_provider().name().to_string());
+        self.provider_availability = provider_availability;
+    }
+
+    fn set_provider_availability(&mut self, provider_availability: Vec<ProviderAvailability>) {
+        self.provider_availability = provider_availability;
+    }
+
+    fn reset_slash_suggestion_selection(&mut self) {
+        self.slash_suggestion_index = 0;
+    }
+
+    fn slash_command_suggestions(&self) -> Vec<&'static SlashCommandSpec> {
+        if self.is_masked_input() || self.input.contains('\n') || !self.input.starts_with('/') {
+            return Vec::new();
+        }
+        let query = self.input.to_ascii_lowercase();
+        SLASH_COMMANDS
+            .iter()
+            .filter(|command| {
+                command.insert_text.starts_with(&query) || command.usage.starts_with(&query)
+            })
+            .collect()
+    }
+
+    fn selected_slash_suggestion(&self) -> Option<&'static SlashCommandSpec> {
+        let suggestions = self.slash_command_suggestions();
+        if suggestions.is_empty() {
+            None
+        } else {
+            Some(suggestions[self.slash_suggestion_index.min(suggestions.len() - 1)])
+        }
+    }
+
+    fn cycle_slash_suggestion(&mut self, delta: isize) -> bool {
+        let suggestions = self.slash_command_suggestions();
+        if suggestions.is_empty() || self.input.contains('\n') {
+            return false;
+        }
+        let len = suggestions.len() as isize;
+        let next = (self.slash_suggestion_index as isize + delta).rem_euclid(len);
+        self.slash_suggestion_index = next as usize;
+        true
+    }
+
+    fn accept_selected_slash_completion(&mut self) -> bool {
+        let Some(suggestion) = self.selected_slash_suggestion() else {
+            return false;
+        };
+        if suggestion.insert_text == self.input {
+            return false;
+        }
+        if !suggestion.insert_text.starts_with(&self.input) {
+            return false;
+        }
+        self.input = suggestion.insert_text.to_string();
+        self.cursor_pos = self.input.chars().count();
+        self.history_cursor = None;
+        true
     }
 
     fn history_back(&mut self) {
@@ -846,6 +1084,7 @@ impl InteractiveApp {
         self.history_draft.clear();
         self.input.clear();
         self.cursor_pos = 0;
+        self.reset_slash_suggestion_selection();
 
         // Handle masked key submission.
         if let InputMode::MaskedKey { ref provider } = self.input_mode {
@@ -859,26 +1098,13 @@ impl InteractiveApp {
         }
 
         // Handle slash commands.
-        if raw.eq_ignore_ascii_case("/login") {
-            if let Some(provider) = self.credential_provider.clone() {
-                self.rows.push(TranscriptRow::new(
-                    TranscriptRowKind::Event,
-                    "• Login",
-                    format!(
-                        "Enter your API key for `{provider}`. Input is masked.\n\
-                         Press Esc to cancel.",
-                    ),
-                ));
-                self.input_mode = InputMode::MaskedKey { provider };
-            } else {
-                self.push_error(
-                    "Login unavailable",
-                    format!(
-                        "The current provider `{}` does not use API-key login.",
-                        self.provider_name
-                    ),
-                );
-            }
+        if raw.starts_with("/login") {
+            self.handle_login_command(&raw);
+            return;
+        }
+
+        if raw.starts_with("/model") {
+            self.handle_model_command(&raw);
             return;
         }
 
@@ -906,6 +1132,227 @@ impl InteractiveApp {
 
     fn take_pending_login(&mut self) -> Option<PendingLogin> {
         self.pending_login.take()
+    }
+
+    fn take_pending_runtime_update(&mut self) -> Option<PendingRuntimeUpdate> {
+        self.pending_runtime_update.take()
+    }
+
+    fn handle_login_command(&mut self, raw: &str) {
+        let mut parts = raw.split_whitespace();
+        let _ = parts.next();
+        let requested_provider = parts.next().map(str::to_ascii_lowercase);
+        let provider = match requested_provider {
+            Some(provider) => match ModelProvider::from_name(&provider) {
+                Some(provider) => provider,
+                None => {
+                    self.push_error(
+                        "Login unavailable",
+                        format!(
+                            "Unknown provider `{provider}`. Try one of: {}.",
+                            ModelProvider::all()
+                                .iter()
+                                .map(|provider| provider.name())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    );
+                    return;
+                }
+            },
+            None => match self
+                .credential_provider
+                .as_deref()
+                .and_then(ModelProvider::from_name)
+            {
+                Some(provider) => provider,
+                None => {
+                    self.push_error(
+                        "Login unavailable",
+                        format!(
+                            "The current provider `{}` does not use API-key login. Use `/login <provider>` instead.",
+                            self.provider_name
+                        ),
+                    );
+                    return;
+                }
+            },
+        };
+
+        if !provider.supports_interactive_login() {
+            self.push_error(
+                "Login unavailable",
+                format!("Provider `{}` does not use API-key login.", provider.name()),
+            );
+            return;
+        }
+
+        self.rows.push(TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Login",
+            format!(
+                "Enter your API key for `{}`. Input is masked.\n\
+                 Press Esc to cancel.",
+                provider.name()
+            ),
+        ));
+        self.input_mode = InputMode::MaskedKey {
+            provider: provider.name().to_string(),
+        };
+    }
+
+    fn handle_model_command(&mut self, raw: &str) {
+        let parts = raw.split_whitespace().collect::<Vec<_>>();
+        if parts.len() == 1 {
+            self.push_event("Model catalog", self.render_model_catalog());
+            return;
+        }
+        if parts.len() < 4 {
+            self.push_error(
+                "Model command invalid",
+                "Use `/model`, `/model synthesizer <provider> <model>`, or `/model planner <provider> <model>`.",
+            );
+            return;
+        }
+
+        let lane = parts[1].to_ascii_lowercase();
+        let provider_name = parts[2].to_ascii_lowercase();
+        let model_id = parts[3..].join(" ");
+        let provider = match ModelProvider::from_name(&provider_name) {
+            Some(provider) => provider,
+            None => {
+                self.push_error(
+                    "Model command invalid",
+                    format!("Unknown provider `{provider_name}`."),
+                );
+                return;
+            }
+        };
+        let availability = self.provider_availability_for(provider);
+        if !availability.enabled {
+            self.push_error(
+                "Model unavailable",
+                format!(
+                    "Provider `{}` is disabled: {}.",
+                    provider.name(),
+                    availability.detail
+                ),
+            );
+            return;
+        }
+        let normalized_model = provider.normalize_model_alias(&model_id);
+        if !provider.accepts_model(&normalized_model) {
+            let accepted = if provider.supports_freeform_model_id() {
+                "any model id".to_string()
+            } else {
+                provider.known_model_ids().join(", ")
+            };
+            self.push_error(
+                "Model command invalid",
+                format!(
+                    "Provider `{}` does not recognize model `{}`. Accepted: {}.",
+                    provider.name(),
+                    normalized_model,
+                    accepted
+                ),
+            );
+            return;
+        }
+
+        let runtime_lanes = match lane.as_str() {
+            "planner" => {
+                let runtime_lanes = self
+                    .runtime_lanes
+                    .clone()
+                    .with_planner_provider(Some(provider))
+                    .with_planner_model_id(Some(normalized_model.clone()));
+                self.pending_runtime_update = Some(PendingRuntimeUpdate {
+                    runtime_lanes,
+                    summary: format!(
+                        "Planner lane now targets `{}`.",
+                        provider.qualified_model_label(&normalized_model)
+                    ),
+                });
+                return;
+            }
+            "synth" | "synthesizer" => RuntimeLaneConfig::new(
+                normalized_model.clone(),
+                self.runtime_lanes.gatherer_model_id().map(str::to_string),
+            )
+            .with_synthesizer_provider(provider)
+            .with_planner_model_id(self.runtime_lanes.planner_model_id().map(str::to_string))
+            .with_planner_provider(self.runtime_lanes.planner_provider_override())
+            .with_gatherer_provider(self.runtime_lanes.gatherer_provider())
+            .with_context1_harness_ready(self.runtime_lanes.context1_harness_ready()),
+            _ => {
+                self.push_error(
+                    "Model command invalid",
+                    format!(
+                        "Unknown lane `{}`. Use `planner` or `synthesizer`.",
+                        parts[1]
+                    ),
+                );
+                return;
+            }
+        };
+        self.pending_runtime_update = Some(PendingRuntimeUpdate {
+            runtime_lanes,
+            summary: format!(
+                "Synthesizer lane now targets `{}`.",
+                provider.qualified_model_label(&normalized_model)
+            ),
+        });
+    }
+
+    fn render_model_catalog(&self) -> String {
+        let mut lines = vec![
+            format!("Active: {}", runtime_lane_summary(&self.runtime_lanes)),
+            format!(
+                "Planner: {}",
+                self.runtime_lanes.planner_provider().qualified_model_label(
+                    self.runtime_lanes
+                        .planner_model_id()
+                        .unwrap_or(self.runtime_lanes.synthesizer_model_id()),
+                )
+            ),
+            format!(
+                "Synthesizer: {}",
+                self.runtime_lanes
+                    .synthesizer_provider()
+                    .qualified_model_label(self.runtime_lanes.synthesizer_model_id())
+            ),
+            String::new(),
+            "Providers:".to_string(),
+        ];
+        for provider in ModelProvider::all() {
+            let availability = self.provider_availability_for(*provider);
+            let models = if provider.supports_freeform_model_id() {
+                "<freeform model id>".to_string()
+            } else {
+                provider.known_model_ids().join(", ")
+            };
+            let status = if availability.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            lines.push(format!(
+                "- [{status}] {}: {} ({})",
+                provider.name(),
+                models,
+                availability.detail
+            ));
+        }
+        lines.push(String::new());
+        lines.push(
+            "Use `/model synthesizer <provider> <model>` or `/model planner <provider> <model>`."
+                .to_string(),
+        );
+        lines.join("\n")
+    }
+
+    fn provider_availability_for(&self, provider: ModelProvider) -> ProviderAvailability {
+        availability_for_provider(&self.provider_availability, provider)
     }
 
     fn push_event(&mut self, header: impl Into<String>, content: impl Into<String>) {
@@ -1194,6 +1641,10 @@ impl InteractiveApp {
             frame.render_widget(self.render_activity_indicator(), layout[1]);
         }
         frame.render_widget(self.render_input(), layout[2]);
+        if let Some(popup_area) = self.command_popup_area(area, layout[2]) {
+            frame.render_widget(Clear, popup_area);
+            frame.render_widget(self.render_command_popup(), popup_area);
+        }
         frame.set_cursor_position(self.cursor_position(layout[2]));
         frame.render_widget(self.render_status_bar(), layout[3]);
     }
@@ -1274,14 +1725,7 @@ impl InteractiveApp {
     }
 
     fn render_input(&self) -> Paragraph<'static> {
-        let is_masked = self.is_masked_input();
-        let (text, style) = self.input_display_line(is_masked);
-
-        let lines: Vec<Line<'static>> = text
-            .split('\n')
-            .map(|line| Line::from(Span::styled(line.to_string(), style)))
-            .collect();
-
+        let lines = self.input_render_lines();
         Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
@@ -1291,6 +1735,93 @@ impl InteractiveApp {
                     .style(Style::default().bg(self.palette.input_bg)),
             )
             .wrap(Wrap { trim: false })
+    }
+
+    fn input_render_lines(&self) -> Vec<Line<'static>> {
+        let is_masked = self.is_masked_input();
+        if !is_masked
+            && !self.input.is_empty()
+            && !self.input.contains('\n')
+            && let Some(suggestion) = self.selected_slash_suggestion()
+            && suggestion.insert_text.starts_with(&self.input)
+            && suggestion.insert_text.len() > self.input.len()
+        {
+            let suffix = &suggestion.insert_text[self.input.len()..];
+            return vec![Line::from(vec![
+                Span::styled(self.input.clone(), self.palette.input_text),
+                Span::styled(suffix.to_string(), self.palette.input_hint),
+            ])];
+        }
+
+        let (text, style) = self.input_display_line(is_masked);
+        text.split('\n')
+            .map(|line| Line::from(Span::styled(line.to_string(), style)))
+            .collect()
+    }
+
+    fn render_command_popup(&self) -> Paragraph<'static> {
+        let suggestions = self.slash_command_suggestions();
+        let selected = self
+            .slash_suggestion_index
+            .min(suggestions.len().saturating_sub(1));
+        let lines = suggestions
+            .iter()
+            .enumerate()
+            .map(|(index, command)| {
+                let is_selected = index == selected;
+                let usage_style = if is_selected {
+                    self.palette.header_title.add_modifier(Modifier::BOLD)
+                } else {
+                    self.palette.input_text
+                };
+                let desc_style = if is_selected {
+                    self.palette.header_meta
+                } else {
+                    self.palette.input_hint
+                };
+                Line::from(vec![
+                    Span::styled(command.usage.to_string(), usage_style),
+                    Span::raw("  "),
+                    Span::styled(command.description.to_string(), desc_style),
+                ])
+            })
+            .collect::<Vec<_>>();
+
+        Paragraph::new(Text::from(lines))
+            .block(
+                Block::default()
+                    .title(" Commands ")
+                    .borders(Borders::ALL)
+                    .border_style(self.palette.border)
+                    .style(Style::default().bg(self.palette.input_bg)),
+            )
+            .wrap(Wrap { trim: false })
+    }
+
+    fn command_popup_area(&self, frame_area: Rect, input_area: Rect) -> Option<Rect> {
+        let suggestions = self.slash_command_suggestions();
+        if suggestions.is_empty() {
+            return None;
+        }
+        let content_width = suggestions
+            .iter()
+            .map(|command| command.usage.len() + command.description.len() + 2)
+            .max()
+            .unwrap_or(24)
+            .min(usize::from(frame_area.width.saturating_sub(4)));
+        let width = ((content_width as u16).max(28) + 2).min(frame_area.width.saturating_sub(2));
+        let height = (suggestions.len() as u16 + 2).min(frame_area.height.saturating_sub(1));
+        let x = input_area
+            .x
+            .saturating_add(2)
+            .min(frame_area.right().saturating_sub(width));
+        let space_above = input_area.y.saturating_sub(frame_area.y);
+        let y = if space_above >= height {
+            input_area.y - height
+        } else {
+            frame_area.y
+        };
+        Some(Rect::new(x, y, width, height))
     }
 
     fn is_masked_input(&self) -> bool {
@@ -2196,15 +2727,17 @@ mod tests {
         TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind,
         collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
         inline_multiline_text, inline_viewport_height_for_terminal, render_row_lines,
-        select_interactive_frontend,
+        runtime_lane_summary, select_interactive_frontend,
     };
-    use crate::application::ConversationSession;
+    use crate::application::{ConversationSession, RuntimeLaneConfig};
     use crate::domain::model::{
         ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
         ConversationTranscriptUpdate, TaskTraceId, TraceRecordId, TurnEvent, TurnTraceId,
     };
+    use crate::infrastructure::credentials::ProviderAvailability;
+    use crate::infrastructure::providers::ModelProvider;
     use crate::infrastructure::step_timing::Pace;
-    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, prelude::Rect};
     use std::time::{Duration, Instant};
 
     fn session() -> ConversationSession {
@@ -2244,6 +2777,25 @@ mod tests {
             .map(|x| buffer[(x, y)].symbol())
             .collect::<Vec<_>>()
             .join("")
+    }
+
+    fn buffer_text(buffer: &Buffer) -> String {
+        (0..buffer.area.height)
+            .map(|y| buffer_line(buffer, y))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn provider_availability(
+        provider: ModelProvider,
+        enabled: bool,
+        detail: &str,
+    ) -> ProviderAvailability {
+        ProviderAvailability {
+            provider,
+            enabled,
+            detail: detail.to_string(),
+        }
     }
 
     #[test]
@@ -2585,6 +3137,28 @@ mod tests {
     }
 
     #[test]
+    fn login_command_accepts_explicit_provider_when_current_lane_is_local() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login openai".to_string();
+
+        app.submit_prompt();
+
+        assert!(matches!(
+            app.input_mode,
+            InputMode::MaskedKey { ref provider } if provider == "openai"
+        ));
+    }
+
+    #[test]
     fn login_submission_queues_pending_key_and_masks_display_text() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -2636,6 +3210,212 @@ mod tests {
                     && row.header == "• Login unavailable"
                     && row.content.contains("does not use API-key login"))
         );
+    }
+
+    #[test]
+    fn model_command_lists_enabled_and_disabled_provider_catalog_entries() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Openai)
+            .with_planner_provider(Some(ModelProvider::Anthropic))
+            .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
+        app.set_runtime_catalog(
+            runtime_lanes.clone(),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Openai, true, "using local credential store"),
+                provider_availability(ModelProvider::Anthropic, false, "login required"),
+                provider_availability(ModelProvider::Google, false, "login required"),
+                provider_availability(ModelProvider::Moonshot, false, "login required"),
+                provider_availability(ModelProvider::Ollama, true, "auth not required"),
+            ],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+
+        let row = app.rows.last().expect("catalog row");
+        assert_eq!(row.header, "• Model catalog");
+        assert!(row.content.contains(&runtime_lane_summary(&runtime_lanes)));
+        assert!(row.content.contains("[enabled] openai"));
+        assert!(row.content.contains("[disabled] anthropic"));
+    }
+
+    #[test]
+    fn model_command_queues_runtime_update_for_enabled_provider() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Openai, true, "using local credential store"),
+            ],
+        );
+        app.input = "/model synthesizer openai gpt-4o".to_string();
+
+        app.submit_prompt();
+
+        let update = app
+            .take_pending_runtime_update()
+            .expect("pending runtime update");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_provider(),
+            ModelProvider::Openai
+        );
+        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
+    }
+
+    #[test]
+    fn model_command_rejects_disabled_provider_selection() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Anthropic, false, "login required"),
+            ],
+        );
+        app.input = "/model planner anthropic claude-sonnet-4-20250514".to_string();
+
+        app.submit_prompt();
+
+        assert!(app.take_pending_runtime_update().is_none());
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.kind == TranscriptRowKind::Error
+                    && row.header == "• Model unavailable"
+                    && row.content.contains("disabled"))
+        );
+    }
+
+    #[test]
+    fn slash_command_popup_renders_matching_commands() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/mod".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let buffer = render_buffer(&app, 100, 18);
+        let rendered = buffer_text(&buffer);
+        let suggestions = app
+            .slash_command_suggestions()
+            .into_iter()
+            .map(|command| command.usage)
+            .collect::<Vec<_>>();
+
+        assert!(rendered.contains("Commands"));
+        assert!(rendered.contains("/model"));
+        assert!(rendered.contains("/model planner"));
+        assert_eq!(
+            suggestions,
+            vec![
+                "/model",
+                "/model planner <provider> <model>",
+                "/model synthesizer <provider> <model>",
+            ]
+        );
+    }
+
+    #[test]
+    fn slash_command_popup_area_stays_within_offset_frame() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let frame_area = Rect::new(0, 41, 239, 9);
+        let input_area = Rect::new(0, 48, 239, 2);
+        let popup = app
+            .command_popup_area(frame_area, input_area)
+            .expect("popup area");
+
+        assert!(popup.y >= frame_area.y);
+        assert!(popup.bottom() <= frame_area.bottom());
+    }
+
+    #[test]
+    fn slash_command_completion_accepts_active_suggestion() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/mod".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/model");
+        assert_eq!(app.cursor_pos, "/model".chars().count());
+    }
+
+    #[test]
+    fn slash_command_completion_can_target_subcommands() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model p".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert!(app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/model planner ");
     }
 
     #[test]

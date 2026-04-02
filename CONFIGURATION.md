@@ -140,7 +140,19 @@ Today the lane wiring is exposed through CLI/runtime configuration:
 paddles --model qwen-1.5b --planner-model qwen3.5-2b --gatherer-provider sift-direct
 ```
 
-This keeps a light synthesizer while assigning a heavier planner to the recursive loop.
+Provider selection is now lane-specific as well. The synthesizer lane uses
+`--provider <name>`, while the planner can either inherit that provider or set
+its own with `--planner-provider <name>`:
+
+```bash
+paddles \
+  --provider openai --model gpt-4o \
+  --planner-provider anthropic --planner-model claude-sonnet-4-20250514 \
+  --gatherer-provider sift-direct
+```
+
+That keeps providers authenticated side-by-side and lets the planner/synthesizer
+mix providers without restarting the session.
 
 If you want a distinct local gatherer model instead of the direct retrieval backend:
 
@@ -207,9 +219,11 @@ openai = "keys/openai.key"
 ```
 
 Key files are written with restricted permissions on Unix systems. In the TUI,
-use `/login` to enter a remote-provider API key through masked input; `paddles`
-updates the referenced key file and rebuilds the active runtime lanes so
-subsequent turns use the new credential immediately. The local `sift` provider
+use `/login <provider>` to enter a provider API key through masked input;
+`paddles` updates the referenced key file and rebuilds the active runtime lanes
+so subsequent turns use the new credential immediately. `/model` shows the full
+known model catalog; providers with resolved credentials are marked enabled and
+providers without credentials are marked disabled. The local `sift` provider
 does not use API-key login.
 
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using

@@ -1,6 +1,7 @@
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
+use crate::infrastructure::providers::ModelProvider;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
 use crate::domain::model::{
@@ -35,10 +36,11 @@ use tokio::sync::RwLock;
 
 /// Factory that constructs a synthesizer engine for a given model ID.
 pub type SynthesizerFactory =
-    dyn Fn(&Path, &str) -> Result<Arc<dyn SynthesizerEngine>> + Send + Sync;
+    dyn Fn(&Path, &PreparedModelLane) -> Result<Arc<dyn SynthesizerEngine>> + Send + Sync;
 
 /// Factory that constructs a recursive planner for a given model ID.
-pub type PlannerFactory = dyn Fn(&Path, &str) -> Result<Arc<dyn RecursivePlanner>> + Send + Sync;
+pub type PlannerFactory =
+    dyn Fn(&Path, &PreparedModelLane) -> Result<Arc<dyn RecursivePlanner>> + Send + Sync;
 
 /// Factory that constructs an optional gatherer from runtime configuration.
 ///
@@ -89,28 +91,40 @@ pub enum GathererProvider {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeLaneConfig {
+    synthesizer_provider: ModelProvider,
     planner_model_id: Option<String>,
+    planner_provider: Option<ModelProvider>,
     synthesizer_model_id: String,
     gatherer_model_id: Option<String>,
     gatherer_provider: GathererProvider,
     context1_harness_ready: bool,
-    requires_local_models: bool,
 }
 
 impl RuntimeLaneConfig {
     pub fn new(synthesizer_model_id: impl Into<String>, gatherer_model_id: Option<String>) -> Self {
         Self {
+            synthesizer_provider: ModelProvider::Sift,
             planner_model_id: None,
+            planner_provider: None,
             synthesizer_model_id: synthesizer_model_id.into(),
             gatherer_model_id,
             gatherer_provider: GathererProvider::SiftDirect,
             context1_harness_ready: false,
-            requires_local_models: true,
         }
     }
 
     pub fn with_planner_model_id(mut self, planner_model_id: Option<String>) -> Self {
         self.planner_model_id = planner_model_id;
+        self
+    }
+
+    pub fn with_synthesizer_provider(mut self, provider: ModelProvider) -> Self {
+        self.synthesizer_provider = provider;
+        self
+    }
+
+    pub fn with_planner_provider(mut self, provider: Option<ModelProvider>) -> Self {
+        self.planner_provider = provider;
         self
     }
 
@@ -124,17 +138,24 @@ impl RuntimeLaneConfig {
         self
     }
 
-    pub fn with_requires_local_models(mut self, requires: bool) -> Self {
-        self.requires_local_models = requires;
-        self
-    }
-
     pub fn synthesizer_model_id(&self) -> &str {
         &self.synthesizer_model_id
     }
 
+    pub fn synthesizer_provider(&self) -> ModelProvider {
+        self.synthesizer_provider
+    }
+
     pub fn planner_model_id(&self) -> Option<&str> {
         self.planner_model_id.as_deref()
+    }
+
+    pub fn planner_provider(&self) -> ModelProvider {
+        self.planner_provider.unwrap_or(self.synthesizer_provider)
+    }
+
+    pub fn planner_provider_override(&self) -> Option<ModelProvider> {
+        self.planner_provider
     }
 
     pub fn gatherer_model_id(&self) -> Option<&str> {
@@ -157,8 +178,15 @@ impl RuntimeLaneConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedModelLane {
     pub role: RuntimeLaneRole,
+    pub provider: ModelProvider,
     pub model_id: String,
     pub paths: Option<ModelPaths>,
+}
+
+impl PreparedModelLane {
+    pub fn qualified_model_label(&self) -> String {
+        self.provider.qualified_model_label(&self.model_id)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1076,11 +1104,13 @@ impl MechSuitService {
 
     fn build_lane(
         role: RuntimeLaneRole,
+        provider: ModelProvider,
         model_id: impl Into<String>,
         paths: Option<ModelPaths>,
     ) -> PreparedModelLane {
         PreparedModelLane {
             role,
+            provider,
             model_id: model_id.into(),
             paths,
         }
@@ -1091,7 +1121,7 @@ impl MechSuitService {
         &self,
         config: &RuntimeLaneConfig,
     ) -> Result<PreparedRuntimeLanes> {
-        let synthesizer_paths = if config.requires_local_models {
+        let synthesizer_paths = if config.synthesizer_provider() == ModelProvider::Sift {
             Some(
                 self.registry
                     .get_model_paths(config.synthesizer_model_id())
@@ -1104,16 +1134,23 @@ impl MechSuitService {
             .planner_model_id()
             .unwrap_or(config.synthesizer_model_id())
             .to_string();
-        let planner_paths = if !config.requires_local_models {
+        let planner_provider = config.planner_provider();
+        let planner_paths = if planner_provider != ModelProvider::Sift {
             None
         } else if planner_model_id == config.synthesizer_model_id() {
             synthesizer_paths.clone()
         } else {
             Some(self.registry.get_model_paths(&planner_model_id).await?)
         };
-        let planner = Self::build_lane(RuntimeLaneRole::Planner, &planner_model_id, planner_paths);
+        let planner = Self::build_lane(
+            RuntimeLaneRole::Planner,
+            planner_provider,
+            &planner_model_id,
+            planner_paths,
+        );
         let synthesizer = Self::build_lane(
             RuntimeLaneRole::Synthesizer,
+            config.synthesizer_provider(),
             config.synthesizer_model_id(),
             synthesizer_paths,
         );
@@ -1142,11 +1179,9 @@ impl MechSuitService {
         };
 
         let verbose = self.verbose.load(Ordering::Relaxed);
-        let engine =
-            (self.synthesizer_factory)(&self.workspace_root, &prepared.synthesizer.model_id)?;
+        let engine = (self.synthesizer_factory)(&self.workspace_root, &prepared.synthesizer)?;
         engine.set_verbose(verbose);
-        let planner_engine =
-            (self.planner_factory)(&self.workspace_root, &prepared.planner.model_id)?;
+        let planner_engine = (self.planner_factory)(&self.workspace_root, &prepared.planner)?;
 
         *self.runtime.write().await = Some(ActiveRuntimeState {
             prepared: prepared.clone(),
@@ -3310,6 +3345,7 @@ mod tests {
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::providers::ModelProvider;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use sift::Conversation;
@@ -3353,6 +3389,31 @@ mod tests {
     impl ModelRegistry for StaticRegistry {
         async fn get_model_paths(&self, _model_id: &str) -> Result<ModelPaths> {
             Err(anyhow!("test registry is not used in this suite"))
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingRegistry {
+        requested_model_ids: Mutex<Vec<String>>,
+    }
+
+    impl RecordingRegistry {
+        fn requested_model_ids(&self) -> Vec<String> {
+            self.requested_model_ids
+                .lock()
+                .expect("requested model ids lock")
+                .clone()
+        }
+    }
+
+    #[async_trait]
+    impl ModelRegistry for RecordingRegistry {
+        async fn get_model_paths(&self, model_id: &str) -> Result<ModelPaths> {
+            self.requested_model_ids
+                .lock()
+                .expect("requested model ids lock")
+                .push(model_id.to_string());
+            Ok(sample_model_paths(model_id))
         }
     }
 
@@ -3608,15 +3669,88 @@ mod tests {
         assert!(!config.context1_harness_ready());
     }
 
+    #[tokio::test]
+    async fn prepare_runtime_lanes_mix_provider_selection_and_only_resolve_sift_paths() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let captured_planner_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let planner_capture = Arc::clone(&captured_planner_lane);
+        let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let service = MechSuitService::new(
+            workspace.path(),
+            registry.clone(),
+            operator_memory,
+            Box::new(move |_, lane| {
+                *synthesizer_capture
+                    .lock()
+                    .expect("captured synthesizer lane lock") = Some(lane.clone());
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(move |_, lane| {
+                *planner_capture.lock().expect("captured planner lane lock") = Some(lane.clone());
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::clone(&recorded_requests),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(|_, _, _, _| Ok(None)),
+        );
+        let config = RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Openai)
+            .with_planner_provider(Some(ModelProvider::Sift))
+            .with_planner_model_id(Some("qwen-1.5b".to_string()));
+
+        let prepared = service
+            .prepare_runtime_lanes(&config)
+            .await
+            .expect("prepare runtime lanes");
+
+        assert_eq!(prepared.synthesizer.provider, ModelProvider::Openai);
+        assert_eq!(prepared.synthesizer.paths, None);
+        assert_eq!(prepared.planner.provider, ModelProvider::Sift);
+        assert_eq!(
+            prepared.planner.paths,
+            Some(sample_model_paths("qwen-1.5b"))
+        );
+        assert_eq!(
+            registry.requested_model_ids(),
+            vec!["qwen-1.5b".to_string()]
+        );
+        assert_eq!(
+            captured_planner_lane
+                .lock()
+                .expect("captured planner lane lock")
+                .clone()
+                .expect("planner lane")
+                .provider,
+            ModelProvider::Sift
+        );
+        assert_eq!(
+            captured_synthesizer_lane
+                .lock()
+                .expect("captured synthesizer lane lock")
+                .clone()
+                .expect("synthesizer lane")
+                .provider,
+            ModelProvider::Openai
+        );
+    }
+
     #[test]
     fn prepared_runtime_lanes_keep_synthesizer_as_default_response_lane() {
         let planner = MechSuitService::build_lane(
             RuntimeLaneRole::Planner,
+            ModelProvider::Sift,
             "qwen-1.5b",
             Some(sample_model_paths("planner")),
         );
         let synthesizer = MechSuitService::build_lane(
             RuntimeLaneRole::Synthesizer,
+            ModelProvider::Sift,
             "qwen-1.5b",
             Some(sample_model_paths("synth")),
         );
@@ -3671,11 +3805,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -3696,11 +3832,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -3729,11 +3867,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -3768,11 +3908,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -3805,11 +3947,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -3894,11 +4038,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -3984,11 +4130,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -4064,11 +4212,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -4131,11 +4281,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -4366,11 +4518,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -4484,11 +4638,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -4554,11 +4710,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
@@ -4614,11 +4772,13 @@ mod tests {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
             synthesizer: PreparedModelLane {
                 role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },

@@ -1126,32 +1126,34 @@ mod tests {
 
         let synth_base_url = base_url.clone();
         let synth_api_key = api_key.clone();
-        let synthesizer_factory: Box<crate::application::SynthesizerFactory> =
-            Box::new(move |workspace: &Path, model_id: &str| {
+        let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
+            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
-                    model_id.to_string(),
+                    lane.model_id.clone(),
                     synth_api_key.clone(),
                     synth_base_url.clone(),
                     format,
                     render_capability_for(format),
                 )) as Arc<dyn SynthesizerEngine>)
-            });
+            },
+        );
 
         let planner_base_url = base_url;
         let planner_api_key = api_key;
-        let planner_factory: Box<crate::application::PlannerFactory> =
-            Box::new(move |workspace: &Path, model_id: &str| {
+        let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
+            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
-                    model_id.to_string(),
+                    lane.model_id.clone(),
                     planner_api_key.clone(),
                     planner_base_url.clone(),
                     format,
                     render_capability_for(format),
                 ));
                 Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
-            });
+            },
+        );
 
         let gatherer_factory: Box<crate::application::GathererFactory> =
             Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
@@ -1196,8 +1198,8 @@ mod tests {
             "test-key".to_string(),
             format,
         );
-        let runtime_lanes =
-            RuntimeLaneConfig::new(model_id.to_string(), None).with_requires_local_models(false);
+        let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai);
         service
             .prepare_runtime_lanes(&runtime_lanes)
             .await
@@ -1494,8 +1496,8 @@ mod tests {
             "test-key".to_string(),
             ApiFormat::OpenAi,
         );
-        let runtime_lanes =
-            RuntimeLaneConfig::new("kimi-k2.5".to_string(), None).with_requires_local_models(false);
+        let runtime_lanes = RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai);
         service
             .prepare_runtime_lanes(&runtime_lanes)
             .await

@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use crate::infrastructure::providers::{ModelProvider, ProviderAuthRequirement};
+
 const CREDENTIALS_FILE: &str = "credentials.toml";
 const KEYS_DIR: &str = "keys";
 
@@ -50,6 +52,13 @@ impl ApiKeySource {
 pub struct ResolvedApiKey {
     pub value: String,
     pub source: ApiKeySource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderAvailability {
+    pub provider: ModelProvider,
+    pub enabled: bool,
+    pub detail: String,
 }
 
 impl Default for CredentialStore {
@@ -141,6 +150,70 @@ impl CredentialStore {
         self.resolve_api_key_from(env_name, env_value.as_deref())
     }
 
+    pub fn resolve_provider_api_key(&self, provider: ModelProvider) -> ResolvedApiKey {
+        match provider.credential_env_var() {
+            Some(env_name) => self.resolve_api_key(env_name),
+            None => ResolvedApiKey {
+                value: String::new(),
+                source: ApiKeySource::Missing {
+                    provider: provider.name().to_string(),
+                },
+            },
+        }
+    }
+
+    pub fn provider_availability(&self, provider: ModelProvider) -> ProviderAvailability {
+        match provider.auth_requirement() {
+            ProviderAuthRequirement::None => ProviderAvailability {
+                provider,
+                enabled: true,
+                detail: "auth not required".to_string(),
+            },
+            ProviderAuthRequirement::OptionalApiKey => {
+                let resolved = self.resolve_provider_api_key(provider);
+                let detail = match resolved.source {
+                    ApiKeySource::Environment { env_var } => {
+                        format!("optional key from environment `{env_var}`")
+                    }
+                    ApiKeySource::StoredFile { .. } => {
+                        "optional key from local credential store".to_string()
+                    }
+                    ApiKeySource::Missing { .. } => "auth not required".to_string(),
+                };
+                ProviderAvailability {
+                    provider,
+                    enabled: true,
+                    detail,
+                }
+            }
+            ProviderAuthRequirement::RequiredApiKey => {
+                let resolved = self.resolve_provider_api_key(provider);
+                let (enabled, detail) = match resolved.source {
+                    ApiKeySource::Environment { env_var } => {
+                        (true, format!("using `{env_var}` from environment"))
+                    }
+                    ApiKeySource::StoredFile { .. } => {
+                        (true, "using local credential store".to_string())
+                    }
+                    ApiKeySource::Missing { .. } => (false, "login required".to_string()),
+                };
+                ProviderAvailability {
+                    provider,
+                    enabled,
+                    detail,
+                }
+            }
+        }
+    }
+
+    pub fn all_provider_availability(&self) -> Vec<ProviderAvailability> {
+        ModelProvider::all()
+            .iter()
+            .copied()
+            .map(|provider| self.provider_availability(provider))
+            .collect()
+    }
+
     fn resolve_api_key_from(&self, env_name: &str, env_value: Option<&str>) -> ResolvedApiKey {
         if let Some(value) = env_value {
             return ResolvedApiKey {
@@ -173,6 +246,7 @@ impl CredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infrastructure::providers::ModelProvider;
 
     #[test]
     fn save_and_load_round_trips() {
@@ -327,5 +401,41 @@ mod tests {
                 provider: "moonshot".to_string()
             }
         );
+    }
+
+    #[test]
+    fn required_remote_provider_is_disabled_when_missing_credentials() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CredentialStore::with_base_dir(dir.path());
+
+        let availability = store.provider_availability(ModelProvider::Openai);
+
+        assert_eq!(availability.provider, ModelProvider::Openai);
+        assert!(!availability.enabled);
+        assert_eq!(availability.detail, "login required");
+    }
+
+    #[test]
+    fn local_provider_is_enabled_without_credentials() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CredentialStore::with_base_dir(dir.path());
+
+        let availability = store.provider_availability(ModelProvider::Sift);
+
+        assert_eq!(availability.provider, ModelProvider::Sift);
+        assert!(availability.enabled);
+        assert_eq!(availability.detail, "auth not required");
+    }
+
+    #[test]
+    fn optional_local_provider_stays_enabled_without_credentials() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = CredentialStore::with_base_dir(dir.path());
+
+        let availability = store.provider_availability(ModelProvider::Ollama);
+
+        assert_eq!(availability.provider, ModelProvider::Ollama);
+        assert!(availability.enabled);
+        assert_eq!(availability.detail, "auth not required");
     }
 }

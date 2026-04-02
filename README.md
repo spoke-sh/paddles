@@ -198,8 +198,9 @@ A few areas are still maturing:
 
 ## Current Runtime Lanes
 
-- The synthesizer lane defaults to `qwen-1.5b`.
-- The planner lane defaults to the synthesizer model unless `--planner-model <id>` selects a different planner-capable model.
+- The synthesizer lane defaults to `qwen-1.5b` on the local `sift` provider.
+- The planner lane defaults to the synthesizer provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
+- Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect or switch planner/synthesizer lanes.
 - `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in planner or synthesizer variants.
 - `sift-direct` is the default local gatherer/search backend used by planner `search` and `refine` actions.
 - `paddles` owns recursive planning. `sift` executes direct retrieval only.

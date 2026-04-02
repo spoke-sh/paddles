@@ -73,6 +73,10 @@ const SUPPORTED_QWEN_MODELS: &[&str] = &[
     "Qwen/Qwen3.5-2B",
 ];
 
+pub fn supported_model_ids() -> &'static [&'static str] {
+    SUPPORTED_QWEN_MODELS
+}
+
 pub fn qwen_spec_for(model_id: &str) -> Result<QwenModelSpec> {
     let spec = match model_id {
         "qwen-1.5b" | "Qwen/Qwen2.5-1.5B-Instruct" => QwenModelSpec {
