@@ -21,7 +21,8 @@ pub use interpretation::{
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
 };
 pub use manifold::{
-    ConversationManifoldProjection, ManifoldFrame, ManifoldSignalState, ManifoldTurnProjection,
+    ConversationManifoldProjection, ManifoldConduitState, ManifoldFrame, ManifoldPrimitiveBasis,
+    ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
 };
 pub use paddles_conversation::{
     ArtifactEnvelope, ArtifactKind, ContextLocator, ContextTier, ConversationThread,

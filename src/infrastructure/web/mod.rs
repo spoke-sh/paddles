@@ -1042,6 +1042,16 @@ mod tests {
         assert!(html.contains(".manifold-panel-list {\n  margin-top: 14px;\n  display: grid;\n  gap: 10px;\n  min-height: 0;\n  overflow: auto;"));
     }
 
+    #[test]
+    fn manifold_route_html_renders_topology_primitives_and_conduits() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("frame.primitives"));
+        assert!(html.contains("frame.conduits"));
+        assert!(html.contains("manifold-node"));
+        assert!(html.contains("manifold-conduit"));
+    }
+
     #[tokio::test]
     async fn web_router_serves_dedicated_manifold_and_transit_routes() {
         let workspace = tempfile::tempdir().expect("workspace");

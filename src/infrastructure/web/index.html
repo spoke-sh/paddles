@@ -693,6 +693,78 @@ body {
   line-height: 1.6;
   color: #5c6d7a;
 }
+.manifold-machine {
+  display: grid;
+  gap: 18px;
+  min-height: 100%;
+  align-content: start;
+}
+.manifold-machine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.manifold-node {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(88, 105, 119, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.68), rgba(244,248,250,0.18)),
+    linear-gradient(155deg, rgba(227, 236, 242, 0.92), rgba(206, 217, 226, 0.84));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(92, 108, 122, 0.12);
+}
+.manifold-node__eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #60727f;
+}
+.manifold-node__title {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #21303a;
+}
+.manifold-node__meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #5c6e7b;
+}
+.manifold-node__basis {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #43535f;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  word-break: break-word;
+}
+.manifold-conduit-strip {
+  display: grid;
+  gap: 10px;
+}
+.manifold-conduit {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px dashed rgba(82, 99, 113, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.54), rgba(241,246,249,0.18)),
+    rgba(223, 232, 238, 0.84);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4f616e;
+}
+.manifold-conduit strong {
+  color: #22313b;
+}
 .manifold-side {
   display: flex;
   flex-direction: column;
@@ -1748,6 +1820,23 @@ function manifoldAnchorLabel(anchor) {
   return (anchor.label && String(anchor.label).trim()) || titleCase(anchor.kind || 'anchor');
 }
 
+function manifoldPrimitiveKindLabel(kind) {
+  return titleCase(kind || 'primitive');
+}
+
+function manifoldPrimitiveBasisLabel(basis) {
+  if (!basis || !basis.kind) {
+    return 'basis: unknown';
+  }
+  if (basis.kind === 'signal_family') {
+    return 'basis: ' + titleCase(basis.signal_kind || 'signal');
+  }
+  if (basis.kind === 'lineage_anchor' && basis.anchor) {
+    return 'basis: ' + manifoldAnchorLabel(basis.anchor);
+  }
+  return 'basis: ' + titleCase(basis.kind);
+}
+
 function renderManifoldShell() {
   const stageMeta = document.getElementById('manifold-stage-meta');
   const canvas = document.getElementById('manifold-canvas');
@@ -1757,6 +1846,8 @@ function renderManifoldShell() {
   const turn = currentManifoldTurn();
   const frame = turn && turn.frames.length ? turn.frames[turn.frames.length - 1] : null;
   const activeSignals = frame && Array.isArray(frame.active_signals) ? frame.active_signals : [];
+  const primitives = frame && Array.isArray(frame.primitives) ? frame.primitives : [];
+  const conduits = frame && Array.isArray(frame.conduits) ? frame.conduits : [];
   const totalFrames = turns.reduce((sum, item) => sum + (Array.isArray(item.frames) ? item.frames.length : 0), 0);
 
   if (!turns.length) {
@@ -1781,12 +1872,39 @@ function renderManifoldShell() {
     totalFrames + ' frames';
 
   canvas.innerHTML =
-    '<div class="manifold-empty-state">' +
-      '<strong>Dedicated manifold route shell ready.</strong>' +
-      '<p>The manifold stage is reserved for the expressive chamber view. This shell already keeps the canvas primary while the side panes carry temporal and source context for the current replay selection.</p>' +
-      '<p><strong>Current turn:</strong> ' + escapeHtml(turn ? turn.turn_id : 'none') + '<br>' +
-      '<strong>Latest frame:</strong> ' + escapeHtml(frame ? String(frame.sequence) : 'none') + '<br>' +
-      '<strong>Active signals:</strong> ' + activeSignals.length + '</p>' +
+    '<div class="manifold-machine">' +
+      '<div class="manifold-empty-state">' +
+        '<strong>Topology projection is now replay-backed.</strong>' +
+        '<p>The manifold stage is drawing stable primitives before any time-scrub or live animation is applied. Signal families become chambers, reservoirs, or valves; lineage anchors receive their own basins; conduits expose the evidence-backed feed relationships between them.</p>' +
+        '<p><strong>Current turn:</strong> ' + escapeHtml(turn ? turn.turn_id : 'none') + '<br>' +
+        '<strong>Latest frame:</strong> ' + escapeHtml(frame ? String(frame.sequence) : 'none') + '<br>' +
+        '<strong>Primitives:</strong> ' + primitives.length + ' · <strong>Conduits:</strong> ' + conduits.length + '</p>' +
+      '</div>' +
+      '<div class="manifold-machine-grid">' +
+        (primitives.length
+          ? primitives.map((primitive) => (
+              '<div class="manifold-node">' +
+                '<div class="manifold-node__eyebrow">' + escapeHtml(manifoldPrimitiveKindLabel(primitive.kind)) + '</div>' +
+                '<div class="manifold-node__title">' + escapeHtml(primitive.label || primitive.primitive_id) + '</div>' +
+                '<div class="manifold-node__meta">' +
+                  'magnitude ' + escapeHtml(String(primitive.magnitude_percent || 0)) + '% · ' +
+                  escapeHtml(primitive.level || 'unknown') +
+                '</div>' +
+                '<div class="manifold-node__basis">' + escapeHtml(manifoldPrimitiveBasisLabel(primitive.basis)) + '</div>' +
+              '</div>'
+            )).join('')
+          : '<div class="manifold-empty-state"><strong>No primitives yet.</strong><p>This frame has signal state but no projected topology.</p></div>') +
+      '</div>' +
+      '<div class="manifold-conduit-strip">' +
+        (conduits.length
+          ? conduits.map((conduit) => (
+              '<div class="manifold-conduit">' +
+                '<strong>' + escapeHtml(conduit.label || conduit.conduit_id) + '</strong>' +
+                '<span>' + escapeHtml(conduit.from_primitive_id) + ' → ' + escapeHtml(conduit.to_primitive_id) + '</span>' +
+              '</div>'
+            )).join('')
+          : '<div class="manifold-panel-copy">No conduits were active in the selected frame.</div>') +
+      '</div>' +
     '</div>';
 
   timelinePanel.innerHTML =
@@ -1810,14 +1928,18 @@ function renderManifoldShell() {
     '<div class="manifold-panel-title">Sources</div>' +
     '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong></div>' +
     '<div class="manifold-panel-list">' +
-      (activeSignals.length
-        ? activeSignals.map((signal) => (
+      (primitives.length
+        ? primitives.map((primitive) => (
             '<div class="manifold-panel-row">' +
-              '<strong>' + escapeHtml(manifoldSignalLabel(signal)) + '</strong>' +
-              '<span>' + escapeHtml(String(signal.magnitude_percent)) + '% · ' + escapeHtml(signal.level || 'unknown') + '</span>' +
+              '<strong>' + escapeHtml(primitive.label || primitive.primitive_id) + '</strong>' +
+              '<span>' +
+                escapeHtml(manifoldPrimitiveKindLabel(primitive.kind)) +
+                ' · ' +
+                escapeHtml(manifoldPrimitiveBasisLabel(primitive.basis)) +
+              '</span>' +
             '</div>'
           )).join('')
-        : '<div class="manifold-panel-copy">No active steering signals were present in the current frame.</div>') +
+        : '<div class="manifold-panel-copy">No active steering primitives were present in the current frame.</div>') +
     '</div>';
 }
 
