@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:32:49.417368885-07:00
+mode: manual
+---
+Reviewed the inspector navigation in src/infrastructure/web/index.html. The web UI now presents a unified lineage-first surface with conversation summary, turn selection, model-call focus, planner-step focus, and ordered trace-record selection in one inspector.

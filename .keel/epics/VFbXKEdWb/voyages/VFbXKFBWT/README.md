@@ -27,7 +27,7 @@ started_at: 2026-04-01T21:34:30
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/6 stories complete
+**Progress:** 4/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -35,6 +35,6 @@ started_at: 2026-04-01T21:34:30
 | [Record Context Lineage And Force Snapshots In Transit](../../../../stories/VFbXMBvl9/README.md) | feat | done |
 | [Expose Web Inspector Replay And Live Projection APIs](../../../../stories/VFbXMCHl6/README.md) | feat | done |
 | [Add Force Overview And Shadow Comparison To The Web Inspector](../../../../stories/VFbXMCVl7/README.md) | feat | backlog |
-| [Render Context-Lineage-First Forensic Inspector In The Web UI](../../../../stories/VFbXMCkli/README.md) | feat | backlog |
+| [Render Context-Lineage-First Forensic Inspector In The Web UI](../../../../stories/VFbXMCkli/README.md) | feat | done |
 | [Stream Provisional Active-Turn Inspector Artifacts](../../../../stories/VFbXMCxlj/README.md) | feat | backlog |
 <!-- END GENERATED -->

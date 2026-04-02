@@ -22,8 +22,8 @@ mission: VFbXKErWU
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/6 stories done
+**Progress:** 0/1 voyages complete, 4/6 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Transit Artifact Capture And Inspector Projection](voyages/VFbXKFBWT/) | in-progress | 3/6 |
+| [Transit Artifact Capture And Inspector Projection](voyages/VFbXKFBWT/) | in-progress | 4/6 |
 <!-- END GENERATED -->

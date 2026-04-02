@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:32:49.462109334-07:00
+mode: manual
+---
+Reviewed provider-envelope rendering in src/infrastructure/web/index.html. Model exchange records expose provider, model, category, and phase metadata plus redacted payload bodies in readable pretty-printed form and exact raw form.

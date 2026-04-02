@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-01T22:32:49.393485129-07:00
+mode: manual
+---
+Reviewed the raw/rendered toggle wiring in src/infrastructure/web/index.html. The selected forensic record now switches between exact raw payload content and a format-friendly rendered presentation through the detail toolbar.
