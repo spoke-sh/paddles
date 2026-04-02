@@ -245,10 +245,10 @@ pub fn final_answer_contract_prompt(
     };
     let transport_rule = match render_capability {
         RenderCapability::PromptEnvelope => {
-            "Respond with ONLY one JSON object and no prose outside it."
+            "Respond with ONLY one complete JSON object and no prose outside it."
         }
         RenderCapability::OpenAiJsonSchema | RenderCapability::GeminiJsonSchema => {
-            "The transport enforces a JSON schema. Fill the structured response envelope exactly."
+            "The transport enforces a JSON schema. Fill the structured response envelope exactly and do not emit partial JSON."
         }
         RenderCapability::AnthropicToolUse => {
             "Use the render_final_answer tool exactly once with arguments that satisfy the schema."
@@ -261,12 +261,20 @@ Supported render types: {}.\n\
 Schema:\n\
 {{\"render_types\":[\"paragraph\",\"citations\"],\"blocks\":[{{\"type\":\"paragraph\",\"text\":\"...\"}},{{\"type\":\"citations\",\"sources\":[\"README.md\"]}}]}}\n\
 Rules:\n\
+- Return exactly one complete JSON object.\n\
+- Start with the `render_types` field and then provide `blocks`.\n\
+- Do not wrap the JSON in markdown fences, prose, or commentary.\n\
+- Do not emit partial blocks, truncated arrays, or unfinished objects.\n\
 - `render_types` must list the exact block types used in `blocks`.\n\
 - Use `paragraph` for normal prose.\n\
+- A `paragraph` block must include `text`.\n\
 - Use `bullet_list` for short flat lists.\n\
+- A `bullet_list` block must include `items`.\n\
 - Use `code_block` only for literal code or terminal output.\n\
+- A `code_block` block must include `code`.\n\
 - Do not use markdown headings, `**bold**`, or list markers inside `paragraph` text.\n\
 - `citations` sources must be plain repository/file references.\n\
+- A `citations` block must include `sources`.\n\
 - {citation_rule}",
         SUPPORTED_RENDER_TYPES.join(", ")
     )
@@ -327,7 +335,25 @@ pub fn assistant_response_json_schema(require_citations: bool) -> Value {
                             "items": { "type": "string" }
                         }
                     },
-                    "required": ["type"]
+                    "required": ["type"],
+                    "allOf": [
+                        {
+                            "if": { "properties": { "type": { "const": "paragraph" } }, "required": ["type"] },
+                            "then": { "required": ["text"] }
+                        },
+                        {
+                            "if": { "properties": { "type": { "const": "bullet_list" } }, "required": ["type"] },
+                            "then": { "required": ["items"] }
+                        },
+                        {
+                            "if": { "properties": { "type": { "const": "code_block" } }, "required": ["type"] },
+                            "then": { "required": ["code"] }
+                        },
+                        {
+                            "if": { "properties": { "type": { "const": "citations" } }, "required": ["type"] },
+                            "then": { "required": ["sources"] }
+                        }
+                    ]
                 }
             }
         },
@@ -839,6 +865,8 @@ mod tests {
         let prompt = final_answer_contract_prompt(RenderCapability::PromptEnvelope, true);
         assert!(prompt.contains("paragraph, bullet_list, code_block, citations"));
         assert!(prompt.contains("Include exactly one `citations` block"));
+        assert!(prompt.contains("Return exactly one complete JSON object"));
+        assert!(prompt.contains("Do not emit partial blocks"));
     }
 
     #[test]
@@ -847,6 +875,7 @@ mod tests {
         assert!(prompt.contains("Use the render_final_answer tool exactly once"));
         let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, false);
         assert!(prompt.contains("transport enforces a JSON schema"));
+        assert!(prompt.contains("do not emit partial JSON"));
     }
 
     #[test]
@@ -890,5 +919,21 @@ mod tests {
         assert_eq!(schema["type"].as_str(), Some("object"));
         assert_eq!(schema["required"][0].as_str(), Some("render_types"));
         assert_eq!(schema["required"][1].as_str(), Some("blocks"));
+        assert_eq!(
+            schema["properties"]["blocks"]["items"]["allOf"][0]["then"]["required"][0].as_str(),
+            Some("text")
+        );
+        assert_eq!(
+            schema["properties"]["blocks"]["items"]["allOf"][1]["then"]["required"][0].as_str(),
+            Some("items")
+        );
+        assert_eq!(
+            schema["properties"]["blocks"]["items"]["allOf"][2]["then"]["required"][0].as_str(),
+            Some("code")
+        );
+        assert_eq!(
+            schema["properties"]["blocks"]["items"]["allOf"][3]["then"]["required"][0].as_str(),
+            Some("sources")
+        );
     }
 }

@@ -376,11 +376,12 @@ impl HttpProviderAdapter {
         Ok((content, raw_response_artifact_id))
     }
 
-    async fn send_openai_structured_answer(
+    async fn send_openai_json_schema(
         &self,
         system: &str,
         user: &str,
-        require_citations: bool,
+        schema_name: &str,
+        schema: Value,
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!(
@@ -397,9 +398,9 @@ impl HttpProviderAdapter {
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "assistant_response",
+                    "name": schema_name,
                     "strict": true,
-                    "schema": assistant_response_json_schema(require_citations),
+                    "schema": schema,
                 }
             }
         });
@@ -431,6 +432,23 @@ impl HttpProviderAdapter {
             .and_then(|c| c.message.content.clone())
             .ok_or_else(|| anyhow!("empty OpenAI response"))?;
         Ok((content, raw_response_artifact_id))
+    }
+
+    async fn send_openai_structured_answer(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        self.send_openai_json_schema(
+            system,
+            user,
+            "assistant_response",
+            assistant_response_json_schema(require_citations),
+            capture,
+        )
+        .await
     }
 
     async fn send_anthropic(
@@ -580,11 +598,11 @@ impl HttpProviderAdapter {
         Ok((content, raw_response_artifact_id))
     }
 
-    async fn send_gemini_structured_answer(
+    async fn send_gemini_json_schema(
         &self,
         system: &str,
         user: &str,
-        require_citations: bool,
+        schema: Value,
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!(
@@ -598,7 +616,7 @@ impl HttpProviderAdapter {
             "contents": [{ "parts": [{ "text": user }] }],
             "generationConfig": {
                 "responseMimeType": "application/json",
-                "responseSchema": assistant_response_json_schema(require_citations),
+                "responseSchema": schema,
             }
         });
 
@@ -626,6 +644,22 @@ impl HttpProviderAdapter {
         Ok((content, raw_response_artifact_id))
     }
 
+    async fn send_gemini_structured_answer(
+        &self,
+        system: &str,
+        user: &str,
+        require_citations: bool,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        self.send_gemini_json_schema(
+            system,
+            user,
+            assistant_response_json_schema(require_citations),
+            capture,
+        )
+        .await
+    }
+
     fn build_system_prompt(&self, interpretation: &InterpretationContext) -> String {
         let mut system = String::from(
             "You are Paddles, a recursive in-context planning harness. \
@@ -641,26 +675,46 @@ impl HttpProviderAdapter {
 
     fn build_planner_system_prompt(&self, interpretation: &InterpretationContext) -> String {
         let mut system = self.build_system_prompt(interpretation);
-        system.push_str(
+        let transport_rule = match self.format {
+            ApiFormat::OpenAi | ApiFormat::Gemini => {
+                "The transport enforces a JSON schema, but you must still produce one complete action envelope."
+            }
+            ApiFormat::Anthropic => {
+                "Your response is parsed directly, so the action envelope must be valid JSON on the first try."
+            }
+        };
+        system.push_str(&format!(
             r#"
 ## Action Schema
 
 You must respond with a single JSON object selecting your next action. Available actions:
 
-{"action":"answer","rationale":"..."}
-{"action":"search","query":"...","mode":"graph","strategy":"bm25|vector","intent":"...","rationale":"..."}
-{"action":"list_files","pattern":"...","rationale":"..."}
-{"action":"read","path":"...","rationale":"..."}
-{"action":"inspect","command":"...","rationale":"..."}
-{"action":"shell","command":"...","rationale":"..."}
-{"action":"stop","reason":"...","rationale":"..."}
+{{"action":"answer","rationale":"..."}}
+{{"action":"search","query":"...","mode":"graph","strategy":"bm25|vector","intent":"...","rationale":"..."}}
+{{"action":"list_files","pattern":"...","rationale":"..."}}
+{{"action":"read","path":"...","rationale":"..."}}
+{{"action":"inspect","command":"...","rationale":"..."}}
+{{"action":"shell","command":"...","rationale":"..."}}
+{{"action":"stop","reason":"...","rationale":"..."}}
 
 Rules:
+- {transport_rule}
+- Return exactly one complete JSON object.
+- The first key must be `action`.
+- Do not wrap the JSON in markdown fences, prose, or commentary.
+- Do not emit partial, truncated, or streaming JSON fragments.
+- `answer` requires `rationale`.
+- `search` requires `query`; include `strategy` when you know whether to use `bm25` or `vector`.
+- `list_files` requires `pattern`.
+- `read` requires `path`.
+- `inspect` and `shell` require `command`.
+- `stop` requires `reason`.
+- Do not invent action names outside the schema above.
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
-- When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly.
+- When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
 - Respond ONLY with the JSON object, no prose.
-"#,
-        );
+"#
+        ));
         system
     }
 
@@ -671,12 +725,42 @@ Rules:
         )
     }
 
+    async fn send_planner_action_async(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        match self.format {
+            ApiFormat::OpenAi => {
+                self.send_openai_json_schema(
+                    system,
+                    user,
+                    "planner_action",
+                    planner_action_json_schema(),
+                    capture,
+                )
+                .await
+            }
+            ApiFormat::Gemini => {
+                self.send_gemini_json_schema(system, user, planner_action_json_schema(), capture)
+                    .await
+            }
+            ApiFormat::Anthropic => self.send_anthropic(system, user, capture).await,
+        }
+    }
+
     fn parse_planner_action(&self, response: &str) -> Result<RecursivePlannerDecision> {
         let json = extract_json(response).unwrap_or(response);
         let envelope: PlannerEnvelope = serde_json::from_str(json)
             .map_err(|e| anyhow!("failed to parse planner action: {e}\nresponse: {response}"))?;
+        let action_name = infer_planner_action_name(&envelope).ok_or_else(|| {
+            anyhow!(
+                "failed to parse planner action: missing action field and no inferrable selector\nresponse: {response}"
+            )
+        })?;
         let rationale = envelope.rationale.unwrap_or_default();
-        let action = match envelope.action.as_str() {
+        let action = match action_name.as_str() {
             "answer" => PlannerAction::Stop {
                 reason: "model selected answer".to_string(),
             },
@@ -975,7 +1059,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         };
         let (response, raw_response_artifact_id) = self
             .engine
-            .send_async(&system, &user, Some(capture.clone()))
+            .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
 
         match self.engine.parse_planner_action(&response) {
@@ -1052,7 +1136,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         };
         let (response, raw_response_artifact_id) = self
             .engine
-            .send_async(&system, &user, Some(capture.clone()))
+            .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
         let decision = self.engine.parse_planner_action(&response)?;
         let rendered = json!({
@@ -1270,7 +1354,8 @@ struct GeminiPart {
 
 #[derive(Deserialize)]
 struct PlannerEnvelope {
-    action: String,
+    #[serde(default)]
+    action: Option<String>,
     #[serde(default)]
     rationale: Option<String>,
     #[serde(default)]
@@ -1287,6 +1372,123 @@ struct PlannerEnvelope {
     intent: Option<String>,
     #[serde(default)]
     strategy: Option<RetrievalStrategy>,
+}
+
+fn planner_action_json_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["answer", "search", "list_files", "read", "inspect", "shell", "stop"],
+                "description": "The next planner action."
+            },
+            "rationale": {
+                "type": "string",
+                "description": "Short reason for the selected action."
+            },
+            "reason": {
+                "type": "string",
+                "description": "Required when `action` is `stop`."
+            },
+            "query": {
+                "type": "string",
+                "description": "Search query when `action` is `search`."
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["linear", "graph"],
+                "description": "Optional retrieval mode when `action` is `search`."
+            },
+            "strategy": {
+                "type": "string",
+                "enum": ["bm25", "vector"],
+                "description": "Optional retrieval strategy when `action` is `search`."
+            },
+            "intent": {
+                "type": "string",
+                "description": "Optional search intent when `action` is `search`."
+            },
+            "pattern": {
+                "type": "string",
+                "description": "Required when `action` is `list_files`."
+            },
+            "path": {
+                "type": "string",
+                "description": "Required when `action` is `read`."
+            },
+            "command": {
+                "type": "string",
+                "description": "Required when `action` is `inspect` or `shell`."
+            }
+        },
+        "required": ["action", "rationale"],
+        "allOf": [
+            {
+                "if": { "properties": { "action": { "const": "search" } }, "required": ["action"] },
+                "then": { "required": ["query"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "list_files" } }, "required": ["action"] },
+                "then": { "required": ["pattern"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "read" } }, "required": ["action"] },
+                "then": { "required": ["path"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "inspect" } }, "required": ["action"] },
+                "then": { "required": ["command"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "shell" } }, "required": ["action"] },
+                "then": { "required": ["command"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "stop" } }, "required": ["action"] },
+                "then": { "required": ["reason"] }
+            }
+        ]
+    })
+}
+
+fn infer_planner_action_name(envelope: &PlannerEnvelope) -> Option<String> {
+    if let Some(action) = envelope.action.clone() {
+        return Some(action);
+    }
+
+    if let Some(command) = envelope.command.as_deref() {
+        return Some(if command_looks_read_only(command) {
+            "inspect".to_string()
+        } else {
+            "shell".to_string()
+        });
+    }
+    if envelope.path.is_some() {
+        return Some("read".to_string());
+    }
+    if envelope.pattern.is_some() {
+        return Some("list_files".to_string());
+    }
+    if envelope.query.is_some() {
+        return Some("search".to_string());
+    }
+    if envelope.reason.is_some() {
+        return Some("stop".to_string());
+    }
+
+    None
+}
+
+fn command_looks_read_only(command: &str) -> bool {
+    let normalized = command.trim();
+    !normalized.is_empty()
+        && !normalized.contains("&&")
+        && !normalized.contains("||")
+        && !normalized.contains(';')
+        && !normalized.contains('>')
+        && !normalized.contains('<')
 }
 
 fn extract_json(text: &str) -> Option<&str> {
@@ -1339,7 +1541,8 @@ mod tests {
         TraceRecordKind, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
-        ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
+        ModelPaths, ModelRegistry, PlannerAction, RecursivePlanner, RecursivePlannerDecision,
+        SynthesizerEngine, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -1755,6 +1958,14 @@ mod tests {
                 .expect("planner system prompt")
                 .contains("Action Schema")
         );
+        assert_eq!(
+            requests[0].body["response_format"]["type"].as_str(),
+            Some("json_schema")
+        );
+        assert_eq!(
+            requests[0].body["response_format"]["json_schema"]["name"].as_str(),
+            Some("planner_action")
+        );
         assert!(
             requests[0].body["messages"][1]["content"]
                 .as_str()
@@ -1819,6 +2030,14 @@ mod tests {
         assert_eq!(requests[0].uri, "/v1/chat/completions");
         assert_eq!(requests[1].uri, "/v1/chat/completions");
         assert_eq!(requests[0].body["model"].as_str(), Some(model_id));
+        assert_eq!(
+            requests[0].body["response_format"]["type"].as_str(),
+            Some("json_schema")
+        );
+        assert_eq!(
+            requests[0].body["response_format"]["json_schema"]["name"].as_str(),
+            Some("planner_action")
+        );
         assert_eq!(
             requests[1].body["response_format"]["type"].as_str(),
             Some("json_schema")
@@ -2035,6 +2254,58 @@ mod tests {
         assert!(redacted.contains("\"content\": \"hello\""));
     }
 
+    #[test]
+    fn parse_planner_action_infers_inspect_when_command_is_present_without_action() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_planner_action(
+                r#"{"command":"nix build .#paddles -L","rationale":"Run the nix-build job to see why CI is failing"}"#,
+            )
+            .expect("planner decision");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "nix build .#paddles -L".to_string(),
+                    },
+                },
+                rationale: "Run the nix-build job to see why CI is failing".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn planner_system_prompt_demands_complete_json_action_envelopes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let prompt = adapter
+            .build_planner_system_prompt(&crate::domain::ports::InterpretationContext::default());
+
+        assert!(prompt.contains("Return exactly one complete JSON object"));
+        assert!(prompt.contains("The first key must be `action`"));
+        assert!(prompt.contains("Do not wrap the JSON in markdown fences"));
+        assert!(prompt.contains("Do not emit partial, truncated, or streaming JSON"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn anthropic_provider_executes_a_full_turn_against_a_mock_server() {
         let model_id = "claude-sonnet-4-20250514";
@@ -2130,6 +2401,14 @@ mod tests {
                 .as_str()
                 .expect("planner system prompt")
                 .contains("Action Schema")
+        );
+        assert_eq!(
+            requests[0].body["generationConfig"]["responseMimeType"].as_str(),
+            Some("application/json")
+        );
+        assert_eq!(
+            requests[0].body["generationConfig"]["responseSchema"]["type"].as_str(),
+            Some("object")
         );
         assert!(
             requests[0].body["contents"][0]["parts"][0]["text"]
