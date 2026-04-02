@@ -226,6 +226,13 @@ known model catalog; providers with resolved credentials are marked enabled and
 providers without credentials are marked disabled. The local `sift` provider
 does not use API-key login.
 
+Successful `/model` changes are written to the machine-managed runtime lane
+state file at `~/.local/state/paddles/runtime-lanes.toml`. That file preserves
+the last selected planner/synthesizer lanes across restarts without mutating
+authored `paddles.toml` files. Runtime lane state sits between user config and
+workspace config in precedence, so a project-local `./paddles.toml` still
+overrides the saved machine state when both are present.
+
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
 

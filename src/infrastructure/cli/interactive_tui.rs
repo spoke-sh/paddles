@@ -5,6 +5,9 @@ use crate::domain::model::{
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
+use crate::infrastructure::runtime_preferences::{
+    RuntimeLanePreferenceStore, RuntimeLanePreferences,
+};
 use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
 use anyhow::Result;
 use crossterm::cursor;
@@ -27,6 +30,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 /// Context passed from main to the TUI for credential management.
 pub struct TuiContext {
     pub credential_store: Arc<CredentialStore>,
+    pub runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
     pub runtime_lanes: RuntimeLaneConfig,
     pub verbose: u8,
 }
@@ -141,6 +145,7 @@ pub async fn run_interactive_tui(
         ),
         tui_ctx.verbose,
     );
+    app.set_runtime_preference_path(tui_ctx.runtime_preference_store.path().to_path_buf());
     app.set_runtime_catalog(tui_ctx.runtime_lanes.clone(), provider_availability);
     if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
         app.load_transcript(&transcript);
@@ -204,7 +209,27 @@ pub async fn run_interactive_tui(
                         tui_ctx.runtime_lanes.clone(),
                         tui_ctx.credential_store.all_provider_availability(),
                     );
-                    app.push_event("Model selection updated", update.summary);
+                    match tui_ctx
+                        .runtime_preference_store
+                        .save(&update.persisted_preferences)
+                    {
+                        Ok(()) => app.push_event(
+                            "Model selection updated",
+                            format!(
+                                "{}\nSaved runtime lane preferences to `{}`.",
+                                update.summary,
+                                tui_ctx.runtime_preference_store.path().display()
+                            ),
+                        ),
+                        Err(err) => app.push_error(
+                            "Runtime preference save failed",
+                            format!(
+                                "{}\nThe lane switch is active, but `{}` could not be updated: {err:#}",
+                                update.summary,
+                                tui_ctx.runtime_preference_store.path().display()
+                            ),
+                        ),
+                    }
                 }
                 Err(err) => {
                     app.push_error(
@@ -738,6 +763,7 @@ struct InteractiveApp {
     slash_suggestion_index: usize,
     provider_name: String,
     credential_provider: Option<String>,
+    runtime_preference_path: Option<PathBuf>,
     active_turn_timing: Option<ActiveTurnTiming>,
     flushed_row_count: usize,
     search_progress_row: Option<usize>,
@@ -785,6 +811,7 @@ struct PendingLogin {
 #[derive(Clone, Debug)]
 struct PendingRuntimeUpdate {
     runtime_lanes: RuntimeLaneConfig,
+    persisted_preferences: RuntimeLanePreferences,
     summary: String,
 }
 
@@ -901,6 +928,7 @@ impl InteractiveApp {
             slash_suggestion_index: 0,
             provider_name,
             credential_provider,
+            runtime_preference_path: None,
             active_turn_timing: None,
             flushed_row_count: 0,
             search_progress_row: None,
@@ -935,6 +963,10 @@ impl InteractiveApp {
             .supports_interactive_login()
             .then(|| self.runtime_lanes.synthesizer_provider().name().to_string());
         self.provider_availability = provider_availability;
+    }
+
+    fn set_runtime_preference_path(&mut self, path: PathBuf) {
+        self.runtime_preference_path = Some(path);
     }
 
     fn set_provider_availability(&mut self, provider_availability: Vec<ProviderAvailability>) {
@@ -1344,6 +1376,9 @@ impl InteractiveApp {
                     .with_planner_provider(Some(provider))
                     .with_planner_model_id(Some(normalized_model.clone()));
                 self.pending_runtime_update = Some(PendingRuntimeUpdate {
+                    persisted_preferences: RuntimeLanePreferences::from_runtime_lanes(
+                        &runtime_lanes,
+                    ),
                     runtime_lanes,
                     summary: format!(
                         "Planner lane now targets `{}`.",
@@ -1373,6 +1408,7 @@ impl InteractiveApp {
             }
         };
         self.pending_runtime_update = Some(PendingRuntimeUpdate {
+            persisted_preferences: RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes),
             runtime_lanes,
             summary: format!(
                 "Synthesizer lane now targets `{}`.",
@@ -1421,6 +1457,14 @@ impl InteractiveApp {
             ));
         }
         lines.push(String::new());
+        if let Some(path) = &self.runtime_preference_path {
+            lines.push(format!("Runtime lane state: {}", path.display()));
+            lines.push(
+                "Workspace `paddles.toml` overrides this machine-managed state when both are present."
+                    .to_string(),
+            );
+            lines.push(String::new());
+        }
         lines.push(
             "Use `/model synthesizer <provider> <model>` or `/model planner <provider> <model>`."
                 .to_string(),
@@ -2815,6 +2859,7 @@ mod tests {
     use crate::infrastructure::providers::ModelProvider;
     use crate::infrastructure::step_timing::Pace;
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, prelude::Rect};
+    use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
     fn session() -> ConversationSession {
@@ -3386,6 +3431,16 @@ mod tests {
             ModelProvider::Openai
         );
         assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
+        assert_eq!(
+            update.persisted_preferences.provider.as_deref(),
+            Some("openai")
+        );
+        assert_eq!(
+            update.persisted_preferences.model.as_deref(),
+            Some("gpt-4o")
+        );
+        assert!(update.persisted_preferences.planner_provider.is_none());
+        assert!(update.persisted_preferences.planner_model.is_none());
     }
 
     #[test]
@@ -3420,6 +3475,40 @@ mod tests {
                     && row.header == "• Model unavailable"
                     && row.content.contains("disabled"))
         );
+    }
+
+    #[test]
+    fn model_catalog_mentions_runtime_lane_state_file() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_preference_path(PathBuf::from(
+            "/home/alex/.local/state/paddles/runtime-lanes.toml",
+        ));
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![provider_availability(
+                ModelProvider::Sift,
+                true,
+                "auth not required",
+            )],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+
+        let row = app.rows.last().expect("catalog row");
+        assert!(row.content.contains("Runtime lane state"));
+        assert!(row.content.contains("runtime-lanes.toml"));
+        assert!(row.content.contains("Workspace `paddles.toml` overrides"));
     }
 
     #[test]

@@ -29,6 +29,7 @@ use paddles::infrastructure::config::{
 use paddles::infrastructure::credentials::CredentialStore;
 use paddles::infrastructure::providers::ModelProvider;
 use paddles::infrastructure::rendering::RenderCapability;
+use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -236,9 +237,18 @@ fn build_planner_engine(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let root_path = env::current_dir()?;
+    let runtime_preference_store = Arc::new(RuntimeLanePreferenceStore::new());
+    let runtime_preferences = match runtime_preference_store.load() {
+        Ok(preferences) => preferences,
+        Err(err) => {
+            eprintln!("[WARN] Failed to load runtime lane preferences: {err:#}");
+            None
+        }
+    };
 
-    // Load config: paddles.toml -> ~/.config/paddles/paddles.toml -> /etc/paddles/paddles.toml
-    let config = PaddlesConfig::load(&root_path);
+    // Load layered config: system -> user -> runtime lane state -> workspace.
+    let config =
+        PaddlesConfig::load_with_runtime_preferences(&root_path, runtime_preferences.as_ref());
 
     // Merge: CLI flags override config values
     let mut model = cli.model.unwrap_or(config.model);
@@ -491,6 +501,7 @@ async fn main() -> Result<()> {
             InteractiveFrontend::Tui => {
                 let tui_ctx = TuiContext {
                     credential_store: Arc::clone(&credential_store),
+                    runtime_preference_store: Arc::clone(&runtime_preference_store),
                     runtime_lanes: runtime_lanes.clone(),
                     verbose,
                 };
