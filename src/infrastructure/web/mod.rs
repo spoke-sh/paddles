@@ -1,7 +1,9 @@
 use crate::application::MechSuitService;
 use crate::domain::model::{
-    ConversationTranscript, ConversationTranscriptUpdate, TaskTraceId, TraceRecordKind,
-    TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationTranscript,
+    ConversationTranscriptUpdate, ForensicLifecycle, ForensicRecordProjection,
+    ForensicTurnProjection, ForensicUpdateSink, TaskTraceId, TraceRecordKind, TranscriptUpdateSink,
+    TurnEvent, TurnEventSink, TurnTraceId,
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
@@ -22,6 +24,7 @@ struct AppState {
     trace_recorder: Arc<dyn TraceRecorder>,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     transcript_tx: broadcast::Sender<ConversationTranscriptUpdate>,
+    forensic_tx: broadcast::Sender<ConversationForensicUpdate>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +49,19 @@ struct TurnResponse {
 
 #[derive(Serialize)]
 struct TranscriptResponse(ConversationTranscript);
+
+#[derive(Serialize)]
+struct ForensicProjectionResponse(ConversationForensicProjection);
+
+#[derive(Serialize)]
+struct ForensicTurnProjectionResponse(ForensicTurnProjection);
+
+#[derive(Serialize)]
+struct ForensicUpdateEventResponse {
+    update: ConversationForensicUpdate,
+    turn_lifecycle: Option<ForensicLifecycle>,
+    record: Option<ForensicRecordProjection>,
+}
 
 #[derive(Serialize)]
 struct TraceGraphResponse {
@@ -97,17 +113,22 @@ pub fn router(
 ) -> (Router, Arc<dyn TurnEventSink>) {
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
     let (transcript_tx, _) = broadcast::channel::<ConversationTranscriptUpdate>(256);
+    let (forensic_tx, _) = broadcast::channel::<ConversationForensicUpdate>(512);
     let observer: Arc<dyn TurnEventSink> = Arc::new(GlobalBroadcastSink {
         tx: event_tx.clone(),
     });
     service.register_transcript_observer(Arc::new(BroadcastTranscriptSink {
         tx: transcript_tx.clone(),
     }));
+    service.register_forensic_observer(Arc::new(BroadcastForensicSink {
+        tx: forensic_tx.clone(),
+    }));
     let state = Arc::new(AppState {
         service,
         trace_recorder,
         event_tx,
         transcript_tx,
+        forensic_tx,
     });
 
     let app = Router::new()
@@ -119,6 +140,15 @@ pub fn router(
         .route(
             "/sessions/{id}/transcript/events",
             get(conversation_transcript_event_stream),
+        )
+        .route("/sessions/{id}/forensics", get(conversation_forensics))
+        .route(
+            "/sessions/{id}/forensics/turns/{turn_id}",
+            get(turn_forensics),
+        )
+        .route(
+            "/sessions/{id}/forensics/events",
+            get(conversation_forensic_event_stream),
         )
         .route("/sessions/{id}/events", get(event_stream))
         .route("/events", get(global_event_stream))
@@ -151,6 +181,16 @@ struct BroadcastTranscriptSink {
 
 impl TranscriptUpdateSink for BroadcastTranscriptSink {
     fn emit(&self, update: ConversationTranscriptUpdate) {
+        let _ = self.tx.send(update);
+    }
+}
+
+struct BroadcastForensicSink {
+    tx: broadcast::Sender<ConversationForensicUpdate>,
+}
+
+impl ForensicUpdateSink for BroadcastForensicSink {
+    fn emit(&self, update: ConversationForensicUpdate) {
         let _ = self.tx.send(update);
     }
 }
@@ -206,6 +246,32 @@ async fn conversation_transcript(
     Ok(Json(TranscriptResponse(transcript)))
 }
 
+async fn conversation_forensics(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ForensicProjectionResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let projection = state
+        .service
+        .replay_conversation_forensics(&task_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(ForensicProjectionResponse(projection)))
+}
+
+async fn turn_forensics(
+    State(state): State<Arc<AppState>>,
+    Path((id, turn_id)): Path<(String, String)>,
+) -> Result<Json<ForensicTurnProjectionResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let turn_id = parse_turn_id(&turn_id)?;
+    let turn = state
+        .service
+        .replay_turn_forensics(&task_id, &turn_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(axum::http::StatusCode::NOT_FOUND)?;
+    Ok(Json(ForensicTurnProjectionResponse(turn)))
+}
+
 async fn conversation_transcript_event_stream(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -215,6 +281,44 @@ async fn conversation_transcript_event_stream(
         Ok(update) if update.task_id.as_str() == id => {
             let json = serde_json::to_string(&update).unwrap_or_default();
             Some(Ok(Event::default().event("transcript_update").data(json)))
+        }
+        _ => None,
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn conversation_forensic_event_stream(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.forensic_tx.subscribe();
+    let state = Arc::clone(&state);
+    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
+        Ok(update) if update.task_id.as_str() == id => {
+            let payload = state
+                .service
+                .replay_turn_forensics(&update.task_id, &update.turn_id)
+                .ok()
+                .flatten()
+                .and_then(|turn| {
+                    let turn_lifecycle = turn.lifecycle;
+                    turn.records
+                        .into_iter()
+                        .find(|record| record.record.record_id == update.record_id)
+                        .map(|record| ForensicUpdateEventResponse {
+                            update: update.clone(),
+                            turn_lifecycle: Some(turn_lifecycle),
+                            record: Some(record),
+                        })
+                })
+                .unwrap_or(ForensicUpdateEventResponse {
+                    update,
+                    turn_lifecycle: None,
+                    record: None,
+                });
+            let json = serde_json::to_string(&payload).unwrap_or_default();
+            Some(Ok(Event::default().event("forensic_update").data(json)))
         }
         _ => None,
     });
@@ -269,6 +373,10 @@ async fn trace_graph(
 
 fn parse_task_id(id: &str) -> Result<TaskTraceId, axum::http::StatusCode> {
     TaskTraceId::new(id).map_err(|_| axum::http::StatusCode::BAD_REQUEST)
+}
+
+fn parse_turn_id(id: &str) -> Result<TurnTraceId, axum::http::StatusCode> {
+    TurnTraceId::new(id).map_err(|_| axum::http::StatusCode::BAD_REQUEST)
 }
 
 async fn trace_replay_all(
@@ -389,5 +497,245 @@ fn truncate(s: &str, n: usize) -> String {
         format!("{}...", &s[..n])
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AppState, BroadcastForensicSink, ForensicProjectionResponse,
+        ForensicTurnProjectionResponse, conversation_forensics, parse_task_id, turn_forensics,
+    };
+    use crate::application::MechSuitService;
+    use crate::domain::model::{
+        ArtifactKind, ConversationForensicUpdate, ForensicUpdateSink, TraceCheckpointKind,
+        TraceCompletionCheckpoint, TraceLineage, TraceModelExchangeArtifact,
+        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
+        TraceRecordId, TraceRecordKind, TraceReplay,
+    };
+    use crate::domain::ports::{ModelPaths, ModelRegistry, TraceRecorder};
+    use crate::infrastructure::adapters::agent_memory::AgentMemory;
+    use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use anyhow::{Result, anyhow};
+    use async_trait::async_trait;
+    use axum::Json;
+    use axum::extract::{Path, State};
+    use paddles_conversation::{
+        ArtifactEnvelope, ConversationSession, TraceArtifactId, TraceCheckpointId, TurnTraceId,
+    };
+    use std::path::Path as FsPath;
+    use std::sync::Arc;
+    use tokio::sync::broadcast;
+
+    #[derive(Default)]
+    struct StaticRegistry;
+
+    #[async_trait]
+    impl ModelRegistry for StaticRegistry {
+        async fn get_model_paths(&self, _model_id: &str) -> Result<ModelPaths> {
+            Err(anyhow!("test registry is not used in this suite"))
+        }
+    }
+
+    fn test_service_with_recorder(
+        workspace: &FsPath,
+        recorder: Arc<dyn TraceRecorder>,
+    ) -> Arc<MechSuitService> {
+        let operator_memory = Arc::new(AgentMemory::load(workspace));
+        Arc::new(MechSuitService::with_trace_recorder(
+            workspace,
+            Arc::new(StaticRegistry),
+            operator_memory,
+            Box::new(|_, _| Err(anyhow!("synthesizer factory not used in this test"))),
+            Box::new(|_, _| Err(anyhow!("planner factory not used in this test"))),
+            Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
+            recorder,
+        ))
+    }
+
+    fn text_artifact(
+        id: &str,
+        kind: ArtifactKind,
+        summary: &str,
+        content: &str,
+    ) -> ArtifactEnvelope {
+        ArtifactEnvelope::text(
+            TraceArtifactId::new(id).expect("artifact"),
+            kind,
+            summary,
+            content,
+            usize::MAX,
+        )
+        .with_mime_type("application/json")
+    }
+
+    fn seed_forensic_replay(
+        recorder: &Arc<InMemoryTraceRecorder>,
+        session: &ConversationSession,
+    ) -> (TraceReplay, TraceRecordId) {
+        let task_id = session.task_id();
+        let turn_id = session.allocate_turn_id();
+        let first_record_id =
+            TraceRecordId::new(format!("{}.record-0001", turn_id.as_str())).expect("record");
+        let second_record_id =
+            TraceRecordId::new(format!("{}.record-0002", turn_id.as_str())).expect("record");
+        let checkpoint_record_id =
+            TraceRecordId::new(format!("{}.record-0003", turn_id.as_str())).expect("record");
+
+        recorder
+            .record(TraceRecord {
+                record_id: first_record_id.clone(),
+                sequence: 1,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_id.clone(),
+                    branch_id: None,
+                    parent_record_id: None,
+                },
+                kind: TraceRecordKind::ModelExchangeArtifact(TraceModelExchangeArtifact {
+                    exchange_id: "exchange-1".to_string(),
+                    lane: TraceModelExchangeLane::Planner,
+                    category: TraceModelExchangeCategory::PlannerAction,
+                    phase: TraceModelExchangePhase::AssembledContext,
+                    provider: "openai".to_string(),
+                    model: "gpt-5.4".to_string(),
+                    parent_artifact_id: None,
+                    artifact: text_artifact(
+                        "artifact-1",
+                        ArtifactKind::Prompt,
+                        "first planner prompt",
+                        "{\"step\":1}",
+                    ),
+                }),
+            })
+            .expect("record first artifact");
+        recorder
+            .record(TraceRecord {
+                record_id: second_record_id.clone(),
+                sequence: 2,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_id.clone(),
+                    branch_id: None,
+                    parent_record_id: Some(first_record_id.clone()),
+                },
+                kind: TraceRecordKind::ModelExchangeArtifact(TraceModelExchangeArtifact {
+                    exchange_id: "exchange-2".to_string(),
+                    lane: TraceModelExchangeLane::Planner,
+                    category: TraceModelExchangeCategory::PlannerAction,
+                    phase: TraceModelExchangePhase::AssembledContext,
+                    provider: "openai".to_string(),
+                    model: "gpt-5.4".to_string(),
+                    parent_artifact_id: Some(TraceArtifactId::new("artifact-1").expect("artifact")),
+                    artifact: text_artifact(
+                        "artifact-2",
+                        ArtifactKind::Prompt,
+                        "second planner prompt",
+                        "{\"step\":2}",
+                    ),
+                }),
+            })
+            .expect("record second artifact");
+        recorder
+            .record(TraceRecord {
+                record_id: checkpoint_record_id,
+                sequence: 3,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_id.clone(),
+                    branch_id: None,
+                    parent_record_id: Some(second_record_id.clone()),
+                },
+                kind: TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                    checkpoint_id: TraceCheckpointId::new(format!(
+                        "{}.checkpoint",
+                        turn_id.as_str()
+                    ))
+                    .expect("checkpoint"),
+                    kind: TraceCheckpointKind::TurnCompleted,
+                    summary: "done".to_string(),
+                    response: Some(text_artifact(
+                        "artifact-3",
+                        ArtifactKind::ModelOutput,
+                        "final response",
+                        "\"ok\"",
+                    )),
+                    citations: Vec::new(),
+                    grounded: true,
+                }),
+            })
+            .expect("record checkpoint");
+
+        (recorder.replay(&task_id).expect("replay"), second_record_id)
+    }
+
+    #[tokio::test]
+    async fn forensic_routes_project_conversation_and_turn_replay_with_lifecycle_states() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let (replay, latest_record_id) = seed_forensic_replay(&recorder, &session);
+        let task_id = replay.task_id.clone();
+        let turn_id = replay.records[0].lineage.turn_id.clone();
+        let (event_tx, _) = broadcast::channel(8);
+        let (transcript_tx, _) = broadcast::channel(8);
+        let (forensic_tx, _) = broadcast::channel(8);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx,
+            transcript_tx,
+            forensic_tx,
+        });
+
+        let Json(ForensicProjectionResponse(conversation)) = conversation_forensics(
+            State(Arc::clone(&state)),
+            Path(task_id.as_str().to_string()),
+        )
+        .await
+        .expect("conversation forensics");
+        assert_eq!(conversation.task_id, task_id);
+        assert_eq!(conversation.turns.len(), 1);
+        assert_eq!(conversation.turns[0].turn_id, turn_id);
+        assert!(
+            conversation.turns[0]
+                .records
+                .iter()
+                .any(|record| record.record.record_id == latest_record_id)
+        );
+        assert!(conversation.turns[0].records.iter().any(|record| matches!(
+            record.lifecycle,
+            crate::domain::model::ForensicLifecycle::Superseded
+        )));
+        assert!(conversation.turns[0].records.iter().any(|record| matches!(
+            record.lifecycle,
+            crate::domain::model::ForensicLifecycle::Final
+        )));
+
+        let Json(ForensicTurnProjectionResponse(turn)) = turn_forensics(
+            State(state),
+            Path((task_id.as_str().to_string(), turn_id.as_str().to_string())),
+        )
+        .await
+        .expect("turn forensics");
+        assert_eq!(turn.turn_id, turn_id);
+        assert_eq!(turn.records.len(), 3);
+    }
+
+    #[test]
+    fn broadcast_forensic_sink_forwards_live_updates() {
+        let (tx, mut rx) = broadcast::channel(8);
+        let sink = BroadcastForensicSink { tx };
+        let update = ConversationForensicUpdate {
+            task_id: parse_task_id("task-000001").expect("task"),
+            turn_id: TurnTraceId::new("task-000001.turn-0001").expect("turn"),
+            record_id: TraceRecordId::new("task-000001.turn-0001.record-0001").expect("record"),
+        };
+
+        sink.emit(update.clone());
+
+        let received = rx.try_recv().expect("received broadcast");
+        assert_eq!(received, update);
     }
 }

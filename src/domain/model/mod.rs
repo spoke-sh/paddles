@@ -2,6 +2,7 @@ use anyhow::Result;
 
 pub mod compaction;
 pub mod context_quality;
+pub mod forensics;
 pub mod interpretation;
 pub mod threading;
 pub mod traces;
@@ -9,6 +10,10 @@ pub mod transcript;
 pub mod turns;
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use context_quality::{ContextPressure, PressureFactor, PressureLevel, PressureTracker};
+pub use forensics::{
+    ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,
+    ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,
+};
 pub use interpretation::{
     GuidanceCategory, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,

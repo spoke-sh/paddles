@@ -6,8 +6,9 @@ pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifac
 
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
-    ConversationThreadRef, ConversationTranscript, ConversationTranscriptUpdate,
-    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, PressureFactor, PressureLevel,
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationThreadRef,
+    ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
+    ForensicTraceSink, ForensicUpdateSink, MultiplexEventSink, PressureFactor, PressureLevel,
     TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
     ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
     TraceCheckpointKind, TraceCompletionCheckpoint, TraceForceContribution, TraceForceKind,
@@ -71,6 +72,7 @@ pub struct MechSuitService {
     event_sink: Arc<dyn TurnEventSink>,
     event_observers: Mutex<Vec<Arc<dyn TurnEventSink>>>,
     transcript_observers: Mutex<Vec<Arc<dyn TranscriptUpdateSink>>>,
+    forensic_observers: Mutex<Vec<Arc<dyn ForensicUpdateSink>>>,
     trace_recorder: Arc<dyn TraceRecorder>,
     trace_counter: AtomicU64,
     sessions: Mutex<HashMap<String, ConversationSession>>,
@@ -246,6 +248,7 @@ impl TurnEventSink for ConsoleTurnEventSink {
 struct StructuredTurnTrace {
     downstream: Arc<dyn TurnEventSink>,
     recorder: Arc<dyn TraceRecorder>,
+    forensic_observers: Vec<Arc<dyn ForensicUpdateSink>>,
     session: ConversationSession,
     turn_id: TurnTraceId,
     active_thread: ConversationThreadRef,
@@ -274,6 +277,7 @@ impl StructuredTurnTrace {
     fn new(
         downstream: Arc<dyn TurnEventSink>,
         recorder: Arc<dyn TraceRecorder>,
+        forensic_observers: Vec<Arc<dyn ForensicUpdateSink>>,
         session: ConversationSession,
         turn_id: TurnTraceId,
         active_thread: ConversationThreadRef,
@@ -281,6 +285,7 @@ impl StructuredTurnTrace {
         Self {
             downstream,
             recorder,
+            forensic_observers,
             session,
             turn_id,
             active_thread,
@@ -786,6 +791,9 @@ impl StructuredTurnTrace {
     }
 
     fn record_or_warn(&self, record: TraceRecord) {
+        let record_id = record.record_id.clone();
+        let task_id = record.lineage.task_id.clone();
+        let turn_id = record.lineage.turn_id.clone();
         if let Err(err) = self.recorder.record(record) {
             let should_emit = {
                 let state = self.session.state();
@@ -802,6 +810,15 @@ impl StructuredTurnTrace {
                     stage: "trace-recorder".to_string(),
                     reason: format!("trace recording failed: {err:#}"),
                 });
+            }
+        } else {
+            let update = ConversationForensicUpdate {
+                task_id,
+                turn_id,
+                record_id,
+            };
+            for observer in &self.forensic_observers {
+                observer.emit(update.clone());
             }
         }
     }
@@ -1504,6 +1521,7 @@ impl MechSuitService {
             event_sink: Arc::new(ConsoleTurnEventSink::default()),
             event_observers: Mutex::new(Vec::new()),
             transcript_observers: Mutex::new(Vec::new()),
+            forensic_observers: Mutex::new(Vec::new()),
             trace_recorder,
             trace_counter: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
@@ -1531,6 +1549,13 @@ impl MechSuitService {
             .push(observer);
     }
 
+    pub fn register_forensic_observer(&self, observer: Arc<dyn ForensicUpdateSink>) {
+        self.forensic_observers
+            .lock()
+            .expect("forensic observers lock")
+            .push(observer);
+    }
+
     fn emit_transcript_update(&self, task_id: &TaskTraceId) {
         let update = ConversationTranscriptUpdate {
             task_id: task_id.clone(),
@@ -1543,6 +1568,38 @@ impl MechSuitService {
         for observer in observers {
             observer.emit(update.clone());
         }
+    }
+
+    pub fn replay_conversation_forensics(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationForensicProjection> {
+        match self.trace_recorder.replay(task_id) {
+            Ok(replay) => Ok(ConversationForensicProjection::from_trace_replay(&replay)),
+            Err(err) => {
+                let known_session = self
+                    .sessions
+                    .lock()
+                    .expect("conversation sessions lock")
+                    .contains_key(task_id.as_str());
+                if known_session {
+                    Ok(ConversationForensicProjection {
+                        task_id: task_id.clone(),
+                        turns: Vec::new(),
+                    })
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
+    pub fn replay_turn_forensics(
+        &self,
+        task_id: &TaskTraceId,
+        turn_id: &TurnTraceId,
+    ) -> Result<Option<crate::domain::model::ForensicTurnProjection>> {
+        Ok(self.replay_conversation_forensics(task_id)?.turn(turn_id))
     }
 
     pub fn replay_all_traces(&self) -> Result<Vec<crate::domain::model::TraceReplay>> {
@@ -1566,6 +1623,13 @@ impl MechSuitService {
         let mut sinks = vec![sink];
         sinks.extend(observers);
         Arc::new(MultiplexEventSink::new(sinks))
+    }
+
+    fn cloned_forensic_observers(&self) -> Vec<Arc<dyn ForensicUpdateSink>> {
+        self.forensic_observers
+            .lock()
+            .expect("forensic observers lock")
+            .clone()
     }
 
     fn allocate_task_id(&self) -> TaskTraceId {
@@ -1784,6 +1848,7 @@ impl MechSuitService {
         let trace = Arc::new(StructuredTurnTrace::new(
             event_sink,
             Arc::clone(&self.trace_recorder),
+            self.cloned_forensic_observers(),
             session.clone(),
             turn_id,
             active_thread.clone(),
@@ -2011,6 +2076,7 @@ impl MechSuitService {
         let trace = Arc::new(StructuredTurnTrace::new(
             event_sink,
             Arc::clone(&self.trace_recorder),
+            self.cloned_forensic_observers(),
             session.clone(),
             turn_id,
             source_thread.clone(),
@@ -3885,8 +3951,9 @@ mod tests {
     };
     use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
-        ContextPressure, ConversationThreadRef, ConversationTranscriptUpdate,
-        ForensicArtifactCapture, ForensicTraceSink, PressureFactor, TaskTraceId, ThreadDecision,
+        ContextPressure, ConversationForensicUpdate, ConversationThreadRef,
+        ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicLifecycle,
+        ForensicTraceSink, ForensicUpdateSink, PressureFactor, TaskTraceId, ThreadDecision,
         ThreadDecisionId, ThreadDecisionKind, TraceForceKind, TraceLineageNodeKind,
         TraceLineageRelation, TraceModelExchangeCategory, TraceModelExchangeLane,
         TraceModelExchangePhase, TraceRecordKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
@@ -4114,6 +4181,23 @@ mod tests {
 
     impl TranscriptUpdateSink for RecordingTranscriptUpdateSink {
         fn emit(&self, update: ConversationTranscriptUpdate) {
+            self.updates.lock().expect("update lock").push(update);
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingForensicUpdateSink {
+        updates: Mutex<Vec<ConversationForensicUpdate>>,
+    }
+
+    impl RecordingForensicUpdateSink {
+        fn recorded(&self) -> Vec<ConversationForensicUpdate> {
+            self.updates.lock().expect("update lock").clone()
+        }
+    }
+
+    impl ForensicUpdateSink for RecordingForensicUpdateSink {
+        fn emit(&self, update: ConversationForensicUpdate) {
             self.updates.lock().expect("update lock").push(update);
         }
     }
@@ -4672,6 +4756,7 @@ mod tests {
         let trace = Arc::new(StructuredTurnTrace::new(
             Arc::new(RecordingTurnEventSink::default()),
             recorder.clone(),
+            Vec::new(),
             session.clone(),
             turn_id.clone(),
             ConversationThreadRef::Mainline,
@@ -4820,6 +4905,7 @@ mod tests {
         let trace = Arc::new(StructuredTurnTrace::new(
             Arc::new(RecordingTurnEventSink::default()),
             recorder.clone(),
+            Vec::new(),
             session.clone(),
             turn_id,
             ConversationThreadRef::Mainline,
@@ -5112,6 +5198,161 @@ mod tests {
                 .iter()
                 .all(|update| update.task_id == session.task_id())
         );
+    }
+
+    #[test]
+    fn replay_conversation_forensics_projects_superseded_and_final_records() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let turn_id = session.allocate_turn_id();
+        let trace = Arc::new(StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            recorder,
+            Vec::new(),
+            session.clone(),
+            turn_id.clone(),
+            ConversationThreadRef::Mainline,
+        ));
+
+        let first_artifact = ForensicTraceSink::record_forensic_artifact(
+            trace.as_ref(),
+            ForensicArtifactCapture {
+                exchange_id: "exchange-1".to_string(),
+                lane: TraceModelExchangeLane::Planner,
+                category: TraceModelExchangeCategory::PlannerAction,
+                phase: TraceModelExchangePhase::AssembledContext,
+                provider: "openai".to_string(),
+                model: "gpt-5.4".to_string(),
+                parent_artifact_id: None,
+                summary: "planner prompt".to_string(),
+                content: "{\"step\":1}".to_string(),
+                mime_type: "application/json".to_string(),
+                labels: Default::default(),
+            },
+        )
+        .expect("first artifact");
+
+        ForensicTraceSink::record_forensic_artifact(
+            trace.as_ref(),
+            ForensicArtifactCapture {
+                exchange_id: "exchange-2".to_string(),
+                lane: TraceModelExchangeLane::Planner,
+                category: TraceModelExchangeCategory::PlannerAction,
+                phase: TraceModelExchangePhase::AssembledContext,
+                provider: "openai".to_string(),
+                model: "gpt-5.4".to_string(),
+                parent_artifact_id: Some(first_artifact),
+                summary: "planner prompt refined".to_string(),
+                content: "{\"step\":2}".to_string(),
+                mime_type: "application/json".to_string(),
+                labels: Default::default(),
+            },
+        )
+        .expect("second artifact");
+        trace.emit(TurnEvent::SynthesisReady {
+            grounded: true,
+            citations: Vec::new(),
+            insufficient_evidence: false,
+        });
+        trace.record_completion("final answer");
+
+        let projection = service
+            .replay_conversation_forensics(&session.task_id())
+            .expect("forensic replay");
+
+        assert_eq!(projection.task_id, session.task_id());
+        assert_eq!(projection.turns.len(), 1);
+        assert_eq!(projection.turns[0].turn_id, turn_id);
+        assert_eq!(projection.turns[0].lifecycle, ForensicLifecycle::Final);
+        assert!(
+            projection.turns[0]
+                .records
+                .iter()
+                .any(|record| record.lifecycle == ForensicLifecycle::Superseded)
+        );
+        assert!(
+            projection.turns[0]
+                .records
+                .iter()
+                .any(|record| record.lifecycle == ForensicLifecycle::Final)
+        );
+    }
+
+    #[test]
+    fn process_prompt_emits_forensic_updates_for_recorded_trace_artifacts() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nEmit forensic updates whenever transit records change.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: None,
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Forensic update response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let updates = Arc::new(RecordingForensicUpdateSink::default());
+        service.register_forensic_observer(updates.clone());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Record forensic updates",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let recorded = updates.recorded();
+        assert!(!recorded.is_empty());
+        assert!(
+            recorded
+                .iter()
+                .all(|update| update.task_id == session.task_id())
+        );
+        assert!(recorded.iter().all(|update| {
+            update
+                .turn_id
+                .as_str()
+                .starts_with(session.task_id().as_str())
+        }));
     }
 
     #[test]
