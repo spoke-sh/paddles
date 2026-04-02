@@ -186,6 +186,7 @@ fn build_synthesizer_engine(
             )?;
             Ok(Arc::new(HttpProviderAdapter::new(
                 workspace.to_path_buf(),
+                provider.name(),
                 lane.model_id.clone(),
                 api_key,
                 base_url,
@@ -221,6 +222,7 @@ fn build_planner_engine(
             )?;
             let engine = Arc::new(HttpProviderAdapter::new(
                 workspace.to_path_buf(),
+                provider.name(),
                 lane.model_id.clone(),
                 api_key,
                 base_url,

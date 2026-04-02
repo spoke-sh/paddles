@@ -471,9 +471,9 @@ model = "qwen-1.5b"
         let configuration = repo_doc("CONFIGURATION.md");
         assert!(configuration.contains("Inception"));
         assert!(configuration.contains("mercury-2"));
+        assert!(configuration.contains("mercury-edit"));
         assert!(configuration.contains("streaming/diffusion"));
-        assert!(configuration.contains("edit-native"));
-        assert!(configuration.contains("optional"));
+        assert!(configuration.contains("Optional native capabilities"));
     }
 
     #[test]
@@ -482,7 +482,7 @@ model = "qwen-1.5b"
         assert!(configuration.contains("usable today"));
         assert!(configuration.contains("without"));
         assert!(configuration.contains("streaming/diffusion"));
-        assert!(configuration.contains("edit-native"));
+        assert!(configuration.contains("single-file `apply_patch`"));
         assert!(configuration.contains("runtime-lanes.toml"));
     }
 }

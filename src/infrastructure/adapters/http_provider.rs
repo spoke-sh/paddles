@@ -81,6 +81,7 @@ pub enum ApiFormat {
 pub struct HttpProviderAdapter {
     workspace_root: PathBuf,
     client: reqwest::Client,
+    provider_name: String,
     api_key: String,
     base_url: String,
     model_id: String,
@@ -93,6 +94,7 @@ pub struct HttpProviderAdapter {
 impl HttpProviderAdapter {
     pub fn new(
         workspace_root: impl Into<PathBuf>,
+        provider_name: impl Into<String>,
         model_id: impl Into<String>,
         api_key: impl Into<String>,
         base_url: impl Into<String>,
@@ -102,6 +104,7 @@ impl HttpProviderAdapter {
         Self {
             workspace_root: workspace_root.into(),
             client: reqwest::Client::new(),
+            provider_name: provider_name.into(),
             api_key: api_key.into(),
             base_url: base_url.into(),
             model_id: model_id.into(),
@@ -186,10 +189,18 @@ impl HttpProviderAdapter {
     }
 
     fn provider_label(&self) -> &'static str {
-        match self.format {
-            ApiFormat::OpenAi => "openai",
-            ApiFormat::Anthropic => "anthropic",
-            ApiFormat::Gemini => "gemini",
+        match self.provider_name.as_str() {
+            "openai" => "openai",
+            "inception" => "inception",
+            "anthropic" => "anthropic",
+            "google" => "google",
+            "moonshot" => "moonshot",
+            "ollama" => "ollama",
+            _ => match self.format {
+                ApiFormat::OpenAi => "openai",
+                ApiFormat::Anthropic => "anthropic",
+                ApiFormat::Gemini => "gemini",
+            },
         }
     }
 
@@ -695,13 +706,19 @@ impl HttpProviderAdapter {
 
 You must respond with a single JSON object selecting your next action. Available actions:
 
-{{"action":"answer","rationale":"..."}}
-{{"action":"search","query":"...","mode":"graph","strategy":"bm25|vector","intent":"...","rationale":"..."}}
-{{"action":"list_files","pattern":"...","rationale":"..."}}
-{{"action":"read","path":"...","rationale":"..."}}
-{{"action":"inspect","command":"...","rationale":"..."}}
-{{"action":"shell","command":"...","rationale":"..."}}
-{{"action":"stop","reason":"...","rationale":"..."}}
+{{"action":"answer","edit":"no","candidate_files":[],"rationale":"..."}}
+{{"action":"search","query":"...","mode":"linear|graph","strategy":"bm25|vector","intent":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"list_files","pattern":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"read","path":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"inspect","command":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"shell","command":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"diff","path":"optional","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"write_file","path":"relative/path","content":"full file contents","edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"replace_in_file","path":"relative/path","old":"exact old text","new":"replacement text","replace_all":false,"edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"apply_patch","patch":"unified diff text","edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"refine","query":"...","mode":"linear|graph","strategy":"bm25|vector","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"branch","branches":["...","..."],"edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"stop","reason":"...","edit":"no","candidate_files":[],"rationale":"..."}}
 
 Rules:
 - {transport_rule}
@@ -714,10 +731,18 @@ Rules:
 - `list_files` requires `pattern`.
 - `read` requires `path`.
 - `inspect` and `shell` require `command`.
+- `write_file` requires `path` and `content`.
+- `replace_in_file` requires `path`, `old`, and `new`.
+- `apply_patch` requires `patch` and it must be a unified diff.
+- `refine` requires `query`.
+- `branch` requires `branches`.
 - `stop` requires `reason`.
+- When the user is clearly asking for a code or file edit, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.
+- When the user is not asking for an edit, set `edit` to `no` and use an empty `candidate_files` array.
 - Do not invent action names outside the schema above.
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
 - When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
+- When the user requests a concrete code change, prefer `write_file`, `replace_in_file`, or `apply_patch` over describing the edit in prose.
 - Respond ONLY with the JSON object, no prose.
 "#
         ));
@@ -776,7 +801,7 @@ Rules:
             "search" => PlannerAction::Workspace {
                 action: WorkspaceAction::Search {
                     query: envelope.query.unwrap_or_default(),
-                    mode: RetrievalMode::Graph,
+                    mode: envelope.mode.unwrap_or(RetrievalMode::Graph),
                     strategy: envelope.strategy.unwrap_or_default(),
                     intent: envelope.intent,
                 },
@@ -801,11 +826,188 @@ Rules:
                     command: envelope.command.unwrap_or_default(),
                 },
             },
+            "diff" => PlannerAction::Workspace {
+                action: WorkspaceAction::Diff {
+                    path: envelope.path,
+                },
+            },
+            "write_file" => PlannerAction::Workspace {
+                action: WorkspaceAction::WriteFile {
+                    path: envelope.path.unwrap_or_default(),
+                    content: envelope.content.unwrap_or_default(),
+                },
+            },
+            "replace_in_file" => PlannerAction::Workspace {
+                action: WorkspaceAction::ReplaceInFile {
+                    path: envelope.path.unwrap_or_default(),
+                    old: envelope.old.unwrap_or_default(),
+                    new: envelope.new.unwrap_or_default(),
+                    replace_all: envelope.replace_all.unwrap_or(false),
+                },
+            },
+            "apply_patch" => PlannerAction::Workspace {
+                action: WorkspaceAction::ApplyPatch {
+                    patch: envelope.patch.unwrap_or_default(),
+                },
+            },
+            "refine" => PlannerAction::Refine {
+                query: envelope.query.unwrap_or_default(),
+                mode: envelope.mode.unwrap_or(RetrievalMode::Graph),
+                strategy: envelope.strategy.unwrap_or_default(),
+                rationale: (!rationale.is_empty()).then_some(rationale.clone()),
+            },
+            "branch" => PlannerAction::Branch {
+                branches: envelope.branches.unwrap_or_default(),
+                rationale: (!rationale.is_empty()).then_some(rationale.clone()),
+            },
             other => PlannerAction::Stop {
                 reason: format!("unknown action: {other}"),
             },
         };
         Ok(RecursivePlannerDecision { action, rationale })
+    }
+
+    fn parse_initial_action_decision(&self, response: &str) -> Result<InitialActionDecision> {
+        let json = extract_json(response).unwrap_or(response);
+        let envelope: PlannerEnvelope = serde_json::from_str(json)
+            .map_err(|e| anyhow!("failed to parse planner action: {e}\nresponse: {response}"))?;
+        let decision = self.parse_planner_action(response)?;
+        Ok(InitialActionDecision {
+            action: match decision.action {
+                PlannerAction::Stop { reason } => InitialAction::Stop { reason },
+                PlannerAction::Workspace { action } => InitialAction::Workspace { action },
+                PlannerAction::Refine {
+                    query,
+                    mode,
+                    strategy,
+                    rationale,
+                } => InitialAction::Refine {
+                    query,
+                    mode,
+                    strategy,
+                    rationale,
+                },
+                PlannerAction::Branch {
+                    branches,
+                    rationale,
+                } => InitialAction::Branch {
+                    branches,
+                    rationale,
+                },
+            },
+            rationale: decision.rationale,
+            edit: initial_edit_instruction_from_http_envelope(&envelope)?,
+        })
+    }
+
+    fn inception_edit_model_id(&self) -> Option<&'static str> {
+        if self.provider_name != "inception" {
+            return None;
+        }
+
+        match self.model_id.as_str() {
+            "mercury-2" => Some("mercury-edit"),
+            "mercury-edit" => Some("mercury-edit"),
+            "mercury-coder" => Some("mercury-coder"),
+            _ => None,
+        }
+    }
+
+    fn send_inception_apply_edit_blocking(
+        &self,
+        edit_model_id: &str,
+        path: &str,
+        original_code: &str,
+        update_snippet: &str,
+    ) -> Result<String> {
+        let rt = tokio::runtime::Handle::try_current()
+            .map_err(|_| anyhow!("no tokio runtime for HTTP provider"))?;
+        tokio::task::block_in_place(|| {
+            rt.block_on(self.send_inception_apply_edit_async(
+                edit_model_id,
+                path,
+                original_code,
+                update_snippet,
+            ))
+        })
+    }
+
+    async fn send_inception_apply_edit_async(
+        &self,
+        edit_model_id: &str,
+        path: &str,
+        original_code: &str,
+        update_snippet: &str,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/v1/apply/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let body = json!({
+            "model": edit_model_id,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": build_inception_apply_edit_prompt(path, original_code, update_snippet),
+                }
+            ],
+            "max_tokens": 4096,
+        });
+
+        let text = send_with_retry("Inception", || {
+            self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+        })
+        .await?;
+
+        let parsed: OpenAiResponse = serde_json::from_str(&text)?;
+        let content = parsed
+            .choices
+            .first()
+            .and_then(|choice| choice.message.content.clone())
+            .ok_or_else(|| anyhow!("empty Inception apply-edit response"))?;
+
+        extract_first_code_block(&content)
+            .or_else(|| {
+                let trimmed = content.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+            .ok_or_else(|| anyhow!("Inception apply-edit response did not contain edited code"))
+    }
+
+    fn try_execute_inception_apply_patch(
+        &self,
+        patch: &str,
+    ) -> Result<Option<WorkspaceActionResult>> {
+        let edit_model_id = match self.inception_edit_model_id() {
+            Some(model_id) => model_id,
+            None => return Ok(None),
+        };
+        let request = match parse_single_file_patch_for_inception_apply_edit(patch) {
+            Some(request) => request,
+            None => return Ok(None),
+        };
+
+        let full_path = self.workspace_root.join(&request.path);
+        let original_code = std::fs::read_to_string(&full_path)?;
+        let updated_code = self.send_inception_apply_edit_blocking(
+            edit_model_id,
+            &request.path,
+            &original_code,
+            &request.update_snippet,
+        )?;
+        std::fs::write(&full_path, updated_code)?;
+
+        Ok(Some(WorkspaceActionResult {
+            name: "apply_patch".to_string(),
+            summary: format!(
+                "applied patch to {} via {} on /v1/apply/completions",
+                request.path, edit_model_id
+            ),
+        }))
     }
 
     fn execute_local_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
@@ -900,6 +1102,9 @@ Rules:
                 })
             }
             WorkspaceAction::ApplyPatch { patch } => {
+                if let Some(result) = self.try_execute_inception_apply_patch(patch)? {
+                    return Ok(result);
+                }
                 let mut child = std::process::Command::new("git")
                     .args(["apply", "--whitespace=nowarn", "-"])
                     .current_dir(&self.workspace_root)
@@ -1073,7 +1278,12 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
             .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
 
-        if is_blank_model_reply(&response) || self.engine.parse_planner_action(&response).is_err() {
+        if is_blank_model_reply(&response)
+            || self
+                .engine
+                .parse_initial_action_decision(&response)
+                .is_err()
+        {
             event_sink.emit(TurnEvent::Fallback {
                 stage: "initial-action-retry".to_string(),
                 reason: "missing or invalid initial action response; asking the planner to restate the action inside the harness state space".to_string(),
@@ -1089,7 +1299,12 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 .await?;
         }
 
-        if is_blank_model_reply(&response) || self.engine.parse_planner_action(&response).is_err() {
+        if is_blank_model_reply(&response)
+            || self
+                .engine
+                .parse_initial_action_decision(&response)
+                .is_err()
+        {
             event_sink.emit(TurnEvent::Fallback {
                 stage: "initial-action-redecision".to_string(),
                 reason: "asking the planner for one final constrained initial action inside the harness state space".to_string(),
@@ -1105,27 +1320,18 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 .await?;
         }
 
-        match self.engine.parse_planner_action(&response) {
+        match self.engine.parse_initial_action_decision(&response) {
             Ok(decision) => {
                 let rendered = json!({
                     "action": decision.action.summary(),
                     "rationale": decision.rationale,
+                    "edit": if decision.edit.known_edit { "yes" } else { "no" },
+                    "candidate_files": decision.edit.candidate_files,
                 })
                 .to_string();
                 self.engine
                     .record_rendered_response(&capture, &rendered, raw_response_artifact_id);
-                let action = match &decision.action {
-                    PlannerAction::Stop { .. } => InitialAction::Answer,
-                    PlannerAction::Workspace { action } => InitialAction::Workspace {
-                        action: action.clone(),
-                    },
-                    _ => InitialAction::Answer,
-                };
-                Ok(InitialActionDecision {
-                    action,
-                    rationale: decision.rationale,
-                    edit: InitialEditInstruction::default(),
-                })
+                Ok(decision)
             }
             Err(_) => {
                 event_sink.emit(TurnEvent::Fallback {
@@ -1424,15 +1630,33 @@ struct PlannerEnvelope {
     #[serde(default)]
     query: Option<String>,
     #[serde(default)]
+    mode: Option<RetrievalMode>,
+    #[serde(default)]
     path: Option<String>,
     #[serde(default)]
     command: Option<String>,
     #[serde(default)]
     pattern: Option<String>,
     #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    old: Option<String>,
+    #[serde(default)]
+    new: Option<String>,
+    #[serde(default)]
+    replace_all: Option<bool>,
+    #[serde(default)]
+    patch: Option<String>,
+    #[serde(default)]
+    branches: Option<Vec<String>>,
+    #[serde(default)]
     intent: Option<String>,
     #[serde(default)]
     strategy: Option<RetrievalStrategy>,
+    #[serde(default)]
+    edit: Option<String>,
+    #[serde(default)]
+    candidate_files: Vec<String>,
 }
 
 fn planner_action_json_schema() -> Value {
@@ -1442,7 +1666,21 @@ fn planner_action_json_schema() -> Value {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["answer", "search", "list_files", "read", "inspect", "shell", "stop"],
+                "enum": [
+                    "answer",
+                    "search",
+                    "list_files",
+                    "read",
+                    "inspect",
+                    "shell",
+                    "diff",
+                    "write_file",
+                    "replace_in_file",
+                    "apply_patch",
+                    "refine",
+                    "branch",
+                    "stop"
+                ],
                 "description": "The next planner action."
             },
             "rationale": {
@@ -1477,11 +1715,46 @@ fn planner_action_json_schema() -> Value {
             },
             "path": {
                 "type": "string",
-                "description": "Required when `action` is `read`."
+                "description": "Required when `action` targets a specific file."
             },
             "command": {
                 "type": "string",
                 "description": "Required when `action` is `inspect` or `shell`."
+            },
+            "content": {
+                "type": "string",
+                "description": "Required when `action` is `write_file`."
+            },
+            "old": {
+                "type": "string",
+                "description": "Required when `action` is `replace_in_file`."
+            },
+            "new": {
+                "type": "string",
+                "description": "Required when `action` is `replace_in_file`."
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Optional when `action` is `replace_in_file`."
+            },
+            "patch": {
+                "type": "string",
+                "description": "Required when `action` is `apply_patch`."
+            },
+            "branches": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Required when `action` is `branch`."
+            },
+            "edit": {
+                "type": "string",
+                "enum": ["yes", "no"],
+                "description": "Optional known-edit routing hint for initial actions."
+            },
+            "candidate_files": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Optional likely edit targets for initial actions."
             }
         },
         "required": ["action", "rationale"],
@@ -1499,12 +1772,36 @@ fn planner_action_json_schema() -> Value {
                 "then": { "required": ["path"] }
             },
             {
+                "if": { "properties": { "action": { "const": "diff" } }, "required": ["action"] },
+                "then": {}
+            },
+            {
                 "if": { "properties": { "action": { "const": "inspect" } }, "required": ["action"] },
                 "then": { "required": ["command"] }
             },
             {
                 "if": { "properties": { "action": { "const": "shell" } }, "required": ["action"] },
                 "then": { "required": ["command"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "write_file" } }, "required": ["action"] },
+                "then": { "required": ["path", "content"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "replace_in_file" } }, "required": ["action"] },
+                "then": { "required": ["path", "old", "new"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "apply_patch" } }, "required": ["action"] },
+                "then": { "required": ["patch"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "refine" } }, "required": ["action"] },
+                "then": { "required": ["query"] }
+            },
+            {
+                "if": { "properties": { "action": { "const": "branch" } }, "required": ["action"] },
+                "then": { "required": ["branches"] }
             },
             {
                 "if": { "properties": { "action": { "const": "stop" } }, "required": ["action"] },
@@ -1528,6 +1825,7 @@ fn build_http_initial_action_prompt(request: &PlannerRequest) -> String {
     format!(
         "User prompt: {}\n\n{}\nSelect your first action.\n\
 If the user is asking to debug a repository failure like CI, build, test, workflow, or lint breakage, do not answer directly before at least one local workspace action unless the interpretation context already contains the exact failure evidence.\n\
+When the user is asking for a code or file change, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.\n\
 Respond with JSON only.",
         request.user_prompt,
         build_http_planner_runtime_context(request)
@@ -1542,6 +1840,7 @@ Return ONLY one valid JSON initial action.\n\
 Do not answer the user directly in prose.\n\
 The first key must be `action`.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
+If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
 \n\
 User prompt: {}",
         build_http_planner_runtime_context(request),
@@ -1561,6 +1860,7 @@ Return ONLY one valid JSON object.\n\
 The first key must be `action`.\n\
 Do not ask the user for logs or repository state that the harness can inspect locally.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
+If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
@@ -1595,6 +1895,7 @@ fn build_http_planner_action_prompt(request: &PlannerRequest) -> String {
     user.push_str(
         "\nSelect your next action.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
+Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
 Respond with JSON only.",
     );
     user
@@ -1672,6 +1973,15 @@ fn infer_planner_action_name(envelope: &PlannerEnvelope) -> Option<String> {
             "shell".to_string()
         });
     }
+    if envelope.patch.is_some() {
+        return Some("apply_patch".to_string());
+    }
+    if envelope.content.is_some() && envelope.path.is_some() {
+        return Some("write_file".to_string());
+    }
+    if envelope.old.is_some() && envelope.new.is_some() && envelope.path.is_some() {
+        return Some("replace_in_file".to_string());
+    }
     if envelope.path.is_some() {
         return Some("read".to_string());
     }
@@ -1680,6 +1990,9 @@ fn infer_planner_action_name(envelope: &PlannerEnvelope) -> Option<String> {
     }
     if envelope.query.is_some() {
         return Some("search".to_string());
+    }
+    if envelope.branches.is_some() {
+        return Some("branch".to_string());
     }
     if envelope.reason.is_some() {
         return Some("stop".to_string());
@@ -1716,6 +2029,162 @@ fn extract_json(text: &str) -> Option<&str> {
         }
     }
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InceptionApplyEditRequest {
+    path: String,
+    update_snippet: String,
+}
+
+fn initial_edit_instruction_from_http_envelope(
+    envelope: &PlannerEnvelope,
+) -> Result<InitialEditInstruction> {
+    let known_edit = envelope
+        .edit
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| match value {
+            "yes" | "true" => Ok(true),
+            "no" | "false" => Ok(false),
+            other => bail!("edit must be `yes` or `no`, got `{other}`"),
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let candidate_files = envelope
+        .candidate_files
+        .iter()
+        .map(|path| path.trim().replace('\\', "/"))
+        .filter(|path| !path.is_empty())
+        .fold(Vec::new(), |mut deduped, path| {
+            if !deduped.contains(&path) {
+                deduped.push(path);
+            }
+            deduped
+        })
+        .into_iter()
+        .take(3)
+        .collect::<Vec<_>>();
+    if known_edit && candidate_files.is_empty() {
+        bail!("candidate_files must contain at least one file when edit is `yes`");
+    }
+
+    Ok(InitialEditInstruction {
+        known_edit,
+        candidate_files,
+    })
+}
+
+fn parse_single_file_patch_for_inception_apply_edit(
+    patch: &str,
+) -> Option<InceptionApplyEditRequest> {
+    let mut path: Option<String> = None;
+    let mut hunks: Vec<Vec<String>> = Vec::new();
+    let mut current_hunk: Vec<String> = Vec::new();
+    let mut in_hunk = false;
+
+    for line in patch.lines() {
+        if let Some(candidate) = line.strip_prefix("+++ ") {
+            let normalized = normalize_patch_path(candidate)?;
+            if let Some(existing) = &path {
+                if existing != &normalized {
+                    return None;
+                }
+            } else {
+                path = Some(normalized);
+            }
+            continue;
+        }
+
+        if line.starts_with("@@") {
+            if !current_hunk.is_empty() {
+                hunks.push(std::mem::take(&mut current_hunk));
+            }
+            in_hunk = true;
+            continue;
+        }
+
+        if !in_hunk {
+            continue;
+        }
+
+        if let Some(content) = line.strip_prefix('+') {
+            current_hunk.push(content.to_string());
+            continue;
+        }
+        if let Some(content) = line.strip_prefix(' ') {
+            current_hunk.push(content.to_string());
+            continue;
+        }
+        if line.starts_with('-') || line.starts_with('\\') {
+            continue;
+        }
+    }
+
+    if !current_hunk.is_empty() {
+        hunks.push(current_hunk);
+    }
+
+    let path = path?;
+    let rendered_hunks = hunks
+        .into_iter()
+        .map(|hunk| hunk.join("\n"))
+        .map(|hunk| hunk.trim_matches('\n').to_string())
+        .filter(|hunk| !hunk.trim().is_empty())
+        .collect::<Vec<_>>();
+    if rendered_hunks.is_empty() {
+        return None;
+    }
+
+    Some(InceptionApplyEditRequest {
+        path,
+        update_snippet: render_inception_update_snippet(&rendered_hunks),
+    })
+}
+
+fn normalize_patch_path(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let trimmed = trimmed
+        .strip_prefix("a/")
+        .or_else(|| trimmed.strip_prefix("b/"))
+        .unwrap_or(trimmed)
+        .trim();
+    (!trimmed.is_empty() && trimmed != "/dev/null").then(|| trimmed.to_string())
+}
+
+fn render_inception_update_snippet(hunks: &[String]) -> String {
+    let mut rendered = String::new();
+    for hunk in hunks {
+        rendered.push_str("// ... existing code ...\n");
+        rendered.push_str(hunk.trim_end_matches('\n'));
+        rendered.push('\n');
+    }
+    rendered.push_str("// ... existing code ...");
+    rendered
+}
+
+fn build_inception_apply_edit_prompt(
+    path: &str,
+    original_code: &str,
+    update_snippet: &str,
+) -> String {
+    format!(
+        "<|original_code|>\n{original_code}<|/original_code|>\n\n<|update_snippet|>\n{update_snippet}\n<|/update_snippet|>\n\n# Target file\n{path}\n"
+    )
+}
+
+fn extract_first_code_block(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("```") {
+        return None;
+    }
+
+    let after_fence = &trimmed[3..];
+    let content_start = after_fence.find('\n')?;
+    let content = &after_fence[content_start + 1..];
+    let end = content.rfind("```")?;
+    Some(content[..end].trim_end_matches('\n').to_string() + "\n")
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -1950,16 +2419,19 @@ mod tests {
         workspace: &Path,
         base_url: String,
         api_key: String,
+        provider: crate::infrastructure::providers::ModelProvider,
         format: ApiFormat,
     ) -> MechSuitService {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
 
         let synth_base_url = base_url.clone();
         let synth_api_key = api_key.clone();
+        let synth_provider_name = provider.name().to_string();
         let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
+                    synth_provider_name.clone(),
                     lane.model_id.clone(),
                     synth_api_key.clone(),
                     synth_base_url.clone(),
@@ -1971,10 +2443,12 @@ mod tests {
 
         let planner_base_url = base_url;
         let planner_api_key = api_key;
+        let planner_provider_name = provider.name().to_string();
         let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
+                    planner_provider_name.clone(),
                     lane.model_id.clone(),
                     planner_api_key.clone(),
                     planner_base_url.clone(),
@@ -2002,6 +2476,7 @@ mod tests {
         workspace: &Path,
         base_url: String,
         api_key: String,
+        provider: crate::infrastructure::providers::ModelProvider,
         format: ApiFormat,
         recorder: Arc<dyn crate::domain::ports::TraceRecorder>,
     ) -> MechSuitService {
@@ -2009,10 +2484,12 @@ mod tests {
 
         let synth_base_url = base_url.clone();
         let synth_api_key = api_key.clone();
+        let synth_provider_name = provider.name().to_string();
         let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
+                    synth_provider_name.clone(),
                     lane.model_id.clone(),
                     synth_api_key.clone(),
                     synth_base_url.clone(),
@@ -2024,10 +2501,12 @@ mod tests {
 
         let planner_base_url = base_url;
         let planner_api_key = api_key;
+        let planner_provider_name = provider.name().to_string();
         let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
+                    planner_provider_name.clone(),
                     lane.model_id.clone(),
                     planner_api_key.clone(),
                     planner_base_url.clone(),
@@ -2081,6 +2560,7 @@ mod tests {
             workspace.path(),
             server.base_url.clone(),
             "test-key".to_string(),
+            provider,
             format,
         );
         let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
@@ -2286,6 +2766,7 @@ mod tests {
             workspace.path(),
             server.base_url.clone(),
             "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Openai,
             ApiFormat::OpenAi,
             recorder.clone(),
         );
@@ -2384,6 +2865,7 @@ mod tests {
             workspace.path(),
             server.base_url.clone(),
             "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Inception,
             ApiFormat::OpenAi,
             recorder.clone(),
         );
@@ -2467,6 +2949,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
             workspace.path(),
+            "inception",
             "mercury-2",
             "test-key",
             "https://api.inceptionlabs.ai/v1/chat/completions",
@@ -2494,10 +2977,43 @@ mod tests {
     }
 
     #[test]
+    fn parse_planner_action_supports_apply_patch_actions() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_planner_action(
+                r#"{"action":"apply_patch","patch":"*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-fn old() {}\n+fn new() {}\n*** End Patch\n","rationale":"apply the requested code change"}"#,
+            )
+            .expect("planner decision");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::ApplyPatch {
+                        patch: "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-fn old() {}\n+fn new() {}\n*** End Patch\n".to_string(),
+                    },
+                },
+                rationale: "apply the requested code change".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn planner_system_prompt_demands_complete_json_action_envelopes() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
             workspace.path(),
+            "inception",
             "mercury-2",
             "test-key",
             "https://api.inceptionlabs.ai",
@@ -2535,6 +3051,7 @@ mod tests {
         .await;
         let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
             workspace.path(),
+            "openai",
             "mercury-2",
             "test-key",
             server.base_url.clone(),
@@ -2590,6 +3107,7 @@ mod tests {
         .await;
         let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
             workspace.path(),
+            "openai",
             "mercury-2",
             "test-key",
             server.base_url.clone(),
@@ -2627,6 +3145,72 @@ mod tests {
                 .expect("retry prompt")
                 .contains("Your last planner reply was empty or invalid.")
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn inception_apply_patch_actions_use_the_native_edit_endpoint() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("sample.rs"),
+            "fn greet() {\n    println!(\"hello\");\n}\n",
+        )
+        .expect("write sample file");
+
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: provider_response(
+                ApiFormat::OpenAi,
+                "```rust\nfn greet() {\n    println!(\"hi\");\n}\n```",
+            ),
+        }])
+        .await;
+
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let result = adapter
+            .execute_workspace_action(&WorkspaceAction::ApplyPatch {
+                patch: concat!(
+                    "--- a/sample.rs\n",
+                    "+++ b/sample.rs\n",
+                    "@@ -1,3 +1,3 @@\n",
+                    " fn greet() {\n",
+                    "-    println!(\"hello\");\n",
+                    "+    println!(\"hi\");\n",
+                    " }\n",
+                )
+                .to_string(),
+            })
+            .expect("apply patch");
+
+        assert_eq!(result.name, "apply_patch");
+        assert!(
+            result.summary.contains("mercury-edit"),
+            "summary should mention the native edit model: {}",
+            result.summary
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("sample.rs")).expect("read sample file"),
+            "fn greet() {\n    println!(\"hi\");\n}\n"
+        );
+
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].uri, "/v1/apply/completions");
+        assert_eq!(requests[0].body["model"].as_str(), Some("mercury-edit"));
+        let prompt = requests[0].body["messages"][0]["content"]
+            .as_str()
+            .expect("native edit prompt");
+        assert!(prompt.contains("<|original_code|>"));
+        assert!(prompt.contains("<|update_snippet|>"));
+        assert!(prompt.contains("println!(\"hi\")"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2862,6 +3446,7 @@ mod tests {
             workspace.path(),
             server.base_url.clone(),
             "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Openai,
             ApiFormat::OpenAi,
         );
         let runtime_lanes = RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)

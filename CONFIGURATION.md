@@ -239,8 +239,10 @@ For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 For Inception, the supported core model path is `mercury-2`. Authenticate with
 `/login inception`, then select it with `/model synthesizer inception mercury-2`
 or `/model planner inception mercury-2`. That chat-completions compatibility
-path is usable today without provider-native streaming/diffusion views or
-edit-native endpoints.
+path is usable today without provider-native streaming/diffusion views. For
+single-file `apply_patch` workspace actions on an Inception-backed lane,
+Paddles now uses the provider-native `mercury-edit` companion endpoint behind
+the scenes.
 
 ### Final Answer Render Capability
 
@@ -261,11 +263,12 @@ raw.
 
 ### Inception Capability Boundary
 
-The first supported Inception slice is intentionally narrow:
+The supported Inception boundary is now:
 
-- Core compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
-- Optional native capabilities: provider-specific streaming/diffusion behavior and edit-native endpoints remain follow-on slices.
-- Operator expectation: Inception is usable today for planner or synthesizer lanes without waiting for those optional native capabilities.
+- Core chat compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
+- Native edit companion: single-file `apply_patch` mutations on an Inception-backed lane use `v1/apply/completions` with the `mercury-edit` companion model.
+- Optional native capabilities: provider-specific streaming/diffusion behavior remains a follow-on slice.
+- Operator expectation: Inception is usable today for planner or synthesizer lanes, and patch-style mutation actions can use the native edit companion without requiring a separate visible model lane.
 
 ### Experimental Context-1 Boundary
 

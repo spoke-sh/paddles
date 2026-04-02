@@ -204,7 +204,8 @@ A few areas are still maturing:
 - Successful `/model` changes persist to the machine-managed runtime state file at `~/.local/state/paddles/runtime-lanes.toml` so they survive restarts without rewriting authored `paddles.toml`.
 - Workspace `./paddles.toml` remains authoritative over that runtime state file, so project-local lane pinning still wins when both are present.
 - Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model synthesizer inception mercury-2` or `/model planner inception mercury-2`.
-- `mercury-2` is the supported Inception compatibility slice today. Provider-native streaming/diffusion views and edit-native endpoints are optional follow-on capabilities, not prerequisites for using Inception in `paddles`.
+- `mercury-2` remains the supported Inception planner/synthesizer chat model. When an Inception-backed turn executes `apply_patch`, paddles now uses the provider-native `mercury-edit` companion endpoint behind the scenes for single-file patch application.
+- Provider-native streaming/diffusion views remain optional follow-on capabilities; they are still not required to use Inception in `paddles`.
 - `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in planner or synthesizer variants.
 - `sift-direct` is the default local gatherer/search backend used by planner `search` and `refine` actions.
 - `paddles` owns recursive planning. `sift` executes direct retrieval only.
