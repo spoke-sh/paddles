@@ -782,6 +782,8 @@ impl HttpProviderAdapter {
 
 - You are the remote planner model inside Paddles.
 - Paddles executes your selected action locally inside the operator's repository workspace.
+- Treat user-reported failures or broken states as working hypotheses until local evidence confirms them.
+- As evidence accumulates, revise the premise explicitly when commands weaken or contradict it.
 - Do not ask the user for logs, file contents, or repository state that the harness can inspect locally.
 
 ## Action Schema
@@ -1253,6 +1255,10 @@ impl SynthesizerEngine for HttpProviderAdapter {
             && grounded_response_defers_executed_command_work(&response, evidence)
         {
             response = grounded_command_evidence_fallback(evidence);
+        } else if let Some(evidence) = gathered_evidence
+            && grounded_response_overstates_unverified_failure(&response, prompt, evidence)
+        {
+            response = grounded_unverified_failure_fallback(evidence);
         }
         let citations = gathered_evidence.map(citation_sources).unwrap_or_default();
         response = ensure_citation_section(&response, &citations);
@@ -1914,6 +1920,8 @@ fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
         "Runtime context:\n\
 - You are the remote planner model inside Paddles.\n\
 - Paddles executes the action you choose locally in the workspace at `{}`.\n\
+- Treat user-reported failures or broken states as working hypotheses until local evidence confirms them.\n\
+- As evidence accumulates, revise the premise explicitly when commands weaken or contradict it.\n\
 - Use local harness capabilities before asking the user for logs or repository state that the workspace can reveal.\n",
         request.workspace_root.display()
     )
@@ -2365,6 +2373,66 @@ fn grounded_response_defers_executed_command_work(reply: &str, evidence: &Eviden
         || normalized.contains("could you please confirm")
 }
 
+fn prompt_asserts_failure_premise(prompt: &str) -> bool {
+    let prompt_lower = prompt.to_ascii_lowercase();
+    [
+        "failing",
+        "failure",
+        "broken",
+        "regression",
+        "panic",
+        "crash",
+        "workflow",
+        "pipeline",
+        "ci ",
+        " ci",
+        "build failing",
+        "tests failing",
+        "test failing",
+        "lint failing",
+    ]
+    .iter()
+    .any(|signal| prompt_lower.contains(signal))
+}
+
+fn reply_asserts_failure_as_fact(reply: &str) -> bool {
+    let normalized = reply.to_ascii_lowercase();
+    normalized.contains(" is failing")
+        || normalized.contains(" are failing")
+        || normalized.contains("currently failing")
+        || normalized.contains("pipeline is failing")
+        || normalized.contains("workflow is failing")
+        || normalized.contains("build is failing")
+        || normalized.contains("test suite is failing")
+        || normalized.contains("tests are failing")
+}
+
+fn evidence_confirms_failure_premise(evidence: &EvidenceBundle) -> bool {
+    evidence.items.iter().any(|item| {
+        let snippet = item.snippet.to_ascii_lowercase();
+        snippet.contains("completed\tfailure")
+            || snippet.contains("\"conclusion\":\"failure\"")
+            || snippet.contains("\"status\":\"failure\"")
+            || snippet.contains("test result: failed")
+            || snippet.contains("build failed")
+            || snippet.contains("error[")
+            || (snippet.contains("thread '") && snippet.contains("panicked"))
+            || snippet.contains("failing test")
+            || snippet.contains("failed tests:")
+            || snippet.contains("failures:")
+    })
+}
+
+fn grounded_response_overstates_unverified_failure(
+    reply: &str,
+    prompt: &str,
+    evidence: &EvidenceBundle,
+) -> bool {
+    prompt_asserts_failure_premise(prompt)
+        && reply_asserts_failure_as_fact(reply)
+        && !evidence_confirms_failure_premise(evidence)
+}
+
 fn grounded_command_evidence_fallback(evidence: &EvidenceBundle) -> String {
     let mut lines = vec![
         "I already ran local inspection commands in the harness. Here is what they showed:"
@@ -2397,6 +2465,23 @@ fn grounded_command_evidence_fallback(evidence: &EvidenceBundle) -> String {
                 truncate(item.snippet.trim(), 180)
             ));
         }
+    }
+
+    lines.join("\n")
+}
+
+fn grounded_unverified_failure_fallback(evidence: &EvidenceBundle) -> String {
+    let mut lines = vec![
+        "The reported failure is not yet confirmed by the gathered evidence. Here is what the harness actually observed:".to_string(),
+        evidence.summary.clone(),
+    ];
+
+    for item in evidence.items.iter().take(4) {
+        lines.push(format!(
+            "- {}: {}",
+            item.source,
+            truncate(item.snippet.trim(), 180)
+        ));
     }
 
     lines.join("\n")
@@ -3300,6 +3385,7 @@ mod tests {
         assert!(prompt.contains("Do not wrap the JSON in markdown fences"));
         assert!(prompt.contains("Do not emit partial, truncated, or streaming JSON"));
         assert!(prompt.contains("Paddles executes your selected action locally"));
+        assert!(prompt.contains("working hypotheses until local evidence confirms them"));
         assert!(prompt.contains("select_planner_action"));
         assert!(prompt.contains("Do not ask the user for logs"));
     }
@@ -3869,6 +3955,64 @@ mod tests {
         assert!(!response.contains("confirm that the repository is cloned"));
         assert!(response.contains("I already ran local inspection commands in the harness."));
         assert!(response.contains("command: gh run list --limit 20 --status failure"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn grounded_http_responses_fall_back_when_they_assert_unverified_failure_claims() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: final_answer_response(
+                ApiFormat::OpenAi,
+                &structured_answer_json(
+                    "The CI pipeline is currently failing after recent changes to the HTTP provider and rendering modules.",
+                ),
+            ),
+        }])
+        .await;
+
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let evidence = EvidenceBundle::new(
+            "Recent harness inspection has not yet confirmed the reported CI failure.",
+            vec![
+                EvidenceItem {
+                    source: "command: gh run list --limit 10".to_string(),
+                    snippet: "completed\tsuccess\tPersist runtime lane preferences over config\tCI\tmain\tpush\t23910509164".to_string(),
+                    rationale: "recent successful CI run".to_string(),
+                    rank: 0,
+                },
+                EvidenceItem {
+                    source: "command: gh run list --limit 10 --json id,status,conclusion,headBranch,workflow".to_string(),
+                    snippet: "Unknown JSON field: \"id\"\nAvailable fields:\n  databaseId\n  displayTitle".to_string(),
+                    rationale: "invalid gh query, not CI failure evidence".to_string(),
+                    rank: 1,
+                },
+            ],
+        );
+
+        let response = adapter
+            .respond_for_turn(
+                "CI is failing. Can you debug it on this machine?",
+                TurnIntent::Planned,
+                Some(&evidence),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .expect("grounded response");
+
+        assert!(!response.contains("CI pipeline is currently failing"));
+        assert!(
+            response
+                .contains("The reported failure is not yet confirmed by the gathered evidence.")
+        );
+        assert!(response.contains("command: gh run list --limit 10"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

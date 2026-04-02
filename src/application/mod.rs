@@ -3201,6 +3201,17 @@ fn enrich_interpretation_with_local_harness_profile(
         context.summary = format!("{}\n\n{}", context.summary.trim(), capability_summary);
     }
 
+    if prompt_requires_verifiable_hypothesis(prompt)
+        && !context
+            .summary
+            .contains("Treat user-reported failures as working hypotheses")
+    {
+        context.summary = format!(
+            "{}\n\nTreat user-reported failures as working hypotheses. Start from the user's report, then verify it from first principles in the harness and revise the premise explicitly when evidence weakens or contradicts it.",
+            context.summary.trim()
+        );
+    }
+
     if capabilities.git {
         append_interpretation_tool_hint(
             &mut context,
@@ -3401,16 +3412,9 @@ fn prompt_mentions_github_or_ci(prompt: &str) -> bool {
     .any(|signal| prompt_lower.contains(signal))
 }
 
-fn prompt_requires_workspace_engagement(
-    prompt: &str,
-    interpretation: &InterpretationContext,
-) -> bool {
-    if mutation_turn_requires_execution_pressure(prompt, interpretation) {
-        return true;
-    }
-
+fn prompt_requires_verifiable_hypothesis(prompt: &str) -> bool {
     let prompt_lower = prompt.to_ascii_lowercase();
-    let diagnostic_signals = [
+    [
         "debug",
         "diagnos",
         "investigat",
@@ -3424,19 +3428,28 @@ fn prompt_requires_workspace_engagement(
         "regression",
         "panic",
         "crash",
-        "ci ",
         " ci",
+        "ci ",
         "workflow",
         "pipeline",
-        "lint failing",
         "build failing",
         "tests failing",
         "test failing",
-    ];
-    if diagnostic_signals
-        .iter()
-        .any(|signal| prompt_lower.contains(signal))
-    {
+        "lint failing",
+    ]
+    .iter()
+    .any(|signal| prompt_lower.contains(signal))
+}
+
+fn prompt_requires_workspace_engagement(
+    prompt: &str,
+    interpretation: &InterpretationContext,
+) -> bool {
+    if mutation_turn_requires_execution_pressure(prompt, interpretation) {
+        return true;
+    }
+
+    if prompt_requires_verifiable_hypothesis(prompt) {
         return true;
     }
 
@@ -5150,6 +5163,25 @@ mod tests {
                             )
                         })
                 })
+        );
+    }
+
+    #[test]
+    fn local_harness_enrichment_marks_diagnostic_claims_as_hypotheses() {
+        let context = super::enrich_interpretation_with_local_harness_profile(
+            "CI is failing can you debug it?",
+            InterpretationContext::default(),
+            &super::LocalHarnessCapabilities {
+                gh: true,
+                git: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            context
+                .summary
+                .contains("Treat user-reported failures as working hypotheses")
         );
     }
 

@@ -256,6 +256,8 @@ pub fn final_answer_contract_prompt(
     };
     let grounded_rule = if require_citations {
         "- The attached evidence came from actions Paddles already executed locally.\n\
+- Treat the user's stated repository failure or broken-state claim as a hypothesis unless attached evidence confirms it.\n\
+- If the evidence weakens or contradicts that premise, say so explicitly instead of repeating the original claim as fact.\n\
 - Report what those completed actions found.\n\
 - Do not say you will run tools or inspect the workspace later.\n\
 - Do not ask the user for logs, file contents, or repository state that the harness could already inspect.\n\
@@ -911,7 +913,21 @@ mod tests {
             prompt
                 .contains("Do not claim that tools produced no output when evidence is attached.")
         );
-        assert!(prompt.contains("Do not ask the user to confirm the environment when attached evidence already proves the command ran."));
+        assert!(prompt.contains(
+            "Do not ask the user to confirm the environment when attached evidence already proves the command ran."
+        ));
+    }
+
+    #[test]
+    fn grounded_contract_prompt_treats_user_failure_claims_as_hypotheses() {
+        let prompt = final_answer_contract_prompt(RenderCapability::OpenAiJsonSchema, true);
+
+        assert!(prompt.contains(
+            "Treat the user's stated repository failure or broken-state claim as a hypothesis unless attached evidence confirms it."
+        ));
+        assert!(prompt.contains(
+            "If the evidence weakens or contradicts that premise, say so explicitly instead of repeating the original claim as fact."
+        ));
     }
 
     #[test]
