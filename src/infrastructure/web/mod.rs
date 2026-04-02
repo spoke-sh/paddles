@@ -147,6 +147,8 @@ pub fn router(
 
     let app = Router::new()
         .route("/", get(index_page))
+        .route("/manifold", get(index_page))
+        .route("/transit", get(index_page))
         .route("/health", get(health))
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
@@ -609,13 +611,16 @@ mod tests {
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use axum::Json;
+    use axum::body::Body;
     use axum::extract::{Path, State};
+    use axum::http::{Request, StatusCode};
     use paddles_conversation::{
         ArtifactEnvelope, ConversationSession, TraceArtifactId, TraceCheckpointId, TurnTraceId,
     };
     use std::path::Path as FsPath;
     use std::sync::Arc;
     use tokio::sync::broadcast;
+    use tower::util::ServiceExt;
 
     #[derive(Default)]
     struct StaticRegistry;
@@ -1011,6 +1016,52 @@ mod tests {
         assert!(html.contains("scheduleForensicRefresh"));
         assert!(html.contains("await refreshForensics(refreshOptions)"));
         assert!(html.contains("refreshTraceGraph();"));
+    }
+
+    #[test]
+    fn web_html_exposes_manifold_route_shell_and_path_sync() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("id=\"manifold-view\""));
+        assert!(html.contains("id=\"manifold-shell\""));
+        assert!(html.contains("data-trace-view=\"manifold\""));
+        assert!(html.contains("window.location.pathname"));
+        assert!(html.contains("history.pushState"));
+        assert!(html.contains("renderManifoldShell"));
+    }
+
+    #[test]
+    fn manifold_route_html_uses_bounded_local_scrollers() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("html,\nbody {\n  height: 100%;\n  overflow: hidden;"));
+        assert!(html.contains(".manifold-shell"));
+        assert!(html.contains(
+            ".manifold-canvas {\n  flex: 1;\n  min-height: 0;\n  padding: 20px;\n  overflow: auto;"
+        ));
+        assert!(html.contains(".manifold-panel-list {\n  margin-top: 14px;\n  display: grid;\n  gap: 10px;\n  min-height: 0;\n  overflow: auto;"));
+    }
+
+    #[tokio::test]
+    async fn web_router_serves_dedicated_manifold_and_transit_routes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let (app, _observer) = super::router(service, recorder);
+
+        for route in ["/", "/manifold", "/transit"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(route)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK, "route {route}");
+        }
     }
 
     #[test]

@@ -27,12 +27,12 @@ started_at: 2026-04-02T11:15:46
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/6 stories complete
+**Progress:** 2/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Expose Steering Signal Manifold Replay And Live Projection](../../../../stories/VFesYkmXJ/README.md) | feat | done |
-| [Add A Dedicated Steering Signal Manifold Route To The Web UI](../../../../stories/VFesYl8XK/README.md) | feat | backlog |
+| [Add A Dedicated Steering Signal Manifold Route To The Web UI](../../../../stories/VFesYl8XK/README.md) | feat | done |
 | [Project Steering Signals Into Chambers And Conduits](../../../../stories/VFesYldXL/README.md) | feat | backlog |
 | [Render Time-Scrubbable Manifold Accumulation And Flow](../../../../stories/VFesYm0Yk/README.md) | feat | backlog |
 | [Stream Active-Turn Steering Signal Changes Into The Manifold View](../../../../stories/VFesYmKYc/README.md) | feat | backlog |

@@ -304,6 +304,9 @@ body {
   flex-direction: column;
   gap: 14px;
 }
+.manifold-view {
+  min-height: 0;
+}
 .forensic-empty {
   display: flex;
   align-items: center;
@@ -609,6 +612,134 @@ body {
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
   gap: 14px;
+}
+.manifold-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
+  gap: 14px;
+}
+.manifold-stage,
+.manifold-panel {
+  min-height: 0;
+  border-radius: 22px;
+  border: 1px solid rgba(90, 108, 121, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.76), rgba(241, 246, 249, 0.28)),
+    linear-gradient(160deg, rgba(229, 237, 242, 0.96), rgba(209, 219, 227, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -2px -2px 0 rgba(104, 121, 135, 0.08),
+    0 18px 28px rgba(102, 118, 132, 0.12);
+}
+.manifold-stage {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.manifold-stage-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(90, 108, 121, 0.14);
+}
+.manifold-stage-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #4d5e6b;
+}
+.manifold-stage-meta {
+  font-size: 11px;
+  color: #6c7c88;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.manifold-canvas {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 24% 22%, rgba(45, 144, 200, 0.16), transparent 20%),
+    radial-gradient(circle at 72% 74%, rgba(240, 138, 36, 0.12), transparent 20%),
+    linear-gradient(180deg, rgba(235, 242, 247, 0.76), rgba(212, 223, 232, 0.82));
+}
+.manifold-empty-state {
+  min-height: 320px;
+  height: 100%;
+  border-radius: 18px;
+  border: 1px dashed rgba(92, 109, 123, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.46), rgba(255,255,255,0.12)),
+    linear-gradient(155deg, rgba(222, 231, 237, 0.8), rgba(201, 213, 223, 0.9));
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.72);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: #32414d;
+}
+.manifold-empty-state strong {
+  font-size: 18px;
+  line-height: 1.3;
+}
+.manifold-empty-state p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #5c6d7a;
+}
+.manifold-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+.manifold-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.manifold-panel-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #50616d;
+}
+.manifold-panel-copy {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #566774;
+}
+.manifold-panel-copy strong {
+  color: #24323c;
+}
+.manifold-panel-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+.manifold-panel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #5f707d;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(88, 104, 119, 0.12);
+}
+.manifold-panel-row strong {
+  color: #23313b;
 }
 .forensic-nav,
 .forensic-records,
@@ -1280,6 +1411,7 @@ body {
   .trace-panel { width: 100%; min-width: 0; flex: 1 1 42vh; min-height: 0; }
   .forensic-overview,
   .forensic-shell,
+  .manifold-shell,
   .forensic-main {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1308,6 +1440,7 @@ body {
     </div>
     <div class="trace-tabs">
       <button class="trace-tab is-active" data-trace-view="inspector">Inspector</button>
+      <button class="trace-tab" data-trace-view="manifold">Manifold</button>
       <button class="trace-tab" data-trace-view="transit">Transit</button>
     </div>
   </div>
@@ -1337,6 +1470,21 @@ body {
       </div>
     </div>
   </div>
+  <div class="trace-view trace-view--manifold manifold-view" id="manifold-view">
+    <div class="manifold-shell" id="manifold-shell">
+      <section class="manifold-stage">
+        <div class="manifold-stage-head">
+          <div class="manifold-stage-title">Steering Signal Manifold</div>
+          <div class="manifold-stage-meta" id="manifold-stage-meta">Replay-backed route shell</div>
+        </div>
+        <div class="manifold-canvas" id="manifold-canvas"></div>
+      </section>
+      <aside class="manifold-side">
+        <section class="manifold-panel" id="manifold-timeline-panel"></section>
+        <section class="manifold-panel" id="manifold-source-panel"></section>
+      </aside>
+    </div>
+  </div>
   <div class="trace-view trace-view--transit" id="transit-view">
     <div id="trace-board" class="trace-board"></div>
     <div class="trace-empty" id="trace-empty">Submit a prompt to see the trace railroad.</div>
@@ -1351,6 +1499,7 @@ let forensicEventSource = null;
 let transcriptSignature = '';
 let latestTraceGraph = null;
 let latestForensics = null;
+let latestManifold = null;
 let selectedTurnId = null;
 let selectedRecordId = null;
 let selectedSelectionMode = 'record';
@@ -1425,7 +1574,14 @@ const FORCE_SOURCE_PALETTE = ['#2d90c8', '#17956c', '#f08a24', '#d65f4a', '#5376
 
 const TRACE_VIEW_LABELS = {
   inspector: 'Forensic Inspector',
+  manifold: 'Steering Signal Manifold',
   transit: 'Turn Steps'
+};
+
+const TRACE_VIEW_PATHS = {
+  inspector: '/',
+  manifold: '/manifold',
+  transit: '/transit'
 };
 
 const FORENSIC_KIND_LABELS = {
@@ -1519,17 +1675,55 @@ function wireStaticUi() {
   bindTracePan(document.getElementById('trace-board'));
 }
 
-function setTraceView(view) {
+function normalizedTracePath(pathname) {
+  const path = pathname || '/';
+  if (path.length > 1 && path.endsWith('/')) {
+    return path.slice(0, -1);
+  }
+  return path;
+}
+
+function traceViewFromPath(pathname) {
+  const path = normalizedTracePath(pathname);
+  if (path === '/manifold') {
+    return 'manifold';
+  }
+  if (path === '/transit') {
+    return 'transit';
+  }
+  return 'inspector';
+}
+
+function tracePathForView(view) {
+  return TRACE_VIEW_PATHS[view] || '/';
+}
+
+function setTraceView(view, { syncHistory = true } = {}) {
   activeTraceView = view;
   document.querySelectorAll('.trace-tab').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.traceView === view);
   });
   document.getElementById('forensic-view').classList.toggle('trace-view--active', view === 'inspector');
+  document.getElementById('manifold-view').classList.toggle('trace-view--active', view === 'manifold');
   document.getElementById('transit-view').classList.toggle('trace-view--active', view === 'transit');
   document.getElementById('trace-subhead').textContent = TRACE_VIEW_LABELS[view] || 'Transit Trace';
+  if (syncHistory) {
+    const nextPath = tracePathForView(view);
+    if (normalizedTracePath(window.location.pathname) !== nextPath) {
+      window.history.pushState({ traceView: view }, '', nextPath);
+    }
+  }
+  if (view === 'manifold') {
+    renderManifoldShell();
+    refreshManifold();
+  }
   if (view === 'transit' && latestTraceGraph) {
     renderTraceDAG(latestTraceGraph);
   }
+}
+
+function syncTraceViewFromLocation() {
+  setTraceView(traceViewFromPath(window.location.pathname), { syncHistory: false });
 }
 
 function setDetailMode(mode) {
@@ -1538,6 +1732,93 @@ function setDetailMode(mode) {
     button.classList.toggle('is-active', button.dataset.detailMode === mode);
   });
   renderForensicDetail();
+}
+
+function manifoldSignalLabel(signal) {
+  if (!signal) {
+    return 'Unknown signal';
+  }
+  return titleCase(signal.kind || 'signal');
+}
+
+function manifoldAnchorLabel(anchor) {
+  if (!anchor) {
+    return 'Conversation scope';
+  }
+  return (anchor.label && String(anchor.label).trim()) || titleCase(anchor.kind || 'anchor');
+}
+
+function renderManifoldShell() {
+  const stageMeta = document.getElementById('manifold-stage-meta');
+  const canvas = document.getElementById('manifold-canvas');
+  const timelinePanel = document.getElementById('manifold-timeline-panel');
+  const sourcePanel = document.getElementById('manifold-source-panel');
+  const turns = manifoldTurns();
+  const turn = currentManifoldTurn();
+  const frame = turn && turn.frames.length ? turn.frames[turn.frames.length - 1] : null;
+  const activeSignals = frame && Array.isArray(frame.active_signals) ? frame.active_signals : [];
+  const totalFrames = turns.reduce((sum, item) => sum + (Array.isArray(item.frames) ? item.frames.length : 0), 0);
+
+  if (!turns.length) {
+    stageMeta.textContent = 'Awaiting replay-backed manifold frames';
+    canvas.innerHTML =
+      '<div class="manifold-empty-state">' +
+        '<strong>Steering signal manifold route is armed.</strong>' +
+        '<p>This route keeps the systemic manifold separate from the precise forensic inspector. Once replay-backed steering snapshots arrive, the chamber canvas, timeline, and source panes will populate here.</p>' +
+      '</div>';
+    timelinePanel.innerHTML =
+      '<div class="manifold-panel-title">Timeline</div>' +
+      '<div class="manifold-panel-copy">Replay-backed turn frames will accumulate here without creating page-level overflow.</div>';
+    sourcePanel.innerHTML =
+      '<div class="manifold-panel-title">Sources</div>' +
+      '<div class="manifold-panel-copy">Active steering signal anchors and contributions will appear here after the first replay-backed manifold frame arrives.</div>';
+    return;
+  }
+
+  stageMeta.textContent =
+    (latestManifold.task_id || 'task') + ' · ' +
+    turns.length + ' turns · ' +
+    totalFrames + ' frames';
+
+  canvas.innerHTML =
+    '<div class="manifold-empty-state">' +
+      '<strong>Dedicated manifold route shell ready.</strong>' +
+      '<p>The manifold stage is reserved for the expressive chamber view. This shell already keeps the canvas primary while the side panes carry temporal and source context for the current replay selection.</p>' +
+      '<p><strong>Current turn:</strong> ' + escapeHtml(turn ? turn.turn_id : 'none') + '<br>' +
+      '<strong>Latest frame:</strong> ' + escapeHtml(frame ? String(frame.sequence) : 'none') + '<br>' +
+      '<strong>Active signals:</strong> ' + activeSignals.length + '</p>' +
+    '</div>';
+
+  timelinePanel.innerHTML =
+    '<div class="manifold-panel-title">Timeline</div>' +
+    '<div class="manifold-panel-copy">Replay-backed frames stay bounded to this pane so long conversations scroll locally instead of expanding the page.</div>' +
+    '<div class="manifold-panel-list">' +
+      turns.slice().reverse().map((turnItem) => {
+        const latestFrame = turnItem.frames && turnItem.frames.length ? turnItem.frames[turnItem.frames.length - 1] : null;
+        return (
+          '<div class="manifold-panel-row">' +
+            '<strong>' + escapeHtml(truncate(turnItem.turn_id, 28)) + '</strong>' +
+            '<span>' + escapeHtml(String((turnItem.frames || []).length)) + ' frames' +
+            (latestFrame ? ' · step ' + escapeHtml(String(latestFrame.sequence)) : '') +
+            '</span>' +
+          '</div>'
+        );
+      }).join('') +
+    '</div>';
+
+  sourcePanel.innerHTML =
+    '<div class="manifold-panel-title">Sources</div>' +
+    '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong></div>' +
+    '<div class="manifold-panel-list">' +
+      (activeSignals.length
+        ? activeSignals.map((signal) => (
+            '<div class="manifold-panel-row">' +
+              '<strong>' + escapeHtml(manifoldSignalLabel(signal)) + '</strong>' +
+              '<span>' + escapeHtml(String(signal.magnitude_percent)) + '% · ' + escapeHtml(signal.level || 'unknown') + '</span>' +
+            '</div>'
+          )).join('')
+        : '<div class="manifold-panel-copy">No active steering signals were present in the current frame.</div>') +
+    '</div>';
 }
 
 function clampTraceZoom(value) {
@@ -1720,6 +2001,7 @@ function scheduleForensicRefresh(options = {}) {
     pendingForensicRefresh = null;
     forensicRefreshTimer = null;
     await refreshForensics(refreshOptions);
+    await refreshManifold();
     refreshTraceGraph();
   }, 40);
 }
@@ -1739,6 +2021,7 @@ function connectSSE() {
   transcriptEventSource.addEventListener('transcript_update', async () => {
     await refreshConversationTranscript({ reset: true, only_if_changed: true });
     await refreshForensics({ preserveSelection: true });
+    await refreshManifold();
     refreshTraceGraph();
   });
 
@@ -1967,8 +2250,20 @@ function projectionTurns() {
   return latestForensics && Array.isArray(latestForensics.turns) ? latestForensics.turns : [];
 }
 
+function manifoldTurns() {
+  return latestManifold && Array.isArray(latestManifold.turns) ? latestManifold.turns : [];
+}
+
 function currentTurn() {
   const turns = projectionTurns();
+  if (!turns.length) {
+    return null;
+  }
+  return turns.find((turn) => turn.turn_id === selectedTurnId) || turns[turns.length - 1];
+}
+
+function currentManifoldTurn() {
+  const turns = manifoldTurns();
   if (!turns.length) {
     return null;
   }
@@ -3021,6 +3316,21 @@ async function refreshForensics({
   }
 }
 
+async function refreshManifold() {
+  try {
+    if (!sessionId) return false;
+    const res = await fetch('/sessions/' + sessionId + '/manifold');
+    if (!res.ok) return false;
+    latestManifold = await res.json();
+    if (activeTraceView === 'manifold') {
+      renderManifoldShell();
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 function renderConversationTranscript(transcript, { reset = false } = {}) {
   if (reset) {
     clearTranscriptMessages();
@@ -3070,6 +3380,7 @@ async function sendTurn() {
     await res.json();
     await refreshConversationTranscript({ reset: true, only_if_changed: true });
     await refreshForensics({ preserveSelection: true });
+    await refreshManifold();
     refreshTraceGraph();
   } catch (err) {
     addMessage('system', 'Error: ' + err.message);
@@ -3315,14 +3626,17 @@ function bindTraceDetailPlacement(board) {
 
 async function bootstrapWebUi() {
   wireStaticUi();
+  syncTraceViewFromLocation();
   await ensureSession();
   await refreshConversationTranscript({ reset: true });
   await refreshForensics({ preserveSelection: false });
+  await refreshManifold();
   connectSSE();
   refreshTraceGraph();
 }
 
 bootstrapWebUi();
+window.addEventListener('popstate', syncTraceViewFromLocation);
 window.addEventListener('resize', () => {
   if (latestTraceGraph && activeTraceView === 'transit') {
     renderTraceDAG(latestTraceGraph);

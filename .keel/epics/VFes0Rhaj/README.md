@@ -22,8 +22,8 @@ mission: VFes0RSam
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/6 stories done
+**Progress:** 0/1 voyages complete, 2/6 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Signal Manifold Route And Chamber Projection](voyages/VFes287sD/) | in-progress | 1/6 |
+| [Signal Manifold Route And Chamber Projection](voyages/VFes287sD/) | in-progress | 2/6 |
 <!-- END GENERATED -->
