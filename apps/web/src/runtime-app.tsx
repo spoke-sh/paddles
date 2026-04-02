@@ -22,6 +22,32 @@ function RouteFrame({
   );
 }
 
+const runtimeRoutes = [
+  {
+    path: '/',
+    navLabel: 'Chat',
+    testId: 'route-chat',
+    title: 'Conversation Route Shell',
+    summary:
+      'This React surface will absorb the transcript and operator controls while preserving the Rust session APIs.',
+  },
+  {
+    path: '/transit',
+    navLabel: 'Transit',
+    testId: 'route-transit',
+    title: 'Transit Route Shell',
+    summary: 'This React surface will absorb the turn-step map, zoom controls, and lineage filters.',
+  },
+  {
+    path: '/manifold',
+    navLabel: 'Manifold',
+    testId: 'route-manifold',
+    title: 'Manifold Route Shell',
+    summary:
+      'This React surface will absorb the steering-signal manifold and its route-linked forensic drilldown.',
+  },
+] as const;
+
 export function RuntimeShell() {
   return (
     <div className="app-shell">
@@ -31,43 +57,28 @@ export function RuntimeShell() {
           <h1>Turborepo Runtime Web App</h1>
         </div>
         <nav className="app-nav" aria-label="Primary">
-          <Link to="/">Chat</Link>
-          <Link to="/transit">Transit</Link>
-          <Link to="/manifold">Manifold</Link>
+          {runtimeRoutes.map((route) => (
+            <Link key={route.path} to={route.path}>
+              {route.navLabel}
+            </Link>
+          ))}
         </nav>
       </header>
       <main>
         <Routes>
-          <Route
-            path="/"
-            element={
-              <RouteFrame
-                testId="route-chat"
-                title="Conversation Route Shell"
-                summary="This React surface will absorb the transcript and operator controls while preserving the Rust session APIs."
-              />
-            }
-          />
-          <Route
-            path="/transit"
-            element={
-              <RouteFrame
-                testId="route-transit"
-                title="Transit Route Shell"
-                summary="This React surface will absorb the turn-step map, zoom controls, and lineage filters."
-              />
-            }
-          />
-          <Route
-            path="/manifold"
-            element={
-              <RouteFrame
-                testId="route-manifold"
-                title="Manifold Route Shell"
-                summary="This React surface will absorb the steering-signal manifold and its route-linked forensic drilldown."
-              />
-            }
-          />
+          {runtimeRoutes.map((route) => (
+            <Route
+              key={route.path}
+              path={route.path}
+              element={
+                <RouteFrame
+                  testId={route.testId}
+                  title={route.title}
+                  summary={route.summary}
+                />
+              }
+            />
+          ))}
         </Routes>
       </main>
     </div>

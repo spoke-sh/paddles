@@ -1,0 +1,46 @@
+---
+recorded_at: 2026-04-02T15:57:56.737034609-07:00
+command: nix develop --command sh -lc 'npm run test --workspace @paddles/web && npm run e2e --workspace @paddles/web'
+---
+
+> @paddles/web@0.0.0 test
+> vitest run
+
+
+ RUN  v2.1.9 /home/alex/workspace/spoke-sh/paddles/apps/web
+
+ ✓ src/runtime-app.test.tsx (3 tests) 57ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  15:57:42
+   Duration  956ms (transform 63ms, setup 73ms, collect 110ms, tests 57ms, environment 343ms, prepare 67ms)
+
+
+> @paddles/web@0.0.0 e2e
+> node ./scripts/run-react-e2e.mjs && node ./scripts/run-legacy-e2e.mjs
+
+
+> @paddles/web@0.0.0 dev
+> vite --host 127.0.0.1 --port 4173
+
+
+  VITE v6.4.1  ready in 153 ms
+
+  ➜  Local:   http://127.0.0.1:4173/
+fixture server listening on http://127.0.0.1:4174
+
+--- stderr ---
+path '/home/alex/workspace/spoke-sh/paddles/.keel' does not contain a 'flake.nix', searching up
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+stderr | src/runtime-app.test.tsx > RuntimeShell > renders the conversation route shell by default
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+npm error Lifecycle script `dev` failed with error:
+npm error code 143
+npm error path /home/alex/workspace/spoke-sh/paddles/apps/web
+npm error workspace @paddles/web@0.0.0
+npm error location /home/alex/workspace/spoke-sh/paddles/apps/web
+npm error command failed
+npm error command sh -c vite --host 127.0.0.1 --port 4173

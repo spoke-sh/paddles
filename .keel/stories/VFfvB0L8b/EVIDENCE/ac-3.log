@@ -1,0 +1,5 @@
+Manual proof for AC-03: `apps/web/src/runtime-app.tsx`
+
+- `RouteFrame` provides one shared route panel boundary for all runtime route shells.
+- `runtimeRoutes` centralizes the path, nav label, test id, title, and summary for each route.
+- `RuntimeShell` maps `runtimeRoutes` into both the primary navigation and the `<Route>` tree, which removes duplicated route metadata and prepares later cutover by keeping route ownership in one place.
