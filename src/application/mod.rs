@@ -21,7 +21,8 @@ use crate::domain::model::{
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
     EvidenceItem, GathererCapability, InitialAction, InitialActionDecision, InterpretationContext,
-    InterpretationRequest, ModelPaths, ModelRegistry, NoopTraceRecorder, OperatorMemory,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, ModelPaths, ModelRegistry, NoopTraceRecorder, OperatorMemory,
     PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
     PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
     RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
@@ -35,7 +36,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::RwLock;
 
 /// Factory that constructs a synthesizer engine for a given model ID.
@@ -2175,7 +2176,7 @@ impl MechSuitService {
             self.operator_memory
                 .operator_memory_documents(&self.workspace_root),
         );
-        match planner
+        let interpretation = match planner
             .derive_interpretation_context(&request, event_sink)
             .await
         {
@@ -2189,7 +2190,13 @@ impl MechSuitService {
                 self.operator_memory
                     .build_interpretation_context(prompt, &self.workspace_root)
             }
-        }
+        };
+
+        enrich_interpretation_with_local_harness_profile(
+            prompt,
+            interpretation,
+            local_harness_capabilities(),
+        )
     }
 
     async fn execute_recursive_planner_loop(
@@ -2875,6 +2882,17 @@ struct PromptExecutionPlan {
     initial_planner_decision: Option<RecursivePlannerDecision>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LocalHarnessCapabilities {
+    git: bool,
+    rg: bool,
+    gh: bool,
+    cargo: bool,
+    just: bool,
+    nix: bool,
+    keel: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptExecutionPath {
     SynthesizerOnly,
@@ -3089,6 +3107,284 @@ fn planner_budget_for_turn(prompt: &str, interpretation: &InterpretationContext)
     }
 }
 
+fn local_harness_capabilities() -> &'static LocalHarnessCapabilities {
+    static CAPABILITIES: OnceLock<LocalHarnessCapabilities> = OnceLock::new();
+    CAPABILITIES.get_or_init(LocalHarnessCapabilities::probe)
+}
+
+impl LocalHarnessCapabilities {
+    fn probe() -> Self {
+        Self {
+            git: command_available("git"),
+            rg: command_available("rg"),
+            gh: command_available("gh"),
+            cargo: command_available("cargo"),
+            just: command_available("just"),
+            nix: command_available("nix"),
+            keel: command_available("keel"),
+        }
+    }
+
+    fn labels(&self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.git {
+            labels.push("git");
+        }
+        if self.rg {
+            labels.push("rg");
+        }
+        if self.gh {
+            labels.push("gh");
+        }
+        if self.cargo {
+            labels.push("cargo");
+        }
+        if self.just {
+            labels.push("just");
+        }
+        if self.nix {
+            labels.push("nix");
+        }
+        if self.keel {
+            labels.push("keel");
+        }
+        labels
+    }
+}
+
+fn command_available(command: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-lc")
+        .arg(format!("command -v {command} >/dev/null 2>&1"))
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn enrich_interpretation_with_local_harness_profile(
+    prompt: &str,
+    mut context: InterpretationContext,
+    capabilities: &LocalHarnessCapabilities,
+) -> InterpretationContext {
+    let available = capabilities.labels();
+    if available.is_empty() {
+        return context;
+    }
+
+    let source = "paddles-harness";
+    let capability_summary = format!(
+        "Paddles can execute local workspace actions through the harness. Available local tools: {}.",
+        available.join(", ")
+    );
+    if context.summary.trim().is_empty() {
+        context.summary = capability_summary.clone();
+    } else if !context
+        .summary
+        .contains("Paddles can execute local workspace actions through the harness")
+    {
+        context.summary = format!("{}\n\n{}", context.summary.trim(), capability_summary);
+    }
+
+    if capabilities.git {
+        append_interpretation_tool_hint(
+            &mut context,
+            InterpretationToolHint {
+                source: source.to_string(),
+                action: WorkspaceAction::Inspect {
+                    command: "git status --short".to_string(),
+                },
+                note: "Start by checking the local workspace state before asking the user for repository status.".to_string(),
+            },
+        );
+    }
+
+    if capabilities.rg {
+        append_interpretation_tool_hint(
+            &mut context,
+            InterpretationToolHint {
+                source: source.to_string(),
+                action: WorkspaceAction::Inspect {
+                    command: "rg --files".to_string(),
+                },
+                note: "Prefer `rg --files` for file discovery and `rg -n` for text search; prefer `rg` over `grep` in this harness.".to_string(),
+            },
+        );
+    }
+
+    if capabilities.keel {
+        append_interpretation_tool_hint(
+            &mut context,
+            InterpretationToolHint {
+                source: source.to_string(),
+                action: WorkspaceAction::Inspect {
+                    command: "keel doctor --status".to_string(),
+                },
+                note: "Use keel directly for board health and structural drift when the task touches missions, stories, or repo health.".to_string(),
+            },
+        );
+    }
+
+    if prompt_mentions_github_or_ci(prompt) && capabilities.gh {
+        append_interpretation_tool_hint(
+            &mut context,
+            InterpretationToolHint {
+                source: source.to_string(),
+                action: WorkspaceAction::Inspect {
+                    command: "gh run list --limit 10".to_string(),
+                },
+                note: "Use the GitHub CLI locally to inspect recent Actions runs instead of asking the user for CI logs first.".to_string(),
+            },
+        );
+    }
+
+    append_interpretation_procedure(
+        &mut context,
+        InterpretationProcedure {
+            source: source.to_string(),
+            label: "Inspect Local Workspace".to_string(),
+            purpose: "Probe local repository state and find the relevant files before asking the user for information the harness can discover itself.".to_string(),
+            steps: local_workspace_procedure_steps(capabilities),
+        },
+    );
+
+    if prompt_mentions_github_or_ci(prompt) {
+        append_interpretation_procedure(
+            &mut context,
+            InterpretationProcedure {
+                source: source.to_string(),
+                label: "Diagnose CI Or Actions".to_string(),
+                purpose: "Use local and GitHub-aware tools to inspect failing CI and reproduce the failure inside the harness when possible.".to_string(),
+                steps: ci_diagnostic_procedure_steps(capabilities),
+            },
+        );
+    }
+
+    context
+}
+
+fn append_interpretation_tool_hint(
+    context: &mut InterpretationContext,
+    hint: InterpretationToolHint,
+) {
+    let duplicate = context.tool_hints.iter().any(|existing| {
+        existing.source == hint.source
+            && existing.action.summary() == hint.action.summary()
+            && existing.note == hint.note
+    });
+    if !duplicate {
+        context.tool_hints.push(hint);
+    }
+}
+
+fn append_interpretation_procedure(
+    context: &mut InterpretationContext,
+    procedure: InterpretationProcedure,
+) {
+    if procedure.steps.is_empty() {
+        return;
+    }
+    let duplicate = context
+        .decision_framework
+        .procedures
+        .iter()
+        .any(|existing| existing.source == procedure.source && existing.label == procedure.label);
+    if !duplicate {
+        context.decision_framework.procedures.push(procedure);
+    }
+}
+
+fn local_workspace_procedure_steps(
+    capabilities: &LocalHarnessCapabilities,
+) -> Vec<InterpretationProcedureStep> {
+    let mut steps = Vec::new();
+    if capabilities.git {
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Inspect {
+                command: "git status --short".to_string(),
+            },
+            note: "Read the local workspace state first.".to_string(),
+        });
+    }
+    if capabilities.rg {
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Inspect {
+                command: "rg --files".to_string(),
+            },
+            note: "Use ripgrep for fast file discovery; prefer it over slower directory scans."
+                .to_string(),
+        });
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Inspect {
+                command: "rg -n \"pattern\" src".to_string(),
+            },
+            note: "Use `rg -n` for targeted text search; prefer it over `grep` in this harness."
+                .to_string(),
+        });
+    }
+    steps
+}
+
+fn ci_diagnostic_procedure_steps(
+    capabilities: &LocalHarnessCapabilities,
+) -> Vec<InterpretationProcedureStep> {
+    let mut steps = Vec::new();
+    if capabilities.gh {
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Inspect {
+                command: "gh run list --limit 10".to_string(),
+            },
+            note: "Inspect recent GitHub Actions runs locally.".to_string(),
+        });
+    }
+    if capabilities.nix && capabilities.just {
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Shell {
+                command: "nix develop --command just test".to_string(),
+            },
+            note: "Reproduce the CI test path locally inside the Nix shell when possible."
+                .to_string(),
+        });
+    } else if capabilities.just {
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Shell {
+                command: "just test".to_string(),
+            },
+            note: "Reproduce the repo test path locally with just.".to_string(),
+        });
+    } else if capabilities.cargo {
+        steps.push(InterpretationProcedureStep {
+            index: steps.len(),
+            action: WorkspaceAction::Shell {
+                command: "cargo test -q".to_string(),
+            },
+            note: "Reproduce the Rust test path locally.".to_string(),
+        });
+    }
+    steps
+}
+
+fn prompt_mentions_github_or_ci(prompt: &str) -> bool {
+    let prompt_lower = prompt.to_ascii_lowercase();
+    [
+        "github",
+        "actions",
+        "workflow",
+        "ci",
+        "pipeline",
+        "run id",
+        "check suite",
+        "check run",
+    ]
+    .iter()
+    .any(|signal| prompt_lower.contains(signal))
+}
+
 fn prompt_requires_workspace_engagement(
     prompt: &str,
     interpretation: &InterpretationContext,
@@ -3128,16 +3424,7 @@ fn prompt_requires_workspace_engagement(
         return true;
     }
 
-    interpretation.tool_hints.iter().any(|hint| {
-        matches!(
-            hint.action,
-            WorkspaceAction::Inspect { .. }
-                | WorkspaceAction::Read { .. }
-                | WorkspaceAction::ListFiles { .. }
-                | WorkspaceAction::Shell { .. }
-                | WorkspaceAction::Diff { .. }
-        )
-    })
+    false
 }
 
 fn mutation_turn_requires_execution_pressure(
@@ -4773,6 +5060,84 @@ mod tests {
     }
 
     #[test]
+    fn local_harness_enrichment_adds_tool_preferences_and_workspace_procedure() {
+        let context = super::enrich_interpretation_with_local_harness_profile(
+            "Find the target file",
+            InterpretationContext::default(),
+            &super::LocalHarnessCapabilities {
+                git: true,
+                rg: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            context
+                .summary
+                .contains("Paddles can execute local workspace actions")
+        );
+        assert!(context.tool_hints.iter().any(|hint| {
+            matches!(
+                hint.action,
+                WorkspaceAction::Inspect { ref command } if command == "git status --short"
+            )
+        }));
+        assert!(context.tool_hints.iter().any(|hint| {
+            matches!(
+                hint.action,
+                WorkspaceAction::Inspect { ref command } if command == "rg --files"
+            ) && hint.note.contains("prefer `rg` over `grep`")
+        }));
+        assert!(context.decision_framework.procedures.iter().any(|procedure| {
+            procedure.label == "Inspect Local Workspace"
+                && procedure
+                    .steps
+                    .iter()
+                    .any(|step| matches!(
+                        step.action,
+                        WorkspaceAction::Inspect { ref command } if command == "rg -n \"pattern\" src"
+                    ))
+        }));
+    }
+
+    #[test]
+    fn local_harness_enrichment_adds_ci_specific_github_and_repro_steps() {
+        let context = super::enrich_interpretation_with_local_harness_profile(
+            "Check the Github action and use the gh CLI",
+            InterpretationContext::default(),
+            &super::LocalHarnessCapabilities {
+                gh: true,
+                just: true,
+                nix: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(context.tool_hints.iter().any(|hint| {
+            matches!(
+                hint.action,
+                WorkspaceAction::Inspect { ref command } if command == "gh run list --limit 10"
+            )
+        }));
+        assert!(
+            context
+                .decision_framework
+                .procedures
+                .iter()
+                .any(|procedure| {
+                    procedure.label == "Diagnose CI Or Actions"
+                        && procedure.steps.iter().any(|step| {
+                            matches!(
+                                step.action,
+                                WorkspaceAction::Shell { ref command }
+                                    if command == "nix develop --command just test"
+                            )
+                        })
+                })
+        );
+    }
+
+    #[test]
     fn process_prompt_assembles_interpretation_before_model_selected_initial_action() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -4836,7 +5201,16 @@ mod tests {
         assert_eq!(requests[0].user_prompt, "Howdy");
         assert_eq!(
             requests[0].interpretation.sources(),
-            vec!["AGENTS.md".to_string()]
+            vec!["AGENTS.md".to_string(), "paddles-harness".to_string()]
+        );
+        assert!(!requests[0].interpretation.tool_hints.is_empty());
+        assert!(
+            requests[0]
+                .interpretation
+                .decision_framework
+                .procedures
+                .iter()
+                .any(|procedure| procedure.label == "Inspect Local Workspace")
         );
 
         let events = sink.recorded();
