@@ -1,9 +1,15 @@
 import { expect, test } from '@playwright/test';
 
-test('root route submits a prompt and renders the live shared transcript', async ({ page }) => {
+test('root route serves the react runtime shell from the rust server', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.locator('#prompt')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Turborepo Runtime Web App' })).toBeVisible();
+  await expect(page.getByTestId('route-chat')).toContainText('Conversation Route Shell');
+  await expect(page.getByTitle('Conversation Route Shell')).toHaveAttribute('src', '/legacy');
+});
+
+test('legacy chat route submits a prompt and renders the live shared transcript', async ({ page }) => {
+  await page.goto('/legacy');
   await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
   await page.locator('#send').click();
 
@@ -15,17 +21,15 @@ test('root route submits a prompt and renders the live shared transcript', async
   );
 });
 
-test('transit route renders significant steps and can expand to the full trace', async ({ page }) => {
-  await page.goto('/transit');
-
-  await page.goto('/');
+test('legacy transit route renders significant steps and can expand to the full trace', async ({ page }) => {
+  await page.goto('/legacy');
   await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
   await page.locator('#send').click();
   await expect(page.locator('.msg.assistant')).toContainText(
     'Mock provider completed the turn after local inspection.'
   );
 
-  await page.goto('/transit');
+  await page.goto('/legacy/transit');
   const nodes = page.locator('#trace-board .trace-node');
   await expect(nodes).not.toHaveCount(0);
   await expect(page.locator('#trace-transit-meta')).toContainText('significant steps');
@@ -35,7 +39,14 @@ test('transit route renders significant steps and can expand to the full trace',
 });
 
 test('transit route adapts detail density as the trace zoom changes', async ({ page }) => {
-  await page.goto('/transit');
+  await page.goto('/legacy');
+  await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
+  await page.locator('#send').click();
+  await expect(page.locator('.msg.assistant')).toContainText(
+    'Mock provider completed the turn after local inspection.'
+  );
+
+  await page.goto('/legacy/transit');
 
   const board = page.locator('#trace-board');
   await expect(board).toHaveAttribute('data-detail-level', 'balanced');
@@ -53,15 +64,15 @@ test('transit route adapts detail density as the trace zoom changes', async ({ p
   await expect(board).toHaveAttribute('data-detail-level', 'focus');
 });
 
-test('manifold route boots the dedicated shell', async ({ page }) => {
-  await page.goto('/');
+test('legacy manifold route boots the dedicated shell', async ({ page }) => {
+  await page.goto('/legacy');
   await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
   await page.locator('#send').click();
   await expect(page.locator('.msg.assistant')).toContainText(
     'Mock provider completed the turn after local inspection.'
   );
 
-  await page.goto('/manifold');
+  await page.goto('/legacy/manifold');
   await expect(page.locator('#manifold-canvas')).toBeVisible();
   await expect(page.locator('#manifold-stage-meta')).not.toContainText(
     'Awaiting replay-backed manifold frames'

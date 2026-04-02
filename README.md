@@ -162,7 +162,7 @@ The frontend is now staged through a shared Turborepo workspace:
 - `apps/docs` owns the Docusaurus documentation site
 - `apps/web` owns the new React runtime web app shell
 
-The Rust-embedded shell remains the runtime source of truth and still serves the live runtime routes until React route cutover reaches parity. That means the manifold route remains local-first and does not add remote visualization bundles, CDNs, or hosted dependencies while the migration is in progress.
+The Rust server now serves the built React runtime shell on the primary web routes. The previous embedded shell still exists as the live legacy runtime under `/legacy`, `/legacy/transit`, and `/legacy/manifold`, which lets the React app wrap the real local-first runtime while parity work continues. The manifold route therefore remains local-first and does not add remote visualization bundles, CDNs, or hosted dependencies while the migration is in progress.
 
 ### Trace Recording
 
@@ -333,7 +333,7 @@ just test
 just quality
 ```
 
-`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for the docs app, the new React runtime shell, and the still-live embedded runtime shell so the migration stays honest.
+`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for the docs app, the React runtime shell, and the legacy runtime mounted under `/legacy` so the migration stays honest.
 
 Check board health:
 

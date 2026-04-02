@@ -9,11 +9,13 @@ use crate::domain::model::{
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
 use axum::extract::{Path, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{Html, Json};
+use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
@@ -146,9 +148,14 @@ pub fn router(
     });
 
     let app = Router::new()
-        .route("/", get(index_page))
-        .route("/manifold", get(index_page))
-        .route("/transit", get(index_page))
+        .route("/", get(primary_index_page))
+        .route("/manifold", get(primary_index_page))
+        .route("/transit", get(primary_index_page))
+        .route("/legacy", get(legacy_index_page))
+        .route("/legacy/manifold", get(legacy_index_page))
+        .route("/legacy/transit", get(legacy_index_page))
+        .route("/assets/{*path}", get(primary_frontend_asset))
+        .route("/favicon.svg", get(primary_frontend_favicon))
         .route("/health", get(health))
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
@@ -220,8 +227,98 @@ impl ForensicUpdateSink for BroadcastForensicSink {
     }
 }
 
-async fn index_page() -> Html<&'static str> {
-    Html(include_str!("index.html"))
+fn legacy_shell_html() -> &'static str {
+    include_str!("index.html")
+}
+
+fn primary_frontend_dist_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("apps")
+        .join("web")
+        .join("dist")
+}
+
+fn load_primary_shell_html_from(dist_dir: &FsPath) -> std::io::Result<String> {
+    std::fs::read_to_string(dist_dir.join("index.html"))
+}
+
+fn load_primary_shell_html() -> String {
+    load_primary_shell_html_from(&primary_frontend_dist_dir())
+        .unwrap_or_else(|_| legacy_shell_html().to_string())
+}
+
+fn resolve_frontend_asset_path(path: &str) -> Option<PathBuf> {
+    let trimmed = path.trim_start_matches('/');
+    let candidate = primary_frontend_dist_dir().join(trimmed);
+    let relative = candidate.strip_prefix(primary_frontend_dist_dir()).ok()?;
+
+    if relative.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return None;
+    }
+
+    Some(candidate)
+}
+
+fn content_type_for_asset(path: &FsPath) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+    {
+        "js" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "json" => "application/json; charset=utf-8",
+        "html" => "text/html; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn primary_index_page() -> Html<String> {
+    Html(load_primary_shell_html())
+}
+
+async fn legacy_index_page() -> Html<&'static str> {
+    Html(legacy_shell_html())
+}
+
+async fn primary_frontend_asset(
+    Path(path): Path<String>,
+) -> Result<Response, axum::http::StatusCode> {
+    let Some(asset_path) = resolve_frontend_asset_path(&format!("assets/{path}")) else {
+        return Err(axum::http::StatusCode::NOT_FOUND);
+    };
+    let bytes = std::fs::read(&asset_path).map_err(|_| axum::http::StatusCode::NOT_FOUND)?;
+
+    Ok((
+        [
+            (CONTENT_TYPE, content_type_for_asset(&asset_path)),
+            (CACHE_CONTROL, "no-cache"),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+async fn primary_frontend_favicon() -> Result<Response, axum::http::StatusCode> {
+    let Some(asset_path) = resolve_frontend_asset_path("favicon.svg") else {
+        return Err(axum::http::StatusCode::NOT_FOUND);
+    };
+    let bytes = std::fs::read(&asset_path).map_err(|_| axum::http::StatusCode::NOT_FOUND)?;
+
+    Ok((
+        [
+            (CONTENT_TYPE, content_type_for_asset(&asset_path)),
+            (CACHE_CONTROL, "no-cache"),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -598,6 +695,7 @@ mod tests {
         ForensicTurnProjectionResponse, conversation_forensics, parse_task_id, turn_forensics,
     };
     use crate::application::{MechSuitService, RuntimeLaneConfig};
+    use crate::domain::model::NullTurnEventSink;
     use crate::domain::model::{
         ArtifactKind, ConversationForensicUpdate, ForensicUpdateSink, TraceCheckpointKind,
         TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind, TraceLineageNodeRef,
@@ -605,7 +703,6 @@ mod tests {
         TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
         TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
     };
-    use crate::domain::model::NullTurnEventSink;
     use crate::domain::ports::{
         ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
     };
@@ -629,8 +726,8 @@ mod tests {
         ArtifactEnvelope, ConversationSession, TraceArtifactId, TraceCheckpointId, TurnTraceId,
     };
     use serde_json::json;
-    use std::path::Path as FsPath;
     use std::collections::VecDeque;
+    use std::path::Path as FsPath;
     use std::sync::{Arc, Mutex};
     use tokio::sync::broadcast;
     use tokio::task::JoinHandle;
@@ -716,9 +813,7 @@ mod tests {
             .expect("bind mock provider");
         let addr = listener.local_addr().expect("local addr");
         let task = tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("run mock provider");
+            axum::serve(listener, app).await.expect("run mock provider");
         });
 
         MockServerHandle {
@@ -1272,6 +1367,15 @@ mod tests {
         assert!(html.contains("setTraceView('inspector')"));
     }
 
+    #[test]
+    fn transit_trace_html_preserves_legacy_route_family_paths() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("function traceRouteFamily(pathname)"));
+        assert!(html.contains("path === '/legacy' || path.startsWith('/legacy/')"));
+        assert!(html.contains("return routePath === '/' ? '/legacy' : `/legacy${routePath}`;"));
+    }
+
     #[tokio::test]
     async fn web_router_serves_dedicated_manifold_and_transit_routes() {
         let workspace = tempfile::tempdir().expect("workspace");
@@ -1292,6 +1396,55 @@ mod tests {
                 .expect("response");
             assert_eq!(response.status(), StatusCode::OK, "route {route}");
         }
+    }
+
+    #[tokio::test]
+    async fn web_router_serves_legacy_runtime_routes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let (app, _observer) = super::router(service, recorder);
+
+        for route in ["/legacy", "/legacy/manifold", "/legacy/transit"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(route)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK, "route {route}");
+        }
+    }
+
+    #[test]
+    fn primary_shell_loader_prefers_react_dist_when_present() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let dist = workspace.path().join("dist");
+        std::fs::create_dir_all(&dist).expect("create dist");
+        std::fs::write(
+            dist.join("index.html"),
+            "<!doctype html><html><body><div id=\"root\">react</div></body></html>",
+        )
+        .expect("write dist index");
+
+        let html = super::load_primary_shell_html_from(&dist).expect("load primary shell");
+
+        assert!(html.contains("<div id=\"root\">react</div>"));
+        assert!(!html.contains("id=\"prompt\""));
+    }
+
+    #[test]
+    fn primary_shell_loader_falls_back_to_legacy_shell_when_dist_is_missing() {
+        let workspace = tempfile::tempdir().expect("workspace");
+
+        let html = super::load_primary_shell_html_from(workspace.path())
+            .unwrap_or_else(|_| super::legacy_shell_html().to_string());
+
+        assert!(html.contains("id=\"prompt\""));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1365,12 +1518,10 @@ mod tests {
             forensic_tx,
         });
 
-        let Json(super::TranscriptResponse(transcript)) = super::conversation_transcript(
-            State(Arc::clone(&state)),
-            Path(task_id.clone()),
-        )
-        .await
-        .expect("conversation transcript");
+        let Json(super::TranscriptResponse(transcript)) =
+            super::conversation_transcript(State(Arc::clone(&state)), Path(task_id.clone()))
+                .await
+                .expect("conversation transcript");
         assert_eq!(transcript.entries.len(), 2);
         assert!(
             transcript.entries[1]
@@ -1386,12 +1537,10 @@ mod tests {
         assert!(graph.nodes.iter().any(|node| node.kind == "action"));
         assert!(graph.nodes.iter().any(|node| node.kind == "signal"));
 
-        let Json(super::ManifoldProjectionResponse(manifold)) = super::conversation_manifold(
-            State(state),
-            Path(task_id),
-        )
-        .await
-        .expect("conversation manifold");
+        let Json(super::ManifoldProjectionResponse(manifold)) =
+            super::conversation_manifold(State(state), Path(task_id))
+                .await
+                .expect("conversation manifold");
         assert_eq!(manifold.turns.len(), 1);
         assert!(
             manifold.turns[0]

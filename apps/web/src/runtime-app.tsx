@@ -4,10 +4,12 @@ function RouteFrame({
   title,
   summary,
   testId,
+  legacyPath,
 }: {
   title: string;
   summary: string;
   testId: string;
+  legacyPath: string;
 }) {
   return (
     <section className="route-panel" data-testid={testId}>
@@ -15,8 +17,18 @@ function RouteFrame({
       <h2>{title}</h2>
       <p>{summary}</p>
       <div className="status-callout">
-        <strong>Migration state:</strong> The Rust-embedded web shell still owns live runtime
-        behavior while this React app grows route-by-route toward cutover.
+        <strong>Runtime composition:</strong> The Rust server now serves this React shell on the
+        primary routes while the legacy live runtime remains mounted under <code>{legacyPath}</code>{' '}
+        until each surface is replaced route-by-route.
+      </div>
+      <div className="runtime-frame-shell">
+        <iframe
+          className="runtime-frame"
+          src={legacyPath}
+          title={title}
+          loading="lazy"
+          referrerPolicy="same-origin"
+        />
       </div>
     </section>
   );
@@ -30,6 +42,7 @@ const runtimeRoutes = [
     title: 'Conversation Route Shell',
     summary:
       'This React surface will absorb the transcript and operator controls while preserving the Rust session APIs.',
+    legacyPath: '/legacy',
   },
   {
     path: '/transit',
@@ -37,6 +50,7 @@ const runtimeRoutes = [
     testId: 'route-transit',
     title: 'Transit Route Shell',
     summary: 'This React surface will absorb the turn-step map, zoom controls, and lineage filters.',
+    legacyPath: '/legacy/transit',
   },
   {
     path: '/manifold',
@@ -45,6 +59,7 @@ const runtimeRoutes = [
     title: 'Manifold Route Shell',
     summary:
       'This React surface will absorb the steering-signal manifold and its route-linked forensic drilldown.',
+    legacyPath: '/legacy/manifold',
   },
 ] as const;
 
@@ -75,6 +90,7 @@ export function RuntimeShell() {
                   testId={route.testId}
                   title={route.title}
                   summary={route.summary}
+                  legacyPath={route.legacyPath}
                 />
               }
             />

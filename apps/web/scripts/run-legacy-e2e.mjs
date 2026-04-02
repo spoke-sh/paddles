@@ -19,6 +19,7 @@ await withServer({
   cwd: repoRoot,
   env: { PORT: '4174' },
   readyUrl: 'http://127.0.0.1:4174/health',
+  readyTimeoutMs: 90_000,
   run: async () => {
     const browser = await chromium.launch({
       executablePath: requiredChromiumExecutable(),
@@ -29,6 +30,18 @@ await withServer({
       const page = await browser.newPage();
 
       await page.goto('http://127.0.0.1:4174/');
+      assert(
+        (await page.getByRole('heading', { name: 'Turborepo Runtime Web App' }).textContent())?.includes(
+          'Turborepo Runtime Web App'
+        ),
+        'expected the rust server root route to serve the React runtime shell'
+      );
+      assert(
+        (await page.getByTitle('Conversation Route Shell').getAttribute('src')) === '/legacy',
+        'expected the root React route to embed the legacy conversation runtime'
+      );
+
+      await page.goto('http://127.0.0.1:4174/legacy');
       await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
       await page.locator('#send').click();
       await page.waitForFunction(() => {
@@ -50,7 +63,7 @@ await withServer({
         'expected the legacy shell to render the assistant response'
       );
 
-      await page.goto('http://127.0.0.1:4174/transit');
+      await page.goto('http://127.0.0.1:4174/legacy/transit');
       await page.waitForFunction(
         () => document.querySelectorAll('#trace-board .trace-node').length > 0
       );
@@ -69,7 +82,7 @@ await withServer({
         'expected the transit route to expand to the full trace'
       );
 
-      await page.goto('http://127.0.0.1:4174/manifold');
+      await page.goto('http://127.0.0.1:4174/legacy/manifold');
       assert(
         await page.locator('#manifold-canvas').isVisible(),
         'expected the manifold canvas to be visible'

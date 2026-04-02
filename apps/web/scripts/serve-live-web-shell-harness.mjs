@@ -126,8 +126,11 @@ function shutdown(code = 0) {
 
 providerServer.listen(providerPort, '127.0.0.1', () => {
   paddles = spawn(
-    'cargo',
+    'nix',
     [
+      'develop',
+      '--command',
+      'cargo',
       'run',
       '--quiet',
       '--',

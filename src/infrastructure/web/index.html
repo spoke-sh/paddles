@@ -2154,19 +2154,34 @@ function normalizedTracePath(pathname) {
   return path;
 }
 
+function traceRouteFamily(pathname) {
+  const path = normalizedTracePath(pathname);
+  if (path === '/legacy' || path.startsWith('/legacy/')) {
+    return 'legacy';
+  }
+  return 'primary';
+}
+
 function traceViewFromPath(pathname) {
   const path = normalizedTracePath(pathname);
-  if (path === '/manifold') {
+  const relativePath = traceRouteFamily(path) === 'legacy'
+    ? path.slice('/legacy'.length) || '/'
+    : path;
+  if (relativePath === '/manifold') {
     return 'manifold';
   }
-  if (path === '/transit') {
+  if (relativePath === '/transit') {
     return 'transit';
   }
   return 'inspector';
 }
 
-function tracePathForView(view) {
-  return TRACE_VIEW_PATHS[view] || '/';
+function tracePathForView(view, pathname = window.location.pathname) {
+  const routePath = TRACE_VIEW_PATHS[view] || '/';
+  if (traceRouteFamily(pathname) === 'legacy') {
+    return routePath === '/' ? '/legacy' : `/legacy${routePath}`;
+  }
+  return routePath;
 }
 
 function setTraceView(view, { syncHistory = true } = {}) {

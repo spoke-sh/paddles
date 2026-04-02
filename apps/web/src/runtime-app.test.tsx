@@ -13,7 +13,7 @@ describe('RuntimeShell', () => {
     );
 
     expect(screen.getByTestId('route-chat')).toHaveTextContent('Conversation Route Shell');
-    expect(screen.getByText('Migration state:')).toBeInTheDocument();
+    expect(screen.getByTitle('Conversation Route Shell')).toHaveAttribute('src', '/legacy');
   });
 
   it('renders the transit route shell', () => {
@@ -24,6 +24,7 @@ describe('RuntimeShell', () => {
     );
 
     expect(screen.getByTestId('route-transit')).toHaveTextContent('Transit Route Shell');
+    expect(screen.getByTitle('Transit Route Shell')).toHaveAttribute('src', '/legacy/transit');
   });
 
   it('renders the manifold route shell', () => {
@@ -34,5 +35,6 @@ describe('RuntimeShell', () => {
     );
 
     expect(screen.getByTestId('route-manifold')).toHaveTextContent('Manifold Route Shell');
+    expect(screen.getByTitle('Manifold Route Shell')).toHaveAttribute('src', '/legacy/manifold');
   });
 });

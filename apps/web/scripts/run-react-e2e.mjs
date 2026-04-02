@@ -35,6 +35,10 @@ await withServer({
         (await chatRoute.textContent())?.includes('Conversation Route Shell'),
         'expected the chat route shell to render'
       );
+      assert(
+        (await page.getByTitle('Conversation Route Shell').getAttribute('src')) === '/legacy',
+        'expected the chat route shell to embed the legacy runtime'
+      );
 
       await page.getByRole('link', { name: 'Transit' }).click();
       assert(page.url().endsWith('/transit'), 'expected the transit route to be active');
@@ -42,12 +46,20 @@ await withServer({
         (await page.getByTestId('route-transit').textContent())?.includes('Transit Route Shell'),
         'expected the transit route shell to render'
       );
+      assert(
+        (await page.getByTitle('Transit Route Shell').getAttribute('src')) === '/legacy/transit',
+        'expected the transit route shell to embed the legacy transit runtime'
+      );
 
       await page.getByRole('link', { name: 'Manifold' }).click();
       assert(page.url().endsWith('/manifold'), 'expected the manifold route to be active');
       assert(
         (await page.getByTestId('route-manifold').textContent())?.includes('Manifold Route Shell'),
         'expected the manifold route shell to render'
+      );
+      assert(
+        (await page.getByTitle('Manifold Route Shell').getAttribute('src')) === '/legacy/manifold',
+        'expected the manifold route shell to embed the legacy manifold runtime'
       );
     } finally {
       await browser.close();

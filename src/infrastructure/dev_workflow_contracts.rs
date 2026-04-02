@@ -64,7 +64,13 @@ fn just_paddles_rebuilds_runtime_frontend_before_launching_cli() {
     let paddles_section = justfile
         .split("\n# Standard mission path for verification.")
         .next()
-        .and_then(|prefix| prefix.split("\n# Run the paddles CLI. Use --cuda to enable GPU support.\npaddles *args:\n").nth(1))
+        .and_then(|prefix| {
+            prefix
+                .split(
+                    "\n# Run the paddles CLI. Use --cuda to enable GPU support.\npaddles *args:\n",
+                )
+                .nth(1)
+        })
         .expect("justfile should contain a paddles recipe");
 
     assert!(
@@ -204,6 +210,24 @@ fn runtime_web_playwright_config_exists() {
     assert!(
         repo_file("apps/web/playwright.config.mjs").exists(),
         "runtime web app should define a Playwright config for browser e2e",
+    );
+}
+
+#[test]
+fn runtime_web_live_harness_launches_paddles_inside_nix_develop() {
+    let harness = read_repo_file("apps/web/scripts/serve-live-web-shell-harness.mjs");
+
+    assert!(
+        harness.contains("spawn(\n    'nix'"),
+        "live runtime harness should launch paddles through nix develop",
+    );
+    assert!(
+        harness.contains("'develop'"),
+        "live runtime harness should enter nix develop before cargo run",
+    );
+    assert!(
+        harness.contains("'cargo'"),
+        "live runtime harness should still run the Rust paddles binary under the nix shell",
     );
 }
 

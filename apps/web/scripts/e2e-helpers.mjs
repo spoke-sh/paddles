@@ -24,6 +24,7 @@ export async function withServer({
   cwd,
   env,
   readyUrl,
+  readyTimeoutMs,
   run,
 }) {
   const child = spawn(command, args, {
@@ -33,7 +34,7 @@ export async function withServer({
   });
 
   try {
-    await waitForUrl(readyUrl);
+    await waitForUrl(readyUrl, readyTimeoutMs);
     await run();
   } finally {
     child.kill('SIGTERM');
