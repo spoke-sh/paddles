@@ -103,6 +103,7 @@
             export CUDA_PATH="${pkgs.cudatoolkit}"
             export CUDA_ROOT="${pkgs.cudatoolkit}"
             export CUDA_TOOLKIT_ROOT_DIR="${pkgs.cudatoolkit}"
+            export CUDA_COMPUTE_CAP="''${CUDA_COMPUTE_CAP:-80}"
 
             # Build-time library search path for the linker.
             # Unlike LD_LIBRARY_PATH, LIBRARY_PATH only affects the linker
