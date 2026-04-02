@@ -22,8 +22,8 @@ mission: VFc2h8Yyb
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 0/1 voyages complete, 1/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Plan Inception Provider Delivery](voyages/VFc2jHVLG/) | planned | 0/5 |
+| [Plan Inception Provider Delivery](voyages/VFc2jHVLG/) | in-progress | 1/5 |
 <!-- END GENERATED -->

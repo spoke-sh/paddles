@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFc2jHVLG
-status: planned
+status: in-progress
 epic: VFc2hwU7e
 created_at: 2026-04-01T23:30:47
 # authored
 title: Plan Inception Provider Delivery
 index: 1
 updated_at: 2026-04-01T23:37:25
+started_at: 2026-04-02T05:59:25
 ---
 
 # Plan Inception Provider Delivery
@@ -26,11 +27,11 @@ updated_at: 2026-04-01T23:37:25
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/5 stories complete
+**Progress:** 1/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Add Inception Provider Catalog And Authentication Support](../../../../stories/VFc2mxZgj/README.md) | feat | backlog |
+| [Add Inception Provider Catalog And Authentication Support](../../../../stories/VFc2mxZgj/README.md) | feat | done |
 | [Expose Inception Defaults And Operator Guidance](../../../../stories/VFc2my2gi/README.md) | chore | backlog |
 | [Add Inception Streaming And Diffusion Visualization Support](../../../../stories/VFc2myPgh/README.md) | feat | backlog |
 | [Wire Mercury-2 Through The OpenAI-Compatible HTTP Adapter](../../../../stories/VFc2mykgg/README.md) | feat | backlog |

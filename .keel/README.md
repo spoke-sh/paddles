@@ -270,7 +270,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Plan Inception Provider Delivery](epics/VFc2hwU7e/voyages/VFc2jHVLG/) | planned |
+| [Plan Inception Provider Delivery](epics/VFc2hwU7e/voyages/VFc2jHVLG/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

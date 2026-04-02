@@ -137,6 +137,7 @@ impl CredentialStore {
     pub fn provider_for_env(env_name: &str) -> Option<&'static str> {
         match env_name {
             "OPENAI_API_KEY" => Some("openai"),
+            "INCEPTION_API_KEY" => Some("inception"),
             "ANTHROPIC_API_KEY" => Some("anthropic"),
             "GOOGLE_API_KEY" => Some("google"),
             "MOONSHOT_API_KEY" => Some("moonshot"),
@@ -350,6 +351,10 @@ mod tests {
             Some("moonshot")
         );
         assert_eq!(
+            CredentialStore::provider_for_env("INCEPTION_API_KEY"),
+            Some("inception")
+        );
+        assert_eq!(
             CredentialStore::provider_for_env("OPENAI_API_KEY"),
             Some("openai")
         );
@@ -413,6 +418,11 @@ mod tests {
         assert_eq!(availability.provider, ModelProvider::Openai);
         assert!(!availability.enabled);
         assert_eq!(availability.detail, "login required");
+
+        let inception = store.provider_availability(ModelProvider::Inception);
+        assert_eq!(inception.provider, ModelProvider::Inception);
+        assert!(!inception.enabled);
+        assert_eq!(inception.detail, "login required");
     }
 
     #[test]

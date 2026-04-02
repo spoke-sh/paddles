@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-02T06:01:37.287122750-07:00
+command: cargo test -q required_remote_provider_is_disabled_when_missing_credentials
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 223 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

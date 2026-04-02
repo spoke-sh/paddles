@@ -111,9 +111,10 @@ fn resolve_provider_from_name(configured: &str, field_name: &str) -> ModelProvid
 
 fn provider_api_format(provider: ModelProvider) -> Option<ApiFormat> {
     match provider {
-        ModelProvider::Openai | ModelProvider::Moonshot | ModelProvider::Ollama => {
-            Some(ApiFormat::OpenAi)
-        }
+        ModelProvider::Openai
+        | ModelProvider::Inception
+        | ModelProvider::Moonshot
+        | ModelProvider::Ollama => Some(ApiFormat::OpenAi),
         ModelProvider::Anthropic => Some(ApiFormat::Anthropic),
         ModelProvider::Google => Some(ApiFormat::Gemini),
         ModelProvider::Sift => None,

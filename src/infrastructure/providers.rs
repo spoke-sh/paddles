@@ -6,6 +6,8 @@ pub enum ModelProvider {
     Sift,
     /// OpenAI chat completions API
     Openai,
+    /// Inception Labs chat completions API
+    Inception,
     /// Anthropic messages API
     Anthropic,
     /// Google Gemini generateContent API
@@ -24,14 +26,16 @@ pub enum ProviderAuthRequirement {
 }
 
 const OPENAI_MODELS: &[&str] = &["gpt-4o", "gpt-4o-mini"];
+const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
 const GOOGLE_MODELS: &[&str] = &["gemini-2.5-flash"];
 const MOONSHOT_MODELS: &[&str] = &["kimi-k2.5"];
 
 impl ModelProvider {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Sift,
         Self::Openai,
+        Self::Inception,
         Self::Anthropic,
         Self::Google,
         Self::Moonshot,
@@ -46,6 +50,7 @@ impl ModelProvider {
         match self {
             Self::Sift => "sift",
             Self::Openai => "openai",
+            Self::Inception => "inception",
             Self::Anthropic => "anthropic",
             Self::Google => "google",
             Self::Moonshot => "moonshot",
@@ -57,6 +62,7 @@ impl ModelProvider {
         match self {
             Self::Sift => "Sift",
             Self::Openai => "OpenAI",
+            Self::Inception => "Inception",
             Self::Anthropic => "Anthropic",
             Self::Google => "Google",
             Self::Moonshot => "Moonshot",
@@ -68,6 +74,7 @@ impl ModelProvider {
         match value {
             "sift" => Some(Self::Sift),
             "openai" => Some(Self::Openai),
+            "inception" => Some(Self::Inception),
             "anthropic" => Some(Self::Anthropic),
             "google" => Some(Self::Google),
             "moonshot" => Some(Self::Moonshot),
@@ -80,7 +87,7 @@ impl ModelProvider {
         match self {
             Self::Sift => ProviderAuthRequirement::None,
             Self::Ollama => ProviderAuthRequirement::OptionalApiKey,
-            Self::Openai | Self::Anthropic | Self::Google | Self::Moonshot => {
+            Self::Openai | Self::Inception | Self::Anthropic | Self::Google | Self::Moonshot => {
                 ProviderAuthRequirement::RequiredApiKey
             }
         }
@@ -90,6 +97,7 @@ impl ModelProvider {
         match self {
             Self::Sift => None,
             Self::Openai => Some("OPENAI_API_KEY"),
+            Self::Inception => Some("INCEPTION_API_KEY"),
             Self::Anthropic => Some("ANTHROPIC_API_KEY"),
             Self::Google => Some("GOOGLE_API_KEY"),
             Self::Moonshot => Some("MOONSHOT_API_KEY"),
@@ -101,6 +109,7 @@ impl ModelProvider {
         match self {
             Self::Sift => None,
             Self::Openai => Some("https://api.openai.com"),
+            Self::Inception => Some("https://api.inceptionlabs.ai"),
             Self::Anthropic => Some("https://api.anthropic.com"),
             Self::Google => Some("https://generativelanguage.googleapis.com"),
             Self::Moonshot => Some("https://api.moonshot.ai"),
@@ -123,6 +132,7 @@ impl ModelProvider {
         match self {
             Self::Sift => crate::infrastructure::adapters::sift_registry::supported_model_ids(),
             Self::Openai => OPENAI_MODELS,
+            Self::Inception => INCEPTION_MODELS,
             Self::Anthropic => ANTHROPIC_MODELS,
             Self::Google => GOOGLE_MODELS,
             Self::Moonshot => MOONSHOT_MODELS,
@@ -192,6 +202,29 @@ mod tests {
             ModelProvider::Openai.auth_requirement(),
             ProviderAuthRequirement::RequiredApiKey
         );
+        assert_eq!(
+            ModelProvider::Inception.auth_requirement(),
+            ProviderAuthRequirement::RequiredApiKey
+        );
+    }
+
+    #[test]
+    fn inception_provider_metadata_is_registered() {
+        assert_eq!(ModelProvider::Inception.name(), "inception");
+        assert_eq!(ModelProvider::Inception.display_name(), "Inception");
+        assert_eq!(
+            ModelProvider::Inception.credential_env_var(),
+            Some("INCEPTION_API_KEY")
+        );
+        assert_eq!(
+            ModelProvider::Inception.default_base_url(),
+            Some("https://api.inceptionlabs.ai")
+        );
+        assert_eq!(ModelProvider::Inception.known_model_ids(), ["mercury-2"]);
+        assert_eq!(
+            ModelProvider::Inception.qualified_model_label("mercury-2"),
+            "inception:mercury-2"
+        );
     }
 
     #[test]
@@ -205,6 +238,9 @@ mod tests {
         }));
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Moonshot && model.model_id == "kimi-k2.5"
+        }));
+        assert!(models.iter().any(|model| {
+            model.provider == ModelProvider::Inception && model.model_id == "mercury-2"
         }));
     }
 }

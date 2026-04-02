@@ -3159,6 +3159,28 @@ mod tests {
     }
 
     #[test]
+    fn login_command_accepts_inception_provider_when_current_lane_is_local() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login inception".to_string();
+
+        app.submit_prompt();
+
+        assert!(matches!(
+            app.input_mode,
+            InputMode::MaskedKey { ref provider } if provider == "inception"
+        ));
+    }
+
+    #[test]
     fn login_submission_queues_pending_key_and_masks_display_text() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -3235,6 +3257,7 @@ mod tests {
                 provider_availability(ModelProvider::Openai, true, "using local credential store"),
                 provider_availability(ModelProvider::Anthropic, false, "login required"),
                 provider_availability(ModelProvider::Google, false, "login required"),
+                provider_availability(ModelProvider::Inception, false, "login required"),
                 provider_availability(ModelProvider::Moonshot, false, "login required"),
                 provider_availability(ModelProvider::Ollama, true, "auth not required"),
             ],
@@ -3248,6 +3271,10 @@ mod tests {
         assert!(row.content.contains(&runtime_lane_summary(&runtime_lanes)));
         assert!(row.content.contains("[enabled] openai"));
         assert!(row.content.contains("[disabled] anthropic"));
+        assert!(
+            row.content
+                .contains("[disabled] inception: mercury-2 (login required)")
+        );
     }
 
     #[test]
