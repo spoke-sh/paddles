@@ -27,7 +27,7 @@ pub use planning::{
     PlannerRequest, PlannerStepRecord, RecursivePlanner, RefinementPolicy, RefinementTrigger,
     RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
-pub use synthesis::{SynthesizerEngine, WorkspaceActionResult};
+pub use synthesis::{SynthesisHandoff, SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
 
 /// Port for model discovery and acquisition.

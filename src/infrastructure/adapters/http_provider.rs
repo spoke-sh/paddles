@@ -7,8 +7,8 @@ use crate::domain::model::{
 use crate::domain::ports::{
     EvidenceBundle, InitialAction, InitialActionDecision, InitialEditInstruction,
     InterpretationContext, InterpretationRequest, PlannerAction, PlannerCapability, PlannerRequest,
-    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesizerEngine,
-    ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
+    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
+    SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
 };
 use crate::infrastructure::rendering::{
     ANTHROPIC_RENDER_TOOL_NAME, RenderCapability, assistant_response_json_schema,
@@ -1240,10 +1240,31 @@ impl SynthesizerEngine for HttpProviderAdapter {
         prompt: &str,
         _turn_intent: TurnIntent,
         gathered_evidence: Option<&EvidenceBundle>,
+        handoff: &SynthesisHandoff,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
         let system = self.build_answer_system_prompt(gathered_evidence.is_some());
-        let mut user_msg = prompt.to_string();
+        let mut user_msg = String::new();
+        if !handoff.recent_turns.is_empty() {
+            user_msg.push_str("## Recent Conversation\n");
+            for turn in &handoff.recent_turns {
+                user_msg.push_str("- ");
+                user_msg.push_str(turn);
+                user_msg.push('\n');
+            }
+            user_msg.push('\n');
+        }
+        if let Some(summary) = handoff
+            .recent_thread_summary
+            .as_deref()
+            .filter(|summary| !summary.trim().is_empty())
+        {
+            user_msg.push_str("## Active Thread Summary\n");
+            user_msg.push_str(summary);
+            user_msg.push_str("\n\n");
+        }
+        user_msg.push_str("## Current User Request\n");
+        user_msg.push_str(prompt);
         if let Some(evidence) = gathered_evidence {
             user_msg.push_str("\n\n## Evidence\n");
             user_msg.push_str(&evidence.summary);
@@ -1948,7 +1969,7 @@ fn planner_action_json_schema() -> Value {
 }
 
 fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
-    format!(
+    let mut context = format!(
         "Runtime context:\n\
 - You are the remote planner model inside Paddles.\n\
 - Paddles executes the action you choose locally in the workspace at `{}`.\n\
@@ -1956,7 +1977,28 @@ fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
 - As evidence accumulates, revise the premise explicitly when commands weaken or contradict it.\n\
 - Use local harness capabilities before asking the user for logs or repository state that the workspace can reveal.\n",
         request.workspace_root.display()
-    )
+    );
+
+    if !request.recent_turns.is_empty() {
+        context.push_str("\nRecent conversation:\n");
+        for turn in &request.recent_turns {
+            context.push_str("- ");
+            context.push_str(turn);
+            context.push('\n');
+        }
+    }
+
+    if let Some(summary) = request
+        .recent_thread_summary
+        .as_deref()
+        .filter(|summary| !summary.trim().is_empty())
+    {
+        context.push_str("\nActive thread summary:\n");
+        context.push_str(summary);
+        context.push('\n');
+    }
+
+    context
 }
 
 fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
@@ -2581,8 +2623,8 @@ mod tests {
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, ModelPaths,
         ModelRegistry, PlannerAction, PlannerBudget, PlannerLoopState, PlannerRequest,
-        RecursivePlanner, RecursivePlannerDecision, SynthesizerEngine, TraceRecorder,
-        WorkspaceAction,
+        RecursivePlanner, RecursivePlannerDecision, SynthesisHandoff, SynthesizerEngine,
+        TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -4079,6 +4121,7 @@ mod tests {
                 "CI is failing. Can you debug it on this machine?",
                 TurnIntent::Planned,
                 Some(&evidence),
+                &SynthesisHandoff::default(),
                 Arc::new(RecordingTurnEventSink::default()),
             )
             .expect("grounded response");
@@ -4134,6 +4177,7 @@ mod tests {
                 "CI is failing. Can you debug it on this machine?",
                 TurnIntent::Planned,
                 Some(&evidence),
+                &SynthesisHandoff::default(),
                 Arc::new(RecordingTurnEventSink::default()),
             )
             .expect("grounded response");
@@ -4190,6 +4234,7 @@ mod tests {
                 "CI is failing. Can you debug it on this machine?",
                 TurnIntent::Planned,
                 Some(&evidence),
+                &SynthesisHandoff::default(),
                 Arc::new(RecordingTurnEventSink::default()),
             )
             .expect("grounded response");

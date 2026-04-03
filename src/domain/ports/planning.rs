@@ -168,6 +168,7 @@ pub struct PlannerRequest {
     pub workspace_root: PathBuf,
     pub interpretation: InterpretationContext,
     pub recent_turns: Vec<String>,
+    pub recent_thread_summary: Option<String>,
     pub loop_state: PlannerLoopState,
     pub budget: PlannerBudget,
     pub resolver: Option<Arc<dyn ContextResolver>>,
@@ -185,6 +186,7 @@ impl PlannerRequest {
             workspace_root: workspace_root.into(),
             interpretation,
             recent_turns: Vec::new(),
+            recent_thread_summary: None,
             loop_state: PlannerLoopState::default(),
             budget,
             resolver: None,
@@ -198,6 +200,11 @@ impl PlannerRequest {
 
     pub fn with_recent_turns(mut self, recent_turns: Vec<String>) -> Self {
         self.recent_turns = recent_turns;
+        self
+    }
+
+    pub fn with_recent_thread_summary(mut self, recent_thread_summary: Option<String>) -> Self {
+        self.recent_thread_summary = recent_thread_summary;
         self
     }
 

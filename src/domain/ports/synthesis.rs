@@ -11,6 +11,12 @@ pub struct WorkspaceActionResult {
     pub summary: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SynthesisHandoff {
+    pub recent_turns: Vec<String>,
+    pub recent_thread_summary: Option<String>,
+}
+
 /// Port for the synthesizer engine that drives conversation turns and workspace actions.
 pub trait SynthesizerEngine: Send + Sync {
     fn set_verbose(&self, level: u8);
@@ -20,6 +26,7 @@ pub trait SynthesizerEngine: Send + Sync {
         prompt: &str,
         turn_intent: TurnIntent,
         gathered_evidence: Option<&EvidenceBundle>,
+        handoff: &SynthesisHandoff,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String>;
 

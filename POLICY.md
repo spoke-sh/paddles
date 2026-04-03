@@ -29,6 +29,7 @@ Model selection is an architectural decision that shapes every turn.
 - **Interpretation Before Routing**: Operator memory and foundational guidance are available to the planner before any routing commitment.
 - **Model-Directed Action Selection**: The planner selects its next bounded action through a constrained model response after interpretation context is assembled.
 - **Controller Owns Validation and Safety**: The controller remains authoritative for schema validation, budgets, safe command allowlists, deterministic execution, and fail-closed behavior. The model drives direction; the controller ensures safety.
+- **Intent Lives In Model Decisions, Not Controller Heuristics**: The controller must not infer workspace engagement or direct-answer intent from prompt-token heuristics. Intent routing comes from the planner's typed decision.
 
 ### Planning and Synthesis
 - **Recursive Planning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
@@ -38,6 +39,7 @@ Model selection is an architectural decision that shapes every turn.
 - **Grounded Answers Cite Sources**: Repository-question answers include file citations by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
 - **Final Answer Rendering Stays Typed**: Planner-direct answers and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
 - **Planner Rationale Is Never The User Answer**: Planner rationale explains control decisions. User-facing answer text must travel through an explicit answer payload before it enters the render pipeline.
+- **Planner And Answer Lanes Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into the answer lane, so follow-up turns remain coherent across planner-direct and synthesizer-authored replies.
 - **Generative Authoring Stays Separate From Rendering**: Rich surface-aware expression belongs in a generative authoring layer that targets the canonical render AST and surface affordances. Renderers project that typed output; they do not invent or reinterpret content.
 
 ### Steering Signals

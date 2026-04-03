@@ -11,7 +11,7 @@ use crate::domain::ports::{
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
     InterpretationToolHint, ModelPaths, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
-    PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
+    PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
     ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::rendering::{
@@ -410,6 +410,7 @@ struct TurnPrompt<'a> {
     workspace_root: &'a Path,
     user_prompt: &'a str,
     recent_turns: &'a str,
+    recent_thread_summary: Option<&'a str>,
     memory_prompt: &'a str,
     context: &'a ContextAssemblyResponse,
     gathered_evidence: Option<&'a EvidenceBundle>,
@@ -1164,7 +1165,13 @@ impl SiftAgentAdapter {
     }
 
     pub fn respond(&self, prompt: &str) -> Result<String> {
-        self.respond_internal(prompt, TurnIntent::DirectResponse, None, &NullTurnEventSink)
+        self.respond_internal(
+            prompt,
+            TurnIntent::DirectResponse,
+            None,
+            &SynthesisHandoff::default(),
+            &NullTurnEventSink,
+        )
     }
 
     pub fn respond_with_evidence(
@@ -1177,7 +1184,13 @@ impl SiftAgentAdapter {
         } else {
             TurnIntent::DirectResponse
         };
-        self.respond_internal(prompt, intent, gathered_evidence, &NullTurnEventSink)
+        self.respond_internal(
+            prompt,
+            intent,
+            gathered_evidence,
+            &SynthesisHandoff::default(),
+            &NullTurnEventSink,
+        )
     }
 
     pub fn respond_for_turn(
@@ -1185,9 +1198,16 @@ impl SiftAgentAdapter {
         prompt: &str,
         turn_intent: TurnIntent,
         gathered_evidence: Option<&EvidenceBundle>,
+        handoff: &SynthesisHandoff,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
+        self.respond_internal(
+            prompt,
+            turn_intent,
+            gathered_evidence,
+            handoff,
+            event_sink.as_ref(),
+        )
     }
 
     pub fn select_initial_action(
@@ -1475,6 +1495,7 @@ impl SiftAgentAdapter {
         prompt: &str,
         turn_intent: TurnIntent,
         gathered_evidence: Option<&EvidenceBundle>,
+        handoff: &SynthesisHandoff,
         event_sink: &dyn TurnEventSink,
     ) -> Result<String> {
         let memory = AgentMemory::load(&self.workspace_root);
@@ -1504,7 +1525,11 @@ impl SiftAgentAdapter {
         state.turn_counter += 1;
         let turn_id = format!("turn-{}", state.turn_counter);
         let assistant_turn_id = format!("{turn_id}-assistant");
-        let recent_turns = format_recent_turns(&state.local_context);
+        let recent_turns = format_synthesis_recent_turns(handoff, &state.local_context);
+        let recent_thread_summary = handoff
+            .recent_thread_summary
+            .as_deref()
+            .filter(|summary| !summary.trim().is_empty());
 
         let mut working_retained = state.retained_artifacts.clone();
         let mut working_local_context = state.local_context.clone();
@@ -1525,7 +1550,13 @@ impl SiftAgentAdapter {
         let mut reply = if direct_response_turn {
             let (reply, exchange_id, raw_response_artifact_id) = self.send_to_model_for_turn(
                 conversation.as_mut(),
-                &build_direct_turn_prompt(prompt, &memory_prompt, self.render_capability),
+                &build_direct_turn_prompt(
+                    prompt,
+                    &recent_turns,
+                    recent_thread_summary,
+                    &memory_prompt,
+                    self.render_capability,
+                ),
                 event_sink,
             )?;
             rendered_exchange_id = Some(exchange_id);
@@ -1540,6 +1571,7 @@ impl SiftAgentAdapter {
                             &build_grounded_turn_prompt(
                                 prompt,
                                 &recent_turns,
+                                recent_thread_summary,
                                 &memory_prompt,
                                 evidence,
                                 self.render_capability,
@@ -1572,6 +1604,7 @@ impl SiftAgentAdapter {
                     workspace_root: &self.workspace_root,
                     user_prompt: prompt,
                     recent_turns: &recent_turns,
+                    recent_thread_summary,
                     memory_prompt: &memory_prompt,
                     context: &initial_context,
                     gathered_evidence,
@@ -1590,6 +1623,7 @@ impl SiftAgentAdapter {
                 &build_planned_direct_prompt(
                     prompt,
                     &recent_turns,
+                    recent_thread_summary,
                     &memory_prompt,
                     gathered_evidence,
                     self.render_capability,
@@ -1611,7 +1645,13 @@ impl SiftAgentAdapter {
                 let (next_reply, exchange_id, raw_response_artifact_id) = self
                     .send_to_model_for_turn(
                         conversation.as_mut(),
-                        &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
+                        &build_direct_retry_prompt(
+                            prompt,
+                            &recent_turns,
+                            recent_thread_summary,
+                            &memory_prompt,
+                            self.render_capability,
+                        ),
                         event_sink,
                     )?;
                 rendered_exchange_id = Some(exchange_id);
@@ -1644,6 +1684,7 @@ impl SiftAgentAdapter {
                                 &build_grounded_retry_prompt(
                                     prompt,
                                     &recent_turns,
+                                    recent_thread_summary,
                                     &memory_prompt,
                                     evidence,
                                     self.render_capability,
@@ -1662,7 +1703,12 @@ impl SiftAgentAdapter {
                 let (next_reply, exchange_id, raw_response_artifact_id) = self
                     .send_to_model_for_turn(
                         conversation.as_mut(),
-                        &build_tool_retry_prompt(prompt, &recent_turns, &memory_prompt),
+                        &build_tool_retry_prompt(
+                            prompt,
+                            &recent_turns,
+                            recent_thread_summary,
+                            &memory_prompt,
+                        ),
                         event_sink,
                     )?;
                 rendered_exchange_id = Some(exchange_id);
@@ -1675,7 +1721,13 @@ impl SiftAgentAdapter {
                 let (next_reply, exchange_id, raw_response_artifact_id) = self
                     .send_to_model_for_turn(
                         conversation.as_mut(),
-                        &build_direct_retry_prompt(prompt, &memory_prompt, self.render_capability),
+                        &build_direct_retry_prompt(
+                            prompt,
+                            &recent_turns,
+                            recent_thread_summary,
+                            &memory_prompt,
+                            self.render_capability,
+                        ),
                         event_sink,
                     )?;
                 rendered_exchange_id = Some(exchange_id);
@@ -2334,9 +2386,16 @@ impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
         prompt: &str,
         turn_intent: TurnIntent,
         gathered_evidence: Option<&EvidenceBundle>,
+        handoff: &SynthesisHandoff,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.respond_internal(prompt, turn_intent, gathered_evidence, event_sink.as_ref())
+        self.respond_internal(
+            prompt,
+            turn_intent,
+            gathered_evidence,
+            handoff,
+            event_sink.as_ref(),
+        )
     }
 
     fn recent_turn_summaries(&self) -> Result<Vec<String>> {
@@ -2396,6 +2455,9 @@ Available tools:\n\
 Recent conversation:\n\
 {}\n\
 \n\
+Active thread summary:\n\
+{}\n\
+\n\
 Gathered retrieval evidence:\n\
 {}\n\
 \n\
@@ -2409,6 +2471,8 @@ Current user request:\n\
         turn.memory_prompt,
         final_answer_contract_prompt(turn.render_capability, turn.gathered_evidence.is_some()),
         turn.recent_turns,
+        turn.recent_thread_summary
+            .unwrap_or("No active thread summary."),
         format_gathered_evidence_digest(turn.gathered_evidence),
         format_context_digest(turn.context),
         turn.user_prompt
@@ -2418,10 +2482,12 @@ Current user request:\n\
 fn build_grounded_turn_prompt(
     user_prompt: &str,
     recent_turns: &str,
+    recent_thread_summary: Option<&str>,
     memory_prompt: &str,
     evidence: &EvidenceBundle,
     render_capability: RenderCapability,
 ) -> String {
+    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
         "You are Paddles, a local-first coding assistant operating inside a repository.\n\
 The planner lane gathered repository evidence for this workspace question.\n\
@@ -2438,6 +2504,9 @@ Persistent operator memory:\n\
 Recent conversation:\n\
 {recent_turns}\n\
 \n\
+Active thread summary:\n\
+{thread_summary}\n\
+\n\
 Gathered repository evidence:\n\
 {}\n\
 \n\
@@ -2450,9 +2519,12 @@ Current user request:\n\
 
 fn build_direct_turn_prompt(
     user_prompt: &str,
+    recent_turns: &str,
+    recent_thread_summary: Option<&str>,
     memory_prompt: &str,
     render_capability: RenderCapability,
 ) -> String {
+    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
         "You are Paddles, a local-first coding assistant.\n\
 The user is making a conversational request that does not require workspace tools.\n\
@@ -2463,6 +2535,12 @@ Do not modify files or suggest workspace actions unless the user explicitly asks
 Persistent operator memory:\n\
 {memory_prompt}\n\
 \n\
+Recent conversation:\n\
+{recent_turns}\n\
+\n\
+Active thread summary:\n\
+{thread_summary}\n\
+\n\
 Current user request:\n\
 {user_prompt}\n",
         final_answer_contract_prompt(render_capability, false),
@@ -2472,10 +2550,12 @@ Current user request:\n\
 fn build_planned_direct_prompt(
     user_prompt: &str,
     recent_turns: &str,
+    recent_thread_summary: Option<&str>,
     memory_prompt: &str,
     gathered_evidence: Option<&EvidenceBundle>,
     render_capability: RenderCapability,
 ) -> String {
+    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
         "You are Paddles, a local-first coding assistant.\n\
 This turn has already passed through the planner lane.\n\
@@ -2490,6 +2570,9 @@ Persistent operator memory:\n\
 Recent conversation:\n\
 {recent_turns}\n\
 \n\
+Active thread summary:\n\
+{thread_summary}\n\
+\n\
 Planner evidence handoff:\n\
 {}\n\
 \n\
@@ -2502,9 +2585,12 @@ Current user request:\n\
 
 fn build_direct_retry_prompt(
     user_prompt: &str,
+    recent_turns: &str,
+    recent_thread_summary: Option<&str>,
     memory_prompt: &str,
     render_capability: RenderCapability,
 ) -> String {
+    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
         "Your last reply tried to call a workspace tool for a conversational message.\n\
 Use this final answer rendering contract:\n\
@@ -2512,6 +2598,12 @@ Use this final answer rendering contract:\n\
 \n\
 Persistent operator memory:\n\
 {memory_prompt}\n\
+\n\
+Recent conversation:\n\
+{recent_turns}\n\
+\n\
+Active thread summary:\n\
+{thread_summary}\n\
 \n\
 Current user request:\n\
         {user_prompt}\n",
@@ -2821,6 +2913,9 @@ Derived decision framework:\n\
 Recent turns:\n\
 {}\n\
 \n\
+Active thread summary:\n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         prompt.workspace_root.display(),
@@ -2828,6 +2923,11 @@ Current user request:\n\
         format_interpretation_tool_hints(prompt.interpretation),
         format_decision_framework(prompt.interpretation),
         format_recent_turn_list(&prompt.request.recent_turns),
+        prompt
+            .request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
         prompt.user_prompt,
     )
 }
@@ -2874,12 +2974,19 @@ Derived decision framework:\n\
 Recent turns:\n\
 {}\n\
 \n\
+Active thread summary:\n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
         format_recent_turn_list(&request.recent_turns),
+        request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
         request.user_prompt,
     )
 }
@@ -2927,12 +3034,23 @@ Interpretation tool hints:\n\
 Derived decision framework:\n\
 {}\n\
 \n\
+Recent turns:\n\
+{}\n\
+\n\
+Active thread summary:\n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         trim_for_context(invalid_reply, 800),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
+        format_recent_turn_list(&request.recent_turns),
+        request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
         request.user_prompt,
     )
 }
@@ -2993,6 +3111,9 @@ Derived decision framework:\n\
 Recent turns:\n\
 {}\n\
 \n\
+Active thread summary:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -3003,6 +3124,11 @@ Current user request:\n\
         format_interpretation_tool_hints(prompt.interpretation),
         format_decision_framework(prompt.interpretation),
         format_recent_turn_list(&prompt.request.recent_turns),
+        prompt
+            .request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
         format_planner_loop_state_digest(prompt.request),
         prompt.user_prompt,
     )
@@ -3044,6 +3170,12 @@ Interpretation tool hints:\n\
 Derived decision framework:\n\
 {}\n\
 \n\
+Recent turns:\n\
+{}\n\
+\n\
+Active thread summary:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -3052,6 +3184,11 @@ Current user request:\n\
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
+        format_recent_turn_list(&request.recent_turns),
+        request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
         format_planner_loop_state_digest(request),
         request.user_prompt,
     )
@@ -3094,6 +3231,12 @@ Interpretation context:\n\
 Derived decision framework:\n\
 {}\n\
 \n\
+Recent turns:\n\
+{}\n\
+\n\
+Active thread summary:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -3102,6 +3245,11 @@ Current user request:\n\
         trim_for_context(invalid_reply, 800),
         format_interpretation_context_digest(&request.interpretation),
         format_decision_framework(&request.interpretation),
+        format_recent_turn_list(&request.recent_turns),
+        request
+            .recent_thread_summary
+            .as_deref()
+            .unwrap_or("No recent thread-local summary."),
         format_planner_loop_state_digest(request),
         request.user_prompt,
     )
@@ -3197,10 +3345,12 @@ Steering candidate:\n\
 fn build_grounded_retry_prompt(
     user_prompt: &str,
     recent_turns: &str,
+    recent_thread_summary: Option<&str>,
     memory_prompt: &str,
     evidence: &EvidenceBundle,
     render_capability: RenderCapability,
 ) -> String {
+    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
         "Your last reply was empty or tried to call a tool for a repository question.\n\
 Answer using ONLY the gathered repository evidence.\n\
@@ -3215,6 +3365,9 @@ Persistent operator memory:\n\
 Recent conversation:\n\
 {recent_turns}\n\
 \n\
+Active thread summary:\n\
+{thread_summary}\n\
+\n\
 Gathered repository evidence:\n\
 {}\n\
 \n\
@@ -3225,7 +3378,13 @@ Current user request:\n\
     )
 }
 
-fn build_tool_retry_prompt(user_prompt: &str, recent_turns: &str, memory_prompt: &str) -> String {
+fn build_tool_retry_prompt(
+    user_prompt: &str,
+    recent_turns: &str,
+    recent_thread_summary: Option<&str>,
+    memory_prompt: &str,
+) -> String {
+    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
         "The user asked for a workspace action and your last reply used prose instead of a tool.\n\
 Reply with ONLY one JSON tool call and no prose.\n\
@@ -3246,6 +3405,9 @@ Available tools:\n\
 \n\
 Recent conversation:\n\
 {recent_turns}\n\
+\n\
+Active thread summary:\n\
+{thread_summary}\n\
 \n\
 Current user request:\n\
 {user_prompt}\n"
@@ -3648,11 +3810,7 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
         }
     }
 
-    let likely_targets = planner_likely_target_files(
-        &request.user_prompt,
-        &request.interpretation,
-        &request.loop_state,
-    );
+    let likely_targets = planner_likely_target_files(&request.loop_state);
     if !likely_targets.is_empty() {
         lines.push("Likely target files:".to_string());
         for path in likely_targets {
@@ -3683,15 +3841,7 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
     lines.join("\n")
 }
 
-fn planner_likely_target_files(
-    user_prompt: &str,
-    interpretation: &InterpretationContext,
-    loop_state: &PlannerLoopState,
-) -> Vec<String> {
-    if !planner_prompt_needs_execution_mode(user_prompt, interpretation) {
-        return Vec::new();
-    }
-
+fn planner_likely_target_files(loop_state: &PlannerLoopState) -> Vec<String> {
     let mut ranked = loop_state
         .evidence_items
         .iter()
@@ -3704,42 +3854,6 @@ fn planner_likely_target_files(
     });
     ranked.dedup_by(|(path_a, _), (path_b, _)| path_a == path_b);
     ranked.into_iter().take(3).map(|(path, _)| path).collect()
-}
-
-fn planner_prompt_needs_execution_mode(
-    user_prompt: &str,
-    interpretation: &InterpretationContext,
-) -> bool {
-    let prompt_lower = user_prompt.to_ascii_lowercase();
-    let prompt_signals = [
-        "edit ",
-        "change ",
-        "update ",
-        "modify ",
-        "implement ",
-        "fix ",
-        "refactor ",
-        "rename ",
-        "make ",
-        "render ",
-        "add ",
-        "remove ",
-    ];
-    if prompt_signals
-        .iter()
-        .any(|signal| prompt_lower.contains(signal))
-    {
-        return true;
-    }
-
-    interpretation.tool_hints.iter().any(|hint| {
-        matches!(
-            hint.action,
-            WorkspaceAction::WriteFile { .. }
-                | WorkspaceAction::ReplaceInFile { .. }
-                | WorkspaceAction::ApplyPatch { .. }
-        )
-    })
 }
 
 fn planner_candidate_path(source: &str) -> Option<String> {
@@ -3826,6 +3940,34 @@ fn format_recent_turns(local_context: &[LocalContextSource]) -> String {
     }
 
     turns.into_iter().rev().collect::<Vec<_>>().join("\n")
+}
+
+fn format_synthesis_recent_turns(
+    handoff: &SynthesisHandoff,
+    local_context: &[LocalContextSource],
+) -> String {
+    let mut turns = handoff
+        .recent_turns
+        .iter()
+        .map(|turn| format!("- {}", trim_for_context(turn, 240)))
+        .collect::<Vec<_>>();
+
+    for turn in format_recent_turns(local_context).lines() {
+        let trimmed = turn.trim();
+        if trimmed.is_empty() || trimmed == "No prior conversation in this session." {
+            continue;
+        }
+        if turns.iter().any(|existing| existing == trimmed) {
+            continue;
+        }
+        turns.push(trimmed.to_string());
+    }
+
+    if turns.is_empty() {
+        return "No prior conversation in this session.".to_string();
+    }
+
+    turns.into_iter().take(6).collect::<Vec<_>>().join("\n")
 }
 
 fn describe_tool_call(tool_call: &ToolCall) -> String {
@@ -4884,7 +5026,7 @@ mod tests {
         InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
         PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
         PlannerTraceMetadata, PlannerTraceStep, RefinementPolicy, RetainedEvidence, RetrievalMode,
-        RetrievalStrategy, WorkspaceAction,
+        RetrievalStrategy, SynthesisHandoff, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_agent::{
         DEFAULT_QWEN_MAX_LENGTH, QwenModelFamily, infer_qwen_family, infer_qwen_runtime_max_length,
@@ -5201,6 +5343,7 @@ mod tests {
                 "Where is the entrypoint?",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -5338,6 +5481,7 @@ mod tests {
                 "How does memory work in paddles?",
                 TurnIntent::Planned,
                 Some(&evidence),
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -5365,6 +5509,7 @@ mod tests {
                 "How does memory work in paddles?",
                 TurnIntent::Planned,
                 Some(&evidence),
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -5438,6 +5583,7 @@ mod tests {
                         rank: 1,
                     }],
                 )),
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -5489,6 +5635,7 @@ mod tests {
                         rank: 1,
                     }],
                 )),
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -5516,7 +5663,13 @@ mod tests {
         let sink = Arc::new(RecordingForensicSink::default());
 
         let reply = adapter
-            .respond_for_turn("Hello", TurnIntent::DirectResponse, None, sink.clone())
+            .respond_for_turn(
+                "Hello",
+                TurnIntent::DirectResponse,
+                None,
+                &SynthesisHandoff::default(),
+                sink.clone(),
+            )
             .expect("reply");
 
         assert_eq!(reply, "Hello.");
@@ -6139,6 +6292,7 @@ mod tests {
                 "Try reading the missing file.",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -6257,6 +6411,7 @@ mod tests {
                 "What can you help with?",
                 TurnIntent::Planned,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -6294,6 +6449,7 @@ mod tests {
                 "Inspect the repository status",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("second response");
@@ -6327,6 +6483,7 @@ mod tests {
                 "Inspect the repository status",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -6361,6 +6518,7 @@ mod tests {
                 "Inspect the repository status",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -6394,6 +6552,7 @@ mod tests {
                 "Show me the git status",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
@@ -6470,6 +6629,7 @@ mod tests {
                 "Keep listing files forever.",
                 TurnIntent::DeterministicAction,
                 None,
+                &SynthesisHandoff::default(),
                 Arc::new(NullTurnEventSink),
             )
             .expect_err("tool budget error");

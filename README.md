@@ -83,7 +83,7 @@ flowchart LR
 
 ### The Recursive Harness in Practice
 
-The primary mech-suit path assembles interpretation context first, then lets the planner model choose each bounded action. The controller validates, executes, and enforces budgets — the model drives direction, the controller ensures safety.
+The primary mech-suit path assembles interpretation context first, then lets the planner model choose each bounded action. The controller validates, executes, and enforces budgets — the model drives direction, the controller ensures safety. Intent routing no longer comes from controller-side prompt token guesses; the planner decides when a turn should answer directly, investigate locally, or recurse.
 
 ```mermaid
 flowchart TD
@@ -254,6 +254,7 @@ A few areas are still maturing:
 
 - **Interpretation shapes direction.** `AGENTS.md` memory influences what the planner investigates, how it prioritizes, and which procedures it follows.
 - **The model drives, the controller guards.** The model selects its next bounded action from interpretation context; the controller validates, executes, and enforces budgets.
+- **Conversation continuity is shared, not inferred twice.** Planner and answer lanes receive the same recent-turn and active-thread handoff, so follow-up turns do not reset just because the answer path changed.
 - **Recursive work earns better answers.** Difficult workspace questions improve through iterative evidence gathering rather than one-shot generation.
 - **Separation of concerns.** Planner and synthesizer are distinct roles, potentially using different models optimized for their respective workloads.
 - **Context over hardcoding.** Keel, project artifacts, and board state flow through memory, search, and tool outputs — the harness stays general-purpose.

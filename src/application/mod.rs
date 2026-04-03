@@ -22,13 +22,14 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
-    EvidenceItem, GathererCapability, InitialAction, InitialActionDecision, InterpretationContext,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, ModelPaths, ModelRegistry, NoopTraceRecorder, OperatorMemory,
-    PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
-    PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-    SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+    EvidenceItem, GathererCapability, InitialAction, InitialActionDecision, InitialEditInstruction,
+    InterpretationContext, InterpretationProcedure, InterpretationProcedureStep,
+    InterpretationRequest, InterpretationToolHint, ModelPaths, ModelRegistry, NoopTraceRecorder,
+    OperatorMemory, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
+    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+    RetrievalStrategy, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
+    WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -234,6 +235,8 @@ struct PlannerLoopContext {
     resolver: Arc<dyn ContextResolver>,
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
+    recent_thread_summary: Option<String>,
+    initial_edit: InitialEditInstruction,
 }
 
 #[derive(Default)]
@@ -2000,13 +2003,15 @@ impl MechSuitService {
         });
 
         let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
+        let recent_thread_summary = session.recent_thread_summary(&active_thread);
         let request = PlannerRequest::new(
             prompt,
             self.workspace_root.clone(),
             interpretation.clone(),
             PlannerBudget::default(),
         )
-        .with_recent_turns(recent_turns.clone());
+        .with_recent_turns(recent_turns.clone())
+        .with_recent_thread_summary(recent_thread_summary.clone());
 
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
@@ -2041,19 +2046,6 @@ impl MechSuitService {
                         ),
                     });
                     decision = bootstrapped;
-                }
-                if let Some(forced) =
-                    coerce_workspace_engagement_initial_action(prompt, &interpretation, &decision)
-                {
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "workspace-engagement".to_string(),
-                        reason: format!(
-                            "turn requires local workspace engagement; forced initial `{}` to `{}`",
-                            decision.action.summary(),
-                            forced.action.summary()
-                        ),
-                    });
-                    decision = forced;
                 }
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence: 1,
@@ -2104,6 +2096,8 @@ impl MechSuitService {
                         resolver,
                         interpretation: interpretation.clone(),
                         recent_turns,
+                        recent_thread_summary: recent_thread_summary.clone(),
+                        initial_edit: execution_plan.initial_edit.clone(),
                     },
                     execution_plan.initial_planner_decision.clone(),
                     Arc::clone(&trace),
@@ -2137,11 +2131,16 @@ impl MechSuitService {
         let session_for_reply = session.clone();
         let thread_for_reply = active_thread;
         let prompt_for_model = prompt.clone();
+        let handoff = SynthesisHandoff {
+            recent_turns,
+            recent_thread_summary,
+        };
         let reply = tokio::task::spawn_blocking(move || {
             engine.respond_for_turn(
                 &prompt_for_model,
                 intent,
                 planner_outcome.evidence.as_ref(),
+                &handoff,
                 event_sink,
             )
         })
@@ -2164,8 +2163,7 @@ impl MechSuitService {
         gatherer: Option<&Arc<dyn ContextGatherer>>,
         decision: &InitialActionDecision,
     ) -> Result<Option<InitialActionDecision>> {
-        if !decision.edit.known_edit && !mutation_turn_requires_action_bias(prompt, interpretation)
-        {
+        if !decision.edit.known_edit {
             return Ok(None);
         }
 
@@ -2208,8 +2206,7 @@ impl MechSuitService {
             ),
             answer: None,
             edit: crate::domain::ports::InitialEditInstruction {
-                known_edit: decision.edit.known_edit
-                    || mutation_turn_requires_action_bias(prompt, interpretation),
+                known_edit: decision.edit.known_edit,
                 candidate_files: ranked_candidates,
             },
         }))
@@ -2345,7 +2342,6 @@ impl MechSuitService {
         };
 
         enrich_interpretation_with_local_harness_profile(
-            prompt,
             interpretation,
             local_harness_capabilities(),
         )
@@ -2359,7 +2355,7 @@ impl MechSuitService {
         trace: Arc<StructuredTurnTrace>,
     ) -> Result<PlannerLoopOutcome> {
         let mut context = context;
-        let budget = planner_budget_for_turn(prompt, &context.interpretation);
+        let budget = planner_budget_for_turn(&context.initial_edit);
         let mut loop_state = PlannerLoopState::default();
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
@@ -2386,6 +2382,7 @@ impl MechSuitService {
                     budget.clone(),
                 )
                 .with_recent_turns(context.recent_turns.clone())
+                .with_recent_thread_summary(context.recent_thread_summary.clone())
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone());
                 context
@@ -3035,6 +3032,7 @@ struct PromptExecutionPlan {
     route_summary: String,
     initial_planner_decision: Option<RecursivePlannerDecision>,
     direct_answer: Option<String>,
+    initial_edit: InitialEditInstruction,
 }
 
 struct PlannerLoopOutcome {
@@ -3069,6 +3067,7 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
         ),
         initial_planner_decision: None,
         direct_answer: None,
+        initial_edit: InitialEditInstruction::default(),
     }
 }
 
@@ -3080,7 +3079,7 @@ fn execution_plan_from_initial_action(
         action,
         rationale,
         answer,
-        edit: _,
+        edit,
     } = decision;
     match action {
         InitialAction::Answer => PromptExecutionPlan {
@@ -3092,6 +3091,7 @@ fn execution_plan_from_initial_action(
             ),
             initial_planner_decision: None,
             direct_answer: answer,
+            initial_edit: edit,
         },
         InitialAction::Stop { reason } => PromptExecutionPlan {
             intent: TurnIntent::DirectResponse,
@@ -3102,6 +3102,7 @@ fn execution_plan_from_initial_action(
             ),
             initial_planner_decision: None,
             direct_answer: answer,
+            initial_edit: edit,
         },
         resource_action => {
             let planner_action = resource_action
@@ -3135,6 +3136,7 @@ fn execution_plan_from_initial_action(
                     answer: None,
                 }),
                 direct_answer: None,
+                initial_edit: edit,
             }
         }
     }
@@ -3259,8 +3261,8 @@ async fn build_planner_prior_context(
     prior
 }
 
-fn planner_budget_for_turn(prompt: &str, interpretation: &InterpretationContext) -> PlannerBudget {
-    if mutation_turn_requires_action_bias(prompt, interpretation) {
+fn planner_budget_for_turn(initial_edit: &InitialEditInstruction) -> PlannerBudget {
+    if initial_edit.known_edit {
         PlannerBudget {
             max_steps: 8,
             max_reads: 4,
@@ -3328,7 +3330,6 @@ fn command_available(command: &str) -> bool {
 }
 
 fn enrich_interpretation_with_local_harness_profile(
-    prompt: &str,
     mut context: InterpretationContext,
     capabilities: &LocalHarnessCapabilities,
 ) -> InterpretationContext {
@@ -3349,17 +3350,6 @@ fn enrich_interpretation_with_local_harness_profile(
         .contains("Paddles can execute local workspace actions through the harness")
     {
         context.summary = format!("{}\n\n{}", context.summary.trim(), capability_summary);
-    }
-
-    if prompt_requires_verifiable_hypothesis(prompt)
-        && !context
-            .summary
-            .contains("Treat user-reported failures as working hypotheses")
-    {
-        context.summary = format!(
-            "{}\n\nTreat user-reported failures as working hypotheses. Start from the user's report, then verify it from first principles in the harness and revise the premise explicitly when evidence weakens or contradicts it.",
-            context.summary.trim()
-        );
     }
 
     if capabilities.git {
@@ -3401,7 +3391,7 @@ fn enrich_interpretation_with_local_harness_profile(
         );
     }
 
-    if prompt_mentions_github_or_ci(prompt) && capabilities.gh {
+    if capabilities.gh {
         append_interpretation_tool_hint(
             &mut context,
             InterpretationToolHint {
@@ -3409,7 +3399,7 @@ fn enrich_interpretation_with_local_harness_profile(
                 action: WorkspaceAction::Inspect {
                     command: "gh run list --limit 10".to_string(),
                 },
-                note: "Use the GitHub CLI locally to inspect recent Actions runs instead of asking the user for CI logs first.".to_string(),
+                note: "Use the GitHub CLI locally when repository work touches pull requests, checks, Actions runs, or workflow state.".to_string(),
             },
         );
     }
@@ -3424,7 +3414,7 @@ fn enrich_interpretation_with_local_harness_profile(
         },
     );
 
-    if prompt_mentions_github_or_ci(prompt) {
+    if capabilities.gh {
         append_interpretation_procedure(
             &mut context,
             InterpretationProcedure {
@@ -3544,154 +3534,6 @@ fn ci_diagnostic_procedure_steps(
         });
     }
     steps
-}
-
-fn prompt_mentions_github_or_ci(prompt: &str) -> bool {
-    let tokens = prompt_intent_tokens(prompt);
-    contains_exact_token(&tokens, "github")
-        || contains_exact_token(&tokens, "actions")
-        || contains_exact_token(&tokens, "workflow")
-        || contains_exact_token(&tokens, "ci")
-        || contains_exact_token(&tokens, "pipeline")
-        || contains_token_phrase(&tokens, &["run", "id"])
-        || contains_token_phrase(&tokens, &["check", "suite"])
-        || contains_token_phrase(&tokens, &["check", "run"])
-}
-
-fn prompt_requires_verifiable_hypothesis(prompt: &str) -> bool {
-    let tokens = prompt_intent_tokens(prompt);
-    contains_prefixed_token(&tokens, "debug")
-        || contains_prefixed_token(&tokens, "diagnos")
-        || contains_prefixed_token(&tokens, "investigat")
-        || contains_prefixed_token(&tokens, "reproduce")
-        || contains_token_phrase(&tokens, &["root", "cause"])
-        || contains_token_phrase(&tokens, &["why", "is"])
-        || contains_token_phrase(&tokens, &["why", "are"])
-        || contains_exact_token(&tokens, "failing")
-        || contains_exact_token(&tokens, "failure")
-        || contains_exact_token(&tokens, "broken")
-        || contains_exact_token(&tokens, "regression")
-        || contains_exact_token(&tokens, "panic")
-        || contains_exact_token(&tokens, "crash")
-        || contains_exact_token(&tokens, "ci")
-        || contains_exact_token(&tokens, "workflow")
-        || contains_exact_token(&tokens, "pipeline")
-        || contains_token_phrase(&tokens, &["build", "failing"])
-        || contains_token_phrase(&tokens, &["tests", "failing"])
-        || contains_token_phrase(&tokens, &["test", "failing"])
-        || contains_token_phrase(&tokens, &["lint", "failing"])
-}
-
-fn prompt_intent_tokens(prompt: &str) -> Vec<String> {
-    prompt
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .map(|token| token.to_ascii_lowercase())
-        .collect()
-}
-
-fn contains_exact_token(tokens: &[String], needle: &str) -> bool {
-    tokens.iter().any(|token| token == needle)
-}
-
-fn contains_prefixed_token(tokens: &[String], prefix: &str) -> bool {
-    tokens.iter().any(|token| token.starts_with(prefix))
-}
-
-fn contains_token_phrase(tokens: &[String], phrase: &[&str]) -> bool {
-    if phrase.is_empty() || tokens.len() < phrase.len() {
-        return false;
-    }
-
-    tokens.windows(phrase.len()).any(|window| {
-        window
-            .iter()
-            .zip(phrase.iter())
-            .all(|(token, expected)| token == expected)
-    })
-}
-
-fn prompt_requires_workspace_engagement(
-    prompt: &str,
-    interpretation: &InterpretationContext,
-) -> bool {
-    if mutation_turn_requires_action_bias(prompt, interpretation) {
-        return true;
-    }
-
-    if prompt_requires_verifiable_hypothesis(prompt) {
-        return true;
-    }
-
-    false
-}
-
-fn mutation_turn_requires_action_bias(
-    prompt: &str,
-    interpretation: &InterpretationContext,
-) -> bool {
-    let prompt_lower = prompt.to_ascii_lowercase();
-    let prompt_signals = [
-        "edit ",
-        "change ",
-        "update ",
-        "modify ",
-        "implement ",
-        "fix ",
-        "refactor ",
-        "rename ",
-        "make ",
-        "render ",
-        "show ",
-        "add ",
-        "remove ",
-    ];
-    if prompt_signals
-        .iter()
-        .any(|signal| prompt_lower.contains(signal))
-    {
-        return true;
-    }
-
-    interpretation.tool_hints.iter().any(|hint| {
-        matches!(
-            hint.action,
-            WorkspaceAction::WriteFile { .. }
-                | WorkspaceAction::ReplaceInFile { .. }
-                | WorkspaceAction::ApplyPatch { .. }
-        )
-    })
-}
-
-fn coerce_workspace_engagement_initial_action(
-    prompt: &str,
-    interpretation: &InterpretationContext,
-    decision: &InitialActionDecision,
-) -> Option<InitialActionDecision> {
-    if !prompt_requires_workspace_engagement(prompt, interpretation) {
-        return None;
-    }
-
-    if matches!(
-        decision.action,
-        InitialAction::Workspace { .. }
-            | InitialAction::Refine { .. }
-            | InitialAction::Branch { .. }
-    ) {
-        return None;
-    }
-
-    Some(InitialActionDecision {
-        action: InitialAction::Workspace {
-            action: WorkspaceAction::Inspect {
-                command: "git status --short".to_string(),
-            },
-        },
-        rationale: "action produces information; diagnose the local workspace state before answering directly"
-            .to_string(),
-        answer: None,
-        edit: decision.edit.clone(),
-    })
 }
 
 fn known_edit_bootstrap_candidates(
@@ -3873,13 +3715,8 @@ async fn review_decision_under_signals(
     workspace_root: &Path,
     trace: Arc<StructuredTurnTrace>,
 ) -> Result<RecursivePlannerDecision> {
-    let steering_notes = collect_steering_review_notes(
-        prompt,
-        &context.interpretation,
-        loop_state,
-        &decision,
-        workspace_root,
-    );
+    let steering_notes =
+        collect_steering_review_notes(context, loop_state, &decision, workspace_root);
     if steering_notes.is_empty() {
         return Ok(decision);
     }
@@ -3896,6 +3733,7 @@ async fn review_decision_under_signals(
         budget.clone(),
     )
     .with_recent_turns(context.recent_turns.clone())
+    .with_recent_thread_summary(context.recent_thread_summary.clone())
     .with_loop_state(review_loop_state)
     .with_resolver(context.resolver.clone());
 
@@ -3924,16 +3762,14 @@ async fn review_decision_under_signals(
 }
 
 fn collect_steering_review_notes(
-    prompt: &str,
-    interpretation: &InterpretationContext,
+    context: &PlannerLoopContext,
     loop_state: &PlannerLoopState,
     decision: &RecursivePlannerDecision,
     workspace_root: &Path,
 ) -> Vec<SteeringReviewNote> {
     let mut notes = Vec::new();
 
-    if prompt_requires_verifiable_hypothesis(prompt)
-        && !loop_state.evidence_items.is_empty()
+    if !loop_state.evidence_items.is_empty()
         && !decision.action.is_terminal()
         && !decision_targets_file(&decision.action)
     {
@@ -3943,13 +3779,13 @@ fn collect_steering_review_notes(
         });
     }
 
-    if mutation_turn_requires_action_bias(prompt, interpretation)
+    if context.initial_edit.known_edit
         && !has_file_targeting_step(loop_state)
         && !decision_targets_file(&decision.action)
     {
         let likely_targets = likely_action_bias_targets(loop_state, workspace_root, 3);
         let likely_targets = if likely_targets.is_empty() {
-            known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3)
+            normalize_candidate_files(workspace_root, &context.initial_edit.candidate_files, 3)
         } else {
             likely_targets
         };
@@ -3960,6 +3796,18 @@ fn collect_steering_review_notes(
     }
 
     notes
+}
+
+fn normalize_candidate_files(
+    workspace_root: &Path,
+    candidates: &[String],
+    limit: usize,
+) -> Vec<String> {
+    candidates
+        .iter()
+        .filter_map(|candidate| normalize_known_edit_candidate(workspace_root, candidate))
+        .take(limit)
+        .collect()
 }
 
 fn format_premise_challenge_review_note(
@@ -4714,8 +4562,9 @@ mod tests {
         PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState,
         PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
         RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
-        SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+        SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
+    use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -5006,6 +4855,7 @@ mod tests {
     struct RecordingSynthesizer {
         executed_actions: Mutex<Vec<WorkspaceAction>>,
         gathered_summaries: Mutex<Vec<String>>,
+        handoffs: Mutex<Vec<SynthesisHandoff>>,
     }
 
     impl SynthesizerEngine for RecordingSynthesizer {
@@ -5016,6 +4866,7 @@ mod tests {
             _prompt: &str,
             _turn_intent: TurnIntent,
             gathered_evidence: Option<&EvidenceBundle>,
+            handoff: &SynthesisHandoff,
             _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<String> {
             if let Some(bundle) = gathered_evidence {
@@ -5024,6 +4875,10 @@ mod tests {
                     .expect("gathered summaries lock")
                     .push(bundle.summary.clone());
             }
+            self.handoffs
+                .lock()
+                .expect("handoffs lock")
+                .push(handoff.clone());
             Ok("Applied the bounded action.".to_string())
         }
 
@@ -5052,6 +4907,40 @@ mod tests {
             rationale: rationale.to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+        }
+    }
+
+    fn test_planner_loop_context(
+        initial_edit: InitialEditInstruction,
+    ) -> super::PlannerLoopContext {
+        super::PlannerLoopContext {
+            prepared: PreparedRuntimeLanes {
+                planner: PreparedModelLane {
+                    role: RuntimeLaneRole::Planner,
+                    provider: ModelProvider::Sift,
+                    model_id: "planner".to_string(),
+                    paths: Some(sample_model_paths("planner")),
+                },
+                synthesizer: PreparedModelLane {
+                    role: RuntimeLaneRole::Synthesizer,
+                    provider: ModelProvider::Sift,
+                    model_id: "synth".to_string(),
+                    paths: Some(sample_model_paths("synth")),
+                },
+                gatherer: None,
+            },
+            planner_engine: Arc::new(TestPlanner::new(
+                initial_action_decision(InitialAction::Answer, "unused"),
+                Vec::new(),
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+            resolver: Arc::new(NoopContextResolver),
+            interpretation: InterpretationContext::default(),
+            recent_turns: Vec::new(),
+            recent_thread_summary: None,
+            initial_edit,
         }
     }
 
@@ -5388,74 +5277,8 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_turns_force_local_inspect_when_initial_action_answers_directly() {
-        let decision = initial_action_decision(
-            InitialAction::Answer,
-            "I need more information from the user before I can help",
-        );
-
-        let forced = super::coerce_workspace_engagement_initial_action(
-            "CI is failing can you debug it?",
-            &InterpretationContext::default(),
-            &decision,
-        )
-        .expect("forced initial action");
-
-        assert_eq!(
-            forced.action,
-            InitialAction::Workspace {
-                action: WorkspaceAction::Inspect {
-                    command: "git status --short".to_string(),
-                },
-            }
-        );
-        assert!(forced.rationale.contains("action produces information"));
-    }
-
-    #[test]
-    fn casual_turns_do_not_force_local_inspect_when_initial_action_answers_directly() {
-        let decision = initial_action_decision(
-            InitialAction::Answer,
-            "the turn can be answered directly after interpretation",
-        );
-
-        assert!(
-            super::coerce_workspace_engagement_initial_action(
-                "Howdy",
-                &InterpretationContext::default(),
-                &decision,
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn ascii_requests_do_not_trigger_ci_workspace_gate() {
-        let decision = initial_action_decision(
-            InitialAction::Answer,
-            "this can be answered directly without local inspection",
-        );
-
-        assert!(!super::prompt_mentions_github_or_ci(
-            "Can you generate an ASCII diagram of the start circuit?"
-        ));
-        assert!(!super::prompt_requires_verifiable_hypothesis(
-            "Can you generate an ASCII diagram of the start circuit?"
-        ));
-        assert!(
-            super::coerce_workspace_engagement_initial_action(
-                "Can you generate an ASCII diagram of the start circuit?",
-                &InterpretationContext::default(),
-                &decision,
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
     fn local_harness_enrichment_adds_tool_preferences_and_workspace_procedure() {
         let context = super::enrich_interpretation_with_local_harness_profile(
-            "Find the target file",
             InterpretationContext::default(),
             &super::LocalHarnessCapabilities {
                 git: true,
@@ -5494,9 +5317,8 @@ mod tests {
     }
 
     #[test]
-    fn local_harness_enrichment_adds_ci_specific_github_and_repro_steps() {
+    fn local_harness_enrichment_adds_general_github_hint_and_ci_procedure_when_available() {
         let context = super::enrich_interpretation_with_local_harness_profile(
-            "Check the Github action and use the gh CLI",
             InterpretationContext::default(),
             &super::LocalHarnessCapabilities {
                 gh: true,
@@ -5531,22 +5353,19 @@ mod tests {
     }
 
     #[test]
-    fn local_harness_enrichment_marks_diagnostic_claims_as_hypotheses() {
+    fn local_harness_enrichment_no_longer_uses_prompt_intent_to_gate_github_hints() {
         let context = super::enrich_interpretation_with_local_harness_profile(
-            "CI is failing can you debug it?",
             InterpretationContext::default(),
             &super::LocalHarnessCapabilities {
                 gh: true,
-                git: true,
                 ..Default::default()
             },
         );
 
-        assert!(
-            context
-                .summary
-                .contains("Treat user-reported failures as working hypotheses")
-        );
+        assert!(context.tool_hints.iter().any(|hint| matches!(
+            hint.action,
+            WorkspaceAction::Inspect { ref command } if command == "gh run list --limit 10"
+        )));
     }
 
     #[test]
@@ -6836,8 +6655,10 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            "fix the action bias behavior",
-            &InterpretationContext::default(),
+            &test_planner_loop_context(InitialEditInstruction {
+                known_edit: true,
+                candidate_files: vec!["src/application/mod.rs".to_string()],
+            }),
             &loop_state,
             &decision,
             Path::new("/workspace"),
@@ -6881,8 +6702,8 @@ mod tests {
         };
         let request_log = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
-            initial_action_decision(
-                InitialAction::Workspace {
+            InitialActionDecision {
+                action: InitialAction::Workspace {
                     action: WorkspaceAction::Search {
                         query: "planner loop edit target".to_string(),
                         mode: RetrievalMode::Linear,
@@ -6890,8 +6711,13 @@ mod tests {
                         intent: Some("implementation search".to_string()),
                     },
                 },
-                "start with one bounded search",
-            ),
+                rationale: "start with one bounded search".to_string(),
+                answer: None,
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["src/application/mod.rs".to_string()],
+                },
+            },
             vec![
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -7069,7 +6895,7 @@ mod tests {
     }
 
     #[test]
-    fn mutation_turn_bootstraps_to_a_file_read_even_without_model_edit_flag() {
+    fn controller_does_not_bootstrap_known_edit_without_model_edit_signal() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
         fs::write(
@@ -7128,10 +6954,10 @@ mod tests {
             .executed_actions
             .lock()
             .expect("executed actions lock");
-        assert!(matches!(
-            executed_actions.first(),
-            Some(WorkspaceAction::Read { path }) if path == "src/application/mod.rs"
-        ));
+        assert!(
+            executed_actions.is_empty(),
+            "without a model-authored edit signal, the controller should not invent a file read"
+        );
     }
 
     #[test]
@@ -7429,6 +7255,150 @@ mod tests {
     }
 
     #[test]
+    fn out_of_domain_direct_turns_do_not_trigger_controller_workspace_inspects() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "conversational request can go straight to the answer lane".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            },
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "Can you help me debug an issue starting my Chevy C20 truck. It's not turning over",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(!sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, invocation, .. }
+                if tool_name == "inspect" && invocation == "git status --short"
+        )));
+    }
+
+    #[test]
+    fn synthesizer_only_turns_receive_recent_turns_and_thread_summary_handoff() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "answer lane should handle this directly".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            },
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let history_store = Arc::new(ConversationHistoryStore::with_path(
+            workspace.path().join("state/conversation-history.toml"),
+        ));
+        service.set_conversation_history_store(Arc::clone(&history_store));
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Can you help me debug an issue starting my Chevy C20 truck?",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("first prompt");
+            service
+                .process_prompt_in_session_with_sink(
+                    "Sure you do. You helped me in a prior conversation",
+                    session,
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("second prompt");
+        });
+
+        let handoffs = synthesizer.handoffs.lock().expect("handoffs lock").clone();
+        assert!(
+            handoffs.len() >= 2,
+            "expected both turns to reach the synthesizer"
+        );
+        let second = handoffs.last().expect("second handoff");
+        assert!(
+            second
+                .recent_turns
+                .iter()
+                .any(|turn| turn.contains("Chevy C20 truck")),
+            "recent turns should include the active conversational subject"
+        );
+        assert!(
+            second
+                .recent_thread_summary
+                .as_deref()
+                .is_some_and(|summary| summary.contains("Chevy C20 truck")),
+            "thread summary should carry the active conversational subject into the answer lane"
+        );
+    }
+
+    #[test]
     fn premise_challenge_stops_redundant_ci_probe_after_non_failing_run_evidence() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             steps: vec![PlannerStepRecord {
@@ -7463,8 +7433,7 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            "CI is failing. Can you debug it on this machine?",
-            &InterpretationContext::default(),
+            &test_planner_loop_context(InitialEditInstruction::default()),
             &loop_state,
             &decision,
             Path::new("/workspace"),
@@ -7618,8 +7587,7 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            "CI is failing. Can you debug it on this machine?",
-            &InterpretationContext::default(),
+            &test_planner_loop_context(InitialEditInstruction::default()),
             &loop_state,
             &decision,
             Path::new("/workspace"),
@@ -7867,8 +7835,10 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            "fix the planner loop",
-            &InterpretationContext::default(),
+            &test_planner_loop_context(InitialEditInstruction {
+                known_edit: true,
+                candidate_files: vec!["src/application/mod.rs".to_string()],
+            }),
             &PlannerLoopState::default(),
             &decision,
             workspace.path(),

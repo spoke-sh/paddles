@@ -290,9 +290,10 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
                 app.input_mode = InputMode::Normal;
                 app.push_event("Login cancelled", "Returned to normal input.");
                 false
-            } else if app.input.is_empty() && app.cancel_latest_queued_steering_prompt() {
-                false
             } else {
+                if app.input.is_empty() {
+                    app.cancel_latest_queued_steering_prompt();
+                }
                 false
             }
         }
@@ -4004,8 +4005,12 @@ mod tests {
 
         assert!(!should_exit);
         assert!(app.queued_prompts.is_empty());
-        assert!(app.rows.iter().any(|row| row.header == "• Cancelled queued steering prompt"
-            && row.content.contains("Are you stuck?")));
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.header == "• Cancelled queued steering prompt"
+                    && row.content.contains("Are you stuck?"))
+        );
     }
 
     #[test]
