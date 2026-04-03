@@ -2014,7 +2014,7 @@ impl MechSuitService {
             summary: execution_plan.route_summary.clone(),
         });
 
-        let gathered_evidence = match execution_plan.path {
+        let planner_outcome = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
                 let recent_turns = synthesizer_engine.recent_turn_summaries()?;
 
@@ -2045,8 +2045,23 @@ impl MechSuitService {
                 )
                 .await?
             }
-            PromptExecutionPath::SynthesizerOnly => None,
+            PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
+                evidence: None,
+                direct_answer: None,
+            },
         };
+
+        if let Some(reply) = planner_outcome.direct_answer {
+            trace.emit(TurnEvent::SynthesisReady {
+                grounded: false,
+                citations: Vec::new(),
+                insufficient_evidence: false,
+            });
+            trace.record_completion(&reply);
+            self.emit_transcript_update(&session.task_id());
+            session.note_thread_reply(&active_thread, prompt, &reply);
+            return Ok(reply);
+        }
 
         let prompt = prompt.to_string();
         let intent = execution_plan.intent;
@@ -2059,7 +2074,7 @@ impl MechSuitService {
             engine.respond_for_turn(
                 &prompt_for_model,
                 intent,
-                gathered_evidence.as_ref(),
+                planner_outcome.evidence.as_ref(),
                 event_sink,
             )
         })
@@ -2272,12 +2287,13 @@ impl MechSuitService {
         context: PlannerLoopContext,
         initial_decision: Option<RecursivePlannerDecision>,
         trace: Arc<StructuredTurnTrace>,
-    ) -> Result<Option<EvidenceBundle>> {
+    ) -> Result<PlannerLoopOutcome> {
         let mut context = context;
         let budget = planner_budget_for_turn(prompt, &context.interpretation);
         let mut loop_state = PlannerLoopState::default();
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
+        let mut direct_answer = None;
         let mut pending_initial_decision = initial_decision;
         let mut steps_without_new_evidence = 0usize;
         let gatherer_provider = context
@@ -2661,6 +2677,9 @@ impl MechSuitService {
                     )
                 }
                 PlannerAction::Stop { reason } => {
+                    if planner_stop_answers_directly(&decision) {
+                        direct_answer = Some(decision.rationale.clone());
+                    }
                     stop_reason = Some(reason.clone());
                     format!("planner requested synthesis: {reason}")
                 }
@@ -2791,16 +2810,22 @@ impl MechSuitService {
         });
 
         if !used_workspace_resources && planner_stopped_without_resource_use(&loop_state) {
-            return Ok(None);
+            return Ok(PlannerLoopOutcome {
+                evidence: None,
+                direct_answer,
+            });
         }
 
-        Ok(Some(build_planner_evidence_bundle(
-            &context.prepared,
-            prompt,
-            &loop_state,
-            completed,
-            &stop_reason,
-        )))
+        Ok(PlannerLoopOutcome {
+            evidence: Some(build_planner_evidence_bundle(
+                &context.prepared,
+                prompt,
+                &loop_state,
+                completed,
+                &stop_reason,
+            )),
+            direct_answer,
+        })
     }
 
     fn mid_loop_refinement_reason(
@@ -2939,6 +2964,11 @@ struct PromptExecutionPlan {
     path: PromptExecutionPath,
     route_summary: String,
     initial_planner_decision: Option<RecursivePlannerDecision>,
+}
+
+struct PlannerLoopOutcome {
+    evidence: Option<EvidenceBundle>,
+    direct_answer: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -4349,6 +4379,13 @@ fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
             PlannerAction::Stop { .. } | PlannerAction::Branch { .. }
         )
     })
+}
+
+fn planner_stop_answers_directly(decision: &RecursivePlannerDecision) -> bool {
+    matches!(
+        &decision.action,
+        PlannerAction::Stop { reason } if reason == "model selected answer"
+    ) && !decision.rationale.trim().is_empty()
 }
 
 fn build_planner_evidence_bundle(
@@ -7025,6 +7062,72 @@ mod tests {
             TurnEvent::ToolFinished { tool_name, summary, .. }
                 if tool_name == "inspect" && summary.contains("# Workspace")
         )));
+    }
+
+    #[test]
+    fn planner_stop_answers_render_directly_without_synthesizer_rewrite() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer = "I’m happy to help you troubleshoot your 1968 Chevy C20. Start with battery, fuel, spark, and starter checks.".to_string();
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "git status --short".to_string(),
+                    },
+                },
+                "inspect the local workspace before answering",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "model selected answer".to_string(),
+                },
+                rationale: answer.clone(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt("help me troubleshoot my 1968 Chevy C20")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        assert!(
+            synthesizer
+                .gathered_summaries
+                .lock()
+                .expect("gathered summaries lock")
+                .is_empty(),
+            "planner-authored stop answers should not be rewritten by the synthesizer"
+        );
     }
 
     #[test]
