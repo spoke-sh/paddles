@@ -122,6 +122,36 @@ body {
   flex-direction: column;
   gap: 10px;
 }
+.msg-meta {
+  margin-bottom: 8px;
+}
+.msg-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,0.44);
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.64);
+  color: #355063;
+  background: rgba(255,255,255,0.55);
+}
+.msg-mode-badge.is-grounded_answer,
+.msg-mode-badge.is-completed_edit {
+  background: rgba(23, 149, 108, 0.16);
+  color: #166751;
+}
+.msg-mode-badge.is-blocked_edit {
+  background: rgba(240, 138, 36, 0.18);
+  color: #9e561d;
+}
+.msg-mode-badge.is-policy_refusal {
+  background: rgba(214, 95, 74, 0.18);
+  color: #9a4536;
+}
 .msg-heading {
   font-weight: 700;
   letter-spacing: 0.02em;

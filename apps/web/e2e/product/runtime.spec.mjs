@@ -29,9 +29,9 @@ test('externally injected turns flow live through chat, transit, manifold, and s
 
   await expect(page.locator('.msg.user').last()).toContainText(prompt);
   await expect(page.locator('.msg.assistant').last()).toContainText(
-    'the local evidence is sufficient'
+    'Mock provider completed the turn after local inspection.'
   );
-  await expect(page.locator('.event-row').filter({ hasText: 'pwd' }).first()).toBeVisible();
+  await expect(page.locator('.msg.assistant').last()).toContainText('direct answer');
 
   await page.getByRole('link', { name: 'Transit' }).click();
   await expect(page.locator('#trace-board .trace-node').first()).toBeVisible();
@@ -49,6 +49,7 @@ test('externally injected turns flow live through chat, transit, manifold, and s
 
   await page.getByRole('link', { name: 'Inspector' }).click();
   await expect(page.locator('.msg.assistant').last()).toContainText(
-    'the local evidence is sufficient'
+    'Mock provider completed the turn after local inspection.'
   );
+  await expect(page.locator('.msg.assistant').last()).toContainText('direct answer');
 });

@@ -46,6 +46,7 @@ const bootstrapProjection: ConversationProjectionSnapshot = {
         turn_id: 'task-123.turn-0001',
         speaker: 'assistant',
         content: '**Summary**\n\nMock provider completed the turn after local inspection.',
+        response_mode: 'grounded_answer',
         render: {
           blocks: [
             { type: 'heading', text: 'Summary' },
@@ -329,6 +330,12 @@ describe('RuntimeApp', () => {
     expect(await screen.findByText('Summary')).toBeInTheDocument();
     expect(screen.getByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
     expect(document.querySelector('.msg-heading')?.textContent).toBe('Summary');
+  });
+
+  it('renders assistant response-state badges from transcript metadata', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByText('grounded answer')).toBeInTheDocument();
   });
 
   it('renders the primary transit route through the client router', async () => {

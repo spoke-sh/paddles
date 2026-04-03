@@ -6,17 +6,18 @@ use crate::infrastructure::providers::ModelProvider;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
 use crate::domain::model::{
-    ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
-    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
-    ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
-    ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
-    InstructionFrame, MultiplexEventSink, RenderDocument, StrainFactor, StrainLevel, TaskTraceId,
-    ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord,
-    TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
-    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
-    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CompactionDecision,
+    CompactionPlan, ConversationForensicProjection, ConversationForensicUpdate,
+    ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
+    ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
+    ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
+    ResponseMode, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceLineage, TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef,
+    TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord,
+    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
     TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
     TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
@@ -576,7 +577,38 @@ impl StructuredTurnTrace {
         });
     }
 
-    fn record_completion(&self, reply: &str) {
+    fn completion_response_mode_for_synthesis(
+        &self,
+        instruction_frame: Option<&InstructionFrame>,
+    ) -> ResponseMode {
+        let synthesis = self
+            .last_synthesis
+            .lock()
+            .expect("synthesis trace lock")
+            .clone()
+            .unwrap_or(SynthesisTraceState {
+                grounded: false,
+                citations: Vec::new(),
+                insufficient_evidence: false,
+            });
+
+        if let Some(frame) = instruction_frame {
+            if frame.requires_applied_edit() {
+                return ResponseMode::BlockedEdit;
+            }
+            if frame.primary_intent == InstructionIntent::Edit {
+                return ResponseMode::CompletedEdit;
+            }
+        }
+
+        if synthesis.grounded && !synthesis.insufficient_evidence {
+            ResponseMode::GroundedAnswer
+        } else {
+            ResponseMode::DirectAnswer
+        }
+    }
+
+    fn record_completion(&self, response: &AuthoredResponse) {
         let synthesis = self
             .last_synthesis
             .lock()
@@ -595,10 +627,11 @@ impl StructuredTurnTrace {
                 } else {
                     "assistant response".to_string()
                 },
-                reply,
+                response.to_plain_text(),
                 1_200,
             )
-            .with_label("citations", synthesis.citations.join(", "));
+            .with_label("citations", synthesis.citations.join(", "))
+            .with_label("paddles.response_mode", response.mode.label());
         let response_artifact_id = response.artifact_id.clone();
         self.record_kind(
             self.default_branch_id(),
@@ -2114,22 +2147,22 @@ impl MechSuitService {
         };
 
         if let Some(reply) = planner_outcome.direct_answer {
-            let reply = if let Some(frame) = planner_outcome
+            let response = if let Some(frame) = planner_outcome
                 .instruction_frame
                 .as_ref()
                 .filter(|frame| frame.requires_applied_edit())
             {
-                instruction_unsatisfied_direct_reply(frame)
+                blocked_edit_response(frame)
             } else {
                 reply
             };
-            let reply = RenderDocument::from_assistant_plain_text(&reply).to_plain_text();
+            let reply = response.to_plain_text();
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
-            trace.record_completion(&reply);
+            trace.record_completion(&response);
             self.emit_transcript_update(&session.task_id());
             session.note_thread_reply(&active_thread, prompt, &reply);
             self.persist_recent_turn_summary(prompt, &reply);
@@ -2153,16 +2186,14 @@ impl MechSuitService {
             .as_ref()
             .filter(|frame| frame.requires_applied_edit())
         {
-            let reply = RenderDocument::from_assistant_plain_text(
-                &instruction_unsatisfied_direct_reply(frame),
-            )
-            .to_plain_text();
+            let response = blocked_edit_response(frame);
+            let reply = response.to_plain_text();
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
-            trace.record_completion(&reply);
+            trace.record_completion(&response);
             self.emit_transcript_update(&session.task_id());
             session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
             self.persist_recent_turn_summary(&prompt, &reply);
@@ -2179,9 +2210,14 @@ impl MechSuitService {
         })
         .await
         .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
-        let reply = RenderDocument::from_assistant_plain_text(&reply).to_plain_text();
+        let response = AuthoredResponse::from_plain_text(
+            trace
+                .completion_response_mode_for_synthesis(planner_outcome.instruction_frame.as_ref()),
+            &reply,
+        );
+        let reply = response.to_plain_text();
 
-        trace.record_completion(&reply);
+        trace.record_completion(&response);
         self.emit_transcript_update(&session.task_id());
         session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
         self.persist_recent_turn_summary(&prompt, &reply);
@@ -2794,7 +2830,7 @@ impl MechSuitService {
                             stage: "instruction-manifold".to_string(),
                             reason: note.clone(),
                         });
-                        direct_answer = Some(instruction_unsatisfied_direct_reply(frame));
+                        direct_answer = Some(blocked_edit_response(frame));
                         stop_reason = Some("instruction-unsatisfied".to_string());
                         accepted_stop = true;
                         "planner stop converted into a blocked reply because the requested applied edit is still unsatisfied"
@@ -2939,7 +2975,7 @@ impl MechSuitService {
                     instruction_frame
                         .as_ref()
                         .filter(|frame| frame.requires_applied_edit())
-                        .map(instruction_unsatisfied_direct_reply)
+                        .map(blocked_edit_response)
                 }),
                 instruction_frame,
             });
@@ -2957,7 +2993,7 @@ impl MechSuitService {
                 instruction_frame
                     .as_ref()
                     .filter(|frame| frame.requires_applied_edit())
-                    .map(instruction_unsatisfied_direct_reply)
+                    .map(blocked_edit_response)
             }),
             instruction_frame,
         })
@@ -3099,14 +3135,14 @@ struct PromptExecutionPlan {
     path: PromptExecutionPath,
     route_summary: String,
     initial_planner_decision: Option<RecursivePlannerDecision>,
-    direct_answer: Option<String>,
+    direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
 }
 
 struct PlannerLoopOutcome {
     evidence: Option<EvidenceBundle>,
-    direct_answer: Option<String>,
+    direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
 }
 
@@ -3169,6 +3205,13 @@ fn instruction_unsatisfied_direct_reply(frame: &InstructionFrame) -> String {
     } else {
         EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY.to_string()
     }
+}
+
+fn blocked_edit_response(frame: &InstructionFrame) -> AuthoredResponse {
+    AuthoredResponse::from_plain_text(
+        ResponseMode::BlockedEdit,
+        &instruction_unsatisfied_direct_reply(frame),
+    )
 }
 
 fn execution_plan_from_initial_action(
@@ -4546,24 +4589,30 @@ fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
     })
 }
 
-fn normalized_direct_answer(answer: Option<String>) -> Option<String> {
+fn normalized_direct_answer(answer: Option<String>) -> Option<AuthoredResponse> {
     answer.and_then(|answer| {
         let trimmed = answer.trim();
         if trimmed.is_empty() {
             None
         } else {
-            Some(trimmed.to_string())
+            Some(AuthoredResponse::from_plain_text(
+                ResponseMode::DirectAnswer,
+                trimmed,
+            ))
         }
     })
 }
 
-fn stop_reason_direct_answer(reason: &str, answer: Option<String>) -> Option<String> {
+fn stop_reason_direct_answer(reason: &str, answer: Option<String>) -> Option<AuthoredResponse> {
     if let Some(answer) = normalized_direct_answer(answer) {
         return Some(answer);
     }
 
     if reason == "refusal" {
-        return Some(POLICY_VIOLATION_DIRECT_REPLY.to_string());
+        return Some(AuthoredResponse::from_plain_text(
+            ResponseMode::PolicyRefusal,
+            POLICY_VIOLATION_DIRECT_REPLY,
+        ));
     }
 
     None
@@ -4778,7 +4827,7 @@ mod tests {
         PreparedGathererLane, PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig,
         RuntimeLaneRole, StructuredTurnTrace, TurnIntent,
     };
-    use crate::domain::model::{CompactionPlan, CompactionRequest};
+    use crate::domain::model::{AuthoredResponse, CompactionPlan, CompactionRequest, ResponseMode};
     use crate::domain::model::{
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
         ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicLifecycle,
@@ -5868,7 +5917,10 @@ mod tests {
             },
         )
         .expect("rendered response artifact");
-        trace.record_completion("Patched src/lib.rs");
+        trace.record_completion(&AuthoredResponse::from_plain_text(
+            ResponseMode::DirectAnswer,
+            "Patched src/lib.rs",
+        ));
 
         let replay = recorder.replay(&session.task_id()).expect("replay");
         let completion_output_id = replay
@@ -5882,6 +5934,17 @@ mod tests {
                 _ => None,
             })
             .expect("completion output id");
+        let completion_mode = replay
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TraceRecordKind::CompletionCheckpoint(checkpoint) => checkpoint
+                    .response
+                    .as_ref()
+                    .and_then(|artifact| artifact.labels.get("paddles.response_mode").cloned()),
+                _ => None,
+            })
+            .expect("completion response mode");
         let lineage_edges = replay
             .records
             .iter()
@@ -5924,6 +5987,7 @@ mod tests {
                 && edge.target.id == format!("output:{completion_output_id}")
                 && edge.relation == TraceLineageRelation::ResultsIn
         }));
+        assert_eq!(completion_mode, "direct_answer");
     }
 
     #[test]
@@ -6567,7 +6631,10 @@ mod tests {
             citations: Vec::new(),
             insufficient_evidence: false,
         });
-        trace.record_completion("final answer");
+        trace.record_completion(&AuthoredResponse::from_plain_text(
+            ResponseMode::GroundedAnswer,
+            "final answer",
+        ));
 
         let projection = service
             .replay_conversation_forensics(&session.task_id())

@@ -75,6 +75,13 @@ function activeViewForPath(pathname: string) {
   return 'inspector';
 }
 
+function responseModeLabel(mode: string | null | undefined) {
+  if (!mode) {
+    return null;
+  }
+  return mode.split('_').join(' ');
+}
+
 function previousArtifactBaseline(
   turn: ForensicTurnProjection | null,
   recordProjection: ForensicRecordProjection | null
@@ -141,6 +148,13 @@ function RuntimeShellLayout() {
               className={`msg ${entry.speaker === 'assistant' ? 'assistant' : 'user'}`}
               key={entry.record_id}
             >
+              {entry.speaker === 'assistant' && entry.response_mode ? (
+                <div className="msg-meta">
+                  <span className={`msg-mode-badge is-${entry.response_mode}`}>
+                    {responseModeLabel(entry.response_mode)}
+                  </span>
+                </div>
+              ) : null}
               {entry.speaker === 'assistant' && entry.render ? (
                 <AssistantMessage render={entry.render} />
               ) : (

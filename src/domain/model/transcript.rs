@@ -1,3 +1,4 @@
+use super::generative::ResponseMode;
 use super::render::RenderDocument;
 use super::traces::{TraceRecordKind, TraceReplay};
 use paddles_conversation::{ArtifactEnvelope, TaskTraceId, TraceRecordId, TurnTraceId};
@@ -16,6 +17,8 @@ pub struct ConversationTranscriptEntry {
     pub turn_id: TurnTraceId,
     pub speaker: ConversationTranscriptSpeaker,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_mode: Option<ResponseMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub render: Option<RenderDocument>,
 }
@@ -37,6 +40,7 @@ impl ConversationTranscript {
                         turn_id: record.lineage.turn_id.clone(),
                         speaker: ConversationTranscriptSpeaker::User,
                         content: artifact_content(&root.prompt),
+                        response_mode: None,
                         render: None,
                     })
                 }
@@ -45,6 +49,7 @@ impl ConversationTranscript {
                     turn_id: record.lineage.turn_id.clone(),
                     speaker: ConversationTranscriptSpeaker::User,
                     content: artifact_content(&turn.prompt),
+                    response_mode: None,
                     render: None,
                 }),
                 TraceRecordKind::CompletionCheckpoint(checkpoint) => {
@@ -56,6 +61,7 @@ impl ConversationTranscript {
                             turn_id: record.lineage.turn_id.clone(),
                             speaker: ConversationTranscriptSpeaker::Assistant,
                             content: render.to_plain_text(),
+                            response_mode: response_mode_label(response),
                             render: Some(render),
                         });
                     }
@@ -78,6 +84,13 @@ fn artifact_content(artifact: &ArtifactEnvelope) -> String {
         .unwrap_or_else(|| artifact.summary.clone())
 }
 
+fn response_mode_label(artifact: &ArtifactEnvelope) -> Option<ResponseMode> {
+    artifact
+        .labels
+        .get("paddles.response_mode")
+        .and_then(|value| ResponseMode::from_label(value))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationTranscriptUpdate {
     pub task_id: TaskTraceId,
@@ -98,8 +111,8 @@ impl TranscriptUpdateSink for NullTranscriptUpdateSink {
 mod tests {
     use super::{ConversationTranscript, ConversationTranscriptSpeaker};
     use crate::domain::model::{
-        TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordKind,
-        TraceReplay, TraceTaskRoot,
+        ResponseMode, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord,
+        TraceRecordKind, TraceReplay, TraceTaskRoot,
     };
     use paddles_conversation::{
         ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceCheckpointId,
@@ -150,13 +163,16 @@ mod tests {
                         checkpoint_id: TraceCheckpointId::new("checkpoint-1").expect("checkpoint"),
                         kind: TraceCheckpointKind::TurnCompleted,
                         summary: "turn completed".to_string(),
-                        response: Some(ArtifactEnvelope::text(
-                            TraceArtifactId::new("artifact-2").expect("artifact"),
-                            ArtifactKind::ModelOutput,
-                            "assistant response",
-                            "hi",
-                            200,
-                        )),
+                        response: Some(
+                            ArtifactEnvelope::text(
+                                TraceArtifactId::new("artifact-2").expect("artifact"),
+                                ArtifactKind::ModelOutput,
+                                "assistant response",
+                                "hi",
+                                200,
+                            )
+                            .with_label("paddles.response_mode", "grounded_answer"),
+                        ),
                         citations: Vec::new(),
                         grounded: true,
                     }),
@@ -176,6 +192,10 @@ mod tests {
             ConversationTranscriptSpeaker::Assistant
         );
         assert_eq!(transcript.entries[1].content, "hi");
+        assert_eq!(
+            transcript.entries[1].response_mode,
+            Some(ResponseMode::GroundedAnswer)
+        );
         assert!(transcript.entries[1].render.is_some());
     }
 }

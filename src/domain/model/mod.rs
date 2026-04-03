@@ -3,6 +3,7 @@ use anyhow::Result;
 pub mod compaction;
 pub mod context_quality;
 pub mod forensics;
+pub mod generative;
 pub mod instructions;
 pub mod interpretation;
 pub mod manifold;
@@ -18,6 +19,7 @@ pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,
 };
+pub use generative::{AuthoredResponse, ResponseMode};
 pub use instructions::{
     InstructionDeliverable, InstructionFrame, InstructionIntent, InstructionObligation,
     InstructionSatisfaction,

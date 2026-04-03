@@ -3074,6 +3074,7 @@ mod tests {
                         .expect("turn id"),
                     speaker: *speaker,
                     content: (*content).to_string(),
+                    response_mode: None,
                     render: None,
                 })
                 .collect(),
@@ -3159,6 +3160,7 @@ mod tests {
                 turn_id: TurnTraceId::new("task-1.turn-0001").expect("turn"),
                 speaker: ConversationTranscriptSpeaker::Assistant,
                 content: "**Summary**\n\nBody".to_string(),
+                response_mode: None,
                 render: Some(RenderDocument {
                     blocks: vec![
                         RenderBlock::Heading {

@@ -18,6 +18,13 @@ export interface ConversationTranscriptEntry {
   turn_id: string;
   speaker: 'user' | 'assistant';
   content: string;
+  response_mode?:
+    | 'direct_answer'
+    | 'grounded_answer'
+    | 'completed_edit'
+    | 'blocked_edit'
+    | 'policy_refusal'
+    | null;
   render?: RenderDocument | null;
 }
 
