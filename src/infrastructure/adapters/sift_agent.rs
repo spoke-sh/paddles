@@ -10,12 +10,9 @@ use crate::domain::ports::{
     InitialActionDecision, InitialEditInstruction, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
+    InterpretationToolHint, ModelPaths, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
     PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
     ThreadDecisionRequest, WorkspaceAction,
-};
-use crate::infrastructure::adapters::sift_registry::{
-    QwenModelFamily, QwenModelSpec, ensure_qwen_assets, qwen_spec_for, qwen_weight_paths,
 };
 use crate::infrastructure::rendering::{
     RenderCapability, ensure_citation_section, final_answer_contract_prompt,
@@ -59,7 +56,23 @@ const MAX_CITATIONS: usize = 4;
 const MAX_INTERPRETATION_GRAPH_DEPTH: usize = 3;
 const MAX_INTERPRETATION_GRAPH_DOCS: usize = 8;
 const MAX_GRAPH_DOC_CHARS: usize = 6_000;
+const DEFAULT_QWEN_MAX_LENGTH: usize = 512;
 const QWEN_SYSTEM_PROMPT: &str = "<|im_start|>system\nYou are Paddles, a helpful AI assistant and mech suit operator. You provide concise and accurate technical advice.<|im_end|>\n";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QwenModelFamily {
+    Qwen2,
+    Qwen3,
+    Qwen3_5,
+}
+
+#[derive(Clone, Debug)]
+struct PreparedQwenModel {
+    model_id: String,
+    paths: ModelPaths,
+    family: QwenModelFamily,
+    max_length: usize,
+}
 
 pub struct SiftAgentAdapter {
     workspace_root: PathBuf,
@@ -413,6 +426,82 @@ struct ThreadPlannerPrompt<'a> {
     request: &'a ThreadDecisionRequest,
 }
 
+impl PreparedQwenModel {
+    fn from_paths(model_id: &str, paths: ModelPaths) -> Result<Self> {
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&paths.config)?)
+                .with_context(|| format!("failed to parse {}", paths.config.display()))?;
+        Ok(Self {
+            model_id: model_id.to_string(),
+            family: infer_qwen_family(&config)?,
+            max_length: infer_qwen_runtime_max_length(&config),
+            paths,
+        })
+    }
+}
+
+fn infer_qwen_family(config: &serde_json::Value) -> Result<QwenModelFamily> {
+    let model_type = config
+        .get("model_type")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            config
+                .get("text_config")
+                .and_then(|value| value.get("model_type"))
+                .and_then(|value| value.as_str())
+        });
+
+    if let Some(model_type) = model_type {
+        match model_type {
+            "qwen2" => return Ok(QwenModelFamily::Qwen2),
+            "qwen3" => return Ok(QwenModelFamily::Qwen3),
+            "qwen3_5" | "qwen3_5_text" => return Ok(QwenModelFamily::Qwen3_5),
+            _ => {}
+        }
+    }
+
+    if let Some(architectures) = config
+        .get("architectures")
+        .and_then(|value| value.as_array())
+    {
+        if architectures
+            .iter()
+            .any(|value| value.as_str().is_some_and(|name| name.contains("Qwen3_5")))
+        {
+            return Ok(QwenModelFamily::Qwen3_5);
+        }
+        if architectures
+            .iter()
+            .any(|value| value.as_str().is_some_and(|name| name.contains("Qwen3")))
+        {
+            return Ok(QwenModelFamily::Qwen3);
+        }
+        if architectures
+            .iter()
+            .any(|value| value.as_str().is_some_and(|name| name.contains("Qwen2")))
+        {
+            return Ok(QwenModelFamily::Qwen2);
+        }
+    }
+
+    bail!("unsupported local sift model config: expected a qwen2/qwen3/qwen3_5 bundle")
+}
+
+fn infer_qwen_runtime_max_length(config: &serde_json::Value) -> usize {
+    config
+        .get("max_position_embeddings")
+        .and_then(|value| value.as_u64())
+        .or_else(|| {
+            config
+                .get("text_config")
+                .and_then(|value| value.get("max_position_embeddings"))
+                .and_then(|value| value.as_u64())
+        })
+        .map(|value| usize::try_from(value).unwrap_or(DEFAULT_QWEN_MAX_LENGTH))
+        .map(|value| value.min(DEFAULT_QWEN_MAX_LENGTH))
+        .unwrap_or(DEFAULT_QWEN_MAX_LENGTH)
+}
+
 trait ConversationFactory: Send + Sync {
     fn start_conversation(&self) -> Result<Box<dyn Conversation>>;
 }
@@ -422,9 +511,9 @@ struct ReusableQwenConversationFactory {
 }
 
 impl ReusableQwenConversationFactory {
-    fn load(spec: QwenModelSpec) -> Result<Self> {
+    fn load(model: PreparedQwenModel) -> Result<Self> {
         Ok(Self {
-            runtime: Arc::new(Mutex::new(PaddlesQwenRuntime::load(spec)?)),
+            runtime: Arc::new(Mutex::new(PaddlesQwenRuntime::load(model)?)),
         })
     }
 }
@@ -466,36 +555,35 @@ impl Conversation for ReusableQwenConversation {
 }
 
 struct PaddlesQwenRuntime {
-    spec: QwenModelSpec,
+    model: PreparedQwenModel,
     session: PaddlesQwenSession,
     tokenizer: Tokenizer,
     family: QwenModelFamily,
 }
 
 impl PaddlesQwenRuntime {
-    fn load(spec: QwenModelSpec) -> Result<Self> {
-        let tokenizer_path = spec.tokenizer_path()?;
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+    fn load(model: PreparedQwenModel) -> Result<Self> {
+        let tokenizer = Tokenizer::from_file(&model.paths.tokenizer)
             .map_err(|err| anyhow!("failed to load tokenizer: {err}"))?;
         let device = get_device_for("QWEN")?;
-        let session = match Self::load_session(spec, &device) {
+        let session = match Self::load_session(&model, &device) {
             Ok(session) => session,
             Err(err) if should_retry_qwen_on_cpu(&device, &err) => {
                 tracing::warn!(
                     "CUDA runtime for {} failed during load ({}); retrying on CPU",
-                    spec.model_id,
+                    model.model_id,
                     err
                 );
-                Self::load_session(spec, &Device::Cpu)?
+                Self::load_session(&model, &Device::Cpu)?
             }
             Err(err) => return Err(err),
         };
 
         Ok(Self {
-            spec,
+            family: model.family,
+            model,
             session,
             tokenizer,
-            family: spec.family,
         })
     }
 
@@ -515,7 +603,7 @@ impl PaddlesQwenRuntime {
             Err(err) if should_retry_qwen_on_cpu(&self.session.device, &err) => {
                 tracing::warn!(
                     "CUDA runtime for {} failed during generation ({}); retrying on CPU",
-                    self.spec.model_id,
+                    self.model.model_id,
                     err
                 );
                 self.reload_on_cpu()?;
@@ -528,31 +616,32 @@ impl PaddlesQwenRuntime {
     }
 
     fn reload_on_cpu(&mut self) -> Result<()> {
-        self.session = Self::load_session(self.spec, &Device::Cpu)?;
+        self.session = Self::load_session(&self.model, &Device::Cpu)?;
         Ok(())
     }
 
-    fn load_session(spec: QwenModelSpec, device: &Device) -> Result<PaddlesQwenSession> {
-        let config_path = spec.config_path()?;
-        let generation = load_generation_settings(spec)?;
-        let dtype = preferred_qwen_weight_dtype(spec.family, device);
-        let vb = load_qwen_var_builder(spec, dtype, device)?;
+    fn load_session(model: &PreparedQwenModel, device: &Device) -> Result<PaddlesQwenSession> {
+        let config_path = &model.paths.config;
+        let generation =
+            load_generation_settings(model.paths.generation_config.as_deref(), config_path)?;
+        let dtype = preferred_qwen_weight_dtype(model.family, device);
+        let vb = load_qwen_var_builder(&model.paths.weights, dtype, device)?;
 
-        match spec.family {
+        match model.family {
             QwenModelFamily::Qwen2 => {
                 let config_partial: QwenConfigPartial =
-                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+                    serde_json::from_str(&fs::read_to_string(config_path)?)?;
                 let config = config_partial.into_config()?;
-                PaddlesQwenSession::new_qwen2(&config, &vb, device, spec.max_length, generation)
+                PaddlesQwenSession::new_qwen2(&config, &vb, device, model.max_length, generation)
             }
             QwenModelFamily::Qwen3 => {
-                let config: Qwen3Config = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                PaddlesQwenSession::new_qwen3(&config, &vb, device, spec.max_length, generation)
+                let config: Qwen3Config = serde_json::from_str(&fs::read_to_string(config_path)?)?;
+                PaddlesQwenSession::new_qwen3(&config, &vb, device, model.max_length, generation)
             }
             QwenModelFamily::Qwen3_5 => {
                 let config: Qwen3_5Config =
-                    serde_json::from_str(&fs::read_to_string(&config_path)?)?;
-                PaddlesQwenSession::new_qwen3_5(&config, &vb, device, spec.max_length, generation)
+                    serde_json::from_str(&fs::read_to_string(config_path)?)?;
+                PaddlesQwenSession::new_qwen3_5(&config, &vb, device, model.max_length, generation)
             }
         }
     }
@@ -845,11 +934,35 @@ impl QwenGenerationSettings {
     }
 }
 
-fn load_generation_settings(spec: QwenModelSpec) -> Result<QwenGenerationSettings> {
-    let path = spec.generation_config_path()?;
-    let generation_config =
-        serde_json::from_str::<QwenGenerationConfig>(&fs::read_to_string(&path)?)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
+fn load_generation_settings(
+    generation_config_path: Option<&Path>,
+    config_path: &Path,
+) -> Result<QwenGenerationSettings> {
+    let generation_config = if let Some(path) = generation_config_path {
+        serde_json::from_str::<QwenGenerationConfig>(&fs::read_to_string(path)?)
+            .with_context(|| format!("failed to parse {}", path.display()))?
+    } else {
+        let config: serde_json::Value = serde_json::from_str(&fs::read_to_string(config_path)?)
+            .with_context(|| format!("failed to parse {}", config_path.display()))?;
+        let eos_token_id = config
+            .get("eos_token_id")
+            .cloned()
+            .or_else(|| {
+                config
+                    .get("text_config")
+                    .and_then(|value| value.get("eos_token_id"))
+                    .cloned()
+            })
+            .ok_or_else(|| anyhow!("config does not define eos_token_id"))?;
+        QwenGenerationConfig {
+            do_sample: false,
+            eos_token_id,
+            repetition_penalty: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+        }
+    };
 
     Ok(QwenGenerationSettings {
         eos_token_ids: parse_eos_token_ids(&generation_config.eos_token_id)?,
@@ -932,37 +1045,11 @@ fn format_qwen_prompt(family: QwenModelFamily, message: &str) -> String {
 }
 
 fn load_qwen_var_builder(
-    spec: QwenModelSpec,
+    weights_paths: &[PathBuf],
     dtype: DType,
     device: &Device,
 ) -> Result<VarBuilder<'static>> {
-    let weights = qwen_weight_paths(spec)?;
-    match unsafe { VarBuilder::from_mmaped_safetensors(&weights, dtype, device) } {
-        Ok(vb) => Ok(vb),
-        Err(err) => {
-            tracing::warn!(
-                "failed to load {}, refreshing cached model weights: {:?}",
-                spec.model_id,
-                err
-            );
-            remove_cached_qwen_weights(spec)?;
-            ensure_qwen_assets(spec)?;
-            let refreshed_weights = qwen_weight_paths(spec)?;
-            unsafe { VarBuilder::from_mmaped_safetensors(&refreshed_weights, dtype, device) }
-                .map_err(Into::into)
-        }
-    }
-}
-
-fn remove_cached_qwen_weights(spec: QwenModelSpec) -> Result<()> {
-    let mut paths = qwen_weight_paths(spec)?;
-    paths.push(spec.primary_weights_path()?);
-    for path in paths {
-        if path.exists() {
-            fs::remove_file(&path)?;
-        }
-    }
-    Ok(())
+    unsafe { VarBuilder::from_mmaped_safetensors(weights_paths, dtype, device) }.map_err(Into::into)
 }
 
 impl ToolCall {
@@ -984,10 +1071,14 @@ impl SiftAgentAdapter {
     pub fn new(
         workspace_root: impl Into<PathBuf>,
         model_id: &str,
+        model_paths: ModelPaths,
         render_capability: RenderCapability,
     ) -> Result<Self> {
         let workspace_root = workspace_root.into();
-        let model = ReusableQwenConversationFactory::load(qwen_spec_for(model_id)?)?;
+        let model = ReusableQwenConversationFactory::load(PreparedQwenModel::from_paths(
+            model_id,
+            model_paths,
+        )?)?;
         Ok(Self::from_factory(
             workspace_root,
             model_id,
@@ -4741,7 +4832,9 @@ mod tests {
         PlannerTraceMetadata, PlannerTraceStep, RefinementPolicy, RetainedEvidence, RetrievalMode,
         RetrievalStrategy, WorkspaceAction,
     };
-    use crate::infrastructure::adapters::sift_registry::QwenModelFamily;
+    use crate::infrastructure::adapters::sift_agent::{
+        DEFAULT_QWEN_MAX_LENGTH, QwenModelFamily, infer_qwen_family, infer_qwen_runtime_max_length,
+    };
     use anyhow::{Result, anyhow};
     use candle_core::{DType, Device};
     use candle_transformers::generation::Sampling;
@@ -4913,6 +5006,58 @@ mod tests {
     fn qwen3_family_prompts_disable_thinking_explicitly() {
         let prompt = format_qwen_prompt(QwenModelFamily::Qwen3_5, "Hello");
         assert!(prompt.contains("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+    }
+
+    #[test]
+    fn infers_qwen_family_from_prepared_config_shapes() {
+        assert_eq!(
+            infer_qwen_family(&json!({
+                "model_type": "qwen2",
+                "max_position_embeddings": 32768
+            }))
+            .expect("qwen2 family"),
+            QwenModelFamily::Qwen2
+        );
+
+        assert_eq!(
+            infer_qwen_family(&json!({
+                "model_type": "qwen3",
+                "architectures": ["Qwen3ForCausalLM"]
+            }))
+            .expect("qwen3 family"),
+            QwenModelFamily::Qwen3
+        );
+
+        assert_eq!(
+            infer_qwen_family(&json!({
+                "model_type": "qwen3_5",
+                "text_config": {
+                    "model_type": "qwen3_5_text",
+                    "max_position_embeddings": 262144
+                },
+                "architectures": ["Qwen3_5ForConditionalGeneration"]
+            }))
+            .expect("qwen3.5 family"),
+            QwenModelFamily::Qwen3_5
+        );
+    }
+
+    #[test]
+    fn caps_prepared_qwen_runtime_length_to_existing_budget() {
+        assert_eq!(
+            infer_qwen_runtime_max_length(&json!({
+                "max_position_embeddings": 32768
+            })),
+            DEFAULT_QWEN_MAX_LENGTH
+        );
+        assert_eq!(
+            infer_qwen_runtime_max_length(&json!({
+                "text_config": {
+                    "max_position_embeddings": 128
+                }
+            })),
+            128
+        );
     }
 
     #[test]

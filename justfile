@@ -29,6 +29,7 @@ build-cuda:
 
 # Install frontend workspace dependencies.
 frontend-install:
+  rm -rf node_modules apps/web/node_modules apps/docs/node_modules
   npm ci
 
 # Run frontend workspace verification checks.

@@ -7473,9 +7473,10 @@ mod tests {
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {
         ModelPaths {
-            weights: PathBuf::from(format!("{prefix}-weights.safetensors")),
+            weights: vec![PathBuf::from(format!("{prefix}-weights.safetensors"))],
             tokenizer: PathBuf::from(format!("{prefix}-tokenizer.json")),
             config: PathBuf::from(format!("{prefix}-config.json")),
+            generation_config: Some(PathBuf::from(format!("{prefix}-generation-config.json"))),
         }
     }
 

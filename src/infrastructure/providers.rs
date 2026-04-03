@@ -234,6 +234,9 @@ mod tests {
             model.provider == ModelProvider::Sift && model.model_id == "qwen-1.5b"
         }));
         assert!(models.iter().any(|model| {
+            model.provider == ModelProvider::Sift && model.model_id == "bonsai-8b"
+        }));
+        assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Openai && model.model_id == "gpt-4o"
         }));
         assert!(models.iter().any(|model| {

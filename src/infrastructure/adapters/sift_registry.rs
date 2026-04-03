@@ -1,221 +1,71 @@
 use crate::domain::ports::{ModelPaths, ModelRegistry};
-use anyhow::{Context, Result, anyhow, bail};
+use crate::infrastructure::adapters::hf_hub::{build_hf_api_from_env, download_hf_model_paths};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
-use serde::Deserialize;
-use sift::internal::cache::cache_dir;
-use sift::internal::search::adapters::llm_utils::ensure_hf_asset;
-use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use sift::{ModelRuntimeContract, ModelSource, prepare_model};
 
 pub struct SiftRegistryAdapter;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QwenModelFamily {
-    Qwen2,
-    Qwen3,
-    Qwen3_5,
-}
+const BONSAI_UNPACKED_REPO: &str = "prism-ml/Bonsai-8B-unpacked";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QwenWeightLayout {
-    Single(&'static str),
-    Indexed(&'static str),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QwenModelSpec {
-    pub model_id: &'static str,
-    pub revision: &'static str,
-    pub max_length: usize,
-    pub family: QwenModelFamily,
-    pub weights: QwenWeightLayout,
-}
-
-impl QwenModelSpec {
-    pub fn root(self) -> Result<PathBuf> {
-        Ok(cache_dir("models")?
-            .join(Path::new(self.model_id))
-            .join(Path::new(self.revision)))
-    }
-
-    pub fn config_path(self) -> Result<PathBuf> {
-        Ok(self.root()?.join("config.json"))
-    }
-
-    pub fn tokenizer_path(self) -> Result<PathBuf> {
-        Ok(self.root()?.join("tokenizer.json"))
-    }
-
-    pub fn generation_config_path(self) -> Result<PathBuf> {
-        Ok(self.root()?.join("generation_config.json"))
-    }
-
-    pub fn primary_weights_path(self) -> Result<PathBuf> {
-        let root = self.root()?;
-        Ok(match self.weights {
-            QwenWeightLayout::Single(file_name) => root.join(file_name),
-            QwenWeightLayout::Indexed(index_name) => root.join(index_name),
-        })
-    }
-}
-
-const SUPPORTED_QWEN_MODELS: &[&str] = &[
+const SUPPORTED_SIFT_MODELS: &[&str] = &[
     "qwen-1.5b",
     "qwen-coder-0.5b",
     "qwen-coder-1.5b",
     "qwen-coder-3b",
     "qwen3.5-2b",
+    "bonsai-8b",
     "Qwen/Qwen2.5-1.5B-Instruct",
     "Qwen/Qwen2.5-Coder-0.5B-Instruct",
     "Qwen/Qwen2.5-Coder-1.5B-Instruct",
     "Qwen/Qwen2.5-Coder-3B-Instruct",
     "Qwen/Qwen3.5-2B",
+    "prism-ml/Bonsai-8B-unpacked",
+    "prism-ml/Bonsai-8B-gguf",
 ];
 
 pub fn supported_model_ids() -> &'static [&'static str] {
-    SUPPORTED_QWEN_MODELS
+    SUPPORTED_SIFT_MODELS
 }
 
-pub fn qwen_spec_for(model_id: &str) -> Result<QwenModelSpec> {
-    let spec = match model_id {
-        "qwen-1.5b" | "Qwen/Qwen2.5-1.5B-Instruct" => QwenModelSpec {
-            model_id: "Qwen/Qwen2.5-1.5B-Instruct",
-            revision: "main",
-            max_length: 512,
-            family: QwenModelFamily::Qwen2,
-            weights: QwenWeightLayout::Single("model.safetensors"),
-        },
-        "qwen-coder-0.5b" | "Qwen/Qwen2.5-Coder-0.5B-Instruct" => QwenModelSpec {
-            model_id: "Qwen/Qwen2.5-Coder-0.5B-Instruct",
-            revision: "main",
-            max_length: 512,
-            family: QwenModelFamily::Qwen2,
-            weights: QwenWeightLayout::Single("model.safetensors"),
-        },
-        "qwen-coder-1.5b" | "Qwen/Qwen2.5-Coder-1.5B-Instruct" => QwenModelSpec {
-            model_id: "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-            revision: "main",
-            max_length: 512,
-            family: QwenModelFamily::Qwen2,
-            weights: QwenWeightLayout::Single("model.safetensors"),
-        },
-        "qwen-coder-3b" | "Qwen/Qwen2.5-Coder-3B-Instruct" => QwenModelSpec {
-            model_id: "Qwen/Qwen2.5-Coder-3B-Instruct",
-            revision: "main",
-            max_length: 512,
-            family: QwenModelFamily::Qwen2,
-            weights: QwenWeightLayout::Indexed("model.safetensors.index.json"),
-        },
-        "qwen3.5-2b" | "Qwen/Qwen3.5-2B" => QwenModelSpec {
-            model_id: "Qwen/Qwen3.5-2B",
-            revision: "main",
-            max_length: 512,
-            family: QwenModelFamily::Qwen3_5,
-            weights: QwenWeightLayout::Indexed("model.safetensors.index.json"),
-        },
+pub fn model_source_for(model_id: &str) -> Result<ModelSource> {
+    let source = match model_id {
+        "qwen-1.5b" | "Qwen/Qwen2.5-1.5B-Instruct" => {
+            ModelSource::hugging_face_revision("Qwen/Qwen2.5-1.5B-Instruct", "main")
+        }
+        "qwen-coder-0.5b" | "Qwen/Qwen2.5-Coder-0.5B-Instruct" => {
+            ModelSource::hugging_face_revision("Qwen/Qwen2.5-Coder-0.5B-Instruct", "main")
+        }
+        "qwen-coder-1.5b" | "Qwen/Qwen2.5-Coder-1.5B-Instruct" => {
+            ModelSource::hugging_face_revision("Qwen/Qwen2.5-Coder-1.5B-Instruct", "main")
+        }
+        "qwen-coder-3b" | "Qwen/Qwen2.5-Coder-3B-Instruct" => {
+            ModelSource::hugging_face_revision("Qwen/Qwen2.5-Coder-3B-Instruct", "main")
+        }
+        "qwen3.5-2b" | "Qwen/Qwen3.5-2B" => {
+            ModelSource::hugging_face_revision("Qwen/Qwen3.5-2B", "main")
+        }
+        "bonsai-8b" | "prism-ml/Bonsai-8B-unpacked" | "prism-ml/Bonsai-8B-gguf" => {
+            ModelSource::hugging_face_revision(BONSAI_UNPACKED_REPO, "main")
+        }
         _ => {
             bail!(
                 "unsupported model id '{model_id}'. supported ids: {}",
-                SUPPORTED_QWEN_MODELS.join(", ")
+                SUPPORTED_SIFT_MODELS.join(", ")
             )
         }
     };
 
-    Ok(spec)
+    Ok(source)
 }
 
-pub fn qwen_weight_paths(spec: QwenModelSpec) -> Result<Vec<PathBuf>> {
-    let root = spec.root()?;
-    match spec.weights {
-        QwenWeightLayout::Single(file_name) => Ok(vec![root.join(file_name)]),
-        QwenWeightLayout::Indexed(index_name) => indexed_weight_paths(&root.join(index_name))
-            .with_context(|| format!("failed to resolve weight shards for {}", spec.model_id)),
+fn prepared_model_to_paths(prepared: sift::PreparedModel) -> ModelPaths {
+    ModelPaths {
+        weights: vec![prepared.weights],
+        tokenizer: prepared.tokenizer,
+        config: prepared.config,
+        generation_config: prepared.generation_config,
     }
-}
-
-pub fn ensure_qwen_assets(spec: QwenModelSpec) -> Result<ModelPaths> {
-    let root = spec.root()?;
-    let config_path = root.join("config.json");
-    let generation_config_path = root.join("generation_config.json");
-    let tokenizer_path = root.join("tokenizer.json");
-    let weights_path = spec.primary_weights_path()?;
-
-    println!("[SIFT] Ensuring assets for {}...", spec.model_id);
-
-    ensure_hf_asset(spec.model_id, spec.revision, &config_path, "config.json")?;
-    ensure_hf_asset(
-        spec.model_id,
-        spec.revision,
-        &tokenizer_path,
-        "tokenizer.json",
-    )?;
-    ensure_hf_asset(
-        spec.model_id,
-        spec.revision,
-        &generation_config_path,
-        "generation_config.json",
-    )?;
-
-    match spec.weights {
-        QwenWeightLayout::Single(file_name) => {
-            ensure_hf_asset(spec.model_id, spec.revision, &weights_path, file_name)?;
-        }
-        QwenWeightLayout::Indexed(index_name) => {
-            ensure_hf_asset(spec.model_id, spec.revision, &weights_path, index_name)?;
-            for shard_name in shard_names_from_index_path(&weights_path)? {
-                ensure_hf_asset(
-                    spec.model_id,
-                    spec.revision,
-                    &root.join(&shard_name),
-                    &shard_name,
-                )?;
-            }
-        }
-    }
-
-    Ok(ModelPaths {
-        weights: weights_path,
-        tokenizer: tokenizer_path,
-        config: config_path,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-struct SafetensorsIndex {
-    weight_map: std::collections::HashMap<String, String>,
-}
-
-fn indexed_weight_paths(index_path: &Path) -> Result<Vec<PathBuf>> {
-    let root = index_path.parent().ok_or_else(|| {
-        anyhow!(
-            "missing parent directory for index file {}",
-            index_path.display()
-        )
-    })?;
-
-    Ok(shard_names_from_index_path(index_path)?
-        .into_iter()
-        .map(|shard_name| root.join(shard_name))
-        .collect())
-}
-
-fn shard_names_from_index_path(index_path: &Path) -> Result<Vec<String>> {
-    let index: SafetensorsIndex = serde_json::from_str(&fs::read_to_string(index_path)?)
-        .with_context(|| format!("failed to parse {}", index_path.display()))?;
-
-    let shards = index
-        .weight_map
-        .into_values()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-
-    if shards.is_empty() {
-        bail!("no weight shards listed in {}", index_path.display());
-    }
-
-    Ok(shards)
 }
 
 impl SiftRegistryAdapter {
@@ -233,84 +83,53 @@ impl Default for SiftRegistryAdapter {
 #[async_trait]
 impl ModelRegistry for SiftRegistryAdapter {
     async fn get_model_paths(&self, model_id: &str) -> Result<ModelPaths> {
-        println!("[SIFT] Resolving model: {}", model_id);
-        ensure_qwen_assets(qwen_spec_for(model_id)?)
+        if matches!(
+            model_id,
+            "bonsai-8b" | "prism-ml/Bonsai-8B-unpacked" | "prism-ml/Bonsai-8B-gguf"
+        ) {
+            let api = build_hf_api_from_env()?;
+            return download_hf_model_paths(&api, BONSAI_UNPACKED_REPO, Some("main")).await;
+        }
+
+        let model_id = model_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            println!("[SIFT] Preparing model: {}", model_id);
+            let source = model_source_for(&model_id)?;
+            let prepared = prepare_model(source, ModelRuntimeContract::CandleSafetensorsBundle)?;
+            Ok(prepared_model_to_paths(prepared))
+        })
+        .await?
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        QwenModelFamily, QwenWeightLayout, indexed_weight_paths, qwen_spec_for,
-        shard_names_from_index_path,
-    };
-    use std::fs;
+    use super::{BONSAI_UNPACKED_REPO, model_source_for, supported_model_ids};
+    use sift::ModelSource;
 
     #[test]
-    fn supports_new_runtime_aliases() {
-        let spec = qwen_spec_for("qwen-coder-0.5b").expect("0.5b coder spec");
-        assert_eq!(spec.model_id, "Qwen/Qwen2.5-Coder-0.5B-Instruct");
-        assert_eq!(spec.family, QwenModelFamily::Qwen2);
-        assert_eq!(spec.weights, QwenWeightLayout::Single("model.safetensors"));
+    fn supports_runtime_aliases_and_bonsai() {
+        assert!(supported_model_ids().contains(&"qwen3.5-2b"));
+        assert!(supported_model_ids().contains(&"bonsai-8b"));
+        assert!(supported_model_ids().contains(&"prism-ml/Bonsai-8B-unpacked"));
 
-        let spec = qwen_spec_for("qwen-coder-1.5b").expect("1.5b coder spec");
-        assert_eq!(spec.model_id, "Qwen/Qwen2.5-Coder-1.5B-Instruct");
-        assert_eq!(spec.family, QwenModelFamily::Qwen2);
-        assert_eq!(spec.weights, QwenWeightLayout::Single("model.safetensors"));
-
-        let spec = qwen_spec_for("qwen-coder-3b").expect("coder spec");
-        assert_eq!(spec.model_id, "Qwen/Qwen2.5-Coder-3B-Instruct");
-        assert_eq!(spec.family, QwenModelFamily::Qwen2);
         assert_eq!(
-            spec.weights,
-            QwenWeightLayout::Indexed("model.safetensors.index.json")
+            model_source_for("qwen-coder-3b").expect("coder source"),
+            ModelSource::hugging_face_revision("Qwen/Qwen2.5-Coder-3B-Instruct", "main")
         );
-
-        let spec = qwen_spec_for("qwen3.5-2b").expect("qwen3.5 spec");
-        assert_eq!(spec.model_id, "Qwen/Qwen3.5-2B");
-        assert_eq!(spec.family, QwenModelFamily::Qwen3_5);
+        assert_eq!(
+            model_source_for("bonsai-8b").expect("bonsai source"),
+            ModelSource::hugging_face_revision(BONSAI_UNPACKED_REPO, "main")
+        );
+        assert_eq!(
+            model_source_for("prism-ml/Bonsai-8B-gguf").expect("legacy bonsai source"),
+            ModelSource::hugging_face_revision(BONSAI_UNPACKED_REPO, "main")
+        );
     }
 
     #[test]
     fn rejects_unknown_model_ids() {
-        let err = qwen_spec_for("mystery-model").expect_err("unknown model should fail");
+        let err = model_source_for("mystery-model").expect_err("unknown model should fail");
         assert!(err.to_string().contains("unsupported model id"));
-    }
-
-    #[test]
-    fn parses_sharded_weight_indexes_in_stable_order() {
-        let workspace = tempfile::tempdir().expect("temp workspace");
-        let index_path = workspace.path().join("model.safetensors.index.json");
-        fs::write(
-            &index_path,
-            r#"{
-  "weight_map": {
-    "layers.0.weight": "model-00002-of-00002.safetensors",
-    "layers.1.weight": "model-00001-of-00002.safetensors",
-    "layers.2.weight": "model-00002-of-00002.safetensors"
-  }
-}"#,
-        )
-        .expect("write index");
-
-        let shard_names = shard_names_from_index_path(&index_path).expect("shard names");
-        assert_eq!(
-            shard_names,
-            vec![
-                "model-00001-of-00002.safetensors".to_string(),
-                "model-00002-of-00002.safetensors".to_string()
-            ]
-        );
-
-        let shard_paths = indexed_weight_paths(&index_path).expect("shard paths");
-        assert_eq!(shard_paths.len(), 2);
-        assert_eq!(
-            shard_paths[0].file_name().and_then(|name| name.to_str()),
-            Some("model-00001-of-00002.safetensors")
-        );
-        assert_eq!(
-            shard_paths[1].file_name().and_then(|name| name.to_str()),
-            Some("model-00002-of-00002.safetensors")
-        );
     }
 }

@@ -251,6 +251,20 @@ single-file `apply_patch` workspace actions on an Inception-backed lane,
 Paddles now uses the provider-native `mercury-edit` companion endpoint behind
 the scenes.
 
+For the local `sift` provider, `bonsai-8b` is now available as an opt-in local
+model path:
+
+```bash
+paddles --provider sift --model bonsai-8b
+```
+
+That path uses the stable `sift` local model boundary, but Bonsai currently
+loads from Prism's official unpacked safetensors bundle rather than the GGUF
+release. The published 1-bit GGUF artifact is not yet executable through the
+upstream `metamorph` -> Candle compatibility path for this model, so paddles
+uses the unpacked compatibility bundle instead. This is still a compatibility
+path and does not preserve the original 1-bit runtime efficiency.
+
 ### Final Answer Render Capability
 
 Paddles resolves final-answer rendering capability at boot from the selected

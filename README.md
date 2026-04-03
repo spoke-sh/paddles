@@ -271,7 +271,9 @@ A few areas are still maturing:
 - Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model synthesizer inception mercury-2` or `/model planner inception mercury-2`.
 - `mercury-2` remains the supported Inception planner/synthesizer chat model. When an Inception-backed turn executes `apply_patch`, paddles now uses the provider-native `mercury-edit` companion endpoint behind the scenes for single-file patch application.
 - Provider-native streaming/diffusion views remain optional follow-on capabilities; they are still not required to use Inception in `paddles`.
-- `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, and `qwen3.5-2b` remain available as opt-in planner or synthesizer variants.
+- `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, `qwen3.5-2b`, and `bonsai-8b` remain available as opt-in local planner or synthesizer variants on the `sift` provider.
+- Local `sift` model preparation now goes through the stable crate-root `sift::prepare_model(...)` seam for compatible single-bundle local models. For `bonsai-8b`, paddles currently uses Prism's official unpacked safetensors bundle because the published 1-bit GGUF artifact is not yet executable through the upstream `metamorph` -> Candle compatibility path.
+- That Bonsai preparation path is still a compatibility path, not native 1-bit execution. It makes the model usable on the current local runtime, but it does not preserve the original 1-bit efficiency of the published GGUF artifact.
 - `sift-direct` is the default local gatherer/search backend used by planner `search` and `refine` actions.
 - `paddles` owns recursive planning. `sift` executes direct retrieval only.
 - Planner `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.

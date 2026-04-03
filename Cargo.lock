@@ -392,6 +392,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "candle-core"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bd9895436c1ba5dc1037a19935d084b838db066ff4e15ef7dded020b7c12a4a"
+dependencies = [
+ "byteorder",
+ "float8",
+ "gemm 0.19.0",
+ "half",
+ "libm",
+ "memmap2",
+ "num-traits",
+ "num_cpus",
+ "rand 0.9.2",
+ "rand_distr",
+ "rayon",
+ "safetensors 0.7.0",
+ "thiserror 2.0.18",
+ "tokenizers",
+ "yoke 0.8.1",
+ "zip 7.2.0",
+]
+
+[[package]]
 name = "candle-kernels"
 version = "0.9.2"
 source = "git+https://github.com/rupurt/candle?branch=feat-qwen3.5-support#d73678a09dfb0e92764e2d404b3e6842573ef6d6"
@@ -404,7 +428,7 @@ name = "candle-nn"
 version = "0.9.2"
 source = "git+https://github.com/rupurt/candle?branch=feat-qwen3.5-support#d73678a09dfb0e92764e2d404b3e6842573ef6d6"
 dependencies = [
- "candle-core",
+ "candle-core 0.9.2",
  "half",
  "libc",
  "num-traits",
@@ -420,7 +444,7 @@ version = "0.9.2"
 source = "git+https://github.com/rupurt/candle?branch=feat-qwen3.5-support#d73678a09dfb0e92764e2d404b3e6842573ef6d6"
 dependencies = [
  "byteorder",
- "candle-core",
+ "candle-core 0.9.2",
  "candle-nn",
  "fancy-regex",
  "num-traits",
@@ -601,6 +625,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "console"
+version = "0.16.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d64e8af5551369d19cf50138de61f1c42074ab970f74e99be916646777f8fc87"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "unicode-width 0.2.0",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -619,6 +655,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
 dependencies = [
  "unicode-segmentation",
+]
+
+[[package]]
+name = "cookie"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747"
+dependencies = [
+ "percent-encoding",
+ "time",
+ "version_check",
+]
+
+[[package]]
+name = "cookie_store"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15b2c103cf610ec6cae3da84a766285b42fd16aad564758459e6ecf128c75206"
+dependencies = [
+ "cookie",
+ "document-features",
+ "idna",
+ "indexmap",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "time",
+ "url",
 ]
 
 [[package]]
@@ -1741,7 +1806,7 @@ dependencies = [
  "dirs",
  "futures",
  "http",
- "indicatif",
+ "indicatif 0.17.11",
  "libc",
  "log",
  "native-tls",
@@ -1754,6 +1819,25 @@ dependencies = [
  "tokio",
  "ureq 2.12.1",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "hf-hub"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aef3982638978efa195ff11b305f51f1f22f4f0a6cabee7af79b383ebee6a213"
+dependencies = [
+ "dirs",
+ "http",
+ "indicatif 0.18.4",
+ "libc",
+ "log",
+ "rand 0.9.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "ureq 3.2.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2091,10 +2175,23 @@ version = "0.17.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
 dependencies = [
- "console",
+ "console 0.15.11",
  "number_prefix",
  "portable-atomic",
  "unicode-width 0.2.0",
+ "web-time",
+]
+
+[[package]]
+name = "indicatif"
+version = "0.18.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
+dependencies = [
+ "console 0.16.3",
+ "portable-atomic",
+ "unicode-width 0.2.0",
+ "unit-prefix",
  "web-time",
 ]
 
@@ -2438,6 +2535,19 @@ checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
 dependencies = [
  "libc",
  "stable_deref_trait",
+]
+
+[[package]]
+name = "metamorph"
+version = "0.1.0"
+source = "git+https://github.com/rupurt/metamorph?rev=00ac826973d378ce7670b1057bfd467f6cf8de29#00ac826973d378ce7670b1057bfd467f6cf8de29"
+dependencies = [
+ "candle-core 0.10.2",
+ "hf-hub 0.5.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokenizers",
 ]
 
 [[package]]
@@ -2800,13 +2910,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "candle-core",
+ "candle-core 0.9.2",
  "candle-nn",
  "candle-transformers",
  "clap",
  "crossterm 0.29.0",
  "directories",
- "hf-hub",
+ "hf-hub 0.4.3",
  "paddles-conversation",
  "ratatui",
  "reqwest",
@@ -3650,12 +3760,12 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "sift"
 version = "0.2.0"
-source = "git+https://github.com/rupurt/sift?rev=a7f7a2f0554db556d39a7e51e4c7d1e564c6df5c#a7f7a2f0554db556d39a7e51e4c7d1e564c6df5c"
+source = "git+https://github.com/rupurt/sift?rev=824162db995ea8e4b42e14b181279d95692c386d#824162db995ea8e4b42e14b181279d95692c386d"
 dependencies = [
  "anyhow",
  "bincode",
  "blake3",
- "candle-core",
+ "candle-core 0.9.2",
  "candle-kernels",
  "candle-nn",
  "candle-transformers",
@@ -3666,6 +3776,7 @@ dependencies = [
  "html2text",
  "ignore",
  "memmap2",
+ "metamorph",
  "pdf-extract",
  "rayon",
  "rust_tokenizers",
@@ -4013,10 +4124,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
+ "itoa",
  "num-conv",
  "powerfmt",
  "serde_core",
  "time-core",
+ "time-macros",
 ]
 
 [[package]]
@@ -4024,6 +4137,16 @@ name = "time-core"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
+
+[[package]]
+name = "time-macros"
+version = "0.2.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
+dependencies = [
+ "num-conv",
+ "time-core",
+]
 
 [[package]]
 name = "tinystr"
@@ -4521,6 +4644,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
 
 [[package]]
+name = "unit-prefix"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4553,11 +4682,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdc97a28575b85cfedf2a7e7d3cc64b3e11bd8ac766666318003abbacc7a21fc"
 dependencies = [
  "base64 0.22.1",
+ "cookie_store",
  "flate2",
  "log",
  "percent-encoding",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "socks",
  "ureq-proto",
  "utf-8",
  "webpki-roots 1.0.6",

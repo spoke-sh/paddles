@@ -15,9 +15,19 @@ fn read_repo_file(path: &str) -> String {
 #[test]
 fn just_quality_runs_frontend_workspace_lint_checks() {
     let justfile = read_repo_file("justfile");
+    let frontend_install_section = justfile
+        .split("\n# Run frontend workspace verification checks.")
+        .next()
+        .and_then(|prefix| prefix.split("\nfrontend-install:\n").nth(1))
+        .expect("justfile should contain a frontend-install recipe");
+
     assert!(
-        justfile.contains("frontend-install:\n  npm ci"),
-        "justfile should define a root frontend install helper using npm ci",
+        frontend_install_section.contains("npm ci"),
+        "frontend-install should use npm ci for clean workspace installs",
+    );
+    assert!(
+        frontend_install_section.contains("rm -rf "),
+        "frontend-install should clear workspace node_modules before npm ci to keep installs idempotent",
     );
     let quality_section = justfile
         .split("\n# Run the paddles CLI.")

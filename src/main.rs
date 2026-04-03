@@ -175,6 +175,9 @@ fn build_synthesizer_engine(
         ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new(
             workspace.to_path_buf(),
             &lane.model_id,
+            lane.paths
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("local sift lane missing prepared model paths"))?,
             RenderCapability::resolve(lane.provider.name(), &lane.model_id),
         )?) as Arc<dyn SynthesizerEngine>),
         provider => {
@@ -208,6 +211,9 @@ fn build_planner_engine(
             let engine = Arc::new(SiftAgentAdapter::new(
                 workspace.to_path_buf(),
                 &lane.model_id,
+                lane.paths.clone().ok_or_else(|| {
+                    anyhow::anyhow!("local sift lane missing prepared model paths")
+                })?,
                 RenderCapability::resolve(lane.provider.name(), &lane.model_id),
             )?);
             Ok(Arc::new(SiftPlannerAdapter::new(engine))
