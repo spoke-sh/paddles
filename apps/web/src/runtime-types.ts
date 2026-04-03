@@ -1,3 +1,14 @@
+export type RenderBlock =
+  | { type: 'heading'; text: string }
+  | { type: 'paragraph'; text: string }
+  | { type: 'bullet_list'; items: string[] }
+  | { type: 'code_block'; language?: string | null; code: string }
+  | { type: 'citations'; sources: string[] };
+
+export interface RenderDocument {
+  blocks: RenderBlock[];
+}
+
 export interface SessionResponse {
   session_id: string;
 }
@@ -7,6 +18,7 @@ export interface ConversationTranscriptEntry {
   turn_id: string;
   speaker: 'user' | 'assistant';
   content: string;
+  render?: RenderDocument | null;
 }
 
 export interface ConversationTranscript {

@@ -117,6 +117,40 @@ body {
     inset 1px 1px 0 rgba(255,255,255,0.75),
     0 10px 20px rgba(90, 104, 120, 0.14);
 }
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.msg-heading {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.msg-paragraph {
+  white-space: pre-wrap;
+}
+.msg-bullet-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.msg-bullet-list li + li {
+  margin-top: 4px;
+}
+.msg-code-block {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(24, 33, 45, 0.08);
+  color: #18212d;
+  overflow-x: auto;
+  font-family: "Iosevka Term", "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.msg-citations {
+  color: #5f7383;
+  font-size: 12px;
+}
 .msg.user {
   align-self: flex-end;
   background:
@@ -141,6 +175,13 @@ body {
   font-size: 12px;
   font-style: italic;
   background: rgba(255,255,255,0.3);
+}
+.msg.user .msg-code-block {
+  background: rgba(255,255,255,0.16);
+  color: #f8fbfd;
+}
+.msg.user .msg-citations {
+  color: rgba(248, 251, 253, 0.88);
 }
 
 .events-group { align-self: flex-start; width: 100%; }

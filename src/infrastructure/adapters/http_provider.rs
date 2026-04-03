@@ -3959,9 +3959,9 @@ mod tests {
         .await;
 
         assert!(response.contains("invalid structured answer"));
-        assert!(response.contains("Raw payload excerpt"));
+        assert!(response.contains("```json"));
         assert!(response.contains("complete payload"));
-        assert!(response.contains("Escaped payload view"));
+        assert!(response.contains("```text"));
         assert!(response.contains("\"blocks\""));
     }
 

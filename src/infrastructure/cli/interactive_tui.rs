@@ -1,7 +1,7 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
 use crate::domain::model::{
     ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
-    ThreadCandidate, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    RenderBlock, RenderDocument, ThreadCandidate, TranscriptUpdateSink, TurnEvent, TurnEventSink,
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
@@ -246,13 +246,7 @@ pub async fn run_interactive_tui(
         if event::poll(FRAME_INTERVAL)? {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if handle_key_event(
-                        &mut app,
-                        key,
-                        Arc::clone(&service),
-                        session.clone(),
-                        tx.clone(),
-                    ) {
+                    if handle_key_event(&mut app, key) {
                         break;
                     }
                 }
@@ -271,13 +265,7 @@ fn drain_messages(app: &mut InteractiveApp, rx: &mut UnboundedReceiver<UiMessage
     }
 }
 
-fn handle_key_event(
-    app: &mut InteractiveApp,
-    key: KeyEvent,
-    _service: Arc<MechSuitService>,
-    _session: ConversationSession,
-    _tx: UnboundedSender<UiMessage>,
-) -> bool {
+fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
         if app.input.is_empty() {
             return true;
@@ -296,7 +284,7 @@ fn handle_key_event(
                 app.push_event("Login cancelled", "Returned to normal input.");
                 false
             } else {
-                true
+                false
             }
         }
         KeyCode::Enter => {
@@ -548,6 +536,7 @@ struct TranscriptRow {
     kind: TranscriptRowKind,
     header: String,
     content: String,
+    render: Option<RenderDocument>,
     timing: Option<TranscriptTiming>,
 }
 
@@ -557,8 +546,14 @@ impl TranscriptRow {
             kind,
             header: header.into(),
             content: content.into(),
+            render: None,
             timing: None,
         }
+    }
+
+    fn with_render(mut self, render: RenderDocument) -> Self {
+        self.render = Some(render);
+        self
     }
 
     fn estimated_height(&self, width: usize) -> usize {
@@ -566,10 +561,13 @@ impl TranscriptRow {
         let body_width = width.saturating_sub(4).max(1);
         let mut lines = wrapped_line_count(&self.display_header(), width);
         if self.content.is_empty() {
+            if let Some(render) = &self.render {
+                return lines + assistant_render_line_count(render, body_width) + 1;
+            }
             return lines + 1;
         }
 
-        for line in self.content.lines() {
+        for line in self.display_content().lines() {
             lines += wrapped_line_count(line, body_width);
         }
         lines + 1
@@ -578,6 +576,14 @@ impl TranscriptRow {
     fn timed(mut self, timing: TranscriptTiming) -> Self {
         self.timing = Some(timing);
         self
+    }
+
+    fn display_content(&self) -> String {
+        self.render
+            .as_ref()
+            .map(RenderDocument::to_plain_text)
+            .filter(|content| !content.is_empty())
+            .unwrap_or_else(|| self.content.clone())
     }
 
     fn display_header(&self) -> String {
@@ -672,14 +678,16 @@ struct PendingReveal {
     row_index: usize,
     full_text: String,
     visible_chars: usize,
+    render: Option<RenderDocument>,
 }
 
 impl PendingReveal {
-    fn new(row_index: usize, full_text: String) -> Self {
+    fn new(row_index: usize, full_text: String, render: Option<RenderDocument>) -> Self {
         Self {
             row_index,
             full_text,
             visible_chars: 0,
+            render,
         }
     }
 
@@ -1536,6 +1544,7 @@ impl InteractiveApp {
                 }
                 ConversationTranscriptSpeaker::Assistant => {
                     let wrapped = soft_wrap_prose(&entry.content, MAX_PROSE_WIDTH);
+                    let render = entry.render.clone();
                     if animate_new_assistant {
                         let row_index = self.rows.len();
                         let mut row =
@@ -1544,12 +1553,15 @@ impl InteractiveApp {
                             row = row.timed(timing);
                         }
                         self.rows.push(row);
-                        self.pending_reveal = Some(PendingReveal::new(row_index, wrapped));
+                        self.pending_reveal = Some(PendingReveal::new(row_index, wrapped, render));
                         self.busy = true;
                         self.busy_phase = BusyPhase::Rendering;
                     } else {
                         let mut row =
                             TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", wrapped);
+                        if let Some(render) = render {
+                            row = row.with_render(render);
+                        }
                         if let Some(timing) = self.pending_turn_total_timing.take() {
                             row = row.timed(timing);
                         }
@@ -1728,6 +1740,9 @@ impl InteractiveApp {
             let finished = pending.advance();
             if let Some(row) = self.rows.get_mut(pending.row_index) {
                 row.content = pending.visible_text();
+                if finished {
+                    row.render = pending.render.clone();
+                }
             }
             if finished {
                 self.pending_reveal = None;
@@ -2229,6 +2244,18 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         return lines;
     }
 
+    if row.kind == TranscriptRowKind::Assistant
+        && let Some(render) = &row.render
+    {
+        lines.extend(render_assistant_document_lines(
+            render,
+            body_style,
+            palette.code,
+            palette.citation,
+        ));
+        return lines;
+    }
+
     let mut in_code_block = false;
     for (index, line) in row.content.lines().enumerate() {
         let prefix = if index == 0 { "  └ " } else { "    " };
@@ -2250,6 +2277,118 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
     }
 
     lines
+}
+
+fn assistant_render_line_count(render: &RenderDocument, width: usize) -> usize {
+    assistant_render_line_specs(render)
+        .iter()
+        .map(|spec| wrapped_line_count(&spec.text, width))
+        .sum()
+}
+
+#[derive(Clone, Copy)]
+enum AssistantRenderLineKind {
+    Heading,
+    Paragraph,
+    Code,
+    Citations,
+}
+
+struct AssistantRenderLine {
+    kind: AssistantRenderLineKind,
+    text: String,
+}
+
+fn assistant_render_line_specs(render: &RenderDocument) -> Vec<AssistantRenderLine> {
+    let mut lines = Vec::new();
+    for (index, block) in render.blocks.iter().enumerate() {
+        if index > 0 {
+            lines.push(AssistantRenderLine {
+                kind: AssistantRenderLineKind::Paragraph,
+                text: String::new(),
+            });
+        }
+
+        match block {
+            RenderBlock::Heading { text } => lines.push(AssistantRenderLine {
+                kind: AssistantRenderLineKind::Heading,
+                text: text.clone(),
+            }),
+            RenderBlock::Paragraph { text } => {
+                for line in text.lines() {
+                    lines.push(AssistantRenderLine {
+                        kind: AssistantRenderLineKind::Paragraph,
+                        text: line.to_string(),
+                    });
+                }
+            }
+            RenderBlock::BulletList { items } => {
+                for item in items {
+                    lines.push(AssistantRenderLine {
+                        kind: AssistantRenderLineKind::Paragraph,
+                        text: format!("- {item}"),
+                    });
+                }
+            }
+            RenderBlock::CodeBlock { language, code } => {
+                lines.push(AssistantRenderLine {
+                    kind: AssistantRenderLineKind::Code,
+                    text: match language.as_deref().filter(|value| !value.is_empty()) {
+                        Some(language) => format!("```{language}"),
+                        None => "```".to_string(),
+                    },
+                });
+                for line in code.lines() {
+                    lines.push(AssistantRenderLine {
+                        kind: AssistantRenderLineKind::Code,
+                        text: line.to_string(),
+                    });
+                }
+                lines.push(AssistantRenderLine {
+                    kind: AssistantRenderLineKind::Code,
+                    text: "```".to_string(),
+                });
+            }
+            RenderBlock::Citations { sources } => lines.push(AssistantRenderLine {
+                kind: AssistantRenderLineKind::Citations,
+                text: format!("Sources: {}", sources.join(", ")),
+            }),
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(AssistantRenderLine {
+            kind: AssistantRenderLineKind::Paragraph,
+            text: String::new(),
+        });
+    }
+
+    lines
+}
+
+fn render_assistant_document_lines(
+    render: &RenderDocument,
+    base_style: Style,
+    code_style: Style,
+    citation_style: Style,
+) -> Vec<Line<'static>> {
+    assistant_render_line_specs(render)
+        .into_iter()
+        .enumerate()
+        .map(|(index, spec)| {
+            let prefix = if index == 0 { "  └ " } else { "    " };
+            let style = match spec.kind {
+                AssistantRenderLineKind::Heading => base_style.add_modifier(Modifier::BOLD),
+                AssistantRenderLineKind::Paragraph => base_style,
+                AssistantRenderLineKind::Code => code_style,
+                AssistantRenderLineKind::Citations => citation_style,
+            };
+            Line::from(vec![
+                Span::styled(prefix.to_string(), base_style),
+                Span::styled(spec.text, style),
+            ])
+        })
+        .collect()
 }
 
 fn render_assistant_line(
@@ -2863,11 +3002,13 @@ mod tests {
     use crate::application::{ConversationSession, RuntimeLaneConfig};
     use crate::domain::model::{
         ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
-        ConversationTranscriptUpdate, TaskTraceId, TraceRecordId, TurnEvent, TurnTraceId,
+        ConversationTranscriptUpdate, RenderBlock, RenderDocument, TaskTraceId, TraceRecordId,
+        TurnEvent, TurnTraceId,
     };
     use crate::infrastructure::credentials::ProviderAvailability;
     use crate::infrastructure::providers::ModelProvider;
     use crate::infrastructure::step_timing::Pace;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::style::Modifier;
     use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, prelude::Rect};
     use std::path::PathBuf;
@@ -2890,6 +3031,7 @@ mod tests {
                         .expect("turn id"),
                     speaker: *speaker,
                     content: (*content).to_string(),
+                    render: None,
                 })
                 .collect(),
         }
@@ -2949,10 +3091,49 @@ mod tests {
 
     #[test]
     fn assistant_reveal_finishes_with_full_text() {
-        let mut reveal = PendingReveal::new(0, "hello world".to_string());
+        let mut reveal = PendingReveal::new(0, "hello world".to_string(), None);
         while !reveal.advance() {}
 
         assert_eq!(reveal.visible_text(), "hello world");
+    }
+
+    #[test]
+    fn assistant_rows_render_heading_blocks_without_literal_markers() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let transcript = ConversationTranscript {
+            task_id: TaskTraceId::new("task-1").expect("task"),
+            entries: vec![ConversationTranscriptEntry {
+                record_id: TraceRecordId::new("record-1").expect("record"),
+                turn_id: TurnTraceId::new("task-1.turn-0001").expect("turn"),
+                speaker: ConversationTranscriptSpeaker::Assistant,
+                content: "**Summary**\n\nBody".to_string(),
+                render: Some(RenderDocument {
+                    blocks: vec![
+                        RenderBlock::Heading {
+                            text: "Summary".to_string(),
+                        },
+                        RenderBlock::Paragraph {
+                            text: "Body".to_string(),
+                        },
+                    ],
+                }),
+            }],
+        };
+
+        app.load_transcript(&transcript);
+        let buffer = render_buffer(&app, 80, 12);
+        let rendered = buffer_text(&buffer);
+        assert!(rendered.contains("Summary"));
+        assert!(!rendered.contains("**Summary**"));
     }
 
     #[test]
@@ -3696,6 +3877,59 @@ mod tests {
         app.cursor_pos = app.input.chars().count();
 
         assert!(app.slash_command_suggestions().is_empty());
+    }
+
+    #[test]
+    fn escape_keeps_interactive_loop_running_in_normal_mode() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "debug the tui".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input, "debug the tui");
+        assert_eq!(app.cursor_pos, "debug the tui".chars().count());
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn escape_cancels_masked_login_input_without_exiting() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input_mode = InputMode::MaskedKey {
+            provider: "inception".to_string(),
+        };
+        app.input = "secret-key".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input, "");
+        assert_eq!(app.cursor_pos, 0);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.rows.iter().any(|row| row.header == "• Login cancelled"
+            && row.content.contains("Returned to normal input.")));
     }
 
     #[test]

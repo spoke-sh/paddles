@@ -6,6 +6,7 @@ pub mod forensics;
 pub mod interpretation;
 pub mod manifold;
 pub mod projection;
+pub mod render;
 pub mod threading;
 pub mod traces;
 pub mod transcript;
@@ -37,6 +38,7 @@ pub use projection::{
     ConversationTraceGraph, ConversationTraceGraphBranch, ConversationTraceGraphEdge,
     ConversationTraceGraphNode,
 };
+pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
 pub use threading::ConversationReplayView;
 pub use traces::{
     TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,

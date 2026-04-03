@@ -10,12 +10,12 @@ use crate::domain::model::{
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
     ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
     ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
-    MultiplexEventSink, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision,
-    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
-    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceLineage, TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef,
-    TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord,
-    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    MultiplexEventSink, RenderDocument, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate,
+    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
+    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
     TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
     TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
@@ -2052,6 +2052,7 @@ impl MechSuitService {
         };
 
         if let Some(reply) = planner_outcome.direct_answer {
+            let reply = RenderDocument::from_assistant_plain_text(&reply).to_plain_text();
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
                 citations: Vec::new(),
@@ -2080,6 +2081,7 @@ impl MechSuitService {
         })
         .await
         .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
+        let reply = RenderDocument::from_assistant_plain_text(&reply).to_plain_text();
 
         trace.record_completion(&reply);
         self.emit_transcript_update(&session.task_id());

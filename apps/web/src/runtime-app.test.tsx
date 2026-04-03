@@ -45,7 +45,16 @@ const bootstrapProjection: ConversationProjectionSnapshot = {
         record_id: 'record-2',
         turn_id: 'task-123.turn-0001',
         speaker: 'assistant',
-        content: 'Mock provider completed the turn after local inspection.',
+        content: '**Summary**\n\nMock provider completed the turn after local inspection.',
+        render: {
+          blocks: [
+            { type: 'heading', text: 'Summary' },
+            {
+              type: 'paragraph',
+              text: 'Mock provider completed the turn after local inspection.',
+            },
+          ],
+        },
       },
     ],
   },
@@ -253,6 +262,7 @@ describe('RuntimeApp', () => {
     renderAtPath('/');
 
     expect(await screen.findByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+    expect(screen.getByText('Summary')).toBeInTheDocument();
     expect(document.querySelector('.runtime-shell-host')).toBeInTheDocument();
     expect(screen.getByText('Forensic Inspector')).toBeInTheDocument();
     expect(document.getElementById('forensic-view')).toBeInTheDocument();
@@ -293,6 +303,14 @@ describe('RuntimeApp', () => {
               turn_id: 'task-123.turn-0002',
               speaker: 'assistant',
               content: 'Projection stream delivered the externally injected turn.',
+              render: {
+                blocks: [
+                  {
+                    type: 'paragraph',
+                    text: 'Projection stream delivered the externally injected turn.',
+                  },
+                ],
+              },
             },
           ],
         },
@@ -303,6 +321,14 @@ describe('RuntimeApp', () => {
     expect(
       await screen.findByText('Projection stream delivered the externally injected turn.')
     ).toBeInTheDocument();
+  });
+
+  it('renders assistant transcript blocks instead of flattening them to plain strings', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByText('Summary')).toBeInTheDocument();
+    expect(screen.getByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+    expect(document.querySelector('.msg-heading')?.textContent).toBe('Summary');
   });
 
   it('renders the primary transit route through the client router', async () => {

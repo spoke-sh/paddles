@@ -1,3 +1,4 @@
+use super::render::RenderDocument;
 use super::traces::{TraceRecordKind, TraceReplay};
 use paddles_conversation::{ArtifactEnvelope, TaskTraceId, TraceRecordId, TurnTraceId};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,8 @@ pub struct ConversationTranscriptEntry {
     pub turn_id: TurnTraceId,
     pub speaker: ConversationTranscriptSpeaker,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render: Option<RenderDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +37,7 @@ impl ConversationTranscript {
                         turn_id: record.lineage.turn_id.clone(),
                         speaker: ConversationTranscriptSpeaker::User,
                         content: artifact_content(&root.prompt),
+                        render: None,
                     })
                 }
                 TraceRecordKind::TurnStarted(turn) => entries.push(ConversationTranscriptEntry {
@@ -41,14 +45,18 @@ impl ConversationTranscript {
                     turn_id: record.lineage.turn_id.clone(),
                     speaker: ConversationTranscriptSpeaker::User,
                     content: artifact_content(&turn.prompt),
+                    render: None,
                 }),
                 TraceRecordKind::CompletionCheckpoint(checkpoint) => {
                     if let Some(response) = checkpoint.response.as_ref() {
+                        let render =
+                            RenderDocument::from_assistant_plain_text(&artifact_content(response));
                         entries.push(ConversationTranscriptEntry {
                             record_id: record.record_id.clone(),
                             turn_id: record.lineage.turn_id.clone(),
                             speaker: ConversationTranscriptSpeaker::Assistant,
-                            content: artifact_content(response),
+                            content: render.to_plain_text(),
+                            render: Some(render),
                         });
                     }
                 }
@@ -168,5 +176,6 @@ mod tests {
             ConversationTranscriptSpeaker::Assistant
         );
         assert_eq!(transcript.entries[1].content, "hi");
+        assert!(transcript.entries[1].render.is_some());
     }
 }

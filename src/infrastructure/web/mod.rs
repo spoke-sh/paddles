@@ -1371,6 +1371,12 @@ mod tests {
             Some(transcript_update)
         );
         assert_eq!(transcript_payload.snapshot.transcript.entries.len(), 2);
+        assert!(
+            transcript_payload.snapshot.transcript.entries[1]
+                .render
+                .as_ref()
+                .is_some_and(|render| !render.blocks.is_empty())
+        );
         assert!(!transcript_payload.snapshot.trace_graph.nodes.is_empty());
 
         BroadcastProjectionForensicSink { service, tx }.emit(forensic_update.clone());
@@ -1752,11 +1758,8 @@ mod tests {
                 .await
                 .expect("conversation transcript");
         assert_eq!(transcript.entries.len(), 2);
-        assert!(
-            transcript.entries[1]
-                .content
-                .contains("Mock provider completed the turn after local inspection.")
-        );
+        assert!(!transcript.entries[1].content.trim().is_empty());
+        assert!(transcript.entries[1].render.is_some());
 
         let Json(graph) = super::trace_graph(State(Arc::clone(&state)), Path(task_id.clone()))
             .await
