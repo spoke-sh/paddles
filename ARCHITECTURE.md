@@ -27,7 +27,82 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 ### Act 3: Synthesis
 
-**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles resolves a provider/model-specific render capability and then uses the strictest supported transport for final answers — native JSON schema or tool-call structure when available, prompt-enveloped JSON when not. Final answers still normalize through the same constrained render-envelope contract (`paragraph`, `bullet_list`, `code_block`, `citations`) before the UI projects them into transcript output.
+**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles resolves a provider/model-specific render capability and then uses the strictest supported transport for final answers — native JSON schema or tool-call structure when available, prompt-enveloped JSON when not.
+
+Direct planner-authored answers no longer bypass this contract by leaking planner rationale into the transcript. Both synthesizer answers and planner-direct answers now normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`) before the UI projects them into transcript output. Planner rationale remains control-only metadata.
+
+### Act 3.5: Generative Manifold
+
+The render AST solved one half of the problem: every answer path now lands in one typed document model. The next architectural seam is a **generative manifold** that sits between planner control and rendering.
+
+Its job is not to plan workspace actions and not to paint pixels. Its job is to author the best possible user-facing response for the active surface while staying accountable to the same evidence and render contract.
+
+```mermaid
+flowchart LR
+    Planner["Planner / loop control"]
+    Evidence["Evidence bundle + loop trace"]
+    Surface["Surface capability profile<br/>TUI · API · Web"]
+    Manifold["Generative manifold<br/>response authoring"]
+    Render["Canonical render AST<br/>+ typed affordances"]
+    Project["TUI / API / Web projection"]
+
+    Planner --> Manifold
+    Evidence --> Manifold
+    Surface --> Manifold
+    Manifold --> Render --> Project
+
+    style Manifold fill:#e3f2fd,stroke:#1976d2
+    style Render fill:#e8f5e9,stroke:#4CAF50
+```
+
+This layer matters because the available expression space changes by runtime context:
+
+| Surface | Constraints | Extra capabilities |
+|--------|-------------|--------------------|
+| **TUI / plain CLI** | Compact width, low-friction scanability, plain-text fallbacks | Dense headings, compact bullets, terse citations, progress-oriented summaries |
+| **API server** | Needs stable machine contracts, streaming safety, client portability | Typed blocks, explicit affordances, structured follow-up suggestions, route/navigation intents |
+| **Web runtime** | Rich layout, persistent projection store, live trace/manifold routes | Linked citations, expandable cards, panel focus intents, trace-step highlighting, structured sidecars |
+
+The generative manifold should therefore be surface-aware. It should consume a typed capability profile and choose among the authoring states that make sense for that surface:
+
+- concise direct answer
+- evidence-grounded explanation
+- diagnostic walkthrough
+- rich browser-ready response with navigation affordances
+- structured API payload with explicit sidecars
+
+The important boundary is what it must not do:
+
+- It must not select workspace actions. That remains the planner loop.
+- It must not silently change or reinterpret evidence. It authors from the gathered sources.
+- It must not collapse into raw markdown. Its output stays typed.
+- It must not live inside the renderer. Rendering projects the authored response; it does not invent it.
+
+### Surface-Aware Output Contract
+
+The canonical render AST is now the minimum common denominator across all answer paths, but a browser or API server can support more than plain transcript blocks. The generative manifold should therefore target a broader typed response envelope:
+
+- `RenderDocument` for the human-readable answer body
+- `citations` and trace/source locators
+- `follow_up_suggestions`
+- `navigation_affordances`
+  examples: focus a transit step, reveal a manifold chamber, open a cited file
+- `presentation_hints`
+  examples: compact, diagnostic, compare, timeline
+
+That gives Paddles one authoring seam that can stay modest in a terminal and much richer in a browser without reintroducing markdown guessing or planner/renderer conflation.
+
+### Why It Is Not The Rendering Manifold
+
+The steering-signal manifold is an expressive projection over controller state. It helps the operator understand what shaped the turn. The generative manifold is different: it authors the response itself.
+
+Those are separate concerns:
+
+- the **steering-signal manifold** visualizes how the harness was influenced
+- the **generative manifold** authors what the harness says next
+- the **renderer** projects that authored result into each surface
+
+Keeping those roles separate prevents the system from hiding control metadata inside user-facing prose or expecting the renderer to recover structure that the authoring layer never produced.
 
 ### Visibility Throughout
 

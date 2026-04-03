@@ -36,7 +36,9 @@ Model selection is an architectural decision that shapes every turn.
 - **Turns Plan First**: The primary mech-suit runtime asks the planner for its first bounded action before route selection. This recursive path is the primary mode of operation.
 - **Separate Planner From Synthesizer**: Planning and final answer generation are distinct steps, each routed to the model best suited for that workload.
 - **Grounded Answers Cite Sources**: Repository-question answers include file citations by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
-- **Final Answer Rendering Stays Typed**: Synthesizer models advertise the render block types they are using (`paragraph`, `bullet_list`, `code_block`, `citations`) through a constrained response envelope; operators see a normalized transcript projection instead of raw markdown conventions.
+- **Final Answer Rendering Stays Typed**: Planner-direct answers and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
+- **Planner Rationale Is Never The User Answer**: Planner rationale explains control decisions. User-facing answer text must travel through an explicit answer payload before it enters the render pipeline.
+- **Generative Authoring Stays Separate From Rendering**: Rich surface-aware expression belongs in a generative authoring layer that targets the canonical render AST and surface affordances. Renderers project that typed output; they do not invent or reinterpret content.
 
 ### Steering Signals
 - **Steering Signals Are Typed Controller Policies**: Steering signals are not hidden vibe checks. They are the family of explicit controller policies that bias or stop recursive work as evidence accumulates.

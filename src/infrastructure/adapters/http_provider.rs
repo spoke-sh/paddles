@@ -790,7 +790,7 @@ impl HttpProviderAdapter {
 
 You must respond with a single JSON object selecting your next action. Available actions:
 
-{{"action":"answer","edit":"no","candidate_files":[],"rationale":"..."}}
+{{"action":"answer","answer":"...","edit":"no","candidate_files":[],"rationale":"..."}}
 {{"action":"search","query":"...","mode":"linear|graph","strategy":"bm25|vector","intent":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"list_files","pattern":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"read","path":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
@@ -810,7 +810,8 @@ Rules:
 - The first key must be `action`.
 - Do not wrap the JSON in markdown fences, prose, or commentary.
 - Do not emit partial, truncated, or streaming JSON fragments.
-- `answer` requires `rationale`.
+- `answer` requires `answer` and `rationale`.
+- `answer` is the user-facing reply text; `rationale` explains why this control action is correct.
 - `search` requires `query`; include `strategy` when you know whether to use `bm25` or `vector`.
 - `list_files` requires `pattern`.
 - `read` requires `path`.
@@ -821,6 +822,7 @@ Rules:
 - `refine` requires `query`.
 - `branch` requires `branches`.
 - `stop` requires `reason`.
+- If `stop.reason` is `model selected answer`, include `answer` with the user-facing reply instead of putting the reply in `rationale`.
 - When the user is clearly asking for a code or file edit, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.
 - When the user is not asking for an edit, set `edit` to `no` and use an empty `candidate_files` array.
 - Do not invent action names outside the schema above.
@@ -870,6 +872,12 @@ Rules:
             )
         })?;
         let rationale = envelope.rationale.unwrap_or_default();
+        let answer = envelope
+            .answer
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let action = match action_name.as_str() {
             "answer" => PlannerAction::Stop {
                 reason: "model selected answer".to_string(),
@@ -943,17 +951,29 @@ Rules:
                 reason: format!("unknown action: {other}"),
             },
         };
-        Ok(RecursivePlannerDecision { action, rationale })
+        Ok(RecursivePlannerDecision {
+            action,
+            rationale,
+            answer,
+        })
     }
 
     fn parse_initial_action_decision(&self, response: &str) -> Result<InitialActionDecision> {
         let json = extract_json(response).unwrap_or(response);
         let envelope: PlannerEnvelope = serde_json::from_str(json)
             .map_err(|e| anyhow!("failed to parse planner action: {e}\nresponse: {response}"))?;
+        let action_name = infer_planner_action_name(&envelope);
         let decision = self.parse_planner_action(response)?;
         Ok(InitialActionDecision {
             action: match decision.action {
-                PlannerAction::Stop { reason } => InitialAction::Stop { reason },
+                PlannerAction::Stop { reason } => {
+                    if action_name.as_deref() == Some("answer") || reason == "model selected answer"
+                    {
+                        InitialAction::Answer
+                    } else {
+                        InitialAction::Stop { reason }
+                    }
+                }
                 PlannerAction::Workspace { action } => InitialAction::Workspace { action },
                 PlannerAction::Refine {
                     query,
@@ -975,6 +995,7 @@ Rules:
                 },
             },
             rationale: decision.rationale,
+            answer: decision.answer,
             edit: initial_edit_instruction_from_http_envelope(&envelope)?,
         })
     }
@@ -1731,6 +1752,8 @@ struct PlannerEnvelope {
     #[serde(default)]
     rationale: Option<String>,
     #[serde(default)]
+    answer: Option<String>,
+    #[serde(default)]
     reason: Option<String>,
     #[serde(default)]
     query: Option<String>,
@@ -1791,6 +1814,10 @@ fn planner_action_json_schema() -> Value {
             "rationale": {
                 "type": "string",
                 "description": "Short reason for the selected action."
+            },
+            "answer": {
+                "type": "string",
+                "description": "User-facing answer text when the planner is ending the loop with a direct answer."
             },
             "reason": {
                 "type": "string",
@@ -1864,6 +1891,10 @@ fn planner_action_json_schema() -> Value {
         },
         "required": ["action", "rationale"],
         "allOf": [
+            {
+                "if": { "properties": { "action": { "const": "answer" } }, "required": ["action"] },
+                "then": { "required": ["answer"] }
+            },
             {
                 "if": { "properties": { "action": { "const": "search" } }, "required": ["action"] },
                 "then": { "required": ["query"] }
@@ -2108,6 +2139,7 @@ fn fail_closed_http_initial_action(request: &PlannerRequest) -> InitialActionDec
         },
         rationale: "controller failed closed after repeated invalid initial-action replies"
             .to_string(),
+        answer: None,
         edit: InitialEditInstruction::default(),
     }
 }
@@ -2118,6 +2150,7 @@ fn fail_closed_http_planner_action() -> RecursivePlannerDecision {
             reason: "planner-action-unavailable after invalid planner replies".to_string(),
         },
         rationale: "controller failed closed after repeated invalid planner replies".to_string(),
+        answer: None,
     }
 }
 
@@ -3347,6 +3380,7 @@ mod tests {
                     },
                 },
                 rationale: "Run the nix-build job to see why CI is failing".to_string(),
+                answer: None,
             }
         );
     }
@@ -3379,6 +3413,7 @@ mod tests {
                     },
                 },
                 rationale: "apply the requested code change".to_string(),
+                answer: None,
             }
         );
     }
@@ -3411,6 +3446,38 @@ mod tests {
                     },
                 },
                 rationale: "check the local workspace state before deeper diagnosis".to_string(),
+                answer: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_planner_action_separates_direct_answer_from_rationale() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_planner_action(
+                r#"{"action":"answer","answer":"Starter circuit\n\n[battery]---(solenoid)---(starter)","rationale":"the user asked for a direct ASCII diagram"}"#,
+            )
+            .expect("planner decision");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "model selected answer".to_string(),
+                },
+                rationale: "the user asked for a direct ASCII diagram".to_string(),
+                answer: Some("Starter circuit\n\n[battery]---(solenoid)---(starter)".to_string()),
             }
         );
     }
@@ -3650,6 +3717,7 @@ mod tests {
                     },
                 },
                 rationale: "check the local workspace state before deeper diagnosis".to_string(),
+                answer: None,
             }
         );
         let requests = server.recorded_requests();

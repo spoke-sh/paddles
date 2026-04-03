@@ -367,6 +367,7 @@ impl InitialAction {
 pub struct InitialActionDecision {
     pub action: InitialAction,
     pub rationale: String,
+    pub answer: Option<String>,
     pub edit: InitialEditInstruction,
 }
 
@@ -454,6 +455,7 @@ impl PlannerAction {
 pub struct PlannerDecision {
     pub action: PlannerAction,
     pub rationale: String,
+    pub answer: Option<String>,
 }
 
 #[cfg(test)]

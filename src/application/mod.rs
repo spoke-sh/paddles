@@ -2047,7 +2047,7 @@ impl MechSuitService {
             }
             PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
                 evidence: None,
-                direct_answer: None,
+                direct_answer: execution_plan.direct_answer.clone(),
             },
         };
 
@@ -2139,6 +2139,7 @@ impl MechSuitService {
             rationale: format!(
                 "known edit turn; action produces information, so read `{best_path}` before broader planning"
             ),
+            answer: None,
             edit: crate::domain::ports::InitialEditInstruction {
                 known_edit: decision.edit.known_edit
                     || mutation_turn_requires_action_bias(prompt, interpretation),
@@ -2680,7 +2681,7 @@ impl MechSuitService {
                 }
                 PlannerAction::Stop { reason } => {
                     if planner_stop_answers_directly(&decision) {
-                        direct_answer = Some(decision.rationale.clone());
+                        direct_answer = decision.answer.clone();
                     }
                     stop_reason = Some(reason.clone());
                     format!("planner requested synthesis: {reason}")
@@ -2966,6 +2967,7 @@ struct PromptExecutionPlan {
     path: PromptExecutionPath,
     route_summary: String,
     initial_planner_decision: Option<RecursivePlannerDecision>,
+    direct_answer: Option<String>,
 }
 
 struct PlannerLoopOutcome {
@@ -2999,6 +3001,7 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
             prepared.planner.model_id, prepared.synthesizer.model_id
         ),
         initial_planner_decision: None,
+        direct_answer: None,
     }
 }
 
@@ -3009,6 +3012,7 @@ fn execution_plan_from_initial_action(
     let InitialActionDecision {
         action,
         rationale,
+        answer,
         edit: _,
     } = decision;
     match action {
@@ -3020,6 +3024,7 @@ fn execution_plan_from_initial_action(
                 prepared.synthesizer.model_id
             ),
             initial_planner_decision: None,
+            direct_answer: answer,
         },
         InitialAction::Stop { reason } => PromptExecutionPlan {
             intent: TurnIntent::DirectResponse,
@@ -3029,6 +3034,7 @@ fn execution_plan_from_initial_action(
                 prepared.synthesizer.model_id
             ),
             initial_planner_decision: None,
+            direct_answer: answer,
         },
         resource_action => {
             let planner_action = resource_action
@@ -3059,7 +3065,9 @@ fn execution_plan_from_initial_action(
                 initial_planner_decision: Some(RecursivePlannerDecision {
                     action: planner_action,
                     rationale,
+                    answer: None,
                 }),
+                direct_answer: None,
             }
         }
     }
@@ -3472,48 +3480,68 @@ fn ci_diagnostic_procedure_steps(
 }
 
 fn prompt_mentions_github_or_ci(prompt: &str) -> bool {
-    let prompt_lower = prompt.to_ascii_lowercase();
-    [
-        "github",
-        "actions",
-        "workflow",
-        "ci",
-        "pipeline",
-        "run id",
-        "check suite",
-        "check run",
-    ]
-    .iter()
-    .any(|signal| prompt_lower.contains(signal))
+    let tokens = prompt_intent_tokens(prompt);
+    contains_exact_token(&tokens, "github")
+        || contains_exact_token(&tokens, "actions")
+        || contains_exact_token(&tokens, "workflow")
+        || contains_exact_token(&tokens, "ci")
+        || contains_exact_token(&tokens, "pipeline")
+        || contains_token_phrase(&tokens, &["run", "id"])
+        || contains_token_phrase(&tokens, &["check", "suite"])
+        || contains_token_phrase(&tokens, &["check", "run"])
 }
 
 fn prompt_requires_verifiable_hypothesis(prompt: &str) -> bool {
-    let prompt_lower = prompt.to_ascii_lowercase();
-    [
-        "debug",
-        "diagnos",
-        "investigat",
-        "reproduce",
-        "root cause",
-        "why is",
-        "why are",
-        "failing",
-        "failure",
-        "broken",
-        "regression",
-        "panic",
-        "crash",
-        " ci",
-        "ci ",
-        "workflow",
-        "pipeline",
-        "build failing",
-        "tests failing",
-        "test failing",
-        "lint failing",
-    ]
-    .iter()
-    .any(|signal| prompt_lower.contains(signal))
+    let tokens = prompt_intent_tokens(prompt);
+    contains_prefixed_token(&tokens, "debug")
+        || contains_prefixed_token(&tokens, "diagnos")
+        || contains_prefixed_token(&tokens, "investigat")
+        || contains_prefixed_token(&tokens, "reproduce")
+        || contains_token_phrase(&tokens, &["root", "cause"])
+        || contains_token_phrase(&tokens, &["why", "is"])
+        || contains_token_phrase(&tokens, &["why", "are"])
+        || contains_exact_token(&tokens, "failing")
+        || contains_exact_token(&tokens, "failure")
+        || contains_exact_token(&tokens, "broken")
+        || contains_exact_token(&tokens, "regression")
+        || contains_exact_token(&tokens, "panic")
+        || contains_exact_token(&tokens, "crash")
+        || contains_exact_token(&tokens, "ci")
+        || contains_exact_token(&tokens, "workflow")
+        || contains_exact_token(&tokens, "pipeline")
+        || contains_token_phrase(&tokens, &["build", "failing"])
+        || contains_token_phrase(&tokens, &["tests", "failing"])
+        || contains_token_phrase(&tokens, &["test", "failing"])
+        || contains_token_phrase(&tokens, &["lint", "failing"])
+}
+
+fn prompt_intent_tokens(prompt: &str) -> Vec<String> {
+    prompt
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_ascii_lowercase())
+        .collect()
+}
+
+fn contains_exact_token(tokens: &[String], needle: &str) -> bool {
+    tokens.iter().any(|token| token == needle)
+}
+
+fn contains_prefixed_token(tokens: &[String], prefix: &str) -> bool {
+    tokens.iter().any(|token| token.starts_with(prefix))
+}
+
+fn contains_token_phrase(tokens: &[String], phrase: &[&str]) -> bool {
+    if phrase.is_empty() || tokens.len() < phrase.len() {
+        return false;
+    }
+
+    tokens.windows(phrase.len()).any(|window| {
+        window
+            .iter()
+            .zip(phrase.iter())
+            .all(|(token, expected)| token == expected)
+    })
 }
 
 fn prompt_requires_workspace_engagement(
@@ -3594,6 +3622,7 @@ fn coerce_workspace_engagement_initial_action(
         },
         rationale: "action produces information; diagnose the local workspace state before answering directly"
             .to_string(),
+        answer: None,
         edit: decision.edit.clone(),
     })
 }
@@ -4387,7 +4416,10 @@ fn planner_stop_answers_directly(decision: &RecursivePlannerDecision) -> bool {
     matches!(
         &decision.action,
         PlannerAction::Stop { reason } if reason == "model selected answer"
-    ) && !decision.rationale.trim().is_empty()
+    ) && decision
+        .answer
+        .as_deref()
+        .is_some_and(|answer| !answer.trim().is_empty())
 }
 
 fn build_planner_evidence_bundle(
@@ -4950,6 +4982,7 @@ mod tests {
         InitialActionDecision {
             action,
             rationale: rationale.to_string(),
+            answer: None,
             edit: InitialEditInstruction::default(),
         }
     }
@@ -5321,6 +5354,29 @@ mod tests {
         assert!(
             super::coerce_workspace_engagement_initial_action(
                 "Howdy",
+                &InterpretationContext::default(),
+                &decision,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn ascii_requests_do_not_trigger_ci_workspace_gate() {
+        let decision = initial_action_decision(
+            InitialAction::Answer,
+            "this can be answered directly without local inspection",
+        );
+
+        assert!(!super::prompt_mentions_github_or_ci(
+            "Can you generate an ASCII diagram of the start circuit?"
+        ));
+        assert!(!super::prompt_requires_verifiable_hypothesis(
+            "Can you generate an ASCII diagram of the start circuit?"
+        ));
+        assert!(
+            super::coerce_workspace_engagement_initial_action(
+                "Can you generate an ASCII diagram of the start circuit?",
                 &InterpretationContext::default(),
                 &decision,
             )
@@ -6442,6 +6498,7 @@ mod tests {
                     reason: "enough graph evidence".to_string(),
                 },
                 rationale: "synthesize after the graph gather".to_string(),
+                answer: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -6613,6 +6670,7 @@ mod tests {
                 },
             },
             rationale: "run a check first".to_string(),
+            answer: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -6683,6 +6741,7 @@ mod tests {
                         },
                     },
                     rationale: "continue exploring".to_string(),
+                    answer: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -6691,12 +6750,14 @@ mod tests {
                         },
                     },
                     rationale: "read the likely target file before more retrieval".to_string(),
+                    answer: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "enough information".to_string(),
                     },
                     rationale: "stop after acting".to_string(),
+                    answer: None,
                 },
             ],
             Arc::clone(&request_log),
@@ -6800,6 +6861,7 @@ mod tests {
             InitialActionDecision {
                 action: InitialAction::Answer,
                 rationale: "known edit turn; controller should choose the file".to_string(),
+                answer: None,
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec![
@@ -6813,6 +6875,7 @@ mod tests {
                     reason: "the file was enough".to_string(),
                 },
                 rationale: "stop after the read".to_string(),
+                answer: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -6878,6 +6941,7 @@ mod tests {
                     reason: "the file was enough".to_string(),
                 },
                 rationale: "stop after the read".to_string(),
+                answer: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -6946,6 +7010,7 @@ mod tests {
                     },
                 },
                 rationale: "controller should still choose the file".to_string(),
+                answer: None,
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec!["src/one.rs".to_string(), "src/two.rs".to_string()],
@@ -6956,6 +7021,7 @@ mod tests {
                     reason: "done".to_string(),
                 },
                 rationale: "stop".to_string(),
+                answer: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7032,6 +7098,7 @@ mod tests {
                     reason: "inspection was enough".to_string(),
                 },
                 rationale: "stop after the inspect".to_string(),
+                answer: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7087,6 +7154,8 @@ mod tests {
             gatherer: None,
         };
         let answer = "I’m happy to help you troubleshoot your 1968 Chevy C20. Start with battery, fuel, spark, and starter checks.".to_string();
+        let rationale = "the user asked for general troubleshooting advice, so the loop can end without synthesis"
+            .to_string();
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
                 InitialAction::Workspace {
@@ -7100,7 +7169,8 @@ mod tests {
                 action: PlannerAction::Stop {
                     reason: "model selected answer".to_string(),
                 },
-                rationale: answer.clone(),
+                rationale: rationale.clone(),
+                answer: Some(answer.clone()),
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7122,6 +7192,7 @@ mod tests {
         });
 
         assert_eq!(reply, answer);
+        assert_ne!(reply, rationale);
         assert!(
             synthesizer
                 .gathered_summaries
@@ -7129,6 +7200,69 @@ mod tests {
                 .expect("gathered summaries lock")
                 .is_empty(),
             "planner-authored stop answers should not be rewritten by the synthesizer"
+        );
+    }
+
+    #[test]
+    fn initial_answer_decisions_render_explicit_user_answer_without_synthesizer_rewrite() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer = "Starter circuit\n\n[ battery ]---(solenoid)---(starter )".to_string();
+        let rationale =
+            "the prompt is a direct diagram request, so no workspace action is required"
+                .to_string();
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: rationale.clone(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction::default(),
+            },
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt("Can you generate an ASCII diagram of the start circuit?")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        assert_ne!(reply, rationale);
+        assert!(
+            synthesizer
+                .gathered_summaries
+                .lock()
+                .expect("gathered summaries lock")
+                .is_empty(),
+            "initial direct answers should bypass the synthesizer"
         );
     }
 
@@ -7163,6 +7297,7 @@ mod tests {
                 },
             },
             rationale: "get the run id for the failing job".to_string(),
+            answer: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -7223,6 +7358,7 @@ mod tests {
                         },
                     },
                     rationale: "repeat the same status probe".to_string(),
+                    answer: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7231,6 +7367,7 @@ mod tests {
                     },
                     rationale: "the gathered sources weaken the premise, so stop and judge them"
                         .to_string(),
+                    answer: None,
                 },
             ],
             Arc::clone(&recorded_requests),
@@ -7315,6 +7452,7 @@ mod tests {
                 },
             },
             rationale: "check a smaller recent window".to_string(),
+            answer: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -7374,6 +7512,7 @@ mod tests {
                         },
                     },
                     rationale: "repeat the same status probe".to_string(),
+                    answer: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7382,6 +7521,7 @@ mod tests {
                     },
                     rationale: "the gathered sources weaken the premise, so stop and judge them"
                         .to_string(),
+                    answer: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7487,6 +7627,7 @@ mod tests {
                         },
                     },
                     rationale: "narrow the list size".to_string(),
+                    answer: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7495,6 +7636,7 @@ mod tests {
                     },
                     rationale: "the gathered sources weaken the premise, so stop and judge them"
                         .to_string(),
+                    answer: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7559,6 +7701,7 @@ mod tests {
                 },
             },
             rationale: "run a check first".to_string(),
+            answer: None,
         };
 
         let notes = super::collect_steering_review_notes(

@@ -214,6 +214,8 @@ enum PlannerActionEnvelope {
         reason: String,
         #[serde(default)]
         rationale: Option<String>,
+        #[serde(default)]
+        answer: Option<String>,
     },
 }
 
@@ -231,6 +233,7 @@ struct InitialActionEnvelope {
 #[serde(tag = "action", rename_all = "snake_case")]
 enum InitialActionVariantEnvelope {
     Answer {
+        answer: String,
         rationale: String,
     },
     Search {
@@ -296,6 +299,8 @@ enum InitialActionVariantEnvelope {
         reason: String,
         #[serde(default)]
         rationale: Option<String>,
+        #[serde(default)]
+        answer: Option<String>,
     },
 }
 
@@ -2767,7 +2772,7 @@ Reply with ONLY one JSON object and no prose or markdown.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"answer\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
@@ -2784,6 +2789,7 @@ Allowed actions:\n\
 Rules:\n\
 - Read the interpretation context before choosing.\n\
 - Answer or stop as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.\n\
+- For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 - `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
@@ -2833,7 +2839,7 @@ Return ONLY one valid JSON initial action.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"answer\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
@@ -2848,6 +2854,7 @@ Allowed actions:\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
 `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
@@ -2886,7 +2893,7 @@ Return ONLY one valid JSON object.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"answer\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
@@ -2904,6 +2911,7 @@ Invalid reply to correct:\n\
 {}\n\
 \n\
 `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
+For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
 `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
@@ -2947,7 +2955,7 @@ Allowed actions:\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
 \n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
@@ -2964,6 +2972,7 @@ Rules:\n\
 - Refine when an earlier search needs a sharper query.\n\
 - Branch when the investigation should split into multiple subqueries.\n\
 - Stop as soon as you have enough evidence to answer. Do not use remaining budget for redundant or confirmatory searches — efficiency matters more than thoroughness.\n\
+- If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
 - When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly — never describe the edit for the user to apply manually.\n\
 - If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 - Never answer the user directly here.\n\
@@ -3016,9 +3025,10 @@ Allowed actions:\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
+If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
@@ -3066,7 +3076,7 @@ Allowed actions:\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
@@ -3075,6 +3085,7 @@ Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
+If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -4016,9 +4027,10 @@ fn interpretation_context_from_envelope(
 fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
     let edit = initial_edit_instruction_from_envelope(&envelope)?;
     let decision = match envelope.action {
-        InitialActionVariantEnvelope::Answer { rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Answer { answer, rationale } => InitialActionDecision {
             action: InitialAction::Answer,
             rationale: required_planner_field("rationale", rationale)?,
+            answer: Some(required_planner_field("answer", answer)?),
             edit,
         },
         InitialActionVariantEnvelope::Search {
@@ -4040,6 +4052,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::ListFiles { pattern, rationale } => InitialActionDecision {
@@ -4052,6 +4065,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::Read { path, rationale } => InitialActionDecision {
@@ -4061,6 +4075,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::Inspect { command, rationale } => InitialActionDecision {
@@ -4070,6 +4085,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::Shell { command, rationale } => InitialActionDecision {
@@ -4079,6 +4095,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::Diff { path, rationale } => InitialActionDecision {
@@ -4091,6 +4108,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::WriteFile {
@@ -4105,6 +4123,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::ReplaceInFile {
@@ -4123,6 +4142,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::ApplyPatch { patch, rationale } => InitialActionDecision {
@@ -4132,6 +4152,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
             edit,
         },
         InitialActionVariantEnvelope::Refine {
@@ -4153,6 +4174,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
+                answer: None,
                 edit,
             }
         }
@@ -4174,14 +4196,24 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                     rationale: rationale.clone(),
                 },
                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
+                answer: None,
                 edit,
             }
         }
-        InitialActionVariantEnvelope::Stop { reason, rationale } => InitialActionDecision {
+        InitialActionVariantEnvelope::Stop {
+            reason,
+            rationale,
+            answer,
+        } => InitialActionDecision {
             action: InitialAction::Stop {
                 reason: required_planner_field("reason", reason)?,
             },
             rationale: rationale.unwrap_or_else(|| "stop routing".to_string()),
+            answer: answer
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
             edit,
         },
     };
@@ -4251,6 +4283,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::ListFiles { pattern, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4262,6 +4295,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::Read { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4270,6 +4304,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::Inspect { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4278,6 +4313,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::Shell { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4286,6 +4322,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::Diff { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4297,6 +4334,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::WriteFile {
             path,
@@ -4310,6 +4348,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::ReplaceInFile {
             path,
@@ -4327,6 +4366,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::ApplyPatch { patch, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4335,6 +4375,7 @@ fn planner_action_from_envelope(
                 },
             },
             rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
         },
         PlannerActionEnvelope::Refine {
             query,
@@ -4355,6 +4396,7 @@ fn planner_action_from_envelope(
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
+                answer: None,
             }
         }
         PlannerActionEnvelope::Branch {
@@ -4375,13 +4417,23 @@ fn planner_action_from_envelope(
                     rationale: rationale.clone(),
                 },
                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
+                answer: None,
             }
         }
-        PlannerActionEnvelope::Stop { reason, rationale } => RecursivePlannerDecision {
+        PlannerActionEnvelope::Stop {
+            reason,
+            rationale,
+            answer,
+        } => RecursivePlannerDecision {
             action: PlannerAction::Stop {
                 reason: required_planner_field("reason", reason)?,
             },
             rationale: rationale.unwrap_or_else(|| "stop planning".to_string()),
+            answer: answer
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
         },
     };
 
@@ -4491,6 +4543,7 @@ fn fail_closed_initial_action(request: &PlannerRequest) -> InitialActionDecision
         },
         rationale: "controller failed closed after repeated invalid initial-action replies"
             .to_string(),
+        answer: None,
         edit: InitialEditInstruction::default(),
     }
 }
@@ -4501,6 +4554,7 @@ fn fail_closed_planner_action() -> RecursivePlannerDecision {
             reason: "planner-action-unavailable after invalid planner replies".to_string(),
         },
         rationale: "controller failed closed after repeated invalid planner replies".to_string(),
+        answer: None,
     }
 }
 
@@ -5502,7 +5556,7 @@ mod tests {
             workspace.path(),
             "qwen-1.5b",
             Box::new(RecordingConversation::new(
-                r#"{"action":"answer","edit":"no","candidate_files":[],"rationale":"no workspace resources needed"}"#,
+                r#"{"action":"answer","answer":"No workspace resources needed.","edit":"no","candidate_files":[],"rationale":"no workspace resources needed"}"#,
                 Arc::clone(&recorded_messages),
             )),
         );
@@ -5577,6 +5631,40 @@ mod tests {
         assert!(prompt.contains("user: previous turn"));
         assert!(prompt.contains("\"edit\":\"yes|no\""));
         assert!(prompt.contains("\"candidate_files\":[\"path1\",\"path2\",\"path3\"]"));
+    }
+
+    #[test]
+    fn initial_action_answer_payload_is_preserved_separately_from_rationale() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                r#"{"action":"answer","answer":"Starter circuit\n\n[battery]---(solenoid)---(starter)","edit":"no","candidate_files":[],"rationale":"the user asked for a direct ASCII diagram"}"#,
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+        );
+
+        let request = PlannerRequest::new(
+            "Can you generate an ASCII diagram of the start circuit?",
+            workspace.path(),
+            InterpretationContext::default(),
+            crate::domain::ports::PlannerBudget::default(),
+        );
+
+        let decision = adapter
+            .select_initial_action(&request, &NullTurnEventSink)
+            .expect("initial action");
+
+        assert_eq!(decision.action, InitialAction::Answer);
+        assert_eq!(
+            decision.rationale,
+            "the user asked for a direct ASCII diagram"
+        );
+        assert_eq!(
+            decision.answer.as_deref(),
+            Some("Starter circuit\n\n[battery]---(solenoid)---(starter)")
+        );
     }
 
     #[test]
