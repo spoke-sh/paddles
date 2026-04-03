@@ -147,6 +147,13 @@ pub async fn run_interactive_tui(
     );
     app.set_runtime_preference_path(tui_ctx.runtime_preference_store.path().to_path_buf());
     app.set_runtime_catalog(tui_ctx.runtime_lanes.clone(), provider_availability);
+    match service.prompt_history() {
+        Ok(prompt_history) => app.load_prompt_history(prompt_history),
+        Err(err) => app.push_error(
+            "Prompt history unavailable",
+            format!("Could not load persisted prompt history: {err:#}"),
+        ),
+    }
     if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
         app.load_transcript(&transcript);
     }
@@ -1134,6 +1141,15 @@ impl InteractiveApp {
             self.input = self.history_draft.clone();
         }
         self.cursor_pos = self.input.chars().count();
+    }
+
+    fn load_prompt_history(&mut self, prompt_history: Vec<String>) {
+        self.prompt_history = prompt_history
+            .into_iter()
+            .filter(|prompt| !prompt.trim().is_empty())
+            .collect();
+        self.history_cursor = None;
+        self.history_draft.clear();
     }
 
     /// Returns (line_index, column, line_start_char_offset, line_char_len) for the cursor.
@@ -4319,6 +4335,33 @@ mod tests {
         let last_row = app.rows.last().expect("user row exists");
         assert_eq!(last_row.kind, TranscriptRowKind::User);
         assert_eq!(last_row.content, "line one ⏎ line two ⏎ line three");
+    }
+
+    #[test]
+    fn app_recalls_loaded_prompt_history_across_instances() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.load_prompt_history(vec![
+            "first prompt".to_string(),
+            "second prompt".to_string(),
+        ]);
+        app.history_back();
+        assert_eq!(app.input, "second prompt");
+
+        app.history_back();
+        assert_eq!(app.input, "first prompt");
+
+        app.history_forward();
+        assert_eq!(app.input, "second prompt");
     }
 
     #[test]

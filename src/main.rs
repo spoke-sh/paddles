@@ -26,6 +26,7 @@ use paddles::infrastructure::cli::interactive_tui::{
 use paddles::infrastructure::config::{
     PaddlesConfig, normalize_gatherer_provider_alias, normalize_provider_model_alias,
 };
+use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
 use paddles::infrastructure::providers::ModelProvider;
 use paddles::infrastructure::rendering::RenderCapability;
@@ -245,6 +246,7 @@ fn build_planner_engine(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let root_path = env::current_dir()?;
+    let conversation_history_store = Arc::new(ConversationHistoryStore::new());
     let runtime_preference_store = Arc::new(RuntimeLanePreferenceStore::new());
     let runtime_preferences = match runtime_preference_store.load() {
         Ok(preferences) => preferences,
@@ -433,6 +435,7 @@ async fn main() -> Result<()> {
         gatherer_factory,
         trace_recorder.clone(),
     ));
+    service.set_conversation_history_store(conversation_history_store);
     let runtime_verbose = match frontend {
         InteractiveFrontend::Tui => 0,
         InteractiveFrontend::PlainLines => verbose,

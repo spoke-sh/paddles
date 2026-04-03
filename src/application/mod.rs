@@ -1,6 +1,7 @@
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
+use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::providers::ModelProvider;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
@@ -79,6 +80,7 @@ pub struct MechSuitService {
     trace_counter: AtomicU64,
     sessions: Mutex<HashMap<String, ConversationSession>>,
     shared_session_id: Mutex<Option<String>>,
+    conversation_history_store: Mutex<Option<Arc<ConversationHistoryStore>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1530,11 +1532,26 @@ impl MechSuitService {
             trace_counter: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
             shared_session_id: Mutex::new(None),
+            conversation_history_store: Mutex::new(None),
         }
     }
 
     pub fn set_verbose(&self, level: u8) {
         self.verbose.store(level, Ordering::Relaxed);
+    }
+
+    pub fn set_conversation_history_store(&self, store: Arc<ConversationHistoryStore>) {
+        *self
+            .conversation_history_store
+            .lock()
+            .expect("conversation history store lock") = Some(store);
+    }
+
+    pub fn prompt_history(&self) -> Result<Vec<String>> {
+        match self.conversation_history_store() {
+            Some(store) => store.prompt_history(),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Register an additional event observer that receives all TurnEvents
@@ -1661,6 +1678,53 @@ impl MechSuitService {
             .lock()
             .expect("forensic observers lock")
             .clone()
+    }
+
+    fn conversation_history_store(&self) -> Option<Arc<ConversationHistoryStore>> {
+        self.conversation_history_store
+            .lock()
+            .expect("conversation history store lock")
+            .clone()
+    }
+
+    fn recent_turn_summaries(
+        &self,
+        synthesizer_engine: &dyn SynthesizerEngine,
+    ) -> Result<Vec<String>> {
+        if let Some(store) = self.conversation_history_store() {
+            let recent_turns = store.recent_turn_summaries()?;
+            if !recent_turns.is_empty() {
+                return Ok(recent_turns);
+            }
+        }
+
+        synthesizer_engine.recent_turn_summaries()
+    }
+
+    fn persist_prompt_history(&self, prompt: &str) {
+        let Some(store) = self.conversation_history_store() else {
+            return;
+        };
+
+        if let Err(err) = store.record_prompt(prompt) {
+            self.warn_history_store_error("persist prompt history", &err);
+        }
+    }
+
+    fn persist_recent_turn_summary(&self, prompt: &str, reply: &str) {
+        let Some(store) = self.conversation_history_store() else {
+            return;
+        };
+
+        if let Err(err) = store.record_turn(prompt, reply) {
+            self.warn_history_store_error("persist recent turn history", &err);
+        }
+    }
+
+    fn warn_history_store_error(&self, action: &str, err: &anyhow::Error) {
+        if self.verbose.load(Ordering::Relaxed) >= 1 {
+            eprintln!("[WARN] Could not {action}: {err:#}");
+        }
     }
 
     fn allocate_task_id(&self) -> TaskTraceId {
@@ -1898,6 +1962,7 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
+        self.persist_prompt_history(prompt);
         let event_sink = self.wrap_sink_with_observers(event_sink);
         let runtime_guard = self.runtime.read().await;
         let runtime = runtime_guard
@@ -1934,7 +1999,7 @@ impl MechSuitService {
             capability: format_planner_capability(&planner_capability),
         });
 
-        let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+        let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
         let request = PlannerRequest::new(
             prompt,
             self.workspace_root.clone(),
@@ -2016,7 +2081,7 @@ impl MechSuitService {
 
         let planner_outcome = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
-                let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+                let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
 
                 // Resolve context artifacts using a transit-backed resolver if available.
                 let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
@@ -2061,6 +2126,7 @@ impl MechSuitService {
             trace.record_completion(&reply);
             self.emit_transcript_update(&session.task_id());
             session.note_thread_reply(&active_thread, prompt, &reply);
+            self.persist_recent_turn_summary(prompt, &reply);
             return Ok(reply);
         }
 
@@ -2086,6 +2152,7 @@ impl MechSuitService {
         trace.record_completion(&reply);
         self.emit_transcript_update(&session.task_id());
         session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
+        self.persist_recent_turn_summary(&prompt, &reply);
         Ok(reply)
     }
 
@@ -2187,7 +2254,7 @@ impl MechSuitService {
         });
         trace.record_thread_candidate(&candidate);
 
-        let recent_turns = synthesizer_engine.recent_turn_summaries()?;
+        let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
         let active_thread = session.active_thread();
         let thread_request = ThreadDecisionRequest::new(
             self.workspace_root.clone(),
@@ -4652,6 +4719,7 @@ mod tests {
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::conversation_history::ConversationHistoryStore;
     use crate::infrastructure::providers::ModelProvider;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
@@ -5955,6 +6023,100 @@ mod tests {
         assert_eq!(
             attached.allocate_turn_id().as_str(),
             "task-000001.turn-0002"
+        );
+    }
+
+    #[tokio::test]
+    async fn recent_turn_history_persists_across_service_processes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let history_store = Arc::new(ConversationHistoryStore::with_path(
+            workspace.path().join("state/conversation-history.toml"),
+        ));
+
+        let service_one = test_service(workspace.path());
+        service_one.set_conversation_history_store(Arc::clone(&history_store));
+        let planner_requests_one = Arc::new(Mutex::new(Vec::new()));
+        *service_one.runtime.write().await = Some(ActiveRuntimeState {
+            prepared: PreparedRuntimeLanes {
+                planner: PreparedModelLane {
+                    role: RuntimeLaneRole::Planner,
+                    provider: ModelProvider::Sift,
+                    model_id: "planner".to_string(),
+                    paths: Some(sample_model_paths("planner")),
+                },
+                synthesizer: PreparedModelLane {
+                    role: RuntimeLaneRole::Synthesizer,
+                    provider: ModelProvider::Sift,
+                    model_id: "synth".to_string(),
+                    paths: Some(sample_model_paths("synth")),
+                },
+                gatherer: None,
+            },
+            planner_engine: Arc::new(TestPlanner::new(
+                initial_action_decision(InitialAction::Answer, "answer directly"),
+                Vec::new(),
+                Arc::clone(&planner_requests_one),
+            )),
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
+
+        service_one
+            .process_prompt_in_session_with_sink(
+                "First prompt",
+                service_one.shared_conversation_session(),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process first prompt");
+
+        let service_two = test_service(workspace.path());
+        service_two.set_conversation_history_store(Arc::clone(&history_store));
+        let planner_requests_two = Arc::new(Mutex::new(Vec::new()));
+        *service_two.runtime.write().await = Some(ActiveRuntimeState {
+            prepared: PreparedRuntimeLanes {
+                planner: PreparedModelLane {
+                    role: RuntimeLaneRole::Planner,
+                    provider: ModelProvider::Sift,
+                    model_id: "planner".to_string(),
+                    paths: Some(sample_model_paths("planner")),
+                },
+                synthesizer: PreparedModelLane {
+                    role: RuntimeLaneRole::Synthesizer,
+                    provider: ModelProvider::Sift,
+                    model_id: "synth".to_string(),
+                    paths: Some(sample_model_paths("synth")),
+                },
+                gatherer: None,
+            },
+            planner_engine: Arc::new(TestPlanner::new(
+                initial_action_decision(InitialAction::Answer, "answer directly"),
+                Vec::new(),
+                Arc::clone(&planner_requests_two),
+            )),
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
+
+        service_two
+            .process_prompt_in_session_with_sink(
+                "Second prompt",
+                service_two.shared_conversation_session(),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process second prompt");
+
+        let second_requests = planner_requests_two.lock().expect("planner requests lock");
+        assert_eq!(second_requests.len(), 1);
+        assert_eq!(
+            second_requests[0].recent_turns,
+            vec!["Q: First prompt A: Applied the bounded action.".to_string()]
+        );
+
+        assert_eq!(
+            history_store.prompt_history().expect("prompt history"),
+            vec!["First prompt".to_string(), "Second prompt".to_string()]
         );
     }
 

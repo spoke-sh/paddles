@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod cli;
 pub mod config;
+pub mod conversation_history;
 pub mod credentials;
 pub mod providers;
 pub mod rendering;
