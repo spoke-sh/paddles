@@ -1,0 +1,17 @@
+---
+recorded_at: 2026-04-02T20:35:48.615669884-07:00
+command: nix develop /home/alex/workspace/spoke-sh/paddles --command bash -lc 'cd /home/alex/workspace/spoke-sh/paddles/apps/web && npx vitest run src/runtime-app.test.tsx'
+---
+
+ RUN  v2.1.9 /home/alex/workspace/spoke-sh/paddles/apps/web
+
+ ✓ src/runtime-app.test.tsx (4 tests) 206ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  20:35:47
+   Duration  1.33s (transform 240ms, setup 63ms, collect 346ms, tests 206ms, environment 339ms, prepare 69ms)
+
+
+--- stderr ---
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m

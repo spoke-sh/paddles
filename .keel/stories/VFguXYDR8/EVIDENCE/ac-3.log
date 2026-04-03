@@ -1,0 +1,15 @@
+---
+recorded_at: 2026-04-02T20:37:20.970163104-07:00
+command: nix develop /home/alex/workspace/spoke-sh/paddles --command npm --workspace @paddles/web run e2e
+---
+
+> @paddles/web@0.0.0 e2e
+> playwright test -c playwright.config.mjs
+
+
+Running 2 tests using 1 worker
+
+  ✓  1 e2e/product/runtime.spec.mjs:3:1 › product routes serve the runtime directly without iframe proxies (349ms)
+  ✓  2 e2e/product/runtime.spec.mjs:11:1 › externally injected turns flow live through chat, transit, manifold, and survive reload (1.6s)
+
+  2 passed (8.6s)

@@ -164,6 +164,12 @@ The frontend is now staged through a shared Turborepo workspace:
 
 The Rust server now serves the built React runtime directly on the primary web routes `/`, `/transit`, and `/manifold`. There is no iframe proxy layer and no secondary `/app` or `/legacy` route family. The product path, the browser E2E path, and the frontend build artifact now share the same route ownership.
 
+The runtime browser contract is now projection-first:
+
+- `GET /session/shared/bootstrap` returns the shared conversation id plus the canonical initial projection
+- `GET /sessions/{id}/projection/events` is the single live stream for that session, carrying both projection rebuilds and turn-progress events
+- the React runtime owns one shared projection store, so chat, transit, and manifold all render from the same conversation snapshot instead of stitching together panel-local fetch paths
+
 ### Trace Recording
 
 Every recursive step produces typed trace records alongside the visible transcript. The UI is a projection; durable lineage lives in the recorder boundary.
@@ -333,7 +339,7 @@ just test
 just quality
 ```
 
-`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for the docs app plus the TanStack React runtime on the primary product routes `/`, `/transit`, and `/manifold`.
+`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace unit/build path, and browser E2E for the docs app plus the TanStack runtime on the primary product routes `/`, `/transit`, and `/manifold`. The runtime browser suite now keeps the page open, injects a turn from outside the page against the shared session, and verifies live transcript, transit, manifold, and reload continuity.
 
 Check board health:
 

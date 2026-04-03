@@ -1,22 +1,37 @@
+import { execFileSync } from 'node:child_process';
+import process from 'node:process';
+
 import { defineConfig } from '@playwright/test';
 
-const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
+function chromiumExecutablePath() {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  }
+
+  try {
+    return execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
+  } catch {
+    return undefined;
+  }
+}
 
 export default defineConfig({
-  testDir: './e2e/react',
+  testDir: './e2e/product',
   fullyParallel: false,
   workers: 1,
-  timeout: 30_000,
+  timeout: 60_000,
   use: {
-    baseURL: 'http://127.0.0.1:4173',
-    launchOptions: executablePath
-      ? { executablePath, headless: true, args: ['--no-sandbox'] }
-      : { headless: true, args: ['--no-sandbox'] },
+    baseURL: 'http://127.0.0.1:4174',
+    headless: true,
+    launchOptions: {
+      executablePath: chromiumExecutablePath(),
+      args: ['--no-sandbox'],
+    },
   },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173',
+    command: 'PORT=4174 node ./scripts/serve-live-web-shell-harness.mjs',
+    url: 'http://127.0.0.1:4174/health',
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 120_000,
   },
 });

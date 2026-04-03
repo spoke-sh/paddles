@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T20:37:26.025190215-07:00
+mode: manual
+---
+Reviewed apps/web/src/runtime-app.tsx, apps/web/src/runtime-store.tsx, and src/infrastructure/web/mod.rs: the primary product routes /, /transit, and /manifold now render from the shared React projection store and keep the same operator route workflow without alternate legacy route families.

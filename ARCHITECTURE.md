@@ -184,6 +184,15 @@ That metaphor is only valid if it remains accountable to exact trace sources. Se
 
 This route also remains inside the local-first delivery contract. Frontend ownership is now split between `apps/docs` and the `apps/web` TanStack React runtime inside one Turborepo workspace. The Rust server serves that built runtime directly on the primary routes `/`, `/transit`, and `/manifold`. There is no iframe proxy layer and no secondary `/app` or `/legacy` route family, so the live session path, the browser E2E path, and the shipped frontend artifact stay under one owner.
 
+The runtime web UI now hydrates from one canonical conversation projection:
+
+- the browser bootstraps through `GET /session/shared/bootstrap`
+- the React runtime stores one shared `ConversationProjectionSnapshot`
+- chat, transit, and manifold all read from that store instead of panel-local replay fetches
+- one session-scoped stream at `GET /sessions/{id}/projection/events` carries both projection rebuilds and turn-progress events
+
+That simplification matters because it makes replay recovery, live sync, and browser E2E all follow the same path. When a turn is injected from outside the page — for example from the TUI or a test harness — the web UI updates by consuming the same shared projection contract it would use after a reload.
+
 ## Planner Action Vocabulary
 
 The planner expresses its intentions through a constrained action schema:

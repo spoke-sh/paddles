@@ -22,8 +22,8 @@ mission: VFguT9Tcg
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/6 stories done
+**Progress:** 1/1 voyages complete, 6/6 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Unified Projection Store And Product-Route Sync](voyages/VFguUzvun/) | planned | 0/6 |
+| [Unified Projection Store And Product-Route Sync](voyages/VFguUzvun/) | done | 6/6 |
 <!-- END GENERATED -->

@@ -5,6 +5,7 @@ pub mod context_quality;
 pub mod forensics;
 pub mod interpretation;
 pub mod manifold;
+pub mod projection;
 pub mod threading;
 pub mod traces;
 pub mod transcript;
@@ -30,6 +31,11 @@ pub use paddles_conversation::{
     ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
     TurnTraceId,
+};
+pub use projection::{
+    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
+    ConversationTraceGraph, ConversationTraceGraphBranch, ConversationTraceGraphEdge,
+    ConversationTraceGraphNode,
 };
 pub use threading::ConversationReplayView;
 pub use traces::{

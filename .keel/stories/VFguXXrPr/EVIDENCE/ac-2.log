@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T20:37:26.090438030-07:00
+mode: manual
+---
+Reviewed apps/web/src/runtime-app.tsx together with apps/web/src/runtime-shell.css and apps/web/src/styles.css: the React cutover preserves the existing panel layout, typography, controls, and route-visible behavior closely rather than introducing a new shell design.

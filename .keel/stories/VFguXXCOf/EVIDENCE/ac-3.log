@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T20:36:33.464972836-07:00
+mode: manual
+---
+Reviewed README.md, ARCHITECTURE.md, and apps/docs/docs/start-here/installation.mdx: the docs now describe the unified projection architecture, the primary route ownership, and the fact that just test runs the product-route browser suite through the same repo entrypoint the governor invokes.

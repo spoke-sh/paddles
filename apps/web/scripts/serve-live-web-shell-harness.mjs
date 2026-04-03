@@ -44,22 +44,33 @@ function openAiToolCallResponse(argumentsJson) {
   });
 }
 
-const queuedResponses = [
-  openAiContentResponse('I should inspect the local workspace before answering.'),
-  openAiToolCallResponse(
-    JSON.stringify({
-      action: 'inspect',
-      command: 'pwd',
-      rationale: 'inspect the local workspace before answering',
-    })
-  ),
-  openAiToolCallResponse(
-    JSON.stringify({
-      action: 'answer',
-      rationale: 'the local evidence is sufficient',
-    })
-  ),
-  openAiContentResponse(
+let providerCallCount = 0;
+
+function nextMockResponse() {
+  const phase = providerCallCount % 4;
+  providerCallCount += 1;
+
+  if (phase === 0) {
+    return openAiContentResponse('I should inspect the local workspace before answering.');
+  }
+  if (phase === 1) {
+    return openAiToolCallResponse(
+      JSON.stringify({
+        action: 'inspect',
+        command: 'pwd',
+        rationale: 'inspect the local workspace before answering',
+      })
+    );
+  }
+  if (phase === 2) {
+    return openAiToolCallResponse(
+      JSON.stringify({
+        action: 'answer',
+        rationale: 'the local evidence is sufficient',
+      })
+    );
+  }
+  return openAiContentResponse(
     JSON.stringify({
       render_types: ['paragraph'],
       blocks: [
@@ -69,8 +80,8 @@ const queuedResponses = [
         },
       ],
     })
-  ),
-];
+  );
+}
 
 const providerServer = http.createServer((req, res) => {
   const url = new URL(req.url || '/', `http://127.0.0.1:${providerPort}`);
@@ -81,19 +92,7 @@ const providerServer = http.createServer((req, res) => {
     return;
   }
 
-  const body =
-    queuedResponses.shift() ||
-    openAiContentResponse(
-      JSON.stringify({
-        render_types: ['paragraph'],
-        blocks: [
-          {
-            type: 'paragraph',
-            text: 'Mock provider exhausted its queued responses.',
-          },
-        ],
-      })
-    );
+  const body = nextMockResponse();
 
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
   res.end(body);

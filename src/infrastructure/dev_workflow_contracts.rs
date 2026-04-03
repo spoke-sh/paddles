@@ -63,6 +63,24 @@ fn just_test_runs_frontend_workspace_test_checks() {
 }
 
 #[test]
+fn pre_commit_governor_runs_repo_quality_and_test_entrypoints() {
+    let hook = read_repo_file(".git/hooks/pre-commit");
+
+    assert!(
+        hook.contains("just quality || exit 1"),
+        "pre-commit should gate commits on the repo quality entrypoint",
+    );
+    assert!(
+        hook.contains("just test || exit 1"),
+        "pre-commit should gate commits on the repo test entrypoint, including browser e2e",
+    );
+    assert!(
+        hook.contains("keel health || exit 1"),
+        "pre-commit should still run keel health after quality and test checks",
+    );
+}
+
+#[test]
 fn just_paddles_rebuilds_runtime_frontend_before_launching_cli() {
     let justfile = read_repo_file("justfile");
     let paddles_section = justfile
@@ -232,6 +250,29 @@ fn runtime_web_live_harness_launches_paddles_inside_nix_develop() {
     assert!(
         harness.contains("'cargo'"),
         "live runtime harness should still run the Rust paddles binary under the nix shell",
+    );
+}
+
+#[test]
+fn runtime_web_e2e_script_runs_the_product_route_playwright_suite() {
+    let package_json = read_repo_file("apps/web/package.json");
+    let package: Value =
+        serde_json::from_str(&package_json).expect("apps/web/package.json should parse");
+    let scripts = package["scripts"]
+        .as_object()
+        .expect("apps/web/package.json scripts should be an object");
+    let e2e = scripts
+        .get("e2e")
+        .and_then(|value| value.as_str())
+        .expect("apps/web/package.json should define an e2e script");
+
+    assert_eq!(
+        e2e, "playwright test -c playwright.config.mjs",
+        "runtime web e2e should execute the single product-route Playwright contract",
+    );
+    assert!(
+        repo_file("apps/web/e2e/product/runtime.spec.mjs").exists(),
+        "runtime web should keep the product-route browser suite under apps/web/e2e/product",
     );
 }
 

@@ -7,16 +7,17 @@ pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifac
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, BootContext, CompactionDecision, CompactionPlan,
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
-    ConversationThreadRef, ConversationTranscript, ConversationTranscriptUpdate,
-    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, MultiplexEventSink,
-    StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
-    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
-    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
-    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
+    ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
+    ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
+    MultiplexEventSink, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceLineage, TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef,
+    TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord,
+    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
+    TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -1573,27 +1574,33 @@ impl MechSuitService {
         }
     }
 
-    pub fn replay_conversation_forensics(
+    fn replay_for_known_session(
         &self,
         task_id: &TaskTraceId,
-    ) -> Result<ConversationForensicProjection> {
+    ) -> Result<Option<crate::domain::model::TraceReplay>> {
         match self.trace_recorder.replay(task_id) {
-            Ok(replay) => Ok(ConversationForensicProjection::from_trace_replay(&replay)),
+            Ok(replay) => Ok(Some(replay)),
             Err(err) => {
                 let known_session = self
                     .sessions
                     .lock()
                     .expect("conversation sessions lock")
                     .contains_key(task_id.as_str());
-                if known_session {
-                    Ok(ConversationForensicProjection {
-                        task_id: task_id.clone(),
-                        turns: Vec::new(),
-                    })
-                } else {
-                    Err(err)
-                }
+                if known_session { Ok(None) } else { Err(err) }
             }
+        }
+    }
+
+    pub fn replay_conversation_forensics(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationForensicProjection> {
+        match self.replay_for_known_session(task_id)? {
+            Some(replay) => Ok(ConversationForensicProjection::from_trace_replay(&replay)),
+            None => Ok(ConversationForensicProjection {
+                task_id: task_id.clone(),
+                turns: Vec::new(),
+            }),
         }
     }
 
@@ -1609,23 +1616,12 @@ impl MechSuitService {
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationManifoldProjection> {
-        match self.trace_recorder.replay(task_id) {
-            Ok(replay) => Ok(ConversationManifoldProjection::from_trace_replay(&replay)),
-            Err(err) => {
-                let known_session = self
-                    .sessions
-                    .lock()
-                    .expect("conversation sessions lock")
-                    .contains_key(task_id.as_str());
-                if known_session {
-                    Ok(ConversationManifoldProjection {
-                        task_id: task_id.clone(),
-                        turns: Vec::new(),
-                    })
-                } else {
-                    Err(err)
-                }
-            }
+        match self.replay_for_known_session(task_id)? {
+            Some(replay) => Ok(ConversationManifoldProjection::from_trace_replay(&replay)),
+            None => Ok(ConversationManifoldProjection {
+                task_id: task_id.clone(),
+                turns: Vec::new(),
+            }),
         }
     }
 
@@ -1718,24 +1714,62 @@ impl MechSuitService {
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationTranscript> {
-        match self.trace_recorder.replay(task_id) {
-            Ok(replay) => Ok(ConversationTranscript::from_trace_replay(&replay)),
-            Err(err) => {
-                let known_session = self
-                    .sessions
-                    .lock()
-                    .expect("conversation sessions lock")
-                    .contains_key(task_id.as_str());
-                if known_session {
-                    Ok(ConversationTranscript {
-                        task_id: task_id.clone(),
-                        entries: Vec::new(),
-                    })
-                } else {
-                    Err(err)
-                }
-            }
+        match self.replay_for_known_session(task_id)? {
+            Some(replay) => Ok(ConversationTranscript::from_trace_replay(&replay)),
+            None => Ok(ConversationTranscript {
+                task_id: task_id.clone(),
+                entries: Vec::new(),
+            }),
         }
+    }
+
+    pub fn replay_conversation_trace_graph(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationTraceGraph> {
+        match self.replay_for_known_session(task_id)? {
+            Some(replay) => Ok(ConversationTraceGraph::from_trace_replay(&replay)),
+            None => Ok(ConversationTraceGraph::empty(task_id.clone())),
+        }
+    }
+
+    pub fn replay_conversation_projection(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationProjectionSnapshot> {
+        Ok(ConversationProjectionSnapshot {
+            task_id: task_id.clone(),
+            transcript: self.replay_conversation_transcript(task_id)?,
+            forensics: self.replay_conversation_forensics(task_id)?,
+            manifold: self.replay_conversation_manifold(task_id)?,
+            trace_graph: self.replay_conversation_trace_graph(task_id)?,
+        })
+    }
+
+    pub fn projection_update_for_transcript(
+        &self,
+        update: &ConversationTranscriptUpdate,
+    ) -> Result<ConversationProjectionUpdate> {
+        Ok(ConversationProjectionUpdate {
+            task_id: update.task_id.clone(),
+            kind: ConversationProjectionUpdateKind::Transcript,
+            transcript_update: Some(update.clone()),
+            forensic_update: None,
+            snapshot: self.replay_conversation_projection(&update.task_id)?,
+        })
+    }
+
+    pub fn projection_update_for_forensic(
+        &self,
+        update: &ConversationForensicUpdate,
+    ) -> Result<ConversationProjectionUpdate> {
+        Ok(ConversationProjectionUpdate {
+            task_id: update.task_id.clone(),
+            kind: ConversationProjectionUpdateKind::Forensic,
+            transcript_update: None,
+            forensic_update: Some(update.clone()),
+            snapshot: self.replay_conversation_projection(&update.task_id)?,
+        })
     }
 
     /// Execute the boot sequence.
@@ -5909,6 +5943,194 @@ mod tests {
 
         assert_eq!(transcript.task_id, session.task_id());
         assert!(transcript.entries.is_empty());
+    }
+
+    #[test]
+    fn replay_conversation_projection_packages_all_shared_session_surfaces() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nProject transcript, forensics, manifold, and trace graph from one canonical snapshot.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Projection response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Project all shared session surfaces",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let projection = service
+            .replay_conversation_projection(&session.task_id())
+            .expect("projection replay");
+
+        assert_eq!(projection.task_id, session.task_id());
+        assert_eq!(projection.transcript.entries.len(), 2);
+        assert_eq!(projection.forensics.turns.len(), 1);
+        assert_eq!(projection.manifold.turns.len(), 1);
+        assert!(!projection.trace_graph.nodes.is_empty());
+        assert!(
+            projection
+                .trace_graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == "root")
+        );
+        assert!(
+            projection
+                .trace_graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == "action")
+        );
+    }
+
+    #[test]
+    fn conversation_projection_updates_are_derived_from_authoritative_replay_state() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nRebuild canonical projection updates from authoritative replay state.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Projection update response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let transcript_updates = Arc::new(RecordingTranscriptUpdateSink::default());
+        let forensic_updates = Arc::new(RecordingForensicUpdateSink::default());
+        service.register_transcript_observer(transcript_updates.clone());
+        service.register_forensic_observer(forensic_updates.clone());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Emit projection updates",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let expected = service
+            .replay_conversation_projection(&session.task_id())
+            .expect("projection replay");
+        let transcript_update = transcript_updates
+            .recorded()
+            .into_iter()
+            .next()
+            .expect("transcript update");
+        let forensic_update = forensic_updates
+            .recorded()
+            .into_iter()
+            .last()
+            .expect("forensic update");
+
+        let transcript_projection_update = service
+            .projection_update_for_transcript(&transcript_update)
+            .expect("projection transcript update");
+        assert_eq!(
+            transcript_projection_update.kind,
+            crate::domain::model::ConversationProjectionUpdateKind::Transcript
+        );
+        assert_eq!(transcript_projection_update.snapshot, expected);
+        assert_eq!(
+            transcript_projection_update.transcript_update.as_ref(),
+            Some(&transcript_update)
+        );
+        assert!(transcript_projection_update.forensic_update.is_none());
+
+        let forensic_projection_update = service
+            .projection_update_for_forensic(&forensic_update)
+            .expect("projection forensic update");
+        assert_eq!(
+            forensic_projection_update.kind,
+            crate::domain::model::ConversationProjectionUpdateKind::Forensic
+        );
+        assert_eq!(forensic_projection_update.snapshot, expected);
+        assert_eq!(
+            forensic_projection_update.forensic_update.as_ref(),
+            Some(&forensic_update)
+        );
+        assert!(forensic_projection_update.transcript_update.is_none());
     }
 
     #[test]

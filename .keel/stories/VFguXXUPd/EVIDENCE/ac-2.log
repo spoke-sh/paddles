@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T20:35:48.681964100-07:00
+mode: manual
+---
+Reviewed apps/web/src/runtime-store.tsx and apps/web/src/runtime-app.tsx: session bootstrap, session identity, projection hydration, and the single projection event stream are now owned once inside the React runtime store instead of the old raw HTML bridge or duplicated route hosts.

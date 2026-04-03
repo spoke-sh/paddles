@@ -1,10 +1,11 @@
 use crate::application::MechSuitService;
 use crate::domain::model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
-    ManifoldTurnProjection, TaskTraceId, TraceRecordKind, TranscriptUpdateSink, TurnEvent,
-    TurnEventSink, TurnTraceId,
+    ManifoldTurnProjection, TaskTraceId, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    TurnTraceId,
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
@@ -28,6 +29,16 @@ struct AppState {
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     transcript_tx: broadcast::Sender<ConversationTranscriptUpdate>,
     forensic_tx: broadcast::Sender<ConversationForensicUpdate>,
+    projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ConversationProjectionStreamEvent {
+    ProjectionUpdate(ConversationProjectionUpdate),
+    TurnEvent {
+        task_id: TaskTraceId,
+        event: TurnEvent,
+    },
 }
 
 #[derive(Serialize)]
@@ -38,6 +49,12 @@ struct HealthResponse {
 #[derive(Serialize)]
 struct SessionResponse {
     session_id: String,
+}
+
+#[derive(Serialize)]
+struct ConversationBootstrapResponse {
+    session_id: String,
+    projection: ConversationProjectionSnapshot,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +69,9 @@ struct TurnResponse {
 
 #[derive(Serialize)]
 struct TranscriptResponse(ConversationTranscript);
+
+#[derive(Serialize)]
+struct ConversationProjectionResponse(ConversationProjectionSnapshot);
 
 #[derive(Serialize)]
 struct ForensicProjectionResponse(ConversationForensicProjection);
@@ -79,44 +99,52 @@ struct ManifoldUpdateEventResponse {
     frame: Option<ManifoldFrame>,
 }
 
-#[derive(Serialize)]
-struct TraceGraphResponse {
-    nodes: Vec<TraceGraphNode>,
-    edges: Vec<TraceGraphEdge>,
-    branches: Vec<TraceGraphBranch>,
-}
-
-#[derive(Serialize)]
-struct TraceGraphNode {
-    id: String,
-    kind: String,
-    label: String,
-    branch_id: Option<String>,
-    sequence: u64,
-}
-
-#[derive(Serialize)]
-struct TraceGraphEdge {
-    from: String,
-    to: String,
-}
-
-#[derive(Serialize)]
-struct TraceGraphBranch {
-    id: String,
-    label: String,
-    status: String,
-    parent_branch_id: Option<String>,
-}
-
 struct BroadcastEventSink {
     session_id: String,
-    tx: broadcast::Sender<(String, TurnEvent)>,
+    task_id: TaskTraceId,
+    event_tx: broadcast::Sender<(String, TurnEvent)>,
+    projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
 
 impl TurnEventSink for BroadcastEventSink {
     fn emit(&self, event: TurnEvent) {
-        let _ = self.tx.send((self.session_id.clone(), event));
+        let _ = self.event_tx.send((self.session_id.clone(), event.clone()));
+        let _ = self
+            .projection_tx
+            .send(ConversationProjectionStreamEvent::TurnEvent {
+                task_id: self.task_id.clone(),
+                event,
+            });
+    }
+}
+
+struct BroadcastProjectionTranscriptSink {
+    service: Arc<MechSuitService>,
+    tx: broadcast::Sender<ConversationProjectionStreamEvent>,
+}
+
+impl TranscriptUpdateSink for BroadcastProjectionTranscriptSink {
+    fn emit(&self, update: ConversationTranscriptUpdate) {
+        if let Ok(payload) = self.service.projection_update_for_transcript(&update) {
+            let _ = self
+                .tx
+                .send(ConversationProjectionStreamEvent::ProjectionUpdate(payload));
+        }
+    }
+}
+
+struct BroadcastProjectionForensicSink {
+    service: Arc<MechSuitService>,
+    tx: broadcast::Sender<ConversationProjectionStreamEvent>,
+}
+
+impl ForensicUpdateSink for BroadcastProjectionForensicSink {
+    fn emit(&self, update: ConversationForensicUpdate) {
+        if let Ok(payload) = self.service.projection_update_for_forensic(&update) {
+            let _ = self
+                .tx
+                .send(ConversationProjectionStreamEvent::ProjectionUpdate(payload));
+        }
     }
 }
 
@@ -130,14 +158,28 @@ pub fn router(
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
     let (transcript_tx, _) = broadcast::channel::<ConversationTranscriptUpdate>(256);
     let (forensic_tx, _) = broadcast::channel::<ConversationForensicUpdate>(512);
+    let (projection_tx, _) = broadcast::channel::<ConversationProjectionStreamEvent>(512);
+    let shared_session = service.shared_conversation_session();
+    let shared_task_id = shared_session.task_id();
     let observer: Arc<dyn TurnEventSink> = Arc::new(GlobalBroadcastSink {
-        tx: event_tx.clone(),
+        session_id: shared_task_id.as_str().to_string(),
+        task_id: shared_task_id,
+        event_tx: event_tx.clone(),
+        projection_tx: projection_tx.clone(),
     });
     service.register_transcript_observer(Arc::new(BroadcastTranscriptSink {
         tx: transcript_tx.clone(),
     }));
+    service.register_transcript_observer(Arc::new(BroadcastProjectionTranscriptSink {
+        service: Arc::clone(&service),
+        tx: projection_tx.clone(),
+    }));
     service.register_forensic_observer(Arc::new(BroadcastForensicSink {
         tx: forensic_tx.clone(),
+    }));
+    service.register_forensic_observer(Arc::new(BroadcastProjectionForensicSink {
+        service: Arc::clone(&service),
+        tx: projection_tx.clone(),
     }));
     let state = Arc::new(AppState {
         service,
@@ -145,6 +187,7 @@ pub fn router(
         event_tx,
         transcript_tx,
         forensic_tx,
+        projection_tx,
     });
 
     let app = Router::new()
@@ -154,8 +197,17 @@ pub fn router(
         .route("/assets/{*path}", get(primary_frontend_asset))
         .route("/favicon.svg", get(primary_frontend_favicon))
         .route("/health", get(health))
+        .route(
+            "/session/shared/bootstrap",
+            get(shared_conversation_bootstrap),
+        )
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
+        .route("/sessions/{id}/projection", get(conversation_projection))
+        .route(
+            "/sessions/{id}/projection/events",
+            get(conversation_projection_event_stream),
+        )
         .route("/sessions/{id}/transcript", get(conversation_transcript))
         .route(
             "/sessions/{id}/transcript/events",
@@ -193,14 +245,21 @@ pub fn router(
 /// Broadcasts all events to the SSE channel regardless of session.
 /// Used as a global observer on MechSuitService so CLI turns are visible.
 struct GlobalBroadcastSink {
-    tx: broadcast::Sender<(String, TurnEvent)>,
+    session_id: String,
+    task_id: TaskTraceId,
+    event_tx: broadcast::Sender<(String, TurnEvent)>,
+    projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
 
 impl TurnEventSink for GlobalBroadcastSink {
     fn emit(&self, event: TurnEvent) {
-        // Broadcast with empty session_id — SSE filtering uses session-specific sinks.
-        // The per-session BroadcastEventSink tags with the correct session_id.
-        let _ = self.tx.send((String::new(), event));
+        let _ = self.event_tx.send((self.session_id.clone(), event.clone()));
+        let _ = self
+            .projection_tx
+            .send(ConversationProjectionStreamEvent::TurnEvent {
+                task_id: self.task_id.clone(),
+                event,
+            });
     }
 }
 
@@ -335,6 +394,22 @@ async fn create_session(State(state): State<Arc<AppState>>) -> Json<SessionRespo
     Json(SessionResponse { session_id })
 }
 
+async fn shared_conversation_bootstrap(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ConversationBootstrapResponse>, axum::http::StatusCode> {
+    let session = state.service.shared_conversation_session();
+    let task_id = session.task_id();
+    let projection = state
+        .service
+        .replay_conversation_projection(&task_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(ConversationBootstrapResponse {
+        session_id: task_id.as_str().to_string(),
+        projection,
+    }))
+}
+
 async fn submit_turn(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -348,7 +423,9 @@ async fn submit_turn(
 
     let sink: Arc<dyn TurnEventSink> = Arc::new(BroadcastEventSink {
         session_id: id,
-        tx: state.event_tx.clone(),
+        task_id,
+        event_tx: state.event_tx.clone(),
+        projection_tx: state.projection_tx.clone(),
     });
 
     let response = state
@@ -370,6 +447,18 @@ async fn conversation_transcript(
         .replay_conversation_transcript(&task_id)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(TranscriptResponse(transcript)))
+}
+
+async fn conversation_projection(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ConversationProjectionResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let projection = state
+        .service
+        .replay_conversation_projection(&task_id)
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(ConversationProjectionResponse(projection)))
 }
 
 async fn conversation_forensics(
@@ -433,6 +522,30 @@ async fn conversation_transcript_event_stream(
         Ok(update) if update.task_id.as_str() == id => {
             let json = serde_json::to_string(&update).unwrap_or_default();
             Some(Ok(Event::default().event("transcript_update").data(json)))
+        }
+        _ => None,
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn conversation_projection_event_stream(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.projection_tx.subscribe();
+    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
+        Ok(ConversationProjectionStreamEvent::ProjectionUpdate(update))
+            if update.task_id.as_str() == id =>
+        {
+            let json = serde_json::to_string(&update).unwrap_or_default();
+            Some(Ok(Event::default().event("projection_update").data(json)))
+        }
+        Ok(ConversationProjectionStreamEvent::TurnEvent { task_id, event })
+            if task_id.as_str() == id =>
+        {
+            let json = serde_json::to_string(&event).unwrap_or_default();
+            Some(Ok(Event::default().event("turn_event").data(json)))
         }
         _ => None,
     });
@@ -520,11 +633,11 @@ async fn conversation_manifold_event_stream(
 
 async fn event_stream(
     State(state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
+    Path(id): Path<String>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let rx = state.event_tx.subscribe();
-    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
-        Ok((_session_id, event)) => {
+    let stream = BroadcastStream::new(rx).filter_map(move |result| match result {
+        Ok((session_id, event)) if session_id == id => {
             let json = serde_json::to_string(&event).unwrap_or_default();
             Some(Ok(Event::default().event("turn_event").data(json)))
         }
@@ -552,15 +665,15 @@ async fn global_event_stream(
 async fn trace_graph(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<TraceGraphResponse>, axum::http::StatusCode> {
+) -> Result<Json<ConversationTraceGraph>, axum::http::StatusCode> {
     let task_id = parse_task_id(&id)?;
 
-    let replay = state
-        .trace_recorder
-        .replay(&task_id)
+    let graph = state
+        .service
+        .replay_conversation_trace_graph(&task_id)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(build_trace_graph(&[replay])))
+    Ok(Json(graph))
 }
 
 fn parse_task_id(id: &str) -> Result<TaskTraceId, axum::http::StatusCode> {
@@ -584,128 +697,34 @@ async fn trace_replay_all(
     Json(replays)
 }
 
-async fn trace_graph_all(State(state): State<Arc<AppState>>) -> Json<TraceGraphResponse> {
+async fn trace_graph_all(State(state): State<Arc<AppState>>) -> Json<ConversationTraceGraph> {
     let replays: Vec<_> = state
         .trace_recorder
         .task_ids()
         .iter()
         .filter_map(|id| state.trace_recorder.replay(id).ok())
         .collect();
-    Json(build_trace_graph(&replays))
-}
-
-fn build_trace_graph(replays: &[crate::domain::model::TraceReplay]) -> TraceGraphResponse {
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    let mut branches = Vec::new();
-
-    for replay in replays {
-        for record in &replay.records {
-            let (kind, label) = match &record.kind {
-                TraceRecordKind::TaskRootStarted(root) => {
-                    ("root".to_string(), root.planner_model.clone())
-                }
-                TraceRecordKind::TurnStarted(_) => ("turn".to_string(), "turn".to_string()),
-                TraceRecordKind::PlannerAction { action, .. } => {
-                    ("action".to_string(), truncate(action, 24))
-                }
-                TraceRecordKind::PlannerBranchDeclared(branch) => {
-                    branches.push(TraceGraphBranch {
-                        id: branch.branch_id.as_str().to_string(),
-                        label: branch.label.clone(),
-                        status: branch.status.label().to_string(),
-                        parent_branch_id: branch
-                            .parent_branch_id
-                            .as_ref()
-                            .map(|id| id.as_str().to_string()),
-                    });
-                    ("branch".to_string(), truncate(&branch.label, 24))
-                }
-                TraceRecordKind::ToolCallRequested(tool) => {
-                    ("tool".to_string(), tool.tool_name.clone())
-                }
-                TraceRecordKind::ToolCallCompleted(tool) => {
-                    ("tool_done".to_string(), tool.tool_name.clone())
-                }
-                TraceRecordKind::SelectionArtifact(sel) => {
-                    ("evidence".to_string(), truncate(&sel.summary, 24))
-                }
-                TraceRecordKind::ModelExchangeArtifact(artifact) => (
-                    "forensic".to_string(),
-                    truncate(
-                        &format!("{} {}", artifact.category.label(), artifact.phase.label()),
-                        24,
-                    ),
-                ),
-                TraceRecordKind::LineageEdge(edge) => {
-                    ("lineage".to_string(), truncate(&edge.summary, 24))
-                }
-                TraceRecordKind::SignalSnapshot(signal) => (
-                    "signal".to_string(),
-                    truncate(&format!("{} {}", signal.kind.label(), signal.level), 24),
-                ),
-                TraceRecordKind::CompletionCheckpoint(cp) => {
-                    ("checkpoint".to_string(), cp.kind.label().to_string())
-                }
-                TraceRecordKind::ThreadMerged(_) => ("merge".to_string(), "merge".to_string()),
-                TraceRecordKind::ThreadCandidateCaptured(_) => {
-                    ("thread".to_string(), "candidate".to_string())
-                }
-                TraceRecordKind::ThreadDecisionSelected(_) => {
-                    ("thread".to_string(), "decision".to_string())
-                }
-            };
-
-            nodes.push(TraceGraphNode {
-                id: record.record_id.as_str().to_string(),
-                kind,
-                label,
-                branch_id: record
-                    .lineage
-                    .branch_id
-                    .as_ref()
-                    .map(|id| id.as_str().to_string()),
-                sequence: record.sequence,
-            });
-
-            if let Some(parent_id) = &record.lineage.parent_record_id {
-                edges.push(TraceGraphEdge {
-                    from: parent_id.as_str().to_string(),
-                    to: record.record_id.as_str().to_string(),
-                });
-            }
-        }
-    }
-
-    TraceGraphResponse {
-        nodes,
-        edges,
-        branches,
-    }
-}
-
-fn truncate(s: &str, n: usize) -> String {
-    if s.len() > n {
-        format!("{}...", &s[..n])
-    } else {
-        s.to_string()
-    }
+    Json(ConversationTraceGraph::from_trace_replays(&replays))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AppState, BroadcastForensicSink, ForensicProjectionResponse,
+        AppState, BroadcastForensicSink, BroadcastProjectionForensicSink,
+        BroadcastProjectionTranscriptSink, ConversationBootstrapResponse,
+        ConversationProjectionStreamEvent, ForensicProjectionResponse,
         ForensicTurnProjectionResponse, conversation_forensics, parse_task_id, turn_forensics,
     };
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::NullTurnEventSink;
     use crate::domain::model::{
-        ArtifactKind, ConversationForensicUpdate, ForensicUpdateSink, TraceCheckpointKind,
+        ArtifactKind, ConversationForensicUpdate, ConversationProjectionUpdateKind,
+        ConversationTranscriptUpdate, ForensicUpdateSink, TraceCheckpointKind,
         TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind, TraceLineageNodeRef,
         TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
         TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
-        TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+        TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TranscriptUpdateSink,
+        TurnEventSink,
     };
     use crate::domain::ports::{
         ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
@@ -1118,6 +1137,7 @@ mod tests {
             event_tx,
             transcript_tx,
             forensic_tx,
+            projection_tx: broadcast::channel(8).0,
         });
 
         let Json(ForensicProjectionResponse(conversation)) = conversation_forensics(
@@ -1172,6 +1192,7 @@ mod tests {
             event_tx,
             transcript_tx,
             forensic_tx,
+            projection_tx: broadcast::channel(8).0,
         });
 
         let Json(super::ManifoldProjectionResponse(conversation)) = super::conversation_manifold(
@@ -1222,6 +1243,7 @@ mod tests {
             event_tx,
             transcript_tx,
             forensic_tx,
+            projection_tx: broadcast::channel(8).0,
         });
 
         let payload = super::manifold_update_payload(
@@ -1255,6 +1277,152 @@ mod tests {
 
         let received = rx.try_recv().expect("received broadcast");
         assert_eq!(received, update);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn broadcast_projection_sinks_rebuild_snapshots_from_authoritative_replay() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the local harness before answering.\n",
+        )
+        .expect("write AGENTS.md");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let server = start_mock_provider_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    "I should inspect the local workspace before answering.",
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"inspect","command":"pwd","rationale":"inspect the local workspace before answering"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"answer","rationale":"the local evidence is sufficient"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    r#"{"render_types":["paragraph"],"blocks":[{"type":"paragraph","text":"Mock provider completed the turn after local inspection."}]}"#,
+                ),
+            },
+        ])
+        .await;
+        let service = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder.clone(),
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare lanes");
+
+        let session = service.shared_conversation_session();
+        service
+            .process_prompt_in_session_with_sink(
+                "CI is failing. Can you debug it on this machine?",
+                session.clone(),
+                Arc::new(NullTurnEventSink),
+            )
+            .await
+            .expect("process prompt");
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        let last_record = replay.records.last().expect("record");
+        let task_id = session.task_id();
+        let forensic_update = ConversationForensicUpdate {
+            task_id: task_id.clone(),
+            turn_id: last_record.lineage.turn_id.clone(),
+            record_id: last_record.record_id.clone(),
+        };
+        let transcript_update = ConversationTranscriptUpdate {
+            task_id: task_id.clone(),
+        };
+
+        let (tx, mut rx) = broadcast::channel(8);
+        BroadcastProjectionTranscriptSink {
+            service: Arc::clone(&service),
+            tx: tx.clone(),
+        }
+        .emit(transcript_update.clone());
+        let ConversationProjectionStreamEvent::ProjectionUpdate(transcript_payload) =
+            rx.try_recv().expect("transcript payload")
+        else {
+            panic!("expected projection update payload");
+        };
+        assert_eq!(
+            transcript_payload.kind,
+            ConversationProjectionUpdateKind::Transcript
+        );
+        assert_eq!(transcript_payload.task_id, task_id);
+        assert_eq!(
+            transcript_payload.transcript_update,
+            Some(transcript_update)
+        );
+        assert_eq!(transcript_payload.snapshot.transcript.entries.len(), 2);
+        assert!(!transcript_payload.snapshot.trace_graph.nodes.is_empty());
+
+        BroadcastProjectionForensicSink { service, tx }.emit(forensic_update.clone());
+        let ConversationProjectionStreamEvent::ProjectionUpdate(forensic_payload) =
+            rx.try_recv().expect("forensic payload")
+        else {
+            panic!("expected projection update payload");
+        };
+        assert_eq!(
+            forensic_payload.kind,
+            ConversationProjectionUpdateKind::Forensic
+        );
+        assert_eq!(forensic_payload.task_id, task_id);
+        assert_eq!(forensic_payload.forensic_update, Some(forensic_update));
+        assert_eq!(forensic_payload.snapshot.forensics.turns.len(), 1);
+        assert_eq!(forensic_payload.snapshot.manifold.turns.len(), 1);
+        assert!(!forensic_payload.snapshot.trace_graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn broadcast_event_sink_tags_turn_events_with_the_session_projection_identity() {
+        let task_id = parse_task_id("task-000001").expect("task");
+        let (event_tx, mut event_rx) = broadcast::channel(8);
+        let (projection_tx, mut projection_rx) = broadcast::channel(8);
+        let sink = super::BroadcastEventSink {
+            session_id: task_id.as_str().to_string(),
+            task_id: task_id.clone(),
+            event_tx,
+            projection_tx,
+        };
+
+        let event = crate::domain::model::TurnEvent::ToolCalled {
+            call_id: "call-1".to_string(),
+            tool_name: "shell".to_string(),
+            invocation: "pwd".to_string(),
+        };
+
+        sink.emit(event.clone());
+
+        let (session_id, received_event) = event_rx.try_recv().expect("event payload");
+        assert_eq!(session_id, task_id.as_str());
+        assert_eq!(received_event, event);
+
+        let ConversationProjectionStreamEvent::TurnEvent {
+            task_id: received_task_id,
+            event: received_projection_event,
+        } = projection_rx.try_recv().expect("projection event payload")
+        else {
+            panic!("expected turn event payload");
+        };
+        assert_eq!(received_task_id, task_id);
+        assert_eq!(received_projection_event, event);
     }
 
     #[test]
@@ -1566,7 +1734,18 @@ mod tests {
             event_tx,
             transcript_tx,
             forensic_tx,
+            projection_tx: broadcast::channel(8).0,
         });
+
+        let Json(super::ConversationProjectionResponse(projection)) =
+            super::conversation_projection(State(Arc::clone(&state)), Path(task_id.clone()))
+                .await
+                .expect("conversation projection");
+        assert_eq!(projection.task_id.as_str(), task_id);
+        assert_eq!(projection.transcript.entries.len(), 2);
+        assert_eq!(projection.forensics.turns.len(), 1);
+        assert_eq!(projection.manifold.turns.len(), 1);
+        assert!(!projection.trace_graph.nodes.is_empty());
 
         let Json(super::TranscriptResponse(transcript)) =
             super::conversation_transcript(State(Arc::clone(&state)), Path(task_id.clone()))
@@ -1598,6 +1777,38 @@ mod tests {
                 .iter()
                 .any(|frame| !frame.active_signals.is_empty())
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shared_bootstrap_route_returns_shared_session_projection() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let state = Arc::new(AppState {
+            service: Arc::clone(&service),
+            trace_recorder: recorder,
+            event_tx: broadcast::channel(8).0,
+            transcript_tx: broadcast::channel(8).0,
+            forensic_tx: broadcast::channel(8).0,
+            projection_tx: broadcast::channel(8).0,
+        });
+
+        let shared = service.shared_conversation_session();
+        let task_id = shared.task_id();
+
+        let Json(ConversationBootstrapResponse {
+            session_id,
+            projection,
+        }) = super::shared_conversation_bootstrap(State(state))
+            .await
+            .expect("shared bootstrap");
+
+        assert_eq!(session_id, task_id.as_str());
+        assert_eq!(projection.task_id, task_id);
+        assert_eq!(projection.transcript.entries.len(), 0);
+        assert_eq!(projection.forensics.turns.len(), 0);
+        assert_eq!(projection.manifold.turns.len(), 0);
+        assert!(projection.trace_graph.nodes.is_empty());
     }
 
     #[test]

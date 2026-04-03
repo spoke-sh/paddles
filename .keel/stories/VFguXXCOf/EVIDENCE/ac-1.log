@@ -1,0 +1,502 @@
+---
+recorded_at: 2026-04-02T20:36:22.888031327-07:00
+command: nix develop /home/alex/workspace/spoke-sh/paddles --command just test
+---
+
+added 1403 packages, and audited 1406 packages in 8s
+
+442 packages are looking for funding
+  run `npm fund` for details
+
+25 vulnerabilities (5 moderate, 20 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> paddles-frontend-workspace@0.0.0 test
+> turbo run test
+
+• Packages in scope: @paddles/docs, @paddles/web
+• Running test in 2 packages
+• Remote caching disabled
+@paddles/web:test: cache hit, replaying logs d15b070d64bd3f41
+@paddles/web:test: 
+@paddles/web:test: > @paddles/web@0.0.0 test
+@paddles/web:test: > vitest run
+@paddles/web:test: 
+@paddles/web:test: [33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+@paddles/web:test: 
+@paddles/web:test:  RUN  v2.1.9 /home/alex/workspace/spoke-sh/paddles/apps/web
+@paddles/web:test: 
+@paddles/web:test:  ✓ src/runtime-app.test.tsx (4 tests) 201ms
+@paddles/web:test: 
+@paddles/web:test:  Test Files  1 passed (1)
+@paddles/web:test:       Tests  4 passed (4)
+@paddles/web:test:    Start at  20:27:10
+@paddles/web:test:    Duration  1.33s (transform 247ms, setup 61ms, collect 347ms, tests 201ms, environment 344ms, prepare 76ms)
+@paddles/web:test: 
+@paddles/docs:test: cache hit, replaying logs 3aadbc5764d6a7c8
+@paddles/docs:test: 
+@paddles/docs:test: > @paddles/docs@0.0.0 test
+@paddles/docs:test: > npm run build
+@paddles/docs:test: 
+@paddles/docs:test: 
+@paddles/docs:test: > @paddles/docs@0.0.0 build
+@paddles/docs:test: > docusaurus build
+@paddles/docs:test: 
+@paddles/docs:test: [INFO] [en] Creating an optimized production build...
+@paddles/docs:test: [webpackbar] ℹ Compiling Client
+@paddles/docs:test: [webpackbar] ℹ Compiling Server
+@paddles/docs:test: [webpackbar] ✔ Server: Compiled successfully in 17.06s
+@paddles/docs:test: [webpackbar] ✔ Client: Compiled successfully in 21.74s
+@paddles/docs:test: [SUCCESS] Generated static files in "build".
+@paddles/docs:test: [INFO] Use `npm run serve` command to test your build locally.
+
+ Tasks:    2 successful, 2 total
+Cached:    2 cached, 2 total
+  Time:    47ms >>> FULL TURBO
+
+
+> @paddles/web@0.0.0 build
+> vite build
+
+vite v6.4.1 building for production...
+transforming...
+✓ 120 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:   0.27 kB
+dist/assets/index-DvvlS4Gw.css   36.90 kB │ gzip:   7.91 kB
+dist/assets/index-C4hSGpL-.js   330.33 kB │ gzip: 101.45 kB
+✓ built in 1.36s
+
+> @paddles/web@0.0.0 build
+> vite build
+
+vite v6.4.1 building for production...
+transforming...
+✓ 120 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.40 kB │ gzip:   0.27 kB
+dist/assets/index-DvvlS4Gw.css   36.90 kB │ gzip:   7.91 kB
+dist/assets/index-C4hSGpL-.js   330.33 kB │ gzip: 101.45 kB
+✓ built in 1.37s
+
+> paddles-frontend-workspace@0.0.0 e2e
+> turbo run e2e
+
+• Packages in scope: @paddles/docs, @paddles/web
+• Running e2e in 2 packages
+• Remote caching disabled
+@paddles/web:build: cache hit, replaying logs a5de716a96a85b15
+@paddles/web:build: 
+@paddles/web:build: > @paddles/web@0.0.0 build
+@paddles/web:build: > vite build
+@paddles/web:build: 
+@paddles/web:build: vite v6.4.1 building for production...
+@paddles/web:build: transforming...
+@paddles/web:build: ✓ 120 modules transformed.
+@paddles/web:build: rendering chunks...
+@paddles/web:build: computing gzip size...
+@paddles/web:build: dist/index.html                   0.40 kB │ gzip:   0.27 kB
+@paddles/web:build: dist/assets/index-DvvlS4Gw.css   36.90 kB │ gzip:   7.91 kB
+@paddles/web:build: dist/assets/index-C4hSGpL-.js   330.33 kB │ gzip: 101.45 kB
+@paddles/web:build: ✓ built in 1.39s
+@paddles/web:e2e: cache hit, replaying logs e97aa469c0120a26
+@paddles/web:e2e: 
+@paddles/web:e2e: > @paddles/web@0.0.0 e2e
+@paddles/web:e2e: > playwright test -c playwright.config.mjs
+@paddles/web:e2e: 
+@paddles/web:e2e: 
+@paddles/web:e2e: Running 2 tests using 1 worker
+@paddles/web:e2e: 
+@paddles/web:e2e:   ✓  1 e2e/product/runtime.spec.mjs:3:1 › product routes serve the runtime directly without iframe proxies (354ms)
+@paddles/web:e2e:   ✓  2 e2e/product/runtime.spec.mjs:11:1 › externally injected turns flow live through chat, transit, manifold, and survive reload (1.5s)
+@paddles/web:e2e: 
+@paddles/web:e2e:   2 passed (8.6s)
+@paddles/docs:build: cache hit, replaying logs 2d03f8bf120b495b
+@paddles/docs:build: 
+@paddles/docs:build: > @paddles/docs@0.0.0 build
+@paddles/docs:build: > docusaurus build
+@paddles/docs:build: 
+@paddles/docs:build: [INFO] [en] Creating an optimized production build...
+@paddles/docs:build: [webpackbar] ℹ Compiling Client
+@paddles/docs:build: [webpackbar] ℹ Compiling Server
+@paddles/docs:build: [webpackbar] ✔ Server: Compiled successfully in 947.84ms
+@paddles/docs:build: [webpackbar] ✔ Client: Compiled successfully in 996.06ms
+@paddles/docs:build: [SUCCESS] Generated static files in "build".
+@paddles/docs:build: [INFO] Use `npm run serve` command to test your build locally.
+@paddles/docs:e2e: cache hit, replaying logs 9bd56f3d0c91a60c
+@paddles/docs:e2e: 
+@paddles/docs:e2e: > @paddles/docs@0.0.0 e2e
+@paddles/docs:e2e: > playwright test --config=playwright.config.mjs
+@paddles/docs:e2e: 
+@paddles/docs:e2e: 
+@paddles/docs:e2e: Running 1 test using 1 worker
+@paddles/docs:e2e: 
+@paddles/docs:e2e:   ✓  1 e2e/docs.spec.mjs:3:1 › docs app serves the landing page and intro route (499ms)
+@paddles/docs:e2e: 
+@paddles/docs:e2e:   1 passed (3.2s)
+
+ Tasks:    4 successful, 4 total
+Cached:    4 cached, 4 total
+  Time:    61ms >>> FULL TURBO
+
+
+--- stderr ---
+just frontend-install
+npm ci
+npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+cargo nextest run --no-tests pass
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.15s
+────────────
+ Nextest run ID 346a1963-47eb-4f92-94b0-f61ff231d05a with nextest profile: default
+    Starting 327 tests across 2 binaries
+        PASS [   0.054s] (  1/327) paddles application::tests::action_bias_falls_back_to_prompt_derived_file_candidates
+        PASS [   0.059s] (  2/327) paddles application::tests::prepared_runtime_lanes_keep_synthesizer_as_default_response_lane
+        PASS [   0.060s] (  3/327) paddles application::tests::context1_boundary_can_be_prepared_without_local_model_paths
+        PASS [   0.064s] (  4/327) paddles application::tests::action_bias_targets_code_files_before_docs
+        PASS [   0.071s] (  5/327) paddles application::tests::prepare_runtime_lanes_mix_provider_selection_and_only_resolve_sift_paths
+        PASS [   0.073s] (  6/327) paddles application::tests::replay_conversation_forensics_projects_superseded_and_final_records
+        PASS [   0.074s] (  7/327) paddles application::tests::local_harness_enrichment_marks_diagnostic_claims_as_hypotheses
+        PASS [   0.074s] (  8/327) paddles application::tests::action_bias_redirects_non_file_actions_before_any_search_step
+        PASS [   0.079s] (  9/327) paddles application::tests::local_harness_enrichment_adds_ci_specific_github_and_repro_steps
+        PASS [   0.082s] ( 10/327) paddles application::tests::stop_initial_actions_fall_back_to_direct_responses
+        PASS [   0.094s] ( 11/327) paddles application::tests::local_harness_enrichment_adds_tool_preferences_and_workspace_procedure
+        PASS [   0.094s] ( 12/327) paddles application::tests::runtime_lane_config_defaults_to_synthesizer_responses
+        PASS [   0.096s] ( 13/327) paddles application::tests::casual_turns_do_not_force_local_inspect_when_initial_action_answers_directly
+        PASS [   0.096s] ( 14/327) paddles application::tests::resource_initial_actions_route_to_the_planner_loop
+        PASS [   0.096s] ( 15/327) paddles application::tests::structured_turn_trace_records_signal_snapshots_with_contribution_estimates
+        PASS [   0.099s] ( 16/327) paddles application::tests::explicit_workspace_initial_actions_route_to_the_planner_loop
+        PASS [   0.100s] ( 17/327) paddles application::tests::diagnostic_turns_force_local_inspect_when_initial_action_answers_directly
+        PASS [   0.100s] ( 18/327) paddles application::tests::prepare_runtime_lanes_treats_inception_as_remote_http_lane_without_local_paths
+        PASS [   0.038s] ( 19/327) paddles domain::model::manifold::tests::projected_topology_keeps_evidence_or_lineage_basis_for_every_primitive
+        PASS [   0.042s] ( 20/327) paddles domain::model::context_quality::tests::strain_tracker_accumulates_and_finishes
+        PASS [   0.103s] ( 21/327) paddles application::tests::compaction_engine_executes_plan_and_preserves_locators
+        PASS [   0.102s] ( 22/327) paddles application::tests::structured_turn_trace_records_lineage_edges_for_model_calls_and_outputs
+        PASS [   0.103s] ( 23/327) paddles application::tests::validate_inspect_rejects_empty_commands
+        PASS [   0.103s] ( 24/327) paddles domain::model::context_quality::tests::computes_correct_strain_level
+        PASS [   0.104s] ( 25/327) paddles application::tests::sift_direct_boundary_can_be_prepared_without_local_model_paths
+        PASS [   0.104s] ( 26/327) paddles application::tests::premise_challenge_stops_redundant_plain_ci_run_list_probe
+        PASS [   0.104s] ( 27/327) paddles application::tests::validate_inspect_allows_safe_read_only_commands
+        PASS [   0.048s] ( 28/327) paddles domain::model::forensics::tests::projection_marks_replaced_model_call_records_as_superseded
+        PASS [   0.107s] ( 29/327) paddles application::tests::premise_challenge_stops_redundant_ci_probe_after_non_failing_run_evidence
+        PASS [   0.107s] ( 30/327) paddles domain::model::compaction::tests::compaction_request_serializes_round_trip
+        PASS [   0.109s] ( 31/327) paddles application::tests::replay_conversation_transcript_returns_empty_for_known_session_without_trace_records
+        PASS [   0.055s] ( 32/327) paddles domain::model::context_quality::tests::serializes_round_trip
+        PASS [   0.111s] ( 33/327) paddles application::tests::answer_initial_actions_route_to_direct_responses
+        PASS [   0.110s] ( 34/327) paddles application::tests::shared_conversation_session_reuses_live_session_state
+        PASS [   0.032s] ( 35/327) paddles domain::model::threading::tests::mainline_thread_has_stable_identity
+        PASS [   0.111s] ( 36/327) paddles domain::model::compaction::tests::compaction_plan_serializes_round_trip
+        PASS [   0.111s] ( 37/327) paddles application::tests::validate_inspect_rejects_chained_commands
+        PASS [   0.041s] ( 38/327) paddles domain::model::manifold::tests::projection_builds_cumulative_frames_from_signal_snapshots
+        PASS [   0.030s] ( 39/327) paddles domain::model::threading::tests::replay_view_reconstructs_threads_and_merges
+        PASS [   0.039s] ( 40/327) paddles domain::model::threading::tests::branch_thread_uses_branch_id_as_stable_identity
+        PASS [   0.039s] ( 41/327) paddles domain::model::projection::tests::trace_graph_projection_replays_root_actions_signals_and_branches
+        PASS [   0.046s] ( 42/327) paddles domain::model::manifold::tests::projection_maps_signal_families_and_lineage_anchors_into_stable_primitives
+        PASS [   0.026s] ( 43/327) paddles domain::model::threading::tests::thread_contract_types_render_generic_labels
+        PASS [   0.025s] ( 44/327) paddles domain::model::traces::tests::artifact_envelope_uses_locator_when_truncated
+        PASS [   0.024s] ( 45/327) paddles domain::ports::context_gathering::tests::gather_requests_default_to_heuristic_planning
+        PASS [   0.034s] ( 46/327) paddles domain::model::traces::tests::context_locator_serializes_round_trip
+        PASS [   0.038s] ( 47/327) paddles domain::model::traces::tests::branch_summary_is_machine_readable_but_human_scannable
+        PASS [   0.039s] ( 48/327) paddles domain::model::traces::tests::context_locator_reports_correct_tier
+        PASS [   0.036s] ( 49/327) paddles domain::ports::context_gathering::tests::available_results_sort_ranked_evidence_and_are_synthesis_ready
+        PASS [   0.042s] ( 50/327) paddles domain::model::traces::tests::legacy_force_snapshot_records_remain_deserializable
+        PASS [   0.049s] ( 51/327) paddles domain::model::traces::tests::artifact_envelope_carries_locator_with_tier_metadata
+        PASS [   0.042s] ( 52/327) paddles domain::ports::context_gathering::tests::planner_config_can_switch_to_graph_mode_without_changing_strategy
+        PASS [   0.047s] ( 53/327) paddles domain::model::traces::tests::no_transit_sift_types_leak_into_domain_ports
+        PASS [   0.047s] ( 54/327) paddles domain::model::turns::tests::context_pressure_event_uses_context_strain_key
+        PASS [   0.042s] ( 55/327) paddles domain::ports::planning::tests::refinement_types_define_stable_defaults
+        PASS [   0.044s] ( 56/327) paddles domain::ports::planning::tests::planner_loop_state_defaults_include_refinement_fields
+        PASS [   0.051s] ( 57/327) paddles domain::ports::planning::tests::planner_budget_has_bounded_defaults
+        PASS [   0.062s] ( 58/327) paddles domain::model::traces::tests::lineage_references_keep_task_turn_and_parent_record
+        PASS [   0.057s] ( 59/327) paddles infrastructure::adapters::agent_memory::tests::agent_memory_roots_only_load_agents_documents
+        PASS [   0.058s] ( 60/327) paddles infrastructure::adapters::agent_memory::tests::interpretation_context_fallback_uses_agents_rooted_documents_only
+        PASS [   0.067s] ( 61/327) paddles domain::model::transcript::tests::projects_prompt_and_completion_entries_from_trace_replay
+        PASS [   0.070s] ( 62/327) paddles domain::model::traces::tests::trace_signal_kind_labels_use_steering_signal_vocabulary
+        PASS [   0.064s] ( 63/327) paddles infrastructure::adapters::agent_memory::tests::truncation_tracking_flags_oversized_documents
+        PASS [   0.064s] ( 64/327) paddles infrastructure::adapters::context1_gatherer::tests::context1_with_harness_flag_but_no_provider_reports_unsupported
+        PASS [   0.059s] ( 65/327) paddles infrastructure::adapters::context1_gatherer::tests::context1_without_harness_reports_harness_required
+        PASS [   0.073s] ( 66/327) paddles domain::ports::context_gathering::tests::unsupported_results_preserve_reason_without_evidence
+        PASS [   0.043s] ( 67/327) paddles infrastructure::adapters::http_provider::tests::http_planner_action_prompt_includes_evidence_and_pressure_notes
+        PASS [   0.077s] ( 68/327) paddles domain::ports::context_gathering::tests::harness_required_results_do_not_pretend_to_be_answers
+        PASS [   0.075s] ( 69/327) paddles domain::ports::planning::tests::planner_action_reports_human_readable_summary
+        PASS [   0.075s] ( 70/327) paddles domain::ports::planning::tests::initial_action_reports_human_readable_summary
+        PASS [   0.080s] ( 71/327) paddles domain::ports::planning::tests::interpretation_context_renders_sources
+        PASS [   0.076s] ( 72/327) paddles infrastructure::adapters::agent_memory::tests::load_guidance_document_resolves_targets_relative_to_source_documents
+        PASS [   0.076s] ( 73/327) paddles infrastructure::adapters::agent_memory::tests::loads_system_user_and_ancestor_memory_in_specificity_order
+        PASS [   0.080s] ( 74/327) paddles domain::ports::planning::tests::thread_decision_request_keeps_generic_thread_state
+        PASS [   0.081s] ( 75/327) paddles infrastructure::adapters::agent_memory::tests::truncation_tracking_nominal_for_small_documents
+        PASS [   0.037s] ( 76/327) paddles infrastructure::adapters::http_provider::tests::retryable_status_identifies_429_and_5xx
+        PASS [   0.026s] ( 77/327) paddles infrastructure::adapters::sift_agent::tests::casual_prompts_fall_back_to_plain_text_after_repeated_tool_calls
+        PASS [   0.038s] ( 78/327) paddles infrastructure::adapters::http_provider::tests::provider_request_redaction_hides_auth_headers_and_query_keys
+        PASS [   0.035s] ( 79/327) paddles infrastructure::adapters::sift_agent::tests::casual_prompts_fall_back_after_repeated_empty_responses
+        PASS [   0.036s] ( 80/327) paddles infrastructure::adapters::sift_agent::tests::apply_patch_returns_error_on_failure
+        PASS [   0.036s] ( 81/327) paddles infrastructure::adapters::sift_agent::tests::assess_context_relevance_produces_heuristic_decisions
+        PASS [   0.098s] ( 82/327) paddles infrastructure::adapters::http_provider::tests::grounded_http_responses_fall_back_when_they_assert_unverified_failure_claims
+        PASS [   0.016s] ( 83/327) paddles infrastructure::adapters::sift_agent::tests::cpu_runtime_keeps_qwen_weights_in_f32
+        PASS [   0.068s] ( 84/327) paddles infrastructure::adapters::http_provider::tests::parse_planner_action_infers_inspect_when_command_is_present_without_action
+        PASS [   0.025s] ( 85/327) paddles infrastructure::adapters::sift_agent::tests::casual_prompts_retry_for_plain_text_instead_of_executing_tools
+        PASS [   0.047s] ( 86/327) paddles infrastructure::adapters::sift_agent::tests::casual_prompts_retry_after_empty_response
+        PASS [   0.018s] ( 87/327) paddles infrastructure::adapters::sift_agent::tests::direct_prompts_include_loaded_agents_memory
+        PASS [   0.018s] ( 88/327) paddles infrastructure::adapters::sift_agent::tests::extracts_tool_call_from_embedded_json
+        PASS [   0.094s] ( 89/327) paddles infrastructure::adapters::http_provider::tests::openai_planner_retries_invalid_initial_action_before_succeeding
+        PASS [   0.068s] ( 90/327) paddles infrastructure::adapters::http_provider::tests::parse_planner_action_supports_apply_patch_actions
+        PASS [   0.016s] ( 91/327) paddles infrastructure::adapters::sift_agent::tests::extracts_tool_call_from_raw_json
+        PASS [   0.022s] ( 92/327) paddles infrastructure::adapters::sift_agent::tests::extracts_tool_call_from_fenced_json
+        PASS [   0.071s] ( 93/327) paddles infrastructure::adapters::http_provider::tests::planner_system_prompt_demands_complete_json_action_envelopes
+        PASS [   0.025s] ( 94/327) paddles infrastructure::adapters::sift_agent::tests::exhausting_the_tool_budget_returns_an_error
+        PASS [   0.096s] ( 95/327) paddles infrastructure::adapters::http_provider::tests::openai_planner_uses_native_action_tool_and_parses_tool_calls
+        PASS [   0.078s] ( 96/327) paddles infrastructure::adapters::http_provider::tests::send_with_retry_fails_immediately_on_non_retryable_status
+        PASS [   0.128s] ( 97/327) paddles infrastructure::adapters::http_provider::tests::grounded_http_responses_fall_back_when_they_deny_visible_command_output
+        PASS [   0.120s] ( 98/327) paddles infrastructure::adapters::http_provider::tests::inception_apply_patch_actions_use_the_native_edit_endpoint
+        PASS [   0.020s] ( 99/327) paddles infrastructure::adapters::sift_agent::tests::general_prompts_retry_after_malformed_tool_protocol_response
+        PASS [   0.020s] (100/327) paddles infrastructure::adapters::sift_agent::tests::grounded_answer_fallback_preserves_evidence_order_without_source_priority
+        PASS [   0.096s] (101/327) paddles infrastructure::adapters::http_provider::tests::parse_planner_action_accepts_pretty_printed_multiline_json
+        PASS [   0.029s] (102/327) paddles infrastructure::adapters::sift_agent::tests::interpretation_context_expands_model_selected_guidance_subgraph_from_agents_roots
+        PASS [   0.030s] (103/327) paddles infrastructure::adapters::sift_agent::tests::invalid_initial_action_replies_use_constrained_redecision_before_succeeding
+        PASS [   0.029s] (104/327) paddles infrastructure::adapters::sift_agent::tests::planned_prompts_include_loaded_agents_memory
+        PASS [   0.037s] (105/327) paddles infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context
+        PASS [   0.146s] (106/327) paddles infrastructure::adapters::http_provider::tests::grounded_http_responses_fall_back_when_they_promise_future_command_work
+        PASS [   0.038s] (107/327) paddles infrastructure::adapters::sift_agent::tests::invalid_planner_replies_fail_closed_after_redecision_is_still_invalid
+        PASS [   0.033s] (108/327) paddles infrastructure::adapters::sift_agent::tests::qwen3_family_prompts_disable_thinking_explicitly
+        PASS [   0.023s] (109/327) paddles infrastructure::adapters::sift_agent::tests::repository_turns_without_evidence_report_insufficient_evidence
+        PASS [   0.024s] (110/327) paddles infrastructure::adapters::sift_agent::tests::read_file_rejects_symlink_escape
+        PASS [   0.043s] (111/327) paddles infrastructure::adapters::sift_agent::tests::invalid_initial_action_replies_fail_closed_after_redecision_is_still_invalid
+        PASS [   0.029s] (112/327) paddles infrastructure::adapters::sift_agent::tests::qwen_generation_sampling_uses_model_defaults
+        PASS [   0.040s] (113/327) paddles infrastructure::adapters::sift_agent::tests::invalid_planner_replies_use_constrained_redecision_before_succeeding
+        PASS [   0.040s] (114/327) paddles infrastructure::adapters::sift_agent::tests::list_files_skips_symlinked_directories
+        PASS [   0.030s] (115/327) paddles infrastructure::adapters::sift_agent::tests::respond_for_turn_records_forensic_exchange_artifacts_on_trace_capable_sink
+        PASS [   0.018s] (116/327) paddles infrastructure::adapters::sift_agent::tests::respond_with_evidence_includes_gathered_summary_in_prompt
+        PASS [   0.044s] (117/327) paddles infrastructure::adapters::sift_agent::tests::normalizes_relative_paths_without_leaving_workspace
+        PASS [   0.033s] (118/327) paddles infrastructure::adapters::sift_agent::tests::repository_turns_fall_back_to_grounded_evidence_when_model_is_confused
+        PASS [   0.018s] (119/327) paddles infrastructure::adapters::sift_agent::tests::search_tool_uses_sift_context_assembly
+        PASS [   0.031s] (120/327) paddles infrastructure::adapters::sift_agent::tests::respond_records_tool_outputs_and_turns_in_local_context
+        PASS [   0.146s] (121/327) paddles infrastructure::adapters::http_provider::tests::openai_planner_retries_invalid_next_action_before_succeeding
+        PASS [   0.125s] (122/327) paddles infrastructure::adapters::sift_agent::tests::action_prompts_retry_for_tool_calls_after_empty_response
+        PASS [   0.032s] (123/327) paddles infrastructure::adapters::sift_agent::tests::retries_qwen_cuda_runtime_on_oom_or_dtype_errors
+        PASS [   0.023s] (124/327) paddles infrastructure::adapters::sift_direct_gatherer::tests::direct_gatherer_emits_concrete_progress_without_planner_labels
+        PASS [   0.032s] (125/327) paddles infrastructure::adapters::sift_agent::tests::structured_final_answer_envelopes_are_normalized_before_return
+        PASS [   0.032s] (126/327) paddles infrastructure::adapters::sift_agent::tests::trims_large_context_payloads
+        PASS [   0.133s] (127/327) paddles infrastructure::adapters::sift_agent::tests::action_prompts_retry_for_tool_calls_after_prose
+        PASS [   0.035s] (128/327) paddles infrastructure::adapters::sift_autonomous_gatherer::tests::autonomous_gatherer_returns_planner_metadata_and_evidence
+        PASS [   0.038s] (129/327) paddles infrastructure::adapters::sift_autonomous_gatherer::tests::autonomous_gatherer_reports_available_capability
+        PASS [   0.037s] (130/327) paddles infrastructure::adapters::sift_autonomous_gatherer::tests::autonomous_gatherer_supports_optional_model_driven_profile_configuration
+        PASS [   0.034s] (131/327) paddles infrastructure::adapters::sift_registry::tests::parses_sharded_weight_indexes_in_stable_order
+        PASS [   0.041s] (132/327) paddles infrastructure::adapters::sift_autonomous_gatherer::tests::autonomous_gatherer_maps_graph_metadata_into_paddles_types
+        PASS [   0.047s] (133/327) paddles infrastructure::adapters::sift_autonomous_gatherer::tests::autonomous_and_static_gatherers_produce_distinct_evidence_shapes
+        PASS [   0.033s] (134/327) paddles infrastructure::adapters::trace_recorders::tests::in_memory_recorder_replays_records_in_sequence_order
+        PASS [   0.028s] (135/327) paddles infrastructure::adapters::trace_recorders::tests::transit_recorder_replays_root_and_verifies_checkpoint
+        PASS [   0.020s] (136/327) paddles infrastructure::adapters::transit_resolver::tests::resolves_filesystem_locator
+        PASS [   0.054s] (137/327) paddles infrastructure::adapters::sift_agent::tests::tool_failures_are_recorded_and_can_recover
+        PASS [   0.039s] (138/327) paddles infrastructure::adapters::sift_registry::tests::supports_new_runtime_aliases
+        PASS [   0.024s] (139/327) paddles infrastructure::adapters::transit_resolver::tests::fails_closed_for_sift_tier
+        PASS [   0.023s] (140/327) paddles infrastructure::adapters::transit_resolver::tests::noop_resolver_fails_closed
+        PASS [   0.024s] (141/327) paddles infrastructure::adapters::transit_resolver::tests::resolves_transit_locator
+        PASS [   0.044s] (142/327) paddles infrastructure::adapters::sift_registry::tests::rejects_unknown_model_ids
+        PASS [   0.032s] (143/327) paddles infrastructure::adapters::transit_resolver::tests::fails_closed_for_missing_transit_record
+        PASS [   0.051s] (144/327) paddles infrastructure::adapters::sift_direct_gatherer::tests::direct_gatherer_returns_direct_retrieval_metadata_and_evidence
+        PASS [   0.128s] (145/327) paddles infrastructure::adapters::sift_agent::tests::deterministic_action_turns_require_model_selected_tool_calls
+        PASS [   0.020s] (146/327) paddles infrastructure::cli::interactive_tui::tests::app_tracks_busy_state_through_reveal_completion
+        PASS [   0.078s] (147/327) paddles infrastructure::adapters::sift_agent::tests::respond_starts_a_fresh_conversation_each_turn
+        PASS [   0.025s] (148/327) paddles infrastructure::cli::interactive_tui::tests::app_submits_multiline_prompt_as_inline_display_row
+        PASS [   0.024s] (149/327) paddles infrastructure::cli::interactive_tui::tests::assistant_reveal_finishes_with_full_text
+        PASS [   0.021s] (150/327) paddles infrastructure::cli::interactive_tui::tests::assistant_rows_style_sources_and_inline_code
+        PASS [   0.032s] (151/327) paddles infrastructure::cli::interactive_tui::tests::app_attaches_elapsed_and_delta_timings_to_turn_rows
+        PASS [   0.027s] (152/327) paddles infrastructure::cli::interactive_tui::tests::duration_formatting_stays_compact
+        PASS [   0.087s] (153/327) paddles infrastructure::adapters::sift_agent::tests::shell_tool_returns_error_on_non_zero_exit
+        PASS [   0.032s] (154/327) paddles infrastructure::cli::interactive_tui::tests::event_details_are_elided_for_long_outputs
+        PASS [   0.033s] (155/327) paddles infrastructure::cli::interactive_tui::tests::completed_rows_become_scrollback_while_live_reveal_stays_inline
+        PASS [   0.038s] (156/327) paddles infrastructure::cli::interactive_tui::tests::command_notice_rows_use_brighter_notice_styles
+        PASS [   0.053s] (157/327) paddles infrastructure::cli::interactive_tui::tests::app_accepts_steering_prompts_while_busy_and_queues_them
+        PASS [   0.042s] (158/327) paddles infrastructure::cli::interactive_tui::tests::idle_prompt_line_has_no_redundant_send_hint
+        PASS [   0.040s] (159/327) paddles infrastructure::cli::interactive_tui::tests::in_flight_row_shows_contextual_label
+        PASS [   0.043s] (160/327) paddles infrastructure::cli::interactive_tui::tests::in_flight_row_says_synthesizing_after_planner_summary
+        PASS [   0.040s] (161/327) paddles infrastructure::cli::interactive_tui::tests::login_command_accepts_explicit_provider_when_current_lane_is_local
+        PASS [   0.046s] (162/327) paddles infrastructure::cli::interactive_tui::tests::in_flight_row_not_emitted_for_quick_events
+        PASS [   0.035s] (163/327) paddles infrastructure::cli::interactive_tui::tests::login_command_enters_masked_mode_for_remote_provider
+        PASS [   0.042s] (164/327) paddles infrastructure::cli::interactive_tui::tests::inline_multiline_text_preserves_single_lines
+        PASS [   0.046s] (165/327) paddles infrastructure::cli::interactive_tui::tests::idle_viewport_keeps_prompt_attached_to_scrollback
+        PASS [   0.386s] (166/327) paddles application::tests::conversation_projection_updates_are_derived_from_authoritative_replay_state
+        PASS [   0.040s] (167/327) paddles infrastructure::cli::interactive_tui::tests::login_command_accepts_inception_provider_when_current_lane_is_local
+        PASS [   0.043s] (168/327) paddles infrastructure::cli::interactive_tui::tests::inline_viewport_height_remains_compact
+        PASS [   0.389s] (169/327) paddles application::tests::action_bias_reads_best_candidate_after_initial_search
+        PASS [   0.036s] (170/327) paddles infrastructure::cli::interactive_tui::tests::model_command_lists_enabled_and_disabled_provider_catalog_entries
+        PASS [   0.028s] (171/327) paddles infrastructure::cli::interactive_tui::tests::model_command_queues_runtime_update_for_enabled_provider
+        PASS [   0.043s] (172/327) paddles infrastructure::cli::interactive_tui::tests::login_command_is_rejected_for_local_provider
+        PASS [   0.025s] (173/327) paddles infrastructure::cli::interactive_tui::tests::new_event_resets_in_flight_flag
+        PASS [   0.042s] (174/327) paddles infrastructure::cli::interactive_tui::tests::login_submission_queues_pending_key_and_masks_display_text
+        PASS [   0.041s] (175/327) paddles infrastructure::cli::interactive_tui::tests::model_catalog_mentions_runtime_lane_state_file
+        PASS [   0.022s] (176/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_completion_can_target_login_provider
+        PASS [   0.028s] (177/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_completion_accepts_active_suggestion
+        PASS [   0.031s] (178/327) paddles infrastructure::cli::interactive_tui::tests::model_command_rejects_disabled_provider_selection
+        PASS [   0.030s] (179/327) paddles infrastructure::cli::interactive_tui::tests::queued_prompt_dispatches_after_current_turn_finishes
+        PASS [   0.021s] (180/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_popup_area_stays_within_offset_frame
+        PASS [   0.033s] (181/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_completion_can_target_model_id
+        PASS [   0.416s] (182/327) paddles application::tests::process_prompt_records_trace_contract_records_beside_turn_events
+        PASS [   0.031s] (183/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_completion_can_target_subcommands
+        PASS [   0.418s] (184/327) paddles application::tests::known_edit_initial_decision_bootstraps_to_a_file_read
+        PASS [   0.420s] (185/327) paddles application::tests::known_edit_bootstrap_uses_vector_evidence_to_pick_the_best_candidate
+        PASS [   0.034s] (186/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_model_suggestions_do_not_fake_freeform_model_ids
+        PASS [   0.425s] (187/327) paddles application::tests::diagnostic_turn_requests_recursive_evidence_review_before_stopping
+        PASS [   0.043s] (188/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_completion_can_target_model_provider
+        PASS [   0.427s] (189/327) paddles application::tests::recursive_search_requests_graph_mode_and_surfaces_graph_trace_summary
+        PASS [   0.044s] (190/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_login_provider_suggestions_skip_non_login_providers
+        PASS [   0.429s] (191/327) paddles application::tests::process_prompt_emits_transcript_updates_for_prompt_and_completion
+        PASS [   0.432s] (192/327) paddles application::tests::mutation_turn_bootstraps_to_a_file_read_even_without_model_edit_flag
+        PASS [   0.432s] (193/327) paddles application::tests::replay_conversation_transcript_projects_prompt_and_completion_records
+        PASS [   0.047s] (194/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_popup_renders_login_provider_suggestions
+        PASS [   0.042s] (195/327) paddles infrastructure::config::tests::configuration_guidance_marks_inception_core_path_as_immediately_usable
+        PASS [   0.048s] (196/327) paddles infrastructure::cli::interactive_tui::tests::transcript_update_for_current_task_requests_transcript_sync
+        PASS [   0.051s] (197/327) paddles infrastructure::cli::interactive_tui::tests::transcript_rows_render_timing_suffixes
+        PASS [   0.438s] (198/327) paddles application::tests::replay_conversation_projection_packages_all_shared_session_surfaces
+        PASS [   0.049s] (199/327) paddles infrastructure::cli::interactive_tui::tests::transcript_update_for_other_task_is_ignored
+        PASS [   0.057s] (200/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_popup_renders_matching_commands
+        PASS [   0.056s] (201/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_popup_renders_model_provider_suggestions
+        PASS [   0.057s] (202/327) paddles infrastructure::cli::interactive_tui::tests::slash_command_popup_renders_model_id_suggestions
+        PASS [   0.444s] (203/327) paddles application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action
+        PASS [   0.057s] (204/327) paddles infrastructure::cli::interactive_tui::tests::turn_events_render_as_codex_like_action_rows
+        PASS [   0.053s] (205/327) paddles infrastructure::config::tests::load_parses_toml_from_workspace
+        PASS [   0.053s] (206/327) paddles infrastructure::config::tests::load_layers_runtime_preferences_after_authored_config
+        PASS [   0.452s] (207/327) paddles application::tests::process_prompt_emits_forensic_updates_for_recorded_trace_artifacts
+        PASS [   0.040s] (208/327) paddles infrastructure::config::tests::readme_documents_inception_authentication_and_model_selection
+        PASS [   0.063s] (209/327) paddles infrastructure::cli::interactive_tui::tests::tty_interactive_mode_uses_tui_but_prompt_keeps_plain_path
+        PASS [   0.062s] (210/327) paddles infrastructure::config::tests::configuration_guidance_distinguishes_core_inception_support_from_optional_capabilities
+        PASS [   0.056s] (211/327) paddles infrastructure::config::tests::normalizes_legacy_gatherer_provider_alias
+        PASS [   0.057s] (212/327) paddles infrastructure::config::tests::load_returns_defaults_when_no_file_exists
+        PASS [   0.049s] (213/327) paddles infrastructure::config::tests::normalizes_legacy_moonshot_model_alias
+        PASS [   0.040s] (214/327) paddles infrastructure::credentials::tests::credential_directories_are_restricted
+        PASS [   0.041s] (215/327) paddles infrastructure::config::tests::runtime_preferences_override_user_config_when_workspace_is_absent
+        PASS [   0.064s] (216/327) paddles infrastructure::config::tests::default_config_uses_sift_and_qwen
+        PASS [   0.466s] (217/327) paddles application::tests::diagnostic_turn_stops_after_plain_ci_listing_shows_no_failure
+        PASS [   0.054s] (218/327) paddles infrastructure::config::tests::runtime_preferences_override_workspace_config_for_lane_fields
+        PASS [   0.471s] (219/327) paddles application::tests::diagnostic_turn_stops_after_sources_weaken_failure_premise
+        PASS [   0.472s] (220/327) paddles application::tests::inspect_actions_emit_tool_execution_events
+        PASS [   0.050s] (221/327) paddles infrastructure::credentials::tests::key_file_has_restricted_permissions
+        PASS [   0.043s] (222/327) paddles infrastructure::credentials::tests::optional_local_provider_stays_enabled_without_credentials
+        PASS [   0.049s] (223/327) paddles infrastructure::credentials::tests::key_files_are_stored_separately
+        PASS [   0.047s] (224/327) paddles infrastructure::credentials::tests::local_provider_is_enabled_without_credentials
+        PASS [   0.055s] (225/327) paddles infrastructure::credentials::tests::load_returns_none_for_unknown_provider
+        PASS [   0.063s] (226/327) paddles infrastructure::credentials::tests::empty_key_file_returns_none
+        PASS [   0.055s] (227/327) paddles infrastructure::credentials::tests::provider_for_env_maps_known_vars
+        PASS [   0.061s] (228/327) paddles infrastructure::credentials::tests::resolve_api_key_falls_back_to_stored_file
+        PASS [   0.055s] (229/327) paddles infrastructure::credentials::tests::save_overwrites_existing_key
+        PASS [   0.064s] (230/327) paddles infrastructure::credentials::tests::resolve_api_key_reports_missing_configuration
+        PASS [   0.071s] (231/327) paddles infrastructure::credentials::tests::required_remote_provider_is_disabled_when_missing_credentials
+        PASS [   0.067s] (232/327) paddles infrastructure::credentials::tests::save_and_load_round_trips
+        PASS [   0.066s] (233/327) paddles infrastructure::dev_workflow_contracts::dev_shell_exposes_node_for_frontend_workspace_checks
+        PASS [   0.062s] (234/327) paddles infrastructure::dev_workflow_contracts::just_paddles_rebuilds_runtime_frontend_before_launching_cli
+        PASS [   0.068s] (235/327) paddles infrastructure::dev_workflow_contracts::frontend_playwright_artifacts_are_gitignored
+        PASS [   0.060s] (236/327) paddles infrastructure::dev_workflow_contracts::root_workspace_lockfile_exists_for_clean_ci_installs
+        PASS [   0.072s] (237/327) paddles infrastructure::dev_workflow_contracts::docs_app_defines_browser_e2e_verification
+        PASS [   0.062s] (238/327) paddles infrastructure::dev_workflow_contracts::root_workspace_package_defines_shared_scripts_and_workspaces
+        PASS [   0.074s] (239/327) paddles infrastructure::dev_workflow_contracts::docs_static_favicon_exists_for_docusaurus_builds
+        PASS [   0.083s] (240/327) paddles infrastructure::credentials::tests::resolve_api_key_prefers_environment_values
+        PASS [   0.060s] (241/327) paddles infrastructure::dev_workflow_contracts::runtime_web_live_harness_launches_paddles_inside_nix_develop
+        PASS [   0.074s] (242/327) paddles infrastructure::dev_workflow_contracts::frontend_apps_exist_under_apps_directory
+        PASS [   0.063s] (243/327) paddles infrastructure::dev_workflow_contracts::runtime_web_app_uses_tanstack_router_instead_of_react_router
+        PASS [   0.065s] (244/327) paddles infrastructure::dev_workflow_contracts::runtime_web_e2e_script_runs_the_product_route_playwright_suite
+        PASS [   0.072s] (245/327) paddles infrastructure::dev_workflow_contracts::just_quality_runs_frontend_workspace_lint_checks
+        PASS [   0.071s] (246/327) paddles infrastructure::dev_workflow_contracts::pre_commit_governor_runs_repo_quality_and_test_entrypoints
+        PASS [   0.067s] (247/327) paddles infrastructure::dev_workflow_contracts::runtime_web_app_defines_a_build_script
+        PASS [   0.064s] (248/327) paddles infrastructure::providers::tests::inception_provider_metadata_is_registered
+        PASS [   0.067s] (249/327) paddles infrastructure::dev_workflow_contracts::runtime_web_playwright_config_exists
+        PASS [   0.069s] (250/327) paddles infrastructure::providers::tests::auth_requirements_distinguish_local_optional_and_required_providers
+        PASS [   0.064s] (251/327) paddles infrastructure::providers::tests::known_state_space_models_include_remote_and_local_catalog_entries
+        PASS [   0.061s] (252/327) paddles infrastructure::rendering::tests::assistant_response_schema_requires_blocks_and_render_types
+        PASS [   0.076s] (253/327) paddles infrastructure::dev_workflow_contracts::turbo_config_exists_for_frontend_workspace
+        PASS [   0.082s] (254/327) paddles infrastructure::dev_workflow_contracts::just_test_runs_frontend_workspace_test_checks
+        PASS [   0.058s] (255/327) paddles infrastructure::rendering::tests::grounded_contract_prompt_treats_user_failure_claims_as_hypotheses
+        PASS [   0.069s] (256/327) paddles infrastructure::providers::tests::moonshot_aliases_are_normalized
+        PASS [   0.057s] (257/327) paddles infrastructure::rendering::tests::keeps_code_blocks_intact_when_sanitizing_markdownish_fallbacks
+        PASS [   0.068s] (258/327) paddles infrastructure::rendering::tests::empty_citation_sources_do_not_poison_parse
+        PASS [   0.068s] (259/327) paddles infrastructure::rendering::tests::grounded_contract_prompt_forbids_denying_attached_output
+        PASS [   0.070s] (260/327) paddles infrastructure::rendering::tests::contract_prompt_advertises_supported_render_types
+        PASS [   0.075s] (261/327) paddles infrastructure::rendering::tests::citation_sections_are_appended_once
+        PASS [   0.063s] (262/327) paddles infrastructure::rendering::tests::native_render_capabilities_announce_transport_constraints
+        PASS [   0.075s] (263/327) paddles infrastructure::rendering::tests::grounded_contract_prompt_forbids_future_intent_language
+        PASS [   0.409s] (264/327) paddles infrastructure::adapters::http_provider::tests::inception_provider_normalizes_structured_final_answers
+        PASS [   0.055s] (265/327) paddles infrastructure::rendering::tests::parses_and_flattens_structured_assistant_responses
+        PASS [   0.063s] (266/327) paddles infrastructure::rendering::tests::openai_compatible_render_capabilities_include_inception
+        PASS [   0.390s] (267/327) paddles infrastructure::adapters::http_provider::tests::openai_provider_surfaces_mock_server_errors_through_full_turns
+        PASS [   0.071s] (268/327) paddles infrastructure::rendering::tests::normalizes_raw_markdownish_bold_fallbacks
+        PASS [   0.061s] (269/327) paddles infrastructure::rendering::tests::repairs_structured_responses_when_render_types_are_missing
+        PASS [   0.062s] (270/327) paddles infrastructure::rendering::tests::repairs_structured_responses_when_declared_types_do_not_match_blocks
+        PASS [   0.054s] (271/327) paddles infrastructure::runtime_preferences::tests::runtime_lane_preferences_capture_planner_override_details
+        PASS [   0.060s] (272/327) paddles infrastructure::runtime_preferences::tests::default_runtime_lane_preference_path_targets_machine_state
+        PASS [   0.400s] (273/327) paddles infrastructure::adapters::http_provider::tests::openai_provider_records_exact_forensic_exchange_artifacts_in_trace_replay
+        PASS [   0.054s] (274/327) paddles infrastructure::step_timing::tests::classify_returns_slow_above_p85
+        PASS [   0.451s] (275/327) paddles infrastructure::adapters::http_provider::tests::anthropic_provider_executes_a_full_turn_against_a_mock_server
+        PASS [   0.056s] (276/327) paddles infrastructure::runtime_preferences::tests::runtime_lane_preferences_omit_redundant_planner_defaults
+        PASS [   0.060s] (277/327) paddles infrastructure::runtime_preferences::tests::runtime_lane_preference_store_round_trips_preferences
+        PASS [   0.059s] (278/327) paddles infrastructure::step_timing::tests::classify_returns_fast_below_p50
+        PASS [   0.058s] (279/327) paddles infrastructure::step_timing::tests::flush_creates_cache_directory
+        PASS [   0.071s] (280/327) paddles infrastructure::rendering::tests::salvages_fragmented_structured_responses_from_partial_json
+        PASS [   0.458s] (281/327) paddles infrastructure::adapters::http_provider::tests::gemini_provider_executes_a_full_turn_against_a_mock_server
+        PASS [   0.417s] (282/327) paddles infrastructure::adapters::http_provider::tests::openai_provider_normalizes_structured_final_answers
+        PASS [   0.059s] (283/327) paddles infrastructure::step_timing::tests::load_returns_empty_for_corrupt_file
+        PASS [   0.064s] (284/327) paddles infrastructure::step_timing::tests::classify_returns_normal_with_insufficient_history
+        PASS [   0.058s] (285/327) paddles infrastructure::step_timing::tests::percentile_computes_correct_p50_and_p85
+        PASS [   0.059s] (286/327) paddles infrastructure::step_timing::tests::oldest_entries_evicted_when_window_full
+        PASS [   0.433s] (287/327) paddles infrastructure::adapters::http_provider::tests::inception_provider_salvages_fragmented_structured_final_answers
+        PASS [   0.060s] (288/327) paddles infrastructure::step_timing::tests::round_trips_through_json_serialization
+        PASS [   0.063s] (289/327) paddles infrastructure::step_timing::tests::percentile_returns_none_with_insufficient_samples
+        PASS [   0.426s] (290/327) paddles infrastructure::adapters::http_provider::tests::openai_provider_executes_a_full_turn_against_a_mock_server
+        PASS [   0.066s] (291/327) paddles infrastructure::step_timing::tests::load_returns_empty_for_missing_file
+        PASS [   0.071s] (292/327) paddles infrastructure::step_timing::tests::classify_returns_normal_between_p50_and_p85
+        PASS [   0.068s] (293/327) paddles infrastructure::step_timing::tests::record_stores_deltas_up_to_window_cap
+        PASS [   0.067s] (294/327) paddles infrastructure::web::tests::broadcast_event_sink_tags_turn_events_with_the_session_projection_identity
+        PASS [   0.063s] (295/327) paddles infrastructure::web::tests::forensic_inspector_html_subscribes_to_replay_backed_live_updates
+        PASS [   0.069s] (296/327) paddles infrastructure::web::tests::broadcast_forensic_sink_forwards_live_updates
+        PASS [   0.062s] (297/327) paddles infrastructure::web::tests::forensic_routes_project_conversation_and_turn_replay_with_lifecycle_states
+        PASS [   0.055s] (298/327) paddles infrastructure::web::tests::manifold_route_html_surfaces_lifecycle_states_during_live_turns
+        PASS [   0.456s] (299/327) paddles infrastructure::adapters::http_provider::tests::inception_provider_records_exact_forensic_exchange_artifacts_in_trace_replay
+        PASS [   0.461s] (300/327) paddles infrastructure::adapters::http_provider::tests::inception_provider_executes_a_full_turn_against_a_mock_server
+        PASS [   0.063s] (301/327) paddles infrastructure::web::tests::manifold_route_html_renders_topology_primitives_and_conduits
+        PASS [   0.051s] (302/327) paddles infrastructure::web::tests::primary_runtime_routes_serve_the_primary_frontend_shell
+        PASS [   0.066s] (303/327) paddles infrastructure::web::tests::manifold_route_html_supports_time_scrub_controls
+        PASS [   0.074s] (304/327) paddles infrastructure::web::tests::forensic_inspector_html_exposes_local_force_and_shadow_surfaces
+        PASS [   0.070s] (305/327) paddles infrastructure::web::tests::manifold_route_html_links_selected_sources_back_to_forensics
+        PASS [   0.061s] (306/327) paddles infrastructure::web::tests::manifold_route_html_uses_bounded_local_scrollers
+        PASS [   0.074s] (307/327) paddles infrastructure::web::tests::manifold_route_html_streams_live_updates_and_reconciles_from_replay
+        PASS [   0.077s] (308/327) paddles infrastructure::web::tests::manifold_route_html_encodes_temporal_signal_phases
+        PASS [   0.060s] (309/327) paddles infrastructure::web::tests::primary_shell_loader_prefers_react_dist_when_present
+        PASS [   0.046s] (310/327) paddles infrastructure::web::tests::web_router_does_not_expose_legacy_or_app_alias_routes
+        PASS [   0.070s] (311/327) paddles infrastructure::web::tests::manifold_routes_project_time_ordered_signal_frames_and_lineage_anchors
+        PASS [   0.064s] (312/327) paddles infrastructure::web::tests::primary_shell_loader_falls_back_to_minimal_primary_shell_when_dist_is_missing
+        PASS [   0.046s] (313/327) paddles infrastructure::web::tests::web_router_serves_dedicated_manifold_and_transit_routes
+        PASS [   0.068s] (314/327) paddles infrastructure::web::tests::manifold_update_payload_replays_turn_state_for_live_updates
+        PASS [   0.055s] (315/327) paddles infrastructure::web::tests::transit_trace_html_fetches_session_scoped_graphs
+        PASS [   0.051s] (316/327) paddles infrastructure::web::tests::transit_trace_html_supports_wheel_zoom
+        PASS [   0.052s] (317/327) paddles infrastructure::web::tests::transit_trace_html_uses_monospace_typography
+        PASS [   0.057s] (318/327) paddles infrastructure::web::tests::transit_trace_html_supports_drag_pan
+        PASS [   0.052s] (319/327) paddles infrastructure::web::tests::web_html_exposes_manifold_route_shell_and_path_sync
+        PASS [   0.055s] (320/327) paddles infrastructure::web::tests::transit_trace_html_supports_significance_toggles
+        PASS [   0.059s] (321/327) paddles infrastructure::web::tests::transit_trace_html_adapts_detail_density_to_zoom
+        PASS [   0.053s] (322/327) paddles infrastructure::web::tests::transit_trace_html_uses_primary_route_paths_only
+        PASS [   0.063s] (323/327) paddles infrastructure::web::tests::shared_bootstrap_route_returns_shared_session_projection
+        PASS [   0.353s] (324/327) paddles infrastructure::web::tests::broadcast_projection_sinks_rebuild_snapshots_from_authoritative_replay
+        PASS [   0.344s] (325/327) paddles infrastructure::web::tests::session_routes_project_live_shared_session_turns_from_mock_provider
+        PASS [   0.778s] (326/327) paddles infrastructure::adapters::sift_direct_gatherer::tests::direct_gatherer_respects_budget_and_requested_mode_metadata
+        PASS [   2.063s] (327/327) paddles infrastructure::adapters::http_provider::tests::send_with_retry_retries_on_429_then_succeeds
+────────────
+     Summary [   2.247s] 327 tests run: 327 passed, 0 skipped
+just frontend-test
+npm run test
+turbo 2.5.0
+
+just frontend-build
+npm --workspace @paddles/web run build
+just frontend-e2e
+just frontend-build
+npm --workspace @paddles/web run build
+npm run e2e
+turbo 2.5.0
+

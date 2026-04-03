@@ -1,0 +1,34 @@
+---
+recorded_at: 2026-04-02T20:36:33.399225165-07:00
+command: sh -lc 'cargo test -q pre_commit_governor_runs_repo_quality_and_test_entrypoints -- --nocapture && cargo test -q just_test_runs_frontend_workspace_test_checks -- --nocapture && cargo test -q runtime_web_e2e_script_runs_the_product_route_playwright_suite -- --nocapture'
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 326 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 326 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 326 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

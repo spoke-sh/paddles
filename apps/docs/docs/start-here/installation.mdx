@@ -29,7 +29,7 @@ just test
 just quality
 ```
 
-`quality` runs `cargo fmt`, `cargo clippy`, the full test suite, and `keel health` in sequence. All four must pass before any commit lands.
+`just quality` runs Rust formatting, Rust linting, and the shared frontend workspace lint/typecheck path. `just test` runs the Rust test suite, the frontend workspace unit/build path, and browser E2E for both the docs app and the shipped TanStack runtime on `/`, `/transit`, and `/manifold`.
 
 ## Verify The Binary
 
