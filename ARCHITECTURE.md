@@ -29,6 +29,30 @@ The important routing boundary is that the controller does not infer intent from
 
 The missing control seam here used to be instruction satisfaction. The planner could correctly identify an edit turn, but nothing in the loop remembered that "make the edit" was an unsatisfied obligation, so a later prose recommendation could be mistaken for completion. Paddles now carries an explicit instruction frame for edit turns. That frame survives through recursive planning and answer handoff, and the controller will not accept advice-only completion while an `applied_edit` obligation is still open.
 
+### The Engine, Its Chambers, And The Governor
+
+At this point, "engine" is the right architectural word, not just a metaphor.
+
+Paddles runs one turn-processing engine composed of typed chambers:
+
+- **Interpretation**: assemble operator memory, guidance, and prior context
+- **Routing**: commit to planner-directed turn flow
+- **Planning**: choose and review bounded next actions
+- **Gathering**: search or retrieve evidence
+- **Tooling**: execute concrete workspace actions
+- **Threading**: manage queued prompts, branches, and merge-back state
+- **Rendering**: finalize the authored response for transcript projection
+- **Governor**: supervise pace, stalls, and interventions across the whole engine
+
+The important architectural change is that these are now first-class runtime states, not just labels inferred in the UI after the fact. The runtime emits typed `harness_state` events derived from ordinary turn events, carrying:
+
+- the active chamber
+- governor status
+- timeout phase
+- optional intervention/detail text
+
+That gives TUI, web, and future API clients one shared harness manifold instead of separate ad hoc interpretations of planner/gatherer/tool progress.
+
 ### Act 3: Synthesis
 
 **`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles resolves a provider/model-specific render capability and then uses the strictest supported transport for final answers — native JSON schema or tool-call structure when available, prompt-enveloped JSON when not.
@@ -114,7 +138,7 @@ Keeping those roles separate prevents the system from hiding control metadata in
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, context strain, fallback decisions, and synthesis — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
+**`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, context strain, fallback decisions, synthesis, and now typed harness/governor state — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI can now prefer the explicit harness chamber over guessed labels, so the operator sees real engine ownership rather than a best-effort inference.
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 

@@ -1,4 +1,7 @@
 use super::context_quality::ContextStrain;
+use super::harness::{
+    GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
+};
 use super::interpretation::InterpretationContext;
 use super::traces::{TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase};
 use paddles_conversation::TraceArtifactId;
@@ -111,6 +114,9 @@ pub enum TurnEvent {
         summary: String,
         sources: Vec<String>,
     },
+    HarnessState {
+        snapshot: HarnessSnapshot,
+    },
     PlannerSummary {
         strategy: String,
         mode: String,
@@ -176,6 +182,7 @@ impl TurnEvent {
             Self::PlannerStepProgress { .. } => "planner_step_progress",
             Self::GathererSearchProgress { .. } => "gatherer_search_progress",
             Self::GathererSummary { .. } => "gatherer_summary",
+            Self::HarnessState { .. } => "harness_state",
             Self::PlannerSummary { .. } => "planner_summary",
             Self::RefinementApplied { .. } => "refinement_applied",
             Self::ContextAssembly { .. } => "context_assembly",
@@ -200,6 +207,7 @@ impl TurnEvent {
 
             Self::PlannerActionSelected { .. }
             | Self::GathererSummary { .. }
+            | Self::HarnessState { .. }
             | Self::PlannerSummary { .. }
             | Self::ContextAssembly { .. }
             | Self::ContextStrain { .. }
@@ -215,6 +223,228 @@ impl TurnEvent {
             | Self::GathererCapability { .. }
             | Self::ThreadCandidateCaptured { .. } => 2,
         }
+    }
+
+    pub fn derived_harness_snapshot(&self) -> Option<HarnessSnapshot> {
+        match self {
+            Self::HarnessState { .. } => None,
+            Self::IntentClassified { intent } => Some(
+                HarnessSnapshot::active(HarnessChamber::Routing)
+                    .with_detail(format!("intent={}", intent.label())),
+            ),
+            Self::InterpretationContext { context } => Some(
+                HarnessSnapshot::active(HarnessChamber::Interpretation)
+                    .with_detail(context.summary.clone()),
+            ),
+            Self::GuidanceGraphExpanded {
+                depth,
+                document_count,
+                ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Interpretation).with_detail(format!(
+                    "guidance graph depth {depth}, {document_count} docs"
+                )),
+            ),
+            Self::RouteSelected { summary } => {
+                Some(HarnessSnapshot::active(HarnessChamber::Routing).with_detail(summary.clone()))
+            }
+            Self::PlannerCapability {
+                provider,
+                capability,
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Planning)
+                    .with_detail(format!("{provider}: {capability}")),
+            ),
+            Self::GathererCapability {
+                provider,
+                capability,
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Gathering)
+                    .with_detail(format!("{provider}: {capability}")),
+            ),
+            Self::PlannerActionSelected {
+                sequence, action, ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Planning)
+                    .with_detail(format!("step {sequence}: {action}")),
+            ),
+            Self::ThreadCandidateCaptured {
+                candidate_id,
+                active_thread,
+                ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Threading)
+                    .with_detail(format!("{candidate_id} on {active_thread}")),
+            ),
+            Self::ThreadDecisionApplied {
+                decision,
+                target_thread,
+                ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Threading)
+                    .with_detail(format!("{decision} -> {target_thread}")),
+            ),
+            Self::ThreadMerged {
+                source_thread,
+                target_thread,
+                mode,
+                ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Threading)
+                    .with_detail(format!("{source_thread} -> {target_thread} via {mode}")),
+            ),
+            Self::PlannerStepProgress {
+                step_number,
+                step_limit,
+                action,
+                query,
+                ..
+            } => {
+                let query = query
+                    .as_deref()
+                    .map(|value| format!(" — {value}"))
+                    .unwrap_or_default();
+                Some(
+                    HarnessSnapshot::active(HarnessChamber::Planning)
+                        .with_detail(format!("step {step_number}/{step_limit}: {action}{query}")),
+                )
+            }
+            Self::GathererSearchProgress {
+                phase,
+                elapsed_seconds,
+                eta_seconds,
+                strategy,
+                detail,
+            } => {
+                let mut governor = GovernorState::active()
+                    .with_timeout(timeout_state(*elapsed_seconds, *eta_seconds));
+                if matches!(
+                    governor.timeout.phase,
+                    TimeoutPhase::Stalled | TimeoutPhase::Expired
+                ) {
+                    governor.status = HarnessStatus::Intervening;
+                    governor.intervention = Some(format!(
+                        "search {phase} is {}",
+                        governor.timeout.phase.label()
+                    ));
+                }
+                let detail = detail
+                    .clone()
+                    .or_else(|| {
+                        strategy
+                            .as_ref()
+                            .map(|value| format!("{phase} via {value}"))
+                    })
+                    .unwrap_or_else(|| phase.clone());
+                Some(
+                    HarnessSnapshot::active(HarnessChamber::Gathering)
+                        .with_governor(governor)
+                        .with_detail(detail),
+                )
+            }
+            Self::GathererSummary {
+                provider, summary, ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Gathering)
+                    .with_detail(format!("{provider}: {summary}")),
+            ),
+            Self::PlannerSummary {
+                strategy,
+                mode,
+                steps,
+                stop_reason,
+                ..
+            } => {
+                let mut detail = format!("{strategy} {mode} ({steps} steps)");
+                if let Some(stop_reason) = stop_reason {
+                    detail.push_str(&format!(" · stop={stop_reason}"));
+                }
+                Some(HarnessSnapshot::active(HarnessChamber::Planning).with_detail(detail))
+            }
+            Self::RefinementApplied { reason, .. } => Some(
+                HarnessSnapshot::intervening(HarnessChamber::Governor, reason.clone())
+                    .with_detail(reason.clone()),
+            ),
+            Self::ContextAssembly {
+                label,
+                hits,
+                retained_artifacts,
+                ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Interpretation).with_detail(format!(
+                    "{label}: {hits} hits, retained {retained_artifacts}"
+                )),
+            ),
+            Self::ToolCalled {
+                tool_name,
+                invocation,
+                ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Tooling)
+                    .with_detail(format!("{tool_name}: {invocation}")),
+            ),
+            Self::ToolFinished {
+                tool_name, summary, ..
+            } => Some(
+                HarnessSnapshot::active(HarnessChamber::Tooling)
+                    .with_detail(format!("{tool_name}: {summary}")),
+            ),
+            Self::Fallback { stage, reason } => Some(
+                HarnessSnapshot::intervening(
+                    HarnessChamber::Governor,
+                    format!("{stage}: {reason}"),
+                )
+                .with_detail(format!("{stage}: {reason}")),
+            ),
+            Self::ContextStrain { strain } => Some(
+                HarnessSnapshot::intervening(
+                    HarnessChamber::Governor,
+                    format!("context strain {}", strain.level.label()),
+                )
+                .with_detail(format!(
+                    "{} truncation(s), factors: {}",
+                    strain.truncation_count,
+                    strain
+                        .factors
+                        .iter()
+                        .map(|factor| factor.label())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+            ),
+            Self::SynthesisReady {
+                grounded,
+                citations,
+                insufficient_evidence,
+            } => {
+                let detail = if *insufficient_evidence {
+                    "insufficient evidence".to_string()
+                } else if *grounded {
+                    format!("grounded answer with {} citation(s)", citations.len())
+                } else {
+                    "direct answer ready".to_string()
+                };
+                Some(HarnessSnapshot::active(HarnessChamber::Rendering).with_detail(detail))
+            }
+        }
+    }
+}
+
+fn timeout_state(elapsed_seconds: u64, eta_seconds: Option<u64>) -> TimeoutState {
+    let deadline_seconds = eta_seconds.map(|eta| elapsed_seconds.saturating_add(eta));
+    let phase = if elapsed_seconds >= 120 {
+        TimeoutPhase::Expired
+    } else if elapsed_seconds >= 45 {
+        TimeoutPhase::Stalled
+    } else if elapsed_seconds >= 10 {
+        TimeoutPhase::Slow
+    } else {
+        TimeoutPhase::Nominal
+    };
+    TimeoutState {
+        phase,
+        elapsed_seconds: Some(elapsed_seconds),
+        deadline_seconds,
     }
 }
 
@@ -281,7 +511,10 @@ impl TurnEventSink for MultiplexEventSink {
 #[cfg(test)]
 mod tests {
     use super::TurnEvent;
-    use crate::domain::model::{ContextStrain, StrainFactor};
+    use crate::domain::model::{
+        ContextStrain, GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, StrainFactor,
+        TimeoutPhase, TimeoutState,
+    };
 
     #[test]
     fn context_pressure_event_uses_context_strain_key() {
@@ -290,5 +523,26 @@ mod tests {
         };
 
         assert_eq!(event.event_type_key(), "context_strain");
+    }
+
+    #[test]
+    fn harness_state_event_uses_harness_state_key() {
+        let event = TurnEvent::HarnessState {
+            snapshot: HarnessSnapshot {
+                chamber: HarnessChamber::Planning,
+                governor: GovernorState {
+                    status: HarnessStatus::Active,
+                    timeout: TimeoutState {
+                        phase: TimeoutPhase::Nominal,
+                        elapsed_seconds: Some(2),
+                        deadline_seconds: Some(30),
+                    },
+                    intervention: None,
+                },
+                detail: Some("planner step 1".to_string()),
+            },
+        };
+
+        assert_eq!(event.event_type_key(), "harness_state");
     }
 }

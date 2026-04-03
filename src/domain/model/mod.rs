@@ -4,6 +4,7 @@ pub mod compaction;
 pub mod context_quality;
 pub mod forensics;
 pub mod generative;
+pub mod harness;
 pub mod instructions;
 pub mod interpretation;
 pub mod manifold;
@@ -20,6 +21,9 @@ pub use forensics::{
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,
 };
 pub use generative::{AuthoredResponse, ResponseMode};
+pub use harness::{
+    GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
+};
 pub use instructions::{
     InstructionDeliverable, InstructionFrame, InstructionIntent, InstructionObligation,
     InstructionSatisfaction,

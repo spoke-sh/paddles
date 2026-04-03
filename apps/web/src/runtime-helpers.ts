@@ -688,6 +688,22 @@ export function eventRow(event: TurnEvent) {
   if (type === 'gatherer_summary') {
     return { badge: 'gather', badgeClass: 'gatherer', text: String(event.summary || '') };
   }
+  if (type === 'harness_state') {
+    const snapshot = (event.snapshot as Record<string, unknown> | undefined) || {};
+    const governor = (snapshot.governor as Record<string, unknown> | undefined) || {};
+    const timeout = (governor.timeout as Record<string, unknown> | undefined) || {};
+    const chamber = String(snapshot.chamber || 'unknown');
+    const status = String(governor.status || 'active');
+    const phase = String(timeout.phase || 'nominal');
+    const detail = String(snapshot.detail || governor.intervention || '').trim();
+    return {
+      badge: 'gov',
+      badgeClass: 'governor',
+      text: [chamber, `status ${status}`, `timeout ${phase}`, detail]
+        .filter(Boolean)
+        .join(' · '),
+    };
+  }
   if (type === 'gatherer_search_progress') {
     const strategy = String(event.strategy || '').trim();
     const detail = String(event.detail || '').trim();

@@ -722,6 +722,18 @@ const IN_FLIGHT_SILENCE_THRESHOLD: Duration = Duration::from_secs(2);
 /// Infer what the system is currently doing based on the last completed event.
 fn in_flight_label(last_event: &TurnEvent) -> &'static str {
     match last_event {
+        TurnEvent::HarnessState { snapshot } => match snapshot.chamber {
+            crate::domain::model::HarnessChamber::Idle => "Thinking",
+            crate::domain::model::HarnessChamber::Interpretation => "Interpreting",
+            crate::domain::model::HarnessChamber::Routing => "Routing",
+            crate::domain::model::HarnessChamber::Planning => "Planning",
+            crate::domain::model::HarnessChamber::Gathering => "Searching",
+            crate::domain::model::HarnessChamber::Tooling => "Running tool",
+            crate::domain::model::HarnessChamber::Threading => "Threading",
+            crate::domain::model::HarnessChamber::Generation => "Generating response",
+            crate::domain::model::HarnessChamber::Rendering => "Rendering",
+            crate::domain::model::HarnessChamber::Governor => "Intervening",
+        },
         // After capability checks → planner or gatherer is about to run.
         TurnEvent::PlannerCapability { .. } => "Planning",
         TurnEvent::GathererCapability { .. } => "Gathering evidence",
@@ -2692,6 +2704,29 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
                 content,
             )
         }
+        TurnEvent::HarnessState { snapshot } => {
+            let mut parts = vec![
+                format!("status={}", snapshot.governor.status),
+                format!("timeout={}", snapshot.governor.timeout.phase),
+            ];
+            if let Some(elapsed_seconds) = snapshot.governor.timeout.elapsed_seconds {
+                parts.push(format!("elapsed={elapsed_seconds}s"));
+            }
+            if let Some(deadline_seconds) = snapshot.governor.timeout.deadline_seconds {
+                parts.push(format!("deadline={deadline_seconds}s"));
+            }
+            if let Some(intervention) = snapshot.governor.intervention.as_deref() {
+                parts.push(format!("intervention={intervention}"));
+            }
+            if let Some(detail) = snapshot.detail.as_deref() {
+                parts.push(detail.to_string());
+            }
+            TranscriptRow::new(
+                TranscriptRowKind::Event,
+                format!("• Governor: {}", snapshot.chamber),
+                parts.join(" · "),
+            )
+        }
         TurnEvent::PlannerSummary {
             strategy,
             mode,
@@ -3220,6 +3255,34 @@ mod tests {
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Ran shell");
         assert_eq!(row.content, "git status --short");
+    }
+
+    #[test]
+    fn harness_state_events_render_governor_and_timeout_summary() {
+        let row = format_turn_event_row(
+            TurnEvent::HarnessState {
+                snapshot: crate::domain::model::HarnessSnapshot {
+                    chamber: crate::domain::model::HarnessChamber::Gathering,
+                    governor: crate::domain::model::GovernorState {
+                        status: crate::domain::model::HarnessStatus::Active,
+                        timeout: crate::domain::model::TimeoutState {
+                            phase: crate::domain::model::TimeoutPhase::Slow,
+                            elapsed_seconds: Some(9),
+                            deadline_seconds: Some(30),
+                        },
+                        intervention: None,
+                    },
+                    detail: Some("indexing 4/10 files".to_string()),
+                },
+            },
+            0,
+        );
+
+        assert_eq!(row.kind, TranscriptRowKind::Event);
+        assert_eq!(row.header, "• Governor: gathering");
+        assert!(row.content.contains("status=active"));
+        assert!(row.content.contains("timeout=slow"));
+        assert!(row.content.contains("indexing 4/10 files"));
     }
 
     #[test]

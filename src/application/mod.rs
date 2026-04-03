@@ -868,6 +868,9 @@ impl StructuredTurnTrace {
 impl TurnEventSink for StructuredTurnTrace {
     fn emit(&self, event: TurnEvent) {
         self.downstream.emit(event.clone());
+        if let Some(snapshot) = event.derived_harness_snapshot() {
+            self.downstream.emit(TurnEvent::HarnessState { snapshot });
+        }
         match event {
             TurnEvent::ToolCalled {
                 call_id,
@@ -1273,6 +1276,23 @@ fn render_turn_event(event: &TurnEvent) -> String {
     match event {
         TurnEvent::IntentClassified { intent } => {
             format!("• Classified turn\n  └ {}", intent.label())
+        }
+        TurnEvent::HarnessState { snapshot } => {
+            let mut parts = vec![
+                format!("status={}", snapshot.governor.status),
+                format!("timeout={}", snapshot.governor.timeout.phase),
+            ];
+            if let Some(intervention) = snapshot.governor.intervention.as_deref() {
+                parts.push(format!("intervention={intervention}"));
+            }
+            if let Some(detail) = snapshot.detail.as_deref() {
+                parts.push(detail.to_string());
+            }
+            format!(
+                "• Governor: {}\n  └ {}",
+                snapshot.chamber,
+                trim_event_detail(&parts.join(" · "), 3)
+            )
         }
         TurnEvent::InterpretationContext { context } => {
             let mut lines = vec![format!(
@@ -5799,7 +5819,7 @@ mod tests {
                 gatherer: None,
             });
             service
-                .process_prompt_with_sink("Record this turn", sink)
+                .process_prompt_with_sink("Record this turn", sink.clone())
                 .await
                 .expect("process prompt")
         });
@@ -5824,6 +5844,17 @@ mod tests {
                 .iter()
                 .any(|record| matches!(record.kind, TraceRecordKind::CompletionCheckpoint(_)))
         );
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::HarnessState { snapshot }
+                if snapshot.chamber == crate::domain::model::HarnessChamber::Planning
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::HarnessState { snapshot }
+                if snapshot.chamber == crate::domain::model::HarnessChamber::Rendering
+        )));
     }
 
     #[test]

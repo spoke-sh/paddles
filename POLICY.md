@@ -42,6 +42,9 @@ Model selection is an architectural decision that shapes every turn.
 - **Planner And Answer Lanes Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into the answer lane, so follow-up turns remain coherent across planner-direct and synthesizer-authored replies.
 - **Instruction Obligations Must Be Satisfied Before Completion**: When the planner marks a turn as an edit turn, that creates an explicit instruction obligation. Advice-only prose does not satisfy an open `applied_edit` obligation; the turn must either apply a workspace write or surface a blocked reply that says the edit is still unsatisfied.
 - **Generative Authoring Stays Separate From Rendering**: Rich surface-aware expression belongs in a generative authoring layer that targets the canonical render AST and surface affordances. Renderers project that typed output; they do not invent or reinterpret content.
+- **The Harness Is An Engine With Typed Chambers**: Interpretation, routing, planning, gathering, tooling, threading, rendering, and governor ownership are first-class runtime states. Operator surfaces should project those states directly instead of guessing them from incidental event text.
+- **The Governor Owns Stall And Timeout Semantics**: Slow, stalled, expired, and intervention states belong to the governor layer of the harness, not to scattered local timers or UI heuristics.
+- **Harness State Must Be Observable**: Chamber ownership, governor status, timeout phase, and intervention detail must remain visible as typed runtime events so TUI, web, and future API clients all read from one source of truth.
 
 ### Steering Signals
 - **Steering Signals Are Typed Controller Policies**: Steering signals are not hidden vibe checks. They are the family of explicit controller policies that bias or stop recursive work as evidence accumulates.
