@@ -1806,7 +1806,7 @@ struct PlannerEnvelope {
     #[serde(default)]
     edit: Option<String>,
     #[serde(default)]
-    candidate_files: Vec<String>,
+    candidate_files: Option<Vec<String>>,
 }
 
 fn planner_action_json_schema() -> Value {
@@ -2310,20 +2310,21 @@ struct InceptionApplyEditRequest {
 fn initial_edit_instruction_from_http_envelope(
     envelope: &PlannerEnvelope,
 ) -> Result<InitialEditInstruction> {
-    let known_edit = envelope
+    let edit_value = envelope
         .edit
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| match value {
-            "yes" | "true" => Ok(true),
-            "no" | "false" => Ok(false),
-            other => bail!("edit must be `yes` or `no`, got `{other}`"),
-        })
-        .transpose()?
-        .unwrap_or(false);
+        .ok_or_else(|| anyhow!("initial action reply must include top-level `edit`"))?;
+    let known_edit = match edit_value {
+        "yes" | "true" => true,
+        "no" | "false" => false,
+        other => bail!("edit must be `yes` or `no`, got `{other}`"),
+    };
     let candidate_files = envelope
         .candidate_files
+        .as_ref()
+        .ok_or_else(|| anyhow!("initial action reply must include top-level `candidate_files`"))?
         .iter()
         .map(|path| path.trim().replace('\\', "/"))
         .filter(|path| !path.is_empty())
@@ -2845,6 +2846,8 @@ mod tests {
     fn planner_json_answer() -> String {
         json!({
             "action": "answer",
+            "edit": "no",
+            "candidate_files": [],
             "rationale": "the mock planner can answer directly"
         })
         .to_string()
@@ -3532,6 +3535,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_initial_action_rejects_missing_edit_metadata() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let err = adapter
+            .parse_initial_action_decision(
+                r#"{"action":"search","query":".runtime-shell-host","mode":"linear","strategy":"bm25","rationale":"locate the selector"}"#,
+            )
+            .expect_err("missing edit metadata should be invalid");
+
+        assert!(
+            err.to_string()
+                .contains("initial action reply must include top-level `edit`")
+        );
+    }
+
+    #[test]
     fn planner_system_prompt_demands_complete_json_action_envelopes() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
@@ -3619,7 +3647,7 @@ mod tests {
                 status: StatusCode::OK,
                 body: provider_response(
                     ApiFormat::OpenAi,
-                    r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis"}"#,
+                    r#"{"action":"inspect","command":"git status --short","edit":"no","candidate_files":[],"rationale":"check the local workspace state before deeper diagnosis"}"#,
                 ),
             },
         ])
@@ -3670,7 +3698,7 @@ mod tests {
             status: StatusCode::OK,
             body: openai_tool_call_response(
                 "select_planner_action",
-                r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis"}"#,
+                r#"{"action":"inspect","command":"git status --short","edit":"no","candidate_files":[],"rationale":"check the local workspace state before deeper diagnosis"}"#,
             ),
         }])
         .await;

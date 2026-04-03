@@ -226,7 +226,7 @@ struct InitialActionEnvelope {
     #[serde(default)]
     edit: Option<String>,
     #[serde(default)]
-    candidate_files: Vec<String>,
+    candidate_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -1225,8 +1225,11 @@ impl SiftAgentAdapter {
                 request,
             }),
         )?;
+        let mut parsed = parse_initial_action(&reply);
 
-        if is_blank_model_reply(&reply) || parse_initial_action(&reply)?.is_none() {
+        if is_blank_model_reply(&reply)
+            || parsed.as_ref().map_or(true, |decision| decision.is_none())
+        {
             self.log_retry_reason(
                 "initial-action-retry",
                 &reply,
@@ -1236,9 +1239,12 @@ impl SiftAgentAdapter {
                 conversation.as_mut(),
                 &build_initial_action_retry_prompt(request),
             )?;
+            parsed = parse_initial_action(&reply);
         }
 
-        if parse_initial_action(&reply)?.is_none() {
+        if is_blank_model_reply(&reply)
+            || parsed.as_ref().map_or(true, |decision| decision.is_none())
+        {
             self.log_retry_reason(
                 "initial-action-redecision",
                 &reply,
@@ -1248,9 +1254,10 @@ impl SiftAgentAdapter {
                 conversation.as_mut(),
                 &build_initial_action_redecision_prompt(request, &reply),
             )?;
+            parsed = parse_initial_action(&reply);
         }
 
-        if let Some(decision) = parse_initial_action(&reply)? {
+        if let Ok(Some(decision)) = parsed {
             return Ok(decision);
         }
 
@@ -4372,20 +4379,21 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
 fn initial_edit_instruction_from_envelope(
     envelope: &InitialActionEnvelope,
 ) -> Result<InitialEditInstruction> {
-    let known_edit = envelope
+    let edit_value = envelope
         .edit
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| match value {
-            "yes" | "true" => Ok(true),
-            "no" | "false" => Ok(false),
-            other => bail!("edit must be `yes` or `no`, got `{other}`"),
-        })
-        .transpose()?
-        .unwrap_or(false);
+        .ok_or_else(|| anyhow!("initial action reply must include top-level `edit`"))?;
+    let known_edit = match edit_value {
+        "yes" | "true" => true,
+        "no" | "false" => false,
+        other => bail!("edit must be `yes` or `no`, got `{other}`"),
+    };
     let candidate_files = envelope
         .candidate_files
+        .as_ref()
+        .ok_or_else(|| anyhow!("initial action reply must include top-level `candidate_files`"))?
         .iter()
         .map(|path| path.trim().replace('\\', "/"))
         .filter(|path| !path.is_empty())
@@ -5990,6 +5998,47 @@ mod tests {
                     command: "git status".to_string(),
                 }
             }
+        );
+    }
+
+    #[test]
+    fn initial_action_retries_when_edit_metadata_is_missing() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                r#"{"action":"search","query":".runtime-shell-host","mode":"linear","strategy":"bm25","rationale":"locate the selector"}"#.to_string(),
+                r#"{"action":"search","query":".runtime-shell-host","mode":"linear","strategy":"bm25","edit":"yes","candidate_files":["apps/web/src/runtime-shell.css"],"rationale":"locate the selector"}"#.to_string(),
+            ])),
+        );
+
+        let request = PlannerRequest::new(
+            "The .runtime-shell-host class needs some padding. Something around 8px",
+            workspace.path(),
+            InterpretationContext::default(),
+            crate::domain::ports::PlannerBudget::default(),
+        );
+
+        let decision = adapter
+            .select_initial_action(&request, &NullTurnEventSink)
+            .expect("initial action");
+
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: ".runtime-shell-host".to_string(),
+                    mode: RetrievalMode::Linear,
+                    strategy: RetrievalStrategy::Lexical,
+                    intent: None,
+                }
+            }
+        );
+        assert!(decision.edit.known_edit);
+        assert_eq!(
+            decision.edit.candidate_files,
+            vec!["apps/web/src/runtime-shell.css".to_string()]
         );
     }
 
