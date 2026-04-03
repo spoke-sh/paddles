@@ -290,7 +290,6 @@ Use that document when you need the retrieval boundary, provider names, capabili
 - `paddles` plans
 - `sift` retrieves
 - `sift-direct` is the active local retrieval backend
-- `sift-autonomous` remains a compatibility alias only
 
 ## Foundational Documents
 

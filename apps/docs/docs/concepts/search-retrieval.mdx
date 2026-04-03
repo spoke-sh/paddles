@@ -29,8 +29,7 @@ The configured gatherer provider determines which backend executes search/refine
 
 | Provider | Role | Notes |
 | --- | --- | --- |
-| `sift-autonomous` | Planner search backend (default) | Graph-capable autonomous retrieval with planner trace metadata and progress events |
-| `sift` | Local retrieval lane | Standard query retrieval with ranked evidence only |
+| `sift-direct` | Planner search backend (default) | Direct workspace retrieval that returns ranked evidence bundles |
 | `context-1` | Experimental specialized planner/gatherer | Exposed in capability checks; may be unavailable depending on environment |
 
 Each provider reports capability before execution:

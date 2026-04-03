@@ -310,19 +310,18 @@ async fn main() -> Result<()> {
     });
 
     let normalized_gatherer_provider = normalize_gatherer_provider_alias(&config.gatherer_provider);
-    if normalized_gatherer_provider != config.gatherer_provider {
-        eprintln!(
-            "[WARN] Gatherer provider `{}` is deprecated; using `{normalized_gatherer_provider}` instead.",
-            config.gatherer_provider
-        );
-    }
-    let gatherer_provider =
-        cli.gatherer_provider
-            .unwrap_or(match normalized_gatherer_provider.as_str() {
-                "local" => GathererProvider::Local,
-                "context1" => GathererProvider::Context1,
-                _ => GathererProvider::SiftDirect,
-            });
+    let gatherer_provider = match cli.gatherer_provider {
+        Some(provider) => provider,
+        None => match normalized_gatherer_provider.as_str() {
+            "sift-direct" => GathererProvider::SiftDirect,
+            "local" => GathererProvider::Local,
+            "context1" => GathererProvider::Context1,
+            _ => bail!(
+                "Invalid gatherer provider `{}` in config. Expected one of `sift-direct`, `local`, or `context1`.",
+                config.gatherer_provider
+            ),
+        },
+    };
 
     let frontend = select_interactive_frontend(
         cli.prompt.is_some(),

@@ -17,7 +17,7 @@ This document is the source of truth for how search works in `paddles`.
 - It ranks results and produces snippets/evidence payloads.
 - It emits low-level progress during direct retrieval stages.
 
-`sift` is not a second planner in the active runtime path. `paddles` does not delegate recursive search strategy back into `sift-autonomous`.
+`sift` is not a second planner in the active runtime path. `paddles` does not delegate recursive search strategy back into the gatherer.
 
 ## Capabilities
 
@@ -47,7 +47,7 @@ Those constraints are deliberate. They keep planning visible and controller-owne
 
 Use `--gatherer-provider sift-direct` to select the direct retrieval backend.
 
-The legacy config value `sift-autonomous` is still accepted as an explicit compatibility alias, but it is normalized to `sift-direct` and should not be used for new configuration.
+`sift` is the direct retrieval backend for all planner workspace search and refine calls.
 
 Other gatherer choices:
 

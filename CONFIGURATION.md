@@ -171,8 +171,6 @@ That backend stays local-first and services bounded planner search.
 - `paddles` remains the only recursive planner in the runtime path.
 - Direct retrieval progress is surfaced as concrete execution stages instead of autonomous planner states.
 - The provider returns evidence bundles and retrieval metadata consumed by the planner and synthesizer lanes.
-- The legacy config value `sift-autonomous` is accepted as a compatibility alias and normalized to `sift-direct`.
-
 See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
 Current local model guidance on an 8 GB CUDA card:

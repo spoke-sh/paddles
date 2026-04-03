@@ -95,7 +95,6 @@ pub enum RuntimeLaneRole {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GathererProvider {
     Local,
-    #[value(alias = "sift-autonomous")]
     SiftDirect,
     Context1,
 }

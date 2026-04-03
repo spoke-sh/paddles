@@ -211,12 +211,9 @@ pub fn normalize_provider_model_alias(provider: &str, model: &str) -> String {
         .unwrap_or_else(|| model.to_string())
 }
 
-/// Normalizes legacy gatherer provider aliases so old configs remain explicit and compatible.
+/// Returns the configured gatherer provider without legacy alias remapping.
 pub fn normalize_gatherer_provider_alias(provider: &str) -> String {
-    match provider {
-        "sift-autonomous" => "sift-direct".to_string(),
-        _ => provider.to_string(),
-    }
+    provider.to_string()
 }
 
 fn authored_config_search_paths(workspace_root: &Path) -> Vec<PathBuf> {
@@ -442,15 +439,12 @@ model = "qwen-1.5b"
     }
 
     #[test]
-    fn normalizes_legacy_gatherer_provider_alias() {
-        assert_eq!(
-            normalize_gatherer_provider_alias("sift-autonomous"),
-            "sift-direct"
-        );
+    fn normalizes_gatherer_provider_alias() {
         assert_eq!(
             normalize_gatherer_provider_alias("sift-direct"),
             "sift-direct"
         );
+        assert_eq!(normalize_gatherer_provider_alias("local"), "local");
         assert_eq!(normalize_gatherer_provider_alias("context1"), "context1");
     }
 
