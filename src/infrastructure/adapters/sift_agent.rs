@@ -1537,6 +1537,7 @@ impl SiftAgentAdapter {
             .recent_thread_summary
             .as_deref()
             .filter(|summary| !summary.trim().is_empty());
+        let instruction_handoff = format_instruction_handoff(handoff);
 
         let mut working_retained = state.retained_artifacts.clone();
         let mut working_local_context = state.local_context.clone();
@@ -1561,6 +1562,7 @@ impl SiftAgentAdapter {
                     prompt,
                     &recent_turns,
                     recent_thread_summary,
+                    &instruction_handoff,
                     &memory_prompt,
                     self.render_capability,
                 ),
@@ -1579,6 +1581,7 @@ impl SiftAgentAdapter {
                                 prompt,
                                 &recent_turns,
                                 recent_thread_summary,
+                                &instruction_handoff,
                                 &memory_prompt,
                                 evidence,
                                 self.render_capability,
@@ -1631,6 +1634,7 @@ impl SiftAgentAdapter {
                     prompt,
                     &recent_turns,
                     recent_thread_summary,
+                    &instruction_handoff,
                     &memory_prompt,
                     gathered_evidence,
                     self.render_capability,
@@ -1656,6 +1660,7 @@ impl SiftAgentAdapter {
                             prompt,
                             &recent_turns,
                             recent_thread_summary,
+                            &instruction_handoff,
                             &memory_prompt,
                             self.render_capability,
                         ),
@@ -1732,6 +1737,7 @@ impl SiftAgentAdapter {
                             prompt,
                             &recent_turns,
                             recent_thread_summary,
+                            &instruction_handoff,
                             &memory_prompt,
                             self.render_capability,
                         ),
@@ -2490,6 +2496,7 @@ fn build_grounded_turn_prompt(
     user_prompt: &str,
     recent_turns: &str,
     recent_thread_summary: Option<&str>,
+    instruction_handoff: &str,
     memory_prompt: &str,
     evidence: &EvidenceBundle,
     render_capability: RenderCapability,
@@ -2514,6 +2521,9 @@ Recent conversation:\n\
 Active thread summary:\n\
 {thread_summary}\n\
 \n\
+Instruction manifold:\n\
+{instruction_handoff}\n\
+\n\
 Gathered repository evidence:\n\
 {}\n\
 \n\
@@ -2528,6 +2538,7 @@ fn build_direct_turn_prompt(
     user_prompt: &str,
     recent_turns: &str,
     recent_thread_summary: Option<&str>,
+    instruction_handoff: &str,
     memory_prompt: &str,
     render_capability: RenderCapability,
 ) -> String {
@@ -2548,6 +2559,9 @@ Recent conversation:\n\
 Active thread summary:\n\
 {thread_summary}\n\
 \n\
+Instruction manifold:\n\
+{instruction_handoff}\n\
+\n\
 Current user request:\n\
 {user_prompt}\n",
         final_answer_contract_prompt(render_capability, false),
@@ -2558,6 +2572,7 @@ fn build_planned_direct_prompt(
     user_prompt: &str,
     recent_turns: &str,
     recent_thread_summary: Option<&str>,
+    instruction_handoff: &str,
     memory_prompt: &str,
     gathered_evidence: Option<&EvidenceBundle>,
     render_capability: RenderCapability,
@@ -2580,6 +2595,9 @@ Recent conversation:\n\
 Active thread summary:\n\
 {thread_summary}\n\
 \n\
+Instruction manifold:\n\
+{instruction_handoff}\n\
+\n\
 Planner evidence handoff:\n\
 {}\n\
 \n\
@@ -2594,6 +2612,7 @@ fn build_direct_retry_prompt(
     user_prompt: &str,
     recent_turns: &str,
     recent_thread_summary: Option<&str>,
+    instruction_handoff: &str,
     memory_prompt: &str,
     render_capability: RenderCapability,
 ) -> String {
@@ -2612,10 +2631,30 @@ Recent conversation:\n\
 Active thread summary:\n\
 {thread_summary}\n\
 \n\
+Instruction manifold:\n\
+{instruction_handoff}\n\
+\n\
 Current user request:\n\
         {user_prompt}\n",
         final_answer_contract_prompt(render_capability, false),
     )
+}
+
+fn format_instruction_handoff(handoff: &SynthesisHandoff) -> String {
+    match handoff.instruction_frame.as_ref() {
+        Some(frame) if frame.requires_applied_edit() => {
+            if let Some(candidates) = frame.candidate_summary() {
+                format!(
+                    "Open obligation: this turn is not complete until Paddles applies a repository edit.\nCandidate files: {candidates}"
+                )
+            } else {
+                "Open obligation: this turn is not complete until Paddles applies a repository edit."
+                    .to_string()
+            }
+        }
+        Some(_) => "Instruction obligations are currently satisfied.".to_string(),
+        None => "No explicit instruction obligations are active.".to_string(),
+    }
 }
 
 fn build_interpretation_validation_prompt(

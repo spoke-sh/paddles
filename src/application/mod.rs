@@ -11,9 +11,9 @@ use crate::domain::model::{
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
     ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
     ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
-    MultiplexEventSink, RenderDocument, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate,
-    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    InstructionFrame, MultiplexEventSink, RenderDocument, StrainFactor, StrainLevel, TaskTraceId,
+    ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord,
+    TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
     TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
     TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
     TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
@@ -236,6 +236,7 @@ struct PlannerLoopContext {
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
+    instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
 }
 
@@ -2097,6 +2098,7 @@ impl MechSuitService {
                         interpretation: interpretation.clone(),
                         recent_turns,
                         recent_thread_summary: recent_thread_summary.clone(),
+                        instruction_frame: execution_plan.instruction_frame.clone(),
                         initial_edit: execution_plan.initial_edit.clone(),
                     },
                     execution_plan.initial_planner_decision.clone(),
@@ -2107,10 +2109,20 @@ impl MechSuitService {
             PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
                 evidence: None,
                 direct_answer: execution_plan.direct_answer.clone(),
+                instruction_frame: execution_plan.instruction_frame.clone(),
             },
         };
 
         if let Some(reply) = planner_outcome.direct_answer {
+            let reply = if let Some(frame) = planner_outcome
+                .instruction_frame
+                .as_ref()
+                .filter(|frame| frame.requires_applied_edit())
+            {
+                instruction_unsatisfied_direct_reply(frame)
+            } else {
+                reply
+            };
             let reply = RenderDocument::from_assistant_plain_text(&reply).to_plain_text();
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
@@ -2134,7 +2146,28 @@ impl MechSuitService {
         let handoff = SynthesisHandoff {
             recent_turns,
             recent_thread_summary,
+            instruction_frame: planner_outcome.instruction_frame.clone(),
         };
+        if let Some(frame) = planner_outcome
+            .instruction_frame
+            .as_ref()
+            .filter(|frame| frame.requires_applied_edit())
+        {
+            let reply = RenderDocument::from_assistant_plain_text(
+                &instruction_unsatisfied_direct_reply(frame),
+            )
+            .to_plain_text();
+            trace.emit(TurnEvent::SynthesisReady {
+                grounded: false,
+                citations: Vec::new(),
+                insufficient_evidence: false,
+            });
+            trace.record_completion(&reply);
+            self.emit_transcript_update(&session.task_id());
+            session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
+            self.persist_recent_turn_summary(&prompt, &reply);
+            return Ok(reply);
+        }
         let reply = tokio::task::spawn_blocking(move || {
             engine.respond_for_turn(
                 &prompt_for_model,
@@ -2360,6 +2393,7 @@ impl MechSuitService {
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
         let mut direct_answer = None;
+        let mut instruction_frame = context.instruction_frame.clone();
         let mut pending_initial_decision = initial_decision;
         let mut steps_without_new_evidence = 0usize;
         let gatherer_provider = context
@@ -2418,6 +2452,7 @@ impl MechSuitService {
                 evidence_count: loop_state.evidence_items.len(),
             });
 
+            let mut accepted_stop = false;
             let outcome = match &decision.action {
                 PlannerAction::Workspace { action } => match action {
                     WorkspaceAction::Search {
@@ -2581,6 +2616,9 @@ impl MechSuitService {
                             });
                             match context.synthesizer_engine.execute_workspace_action(action) {
                                 Ok(result) => {
+                                    if let Some(frame) = instruction_frame.as_mut() {
+                                        frame.note_successful_workspace_action(action);
+                                    }
                                     trace.emit(TurnEvent::ToolFinished {
                                         call_id,
                                         tool_name: result.name.to_string(),
@@ -2744,9 +2782,29 @@ impl MechSuitService {
                     )
                 }
                 PlannerAction::Stop { reason } => {
-                    direct_answer = stop_reason_direct_answer(reason, decision.answer.clone());
-                    stop_reason = Some(reason.clone());
-                    format!("planner requested synthesis: {reason}")
+                    if let Some(frame) = instruction_frame
+                        .as_ref()
+                        .filter(|frame| frame.requires_applied_edit())
+                    {
+                        let note = instruction_unsatisfied_note(frame);
+                        if !loop_state.notes.contains(&note) {
+                            loop_state.notes.push(note.clone());
+                        }
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "instruction-manifold".to_string(),
+                            reason: note.clone(),
+                        });
+                        direct_answer = Some(instruction_unsatisfied_direct_reply(frame));
+                        stop_reason = Some("instruction-unsatisfied".to_string());
+                        accepted_stop = true;
+                        "planner stop converted into a blocked reply because the requested applied edit is still unsatisfied"
+                            .to_string()
+                    } else {
+                        direct_answer = stop_reason_direct_answer(reason, decision.answer.clone());
+                        stop_reason = Some(reason.clone());
+                        accepted_stop = true;
+                        format!("planner requested synthesis: {reason}")
+                    }
                 }
             };
 
@@ -2822,7 +2880,7 @@ impl MechSuitService {
                 }
             }
 
-            if let PlannerAction::Stop { .. } = decision.action {
+            if accepted_stop {
                 break;
             }
 
@@ -2877,7 +2935,13 @@ impl MechSuitService {
         if !used_workspace_resources && planner_stopped_without_resource_use(&loop_state) {
             return Ok(PlannerLoopOutcome {
                 evidence: None,
-                direct_answer,
+                direct_answer: direct_answer.or_else(|| {
+                    instruction_frame
+                        .as_ref()
+                        .filter(|frame| frame.requires_applied_edit())
+                        .map(instruction_unsatisfied_direct_reply)
+                }),
+                instruction_frame,
             });
         }
 
@@ -2889,7 +2953,13 @@ impl MechSuitService {
                 completed,
                 &stop_reason,
             )),
-            direct_answer,
+            direct_answer: direct_answer.or_else(|| {
+                instruction_frame
+                    .as_ref()
+                    .filter(|frame| frame.requires_applied_edit())
+                    .map(instruction_unsatisfied_direct_reply)
+            }),
+            instruction_frame,
         })
     }
 
@@ -3030,12 +3100,14 @@ struct PromptExecutionPlan {
     route_summary: String,
     initial_planner_decision: Option<RecursivePlannerDecision>,
     direct_answer: Option<String>,
+    instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
 }
 
 struct PlannerLoopOutcome {
     evidence: Option<EvidenceBundle>,
     direct_answer: Option<String>,
+    instruction_frame: Option<InstructionFrame>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3056,6 +3128,7 @@ enum PromptExecutionPath {
 }
 
 const POLICY_VIOLATION_DIRECT_REPLY: &str = "I can't help with that because it violates policy.";
+const EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested repository edit yet. This turn stays open until Paddles applies a workspace change.";
 
 fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
     PromptExecutionPlan {
@@ -3067,7 +3140,34 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
         ),
         initial_planner_decision: None,
         direct_answer: None,
+        instruction_frame: None,
         initial_edit: InitialEditInstruction::default(),
+    }
+}
+
+fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<InstructionFrame> {
+    if edit.known_edit {
+        Some(InstructionFrame::for_edit(edit.candidate_files.clone()))
+    } else {
+        None
+    }
+}
+
+fn instruction_unsatisfied_note(frame: &InstructionFrame) -> String {
+    if let Some(candidates) = frame.candidate_summary() {
+        format!(
+            "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Apply a workspace write before finishing. Candidate files: {candidates}"
+        )
+    } else {
+        "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Apply a workspace write before finishing.".to_string()
+    }
+}
+
+fn instruction_unsatisfied_direct_reply(frame: &InstructionFrame) -> String {
+    if let Some(candidates) = frame.candidate_summary() {
+        format!("{EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY}\n\nLikely target files: {candidates}")
+    } else {
+        EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY.to_string()
     }
 }
 
@@ -3081,6 +3181,7 @@ fn execution_plan_from_initial_action(
         answer,
         edit,
     } = decision;
+    let instruction_frame = instruction_frame_from_initial_edit(&edit);
     match action {
         InitialAction::Answer => {
             let direct_answer = normalized_direct_answer(answer);
@@ -3099,6 +3200,7 @@ fn execution_plan_from_initial_action(
                 route_summary,
                 initial_planner_decision: None,
                 direct_answer,
+                instruction_frame,
                 initial_edit: edit,
             }
         }
@@ -3121,6 +3223,7 @@ fn execution_plan_from_initial_action(
                 route_summary,
                 initial_planner_decision: None,
                 direct_answer,
+                instruction_frame,
                 initial_edit: edit,
             }
         }
@@ -3156,6 +3259,7 @@ fn execution_plan_from_initial_action(
                     answer: None,
                 }),
                 direct_answer: None,
+                instruction_frame,
                 initial_edit: edit,
             }
         }
@@ -5068,6 +5172,7 @@ mod tests {
             interpretation: InterpretationContext::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
+            instruction_frame: super::instruction_frame_from_initial_edit(&initial_edit),
             initial_edit,
         }
     }
@@ -7593,6 +7698,186 @@ mod tests {
                 .is_empty(),
             "initial direct answers should bypass the synthesizer"
         );
+    }
+
+    #[test]
+    fn edit_turns_do_not_complete_with_advice_only_stop_answers() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create css dir");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-shell.css"),
+            ".runtime-shell-host {\n  padding: 0;\n}\n",
+        )
+        .expect("write css");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "the file is obvious, so jump straight to the answer".to_string(),
+                answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                },
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                },
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt(
+                    "The .runtime-shell-host class needs some padding. Something around 8px",
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(
+            reply.contains("haven't completed the requested repository edit yet"),
+            "edit turns should stay open instead of completing with advice-only text: {reply}"
+        );
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "unsatisfied edit turns should not fall through to the synthesizer"
+        );
+    }
+
+    #[test]
+    fn edit_turns_can_complete_after_a_successful_write() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create css dir");
+        let css_path = workspace.path().join("apps/web/src/runtime-shell.css");
+        fs::write(&css_path, ".runtime-shell-host {\n  padding: 0;\n}\n").expect("write css");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer = "Added 8px padding to `.runtime-shell-host`.".to_string();
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "the file is obvious, so jump straight to the answer".to_string(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                },
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::ReplaceInFile {
+                            path: "apps/web/src/runtime-shell.css".to_string(),
+                            old: "padding: 0;".to_string(),
+                            new: "padding: 8px;".to_string(),
+                            replace_all: false,
+                        },
+                    },
+                    rationale: "apply the requested padding change".to_string(),
+                    answer: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                },
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt(
+                    "The .runtime-shell-host class needs some padding. Something around 8px",
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        assert!(matches!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .last(),
+            Some(WorkspaceAction::ReplaceInFile { path, new, .. })
+                if path == "apps/web/src/runtime-shell.css" && new == "padding: 8px;"
+        ));
     }
 
     #[test]

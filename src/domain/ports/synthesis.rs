@@ -1,4 +1,4 @@
-use crate::domain::model::{TurnEventSink, TurnIntent};
+use crate::domain::model::{InstructionFrame, TurnEventSink, TurnIntent};
 use crate::domain::ports::context_gathering::EvidenceBundle;
 use crate::domain::ports::planning::WorkspaceAction;
 use anyhow::Result;
@@ -15,6 +15,7 @@ pub struct WorkspaceActionResult {
 pub struct SynthesisHandoff {
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
+    pub instruction_frame: Option<InstructionFrame>,
 }
 
 /// Port for the synthesizer engine that drives conversation turns and workspace actions.

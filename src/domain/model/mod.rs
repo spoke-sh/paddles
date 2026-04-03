@@ -3,6 +3,7 @@ use anyhow::Result;
 pub mod compaction;
 pub mod context_quality;
 pub mod forensics;
+pub mod instructions;
 pub mod interpretation;
 pub mod manifold;
 pub mod projection;
@@ -16,6 +17,10 @@ pub use context_quality::{ContextStrain, StrainFactor, StrainLevel, StrainTracke
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,
+};
+pub use instructions::{
+    InstructionDeliverable, InstructionFrame, InstructionIntent, InstructionObligation,
+    InstructionSatisfaction,
 };
 pub use interpretation::{
     GuidanceCategory, InterpretationConflict, InterpretationContext,

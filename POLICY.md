@@ -40,6 +40,7 @@ Model selection is an architectural decision that shapes every turn.
 - **Final Answer Rendering Stays Typed**: Planner-direct answers and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
 - **Planner Rationale Is Never The User Answer**: Planner rationale explains control decisions. User-facing answer text must travel through an explicit answer payload before it enters the render pipeline.
 - **Planner And Answer Lanes Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into the answer lane, so follow-up turns remain coherent across planner-direct and synthesizer-authored replies.
+- **Instruction Obligations Must Be Satisfied Before Completion**: When the planner marks a turn as an edit turn, that creates an explicit instruction obligation. Advice-only prose does not satisfy an open `applied_edit` obligation; the turn must either apply a workspace write or surface a blocked reply that says the edit is still unsatisfied.
 - **Generative Authoring Stays Separate From Rendering**: Rich surface-aware expression belongs in a generative authoring layer that targets the canonical render AST and surface affordances. Renderers project that typed output; they do not invent or reinterpret content.
 
 ### Steering Signals

@@ -1264,6 +1264,22 @@ impl SynthesizerEngine for HttpProviderAdapter {
             user_msg.push_str(summary);
             user_msg.push_str("\n\n");
         }
+        if let Some(frame) = handoff.instruction_frame.as_ref() {
+            user_msg.push_str("## Instruction Manifold\n");
+            if frame.requires_applied_edit() {
+                user_msg.push_str(
+                    "Open obligation: this turn is not complete until Paddles applies a repository edit.\n",
+                );
+            } else {
+                user_msg.push_str("Instruction obligations are currently satisfied.\n");
+            }
+            if let Some(candidates) = frame.candidate_summary() {
+                user_msg.push_str("Candidate files: ");
+                user_msg.push_str(&candidates);
+                user_msg.push('\n');
+            }
+            user_msg.push('\n');
+        }
         user_msg.push_str("## Current User Request\n");
         user_msg.push_str(prompt);
         if let Some(evidence) = gathered_evidence {

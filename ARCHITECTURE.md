@@ -27,11 +27,15 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 The important routing boundary is that the controller does not infer intent from prompt-token heuristics. The planner decides whether a turn should answer directly, inspect locally, recurse, or stop. The controller validates that choice and keeps the loop safe.
 
+The missing control seam here used to be instruction satisfaction. The planner could correctly identify an edit turn, but nothing in the loop remembered that "make the edit" was an unsatisfied obligation, so a later prose recommendation could be mistaken for completion. Paddles now carries an explicit instruction frame for edit turns. That frame survives through recursive planning and answer handoff, and the controller will not accept advice-only completion while an `applied_edit` obligation is still open.
+
 ### Act 3: Synthesis
 
 **`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles resolves a provider/model-specific render capability and then uses the strictest supported transport for final answers — native JSON schema or tool-call structure when available, prompt-enveloped JSON when not.
 
 Planner and answer lanes now share one typed conversational handoff: recent turns plus the active thread summary. That keeps follow-up turns coherent even when the planner chooses a direct-answer route on one turn and a synthesizer-authored route on the next.
+
+That handoff now also carries the active instruction frame. The answer lane therefore sees whether the turn still owes the user an applied repository edit, instead of seeing only evidence and conversational context.
 
 Direct planner-authored answers no longer bypass this contract by leaking planner rationale into the transcript. Both synthesizer answers and planner-direct answers now normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`) before the UI projects them into transcript output. Planner rationale remains control-only metadata.
 
