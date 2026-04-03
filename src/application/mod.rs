@@ -3055,8 +3055,7 @@ enum PromptExecutionPath {
     PlannerThenSynthesize,
 }
 
-const POLICY_VIOLATION_DIRECT_REPLY: &str =
-    "I can't help with that because it violates policy.";
+const POLICY_VIOLATION_DIRECT_REPLY: &str = "I can't help with that because it violates policy.";
 
 fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
     PromptExecutionPlan {
@@ -3086,8 +3085,7 @@ fn execution_plan_from_initial_action(
         InitialAction::Answer => {
             let direct_answer = normalized_direct_answer(answer);
             let route_summary = if direct_answer.is_some() {
-                "model selected a direct response; controller will render it directly"
-                    .to_string()
+                "model selected a direct response; controller will render it directly".to_string()
             } else {
                 format!(
                     "model selected a direct response on synthesizer lane '{}'",
@@ -3801,23 +3799,48 @@ fn collect_steering_review_notes(
         });
     }
 
-    if context.initial_edit.known_edit
-        && !has_file_targeting_step(loop_state)
-        && !decision_targets_file(&decision.action)
-    {
+    let likely_targets = if context.initial_edit.known_edit {
         let likely_targets = likely_action_bias_targets(loop_state, workspace_root, 3);
-        let likely_targets = if likely_targets.is_empty() {
+        if likely_targets.is_empty() {
             normalize_candidate_files(workspace_root, &context.initial_edit.candidate_files, 3)
         } else {
             likely_targets
-        };
+        }
+    } else {
+        Vec::new()
+    };
+
+    if context.initial_edit.known_edit
+        && should_apply_execution_review(loop_state, decision, &likely_targets)
+    {
         notes.push(SteeringReviewNote {
             kind: SteeringReviewKind::Execution,
-            note: format_action_bias_review_note(decision, &likely_targets),
+            note: format_action_bias_review_note(
+                decision,
+                &likely_targets,
+                exact_diff_pressure(loop_state, decision, &likely_targets),
+            ),
         });
     }
 
     notes
+}
+
+fn should_apply_execution_review(
+    loop_state: &PlannerLoopState,
+    decision: &RecursivePlannerDecision,
+    likely_targets: &[String],
+) -> bool {
+    if decision_is_exact_edit(&decision.action) {
+        return false;
+    }
+
+    if !has_file_targeting_step(loop_state) && !decision_targets_file(&decision.action) {
+        return true;
+    }
+
+    let pressure = exact_diff_pressure(loop_state, decision, likely_targets);
+    pressure.has_read_target || pressure.repeated_read.is_some()
 }
 
 fn normalize_candidate_files(
@@ -3855,15 +3878,74 @@ fn format_premise_challenge_review_note(
     lines.join("\n")
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+struct ExactDiffPressure {
+    has_read_target: bool,
+    repeated_read: Option<(String, usize)>,
+}
+
+fn exact_diff_pressure(
+    loop_state: &PlannerLoopState,
+    decision: &RecursivePlannerDecision,
+    likely_targets: &[String],
+) -> ExactDiffPressure {
+    let read_counts = prior_read_counts(loop_state);
+    let has_read_target = likely_targets
+        .iter()
+        .any(|path| read_counts.contains_key(path));
+    let repeated_read = match &decision.action {
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Read { path },
+        } => read_counts
+            .get(path)
+            .copied()
+            .filter(|count| *count >= 1)
+            .map(|count| (path.clone(), count)),
+        _ => None,
+    };
+
+    ExactDiffPressure {
+        has_read_target,
+        repeated_read,
+    }
+}
+
+fn prior_read_counts(loop_state: &PlannerLoopState) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for step in &loop_state.steps {
+        if let PlannerAction::Workspace {
+            action: WorkspaceAction::Read { path },
+        } = &step.action
+        {
+            *counts.entry(path.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn decision_is_exact_edit(action: &PlannerAction) -> bool {
+    matches!(
+        action,
+        PlannerAction::Workspace {
+            action: WorkspaceAction::WriteFile { .. }
+                | WorkspaceAction::ReplaceInFile { .. }
+                | WorkspaceAction::ApplyPatch { .. }
+        }
+    )
+}
+
 fn format_action_bias_review_note(
     decision: &RecursivePlannerDecision,
     likely_targets: &[String],
+    pressure: ExactDiffPressure,
 ) -> String {
     let mut lines = vec![
         "Steering review [action-bias]".to_string(),
         format!("Proposed action under review: {}", decision.action.summary()),
         "This turn is edit-oriented. Action produces information.".to_string(),
         "If there is a plausible target file, prefer read/diff/edit over another broad search or generic inspect.".to_string(),
+        "If the requested change is local and mechanical (padding, copy, one selector, one condition, or a small UI tweak), move into exact-diff state space now.".to_string(),
+        "Use `replace_in_file` when you can name the exact old and new text. Use `apply_patch` when the change spans a few nearby lines.".to_string(),
     ];
 
     if !likely_targets.is_empty() {
@@ -3871,6 +3953,17 @@ fn format_action_bias_review_note(
         for path in likely_targets.iter().take(3) {
             lines.push(format!("- {}", path));
         }
+    }
+
+    if let Some((path, count)) = pressure.repeated_read {
+        lines.push(format!(
+            "`{path}` has already been read {count} time(s). Another read is unlikely to add information."
+        ));
+    } else if pressure.has_read_target {
+        lines.push(
+            "A likely target file has already been read. If the requested change is concrete, edit it directly instead of rereading."
+                .to_string(),
+        );
     }
 
     lines.join("\n")
@@ -4577,9 +4670,9 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 #[cfg(test)]
 mod tests {
     use crate::application::{
-        ActiveRuntimeState, GathererProvider, MechSuitService, PreparedGathererLane,
-        POLICY_VIOLATION_DIRECT_REPLY, PreparedModelLane, PreparedRuntimeLanes,
-        RuntimeLaneConfig, RuntimeLaneRole, StructuredTurnTrace, TurnIntent,
+        ActiveRuntimeState, GathererProvider, MechSuitService, POLICY_VIOLATION_DIRECT_REPLY,
+        PreparedGathererLane, PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig,
+        RuntimeLaneRole, StructuredTurnTrace, TurnIntent,
     };
     use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
@@ -6707,6 +6800,59 @@ mod tests {
     }
 
     #[test]
+    fn action_bias_escalates_to_exact_diff_after_target_file_has_been_read() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "planner-step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "apps/web/src/runtime-shell.css".to_string(),
+                    },
+                },
+                outcome: "read the likely css target".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "apps/web/src/runtime-shell.css".to_string(),
+                snippet: ".runtime-shell-host { padding: 0; }".to_string(),
+                rationale: "likely css target".to_string(),
+                rank: 1,
+            }],
+            ..Default::default()
+        };
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: "apps/web/src/runtime-shell.css".to_string(),
+                },
+            },
+            rationale: "read the CSS file again before editing".to_string(),
+            answer: None,
+        };
+
+        let notes = super::collect_steering_review_notes(
+            &test_planner_loop_context(InitialEditInstruction {
+                known_edit: true,
+                candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+            }),
+            &loop_state,
+            &decision,
+            Path::new("/workspace"),
+        );
+
+        let note = notes
+            .iter()
+            .find(|note| note.kind == super::SteeringReviewKind::Execution)
+            .expect("action bias note should be present");
+        assert!(note.note.contains("exact-diff state space"));
+        assert!(note.note.contains("replace_in_file"));
+        assert!(note.note.contains("apply_patch"));
+        assert!(note.note.contains("apps/web/src/runtime-shell.css"));
+        assert!(note.note.contains("already been read 1 time"));
+    }
+
+    #[test]
     fn action_bias_reads_best_candidate_after_initial_search() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -6782,6 +6928,13 @@ mod tests {
                     rationale: "stop after acting".to_string(),
                     answer: None,
                 },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "enough information".to_string(),
+                    },
+                    rationale: "stop after acting".to_string(),
+                    answer: None,
+                },
             ],
             Arc::clone(&request_log),
         ));
@@ -6839,6 +6992,11 @@ mod tests {
         assert!(review_request.loop_state.notes.iter().any(|note| {
             note.contains("Likely target files") && note.contains("src/application/mod.rs")
         }));
+        assert!(review_request.loop_state.notes.iter().any(|note| {
+            note.contains("exact-diff state space")
+                && note.contains("replace_in_file")
+                && note.contains("apply_patch")
+        }));
 
         let executed_actions = synthesizer
             .executed_actions
@@ -6893,13 +7051,22 @@ mod tests {
                     ],
                 },
             },
-            vec![RecursivePlannerDecision {
-                action: PlannerAction::Stop {
-                    reason: "the file was enough".to_string(),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
                 },
-                rationale: "stop after the read".to_string(),
-                answer: None,
-            }],
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                },
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
@@ -7039,13 +7206,22 @@ mod tests {
                     candidate_files: vec!["src/one.rs".to_string(), "src/two.rs".to_string()],
                 },
             },
-            vec![RecursivePlannerDecision {
-                action: PlannerAction::Stop {
-                    reason: "done".to_string(),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "done".to_string(),
+                    },
+                    rationale: "stop".to_string(),
+                    answer: None,
                 },
-                rationale: "stop".to_string(),
-                answer: None,
-            }],
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "done".to_string(),
+                    },
+                    rationale: "stop".to_string(),
+                    answer: None,
+                },
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());

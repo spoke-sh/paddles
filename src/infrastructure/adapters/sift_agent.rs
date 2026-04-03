@@ -2889,6 +2889,7 @@ Rules:\n\
 - Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 - Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
+- If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
 - Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
@@ -2960,6 +2961,7 @@ For `answer`, put the user-facing reply in `answer` and keep `rationale` as the 
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
+If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -3023,6 +3025,7 @@ For `answer`, put the user-facing reply in `answer` and keep `rationale` as the 
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
+If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
 Interpretation context:\n\
@@ -3081,6 +3084,7 @@ Rules:\n\
 - Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 - Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
+- If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - List files when you need a bounded inventory of candidate files.\n\
 - Read when a specific file or artifact should be opened.\n\
@@ -3158,6 +3162,7 @@ If you are stopping because you already have the final user-facing answer, put t
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
+If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 \n\
@@ -3221,6 +3226,7 @@ Invalid reply to correct:\n\
 Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
+If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
@@ -5784,6 +5790,60 @@ mod tests {
         assert!(prompt.contains("user: previous turn"));
         assert!(prompt.contains("\"edit\":\"yes|no\""));
         assert!(prompt.contains("\"candidate_files\":[\"path1\",\"path2\",\"path3\"]"));
+        assert!(prompt.contains("exact-diff state space"));
+        assert!(prompt.contains("replace_in_file"));
+        assert!(prompt.contains("apply_patch"));
+    }
+
+    #[test]
+    fn planner_action_prompts_include_exact_diff_guidance() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(RecordingConversation::new(
+                r#"{"action":"stop","reason":"done","rationale":"enough context","answer":"patched the css"}"#,
+                Arc::clone(&recorded_messages),
+            )),
+        );
+
+        let request = PlannerRequest::new(
+            "The .runtime-shell-host class needs some padding. Something around 8px",
+            workspace.path(),
+            InterpretationContext::default(),
+            crate::domain::ports::PlannerBudget::default(),
+        )
+        .with_loop_state(PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "planner-step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "apps/web/src/runtime-shell.css".to_string(),
+                    },
+                },
+                outcome: "read the likely target file".to_string(),
+            }],
+            notes: vec!["Steering review [action-bias]\nIf one likely target file is already known or already read, move into exact-diff state space.".to_string()],
+            ..PlannerLoopState::default()
+        });
+
+        adapter
+            .select_planner_action(&request, &NullTurnEventSink)
+            .expect("planner action");
+
+        let prompt = recorded_messages
+            .lock()
+            .expect("history lock")
+            .first()
+            .cloned()
+            .expect("recorded prompt");
+        assert!(prompt.contains("exact-diff state space"));
+        assert!(prompt.contains("replace_in_file"));
+        assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("Steering review [action-bias]"));
     }
 
     #[test]

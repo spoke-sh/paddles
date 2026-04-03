@@ -829,6 +829,7 @@ Rules:
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
 - When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
 - When the user requests a concrete code change, prefer `write_file`, `replace_in_file`, or `apply_patch` over describing the edit in prose.
+- If `edit` is `yes` and one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.
 - If the loop-state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.
 - Respond ONLY with the JSON object, no prose.
 "#
@@ -2056,6 +2057,7 @@ fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat)
         "User prompt: {}\n\n{}\nSelect your first action.\n\
 If the user is asking to debug a repository failure like CI, build, test, workflow, or lint breakage, do not answer directly before at least one local workspace action unless the interpretation context already contains the exact failure evidence.\n\
 When the user is asking for a code or file change, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.\n\
+If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}",
         request.user_prompt,
         build_http_planner_runtime_context(request),
@@ -2070,6 +2072,7 @@ fn build_http_initial_action_retry_prompt(request: &PlannerRequest, format: ApiF
 {}\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
 If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
+If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 \n\
 User prompt: {}",
         build_http_planner_runtime_context(request),
@@ -2091,6 +2094,7 @@ Make one final constrained routing decision.\n\
 Do not ask the user for logs or repository state that the harness can inspect locally.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
 If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
+If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
@@ -2119,6 +2123,7 @@ fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat)
         "\nSelect your next action.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
+If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the loop-state notes contain a steering review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
 {}",
         planner_transport_reply_instruction(format)
@@ -2132,6 +2137,7 @@ fn build_http_planner_retry_prompt(request: &PlannerRequest, format: ApiFormat) 
 {}\n\
 Current loop state:\n\
 {}\n\
+If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
 \n\
 Current user request: {}",
@@ -2153,6 +2159,7 @@ fn build_http_planner_redecision_prompt(
 Current loop state:\n\
 {}\n\
 Make one final constrained next-action decision.\n\
+If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
 \n\
 Invalid reply to correct:\n\
@@ -3543,6 +3550,9 @@ mod tests {
         assert!(prompt.contains("Return exactly one complete JSON object"));
         assert!(prompt.contains("The first key must be `action`"));
         assert!(prompt.contains("Do not wrap the JSON in markdown fences"));
+        assert!(prompt.contains("exact-diff state space"));
+        assert!(prompt.contains("replace_in_file"));
+        assert!(prompt.contains("apply_patch"));
         assert!(prompt.contains("Do not emit partial, truncated, or streaming JSON"));
         assert!(prompt.contains("Paddles executes your selected action locally"));
         assert!(prompt.contains("working hypotheses until local evidence confirms them"));
@@ -3592,6 +3602,9 @@ mod tests {
         assert!(prompt.contains("Steering review [premise-challenge]"));
         assert!(prompt.contains("gh run list --limit 10"));
         assert!(prompt.contains("\"conclusion\":\"success\""));
+        assert!(prompt.contains("exact-diff state space"));
+        assert!(prompt.contains("replace_in_file"));
+        assert!(prompt.contains("apply_patch"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
