@@ -290,6 +290,8 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
                 app.input_mode = InputMode::Normal;
                 app.push_event("Login cancelled", "Returned to normal input.");
                 false
+            } else if app.input.is_empty() && app.cancel_latest_queued_steering_prompt() {
+                false
             } else {
                 false
             }
@@ -1150,6 +1152,30 @@ impl InteractiveApp {
             .collect();
         self.history_cursor = None;
         self.history_draft.clear();
+    }
+
+    fn cancel_latest_queued_steering_prompt(&mut self) -> bool {
+        let Some(index) = self
+            .queued_prompts
+            .iter()
+            .rposition(|prompt| matches!(prompt, QueuedPrompt::Steering(_)))
+        else {
+            return false;
+        };
+
+        let Some(QueuedPrompt::Steering(candidate)) = self.queued_prompts.remove(index) else {
+            return false;
+        };
+
+        self.rows.push(TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Cancelled queued steering prompt",
+            format!(
+                "`{}` removed from the queue.",
+                trim_for_display(&inline_multiline_text(&candidate.prompt), 96)
+            ),
+        ));
+        true
     }
 
     /// Returns (line_index, column, line_start_char_offset, line_char_len) for the cursor.
@@ -3946,6 +3972,40 @@ mod tests {
         assert_eq!(app.input_mode, InputMode::Normal);
         assert!(app.rows.iter().any(|row| row.header == "• Login cancelled"
             && row.content.contains("Returned to normal input.")));
+    }
+
+    #[test]
+    fn escape_removes_latest_queued_steering_prompt_without_exiting() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "first".to_string();
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("first".to_string()))
+        );
+        assert!(app.busy);
+
+        app.input = "Are you stuck?".to_string();
+        app.submit_prompt();
+        assert_eq!(app.queued_prompts.len(), 1);
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert!(app.queued_prompts.is_empty());
+        assert!(app.rows.iter().any(|row| row.header == "• Cancelled queued steering prompt"
+            && row.content.contains("Are you stuck?")));
     }
 
     #[test]
