@@ -420,6 +420,8 @@ fn invalid_structured_response_fallback(response: &str) -> Option<String> {
         return None;
     }
 
+    let line_count = trimmed.lines().count().max(1);
+    let char_count = trimmed.chars().count();
     let excerpt_lines = trimmed
         .lines()
         .take(INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES)
@@ -430,18 +432,37 @@ fn invalid_structured_response_fallback(response: &str) -> Option<String> {
         excerpt_lines.join("\n").trim_end().to_string()
     };
 
-    let truncation_note = if trimmed.lines().count() > INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES {
+    let payload_scope_note = if line_count > INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES {
+        format!(
+            "excerpt from a {}-line / {}-char payload",
+            line_count, char_count
+        )
+    } else {
+        format!(
+            "complete payload, {} lines / {} chars",
+            line_count, char_count
+        )
+    };
+    let truncation_note = if line_count > INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES {
         format!(
             "\n\nPayload excerpt truncated after {} lines.",
             INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES
+        )
+    } else {
+        format!("\n\nThe payload itself ended after {} lines.", line_count)
+    };
+    let escaped_view = if line_count <= 6 {
+        format!(
+            "\n\nEscaped payload view:\n```text\n{}\n```",
+            trimmed.escape_default()
         )
     } else {
         String::new()
     };
 
     Some(format!(
-        "The model returned an invalid structured answer.\n\nRaw payload excerpt:\n```json\n{}\n```{}",
-        excerpt, truncation_note
+        "The model returned an invalid structured answer.\n\nRaw payload excerpt ({payload_scope_note}):\n```json\n{}\n```{}{}",
+        excerpt, truncation_note, escaped_view
     ))
 }
 
@@ -1016,6 +1037,9 @@ mod tests {
         let normalized = normalize_assistant_response(response);
         assert!(normalized.contains("invalid structured answer"));
         assert!(normalized.contains("Raw payload excerpt"));
+        assert!(normalized.contains("complete payload"));
+        assert!(normalized.contains("The payload itself ended after"));
+        assert!(normalized.contains("Escaped payload view"));
         assert!(normalized.contains("\"blocks\""));
         assert!(normalized.contains("```json"));
     }
