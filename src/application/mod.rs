@@ -1498,7 +1498,7 @@ fn render_turn_event(event: &TurnEvent) -> String {
                 .as_deref()
                 .map(|d| format!(" | {d}"))
                 .unwrap_or_default();
-            format!("• Searching ({phase})\n  └ elapsed {elapsed_seconds}s{eta}{strategy}{suffix}")
+            format!("• Hunting ({phase})\n  └ elapsed {elapsed_seconds}s{eta}{strategy}{suffix}")
         }
         TurnEvent::SynthesisReady {
             grounded,
@@ -4844,7 +4844,7 @@ mod tests {
     use crate::application::{
         ActiveRuntimeState, GathererProvider, MechSuitService, POLICY_VIOLATION_DIRECT_REPLY,
         PreparedGathererLane, PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig,
-        RuntimeLaneRole, StructuredTurnTrace, TurnIntent,
+        RuntimeLaneRole, StructuredTurnTrace, TurnIntent, render_turn_event,
     };
     use crate::domain::model::{AuthoredResponse, CompactionPlan, CompactionRequest, ResponseMode};
     use crate::domain::model::{
@@ -5854,6 +5854,21 @@ mod tests {
             TurnEvent::HarnessState { snapshot }
                 if snapshot.chamber == crate::domain::model::HarnessChamber::Rendering
         )));
+    }
+
+    #[test]
+    fn plain_turn_event_rendering_uses_hunting_language_for_gatherer_progress() {
+        let rendered = render_turn_event(&TurnEvent::GathererSearchProgress {
+            phase: "Indexing".to_string(),
+            elapsed_seconds: 110,
+            eta_seconds: Some(0),
+            strategy: Some("bm25".to_string()),
+            detail: Some("indexing 75914/75934 files".to_string()),
+        });
+
+        assert!(rendered.starts_with("• Hunting (Indexing)"));
+        assert!(rendered.contains("strategy=bm25"));
+        assert!(rendered.contains("indexing 75914/75934 files"));
     }
 
     #[test]

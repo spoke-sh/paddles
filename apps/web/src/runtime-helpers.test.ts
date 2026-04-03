@@ -20,6 +20,19 @@ describe('eventRow', () => {
     expect(row?.text).toContain('eta 12s');
   });
 
+  it('uses hunting as the fallback gatherer label when no detail is available', () => {
+    const row = eventRow({
+      type: 'gatherer_search_progress',
+      phase: 'Indexing',
+      strategy: '',
+      eta_seconds: null,
+      detail: '',
+    });
+
+    expect(row).toBeTruthy();
+    expect(row?.text).toContain('hunting (Indexing)');
+  });
+
   it('surfaces harness governor state with chamber ownership and timeout phase', () => {
     const row = eventRow({
       type: 'harness_state',

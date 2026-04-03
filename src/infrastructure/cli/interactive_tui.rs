@@ -727,7 +727,7 @@ fn in_flight_label(last_event: &TurnEvent) -> &'static str {
             crate::domain::model::HarnessChamber::Interpretation => "Interpreting",
             crate::domain::model::HarnessChamber::Routing => "Routing",
             crate::domain::model::HarnessChamber::Planning => "Planning",
-            crate::domain::model::HarnessChamber::Gathering => "Searching",
+            crate::domain::model::HarnessChamber::Gathering => "Hunting",
             crate::domain::model::HarnessChamber::Tooling => "Running tool",
             crate::domain::model::HarnessChamber::Threading => "Threading",
             crate::domain::model::HarnessChamber::Generation => "Generating response",
@@ -754,7 +754,7 @@ fn in_flight_label(last_event: &TurnEvent) -> &'static str {
         TurnEvent::PlannerSummary { .. } => "Synthesizing",
 
         // Gathering evidence.
-        TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. } => "Searching",
+        TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. } => "Hunting",
 
         // Context assembly → model is about to think.
         TurnEvent::ContextAssembly { .. } | TurnEvent::ContextStrain { .. } => "Thinking",
@@ -1876,7 +1876,7 @@ impl InteractiveApp {
             Some((
                 TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. },
                 _,
-            )) => "searching",
+            )) => "hunting",
             _ => match self.busy_phase {
                 BusyPhase::Thinking => "thinking",
                 BusyPhase::Rendering => "rendering",
@@ -2681,7 +2681,7 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
                 .unwrap_or_default();
             TranscriptRow::new(
                 TranscriptRowKind::Event,
-                format!("• Searching ({phase}) — {elapsed} (eta {eta}){strategy}"),
+                format!("• Hunting ({phase}) — {elapsed} (eta {eta}){strategy}"),
                 content,
             )
         }
@@ -3255,6 +3255,27 @@ mod tests {
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Ran shell");
         assert_eq!(row.content, "git status --short");
+    }
+
+    #[test]
+    fn gatherer_progress_rows_use_hunting_language() {
+        let row = format_turn_event_row(
+            TurnEvent::GathererSearchProgress {
+                phase: "Indexing".to_string(),
+                elapsed_seconds: 110,
+                eta_seconds: Some(0),
+                strategy: Some("bm25".to_string()),
+                detail: Some("indexing 75914/75934 files".to_string()),
+            },
+            0,
+        );
+
+        assert_eq!(row.kind, TranscriptRowKind::Event);
+        assert_eq!(
+            row.header,
+            "• Hunting (Indexing) — 1m 50s (eta 0ms) strategy=bm25"
+        );
+        assert_eq!(row.content, "indexing 75914/75934 files");
     }
 
     #[test]
@@ -4385,6 +4406,36 @@ mod tests {
         app.tick();
         let row = app.rows.last().expect("in-flight row");
         assert_eq!(row.header, "• Synthesizing...");
+    }
+
+    #[test]
+    fn in_flight_row_says_hunting_for_gatherer_progress() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+        app.last_event = Some((
+            TurnEvent::GathererSearchProgress {
+                phase: "Indexing".to_string(),
+                elapsed_seconds: 3,
+                eta_seconds: None,
+                strategy: Some("bm25".to_string()),
+                detail: Some("indexing 4/10 files".to_string()),
+            },
+            Instant::now() - Duration::from_secs(3),
+        ));
+
+        app.tick();
+        let row = app.rows.last().expect("in-flight row");
+        assert_eq!(row.header, "• Hunting...");
     }
 
     #[test]

@@ -709,7 +709,7 @@ export function eventRow(event: TurnEvent) {
     const detail = String(event.detail || '').trim();
     const etaSeconds =
       typeof event.eta_seconds === 'number' ? Number(event.eta_seconds) : null;
-    const fallback = `searching (${String(event.phase || 'phase')})`;
+    const fallback = `hunting (${String(event.phase || 'phase')})`;
     const text = [
       strategy || null,
       detail || fallback,
