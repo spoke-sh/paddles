@@ -6,6 +6,7 @@ use crate::domain::ports::{
     PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
     RetainedEvidence, RetrievalMode, RetrievalStrategy,
 };
+use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
@@ -128,19 +129,13 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<u64>();
 
         let search_preview = request.user_query.chars().take(96).collect::<String>();
-        let search_summary = format!(
-            "query: \"{}\" · mode={} · strategy={} · steps={} · target {} hit(s)",
-            search_preview,
-            request.planning.mode.label(),
-            request.planning.retrieval_strategy.label(),
-            request.planning.step_limit,
-            request.budget.max_items
-        );
         let event_sink_for_task = event_sink.clone();
-        let search_summary_for_task = search_summary.clone();
         let strategy_for_task = strategy.to_string();
-        let initial_search_detail =
-            format!("{search_summary} · elapsed: 0s · status: initializing gatherer");
+        let initial_search_detail = format!(
+            "initializing {} gatherer for \"{}\"",
+            request.planning.retrieval_strategy.label(),
+            search_preview,
+        );
 
         if let Some(sink) = event_sink.as_ref() {
             sink.emit(TurnEvent::GathererSearchProgress {
@@ -157,6 +152,8 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         // Runs as a separate tokio task so it doesn't block the spawn_blocking closure.
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let done_flag = Arc::clone(&done);
+        let latest_progress = Arc::new(std::sync::Mutex::new(None::<SiftProgressDisplay>));
+        let latest_progress_for_task = Arc::clone(&latest_progress);
         let timer_handle = tokio::spawn(async move {
             let start = tokio::time::Instant::now();
             let mut delay = tokio::time::sleep(Duration::from_secs(2));
@@ -177,19 +174,24 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
             let event_sink = event_sink_for_task;
             let strategy = strategy_for_task;
             let started_at = Instant::now();
-            let search_summary = search_summary_for_task;
+            let telemetry_sift = Arc::clone(&sift);
             let result = sift.search_autonomous_with_progress(
                 search_request,
                 Some(move |progress: &SearchProgress| {
-                    let (phase, detail, eta_seconds) =
-                        describe_sift_progress(progress, &search_summary);
+                    let display =
+                        describe_sift_progress(progress, &telemetry_sift.telemetry_snapshot());
+                    *latest_progress_for_task
+                        .lock()
+                        .expect("latest progress lock") = Some(display.clone());
                     if let Some(sink) = event_sink.as_ref() {
                         sink.emit(TurnEvent::GathererSearchProgress {
-                            phase,
+                            phase: display.phase,
                             elapsed_seconds: started_at.elapsed().as_secs(),
-                            eta_seconds: eta_seconds.map(|duration| duration.as_secs()),
+                            eta_seconds: display
+                                .estimated_remaining
+                                .map(|duration| duration.as_secs()),
                             strategy: Some(strategy.clone()),
-                            detail: Some(detail),
+                            detail: Some(display.detail),
                         });
                     }
                 }),
@@ -207,14 +209,23 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
                     if let Some(elapsed_seconds) = event
                         && let Some(sink) = event_sink.as_ref()
                     {
+                        let latest = latest_progress.lock().expect("latest progress lock").clone();
                         sink.emit(TurnEvent::GathererSearchProgress {
-                            phase: "searching".to_string(),
+                            phase: latest
+                                .as_ref()
+                                .map(|progress| progress.phase.clone())
+                                .unwrap_or_else(|| "searching".to_string()),
                             elapsed_seconds,
-                            eta_seconds: None,
+                            eta_seconds: latest
+                                .as_ref()
+                                .and_then(|progress| progress.estimated_remaining.map(|duration| duration.as_secs())),
                             strategy: Some(strategy.to_string()),
-                            detail: Some(format!(
-                                "{search_summary} · elapsed: {elapsed_seconds}s · status: searching",
-                            )),
+                            detail: Some(
+                                latest
+                                    .as_ref()
+                                    .map(|progress| progress.detail.clone())
+                                    .unwrap_or_else(|| "searching".to_string()),
+                            ),
                         });
                     }
                 }
@@ -254,70 +265,6 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
         }
 
         Ok(ContextGatherResult::available(bundle))
-    }
-}
-
-fn describe_sift_progress(
-    progress: &SearchProgress,
-    search_summary: &str,
-) -> (String, String, Option<Duration>) {
-    match progress {
-        SearchProgress::Indexing {
-            phase,
-            files_processed,
-            files_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{search_summary} · indexing {files_processed}/{files_total} source(s)"),
-            *estimated_remaining,
-        ),
-        SearchProgress::Embedding {
-            phase,
-            chunks_processed,
-            chunks_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{phase} {chunks_processed}/{chunks_total} chunks"),
-            *estimated_remaining,
-        ),
-        SearchProgress::PlannerStep {
-            phase,
-            step_index,
-            action,
-            query,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!(
-                "{phase} step {step_index}: {action}{}",
-                query
-                    .as_deref()
-                    .map_or_else(String::new, |value| format!(" · query: {value}"))
-            ),
-            *estimated_remaining,
-        ),
-        SearchProgress::Retrieving {
-            phase,
-            turn_index,
-            turns_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{phase} turn {turn_index}/{turns_total}"),
-            *estimated_remaining,
-        ),
-        SearchProgress::Ranking {
-            phase,
-            results_processed,
-            results_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{phase} ranking {results_processed}/{results_total} hits"),
-            *estimated_remaining,
-        ),
     }
 }
 

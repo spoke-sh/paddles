@@ -8,6 +8,7 @@ pub mod sift_autonomous_gatherer;
 pub mod sift_context_gatherer;
 pub mod sift_direct_gatherer;
 pub mod sift_planner;
+pub(crate) mod sift_progress;
 pub mod sift_registry;
 pub mod trace_recorders;
 pub mod transit_resolver;

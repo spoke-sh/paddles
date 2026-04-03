@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 hf-hub = "0.4.1"
-sift = { git = "https://github.com/rupurt/sift", rev = "824162db995ea8e4b42e14b181279d95692c386d" }
+sift = { git = "https://github.com/rupurt/sift", rev = "2932cb44422f218a8ef96b45929813b7849a9379" }
 candle-core = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-nn = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-transformers = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }

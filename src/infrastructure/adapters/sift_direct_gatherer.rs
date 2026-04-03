@@ -3,14 +3,13 @@ use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
     GathererCapability, PlannerDecision, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
 };
+use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use anyhow::Result;
 use async_trait::async_trait;
-use sift::internal::dense::DenseReranker;
-use sift::internal::search::{
-    Bm25Index, Embedder, SearchEngine, SearchEnvironment, SearchRequest, SearchServiceBuilder,
-    load_search_corpus_with_progress,
+use sift::{
+    EnvironmentFactInput, LocalContextSource, SearchInput, SearchOptions, SearchProgress,
+    SearchResponse, Sift,
 };
-use sift::{EnvironmentFactInput, LocalContextSource, SearchPhase, SearchProgress, SearchResponse};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,6 +17,7 @@ use std::time::{Duration, Instant};
 
 pub struct SiftDirectGathererAdapter {
     workspace_root: PathBuf,
+    sift: Arc<Sift>,
     verbose: AtomicU8,
     event_sink: Mutex<Option<Arc<dyn TurnEventSink>>>,
 }
@@ -27,6 +27,11 @@ impl SiftDirectGathererAdapter {
         let workspace_root = workspace_root.into();
         Self {
             workspace_root: workspace_root.clone(),
+            sift: Arc::new(
+                Sift::builder()
+                    .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                    .build(),
+            ),
             verbose: AtomicU8::new(0),
             event_sink: Mutex::new(None),
         }
@@ -36,10 +41,7 @@ impl SiftDirectGathererAdapter {
         self.verbose.store(level, Ordering::Relaxed);
     }
 
-    fn build_search_request(
-        &self,
-        request: &ContextGatherRequest,
-    ) -> (SearchRequest, Vec<LocalContextSource>) {
+    fn build_search_input(&self, request: &ContextGatherRequest) -> SearchInput {
         let local_context = request
             .prior_context
             .iter()
@@ -51,18 +53,17 @@ impl SiftDirectGathererAdapter {
                 ))
             })
             .collect::<Vec<_>>();
-        let mut search_request = SearchRequest::new(
-            request.planning.retrieval_strategy.label(),
-            request.user_query.clone(),
-            self.workspace_root.clone(),
-        );
-        search_request.intent = Some(request.intent_reason.clone());
-        search_request.limit = request.budget.max_items;
-        search_request.shortlist = request.budget.max_items;
-        search_request.verbose = self.verbose.load(Ordering::Relaxed);
-        search_request.local_context = local_context.clone();
-        search_request.cache_dir = Some(cache_dir_for_sift(&self.workspace_root));
-        (search_request, local_context)
+
+        SearchInput::new(&self.workspace_root, request.user_query.clone())
+            .with_intent(request.intent_reason.clone())
+            .with_options(
+                SearchOptions::default()
+                    .with_strategy(request.planning.retrieval_strategy.label())
+                    .with_limit(request.budget.max_items)
+                    .with_shortlist(request.budget.max_items)
+                    .with_verbose(self.verbose.load(Ordering::Relaxed))
+                    .with_local_context(local_context),
+            )
     }
 
     fn search_workspace_with_progress<F: Fn(&SearchProgress)>(
@@ -70,74 +71,8 @@ impl SiftDirectGathererAdapter {
         request: &ContextGatherRequest,
         progress: F,
     ) -> Result<SearchResponse> {
-        let (search_request, local_context) = self.build_search_request(request);
-        let plan = search_plan_for_strategy(request.planning.retrieval_strategy);
-        let embedder = if plan.retrievers.contains(&sift::RetrieverPolicy::Vector) {
-            Some(
-                Arc::new(DenseReranker::load(search_request.dense_model.clone())?)
-                    as Arc<dyn Embedder>,
-            )
-        } else {
-            None
-        };
-        let corpus = load_search_corpus_with_progress(
-            &search_request.path,
-            None,
-            search_request.verbose,
-            embedder.as_deref(),
-            &search_request.telemetry,
-            &local_context,
-            search_request.cache_dir.as_deref(),
-            Some(&progress),
-        )?;
-        let total_chunks = corpus
-            .artifacts
-            .iter()
-            .map(|artifact| artifact.segments.len())
-            .sum();
-        if total_chunks > 0 && plan.retrievers.contains(&sift::RetrieverPolicy::Vector) {
-            progress(&SearchProgress::Embedding {
-                phase: SearchPhase::Embedding,
-                chunks_processed: 0,
-                chunks_total: total_chunks,
-                estimated_remaining: None,
-            });
-        }
-        let index = Bm25Index::build(&corpus.artifacts);
-        let llm_reranker = SearchServiceBuilder::load_llm_reranker(&plan, &search_request)?;
-        let env = SearchEnvironment::new_with_plan(
-            &search_request,
-            plan,
-            &corpus,
-            &index,
-            embedder,
-            llm_reranker,
-        )?;
-        progress(&SearchProgress::Retrieving {
-            phase: SearchPhase::Retrieving,
-            turn_index: 1,
-            turns_total: 1,
-            estimated_remaining: None,
-        });
-        let response = env.search(&search_request)?;
-        if total_chunks > 0
-            && request.planning.retrieval_strategy
-                == crate::domain::ports::RetrievalStrategy::Vector
-        {
-            progress(&SearchProgress::Embedding {
-                phase: SearchPhase::Embedding,
-                chunks_processed: total_chunks,
-                chunks_total: total_chunks,
-                estimated_remaining: Some(Duration::ZERO),
-            });
-        }
-        progress(&SearchProgress::Ranking {
-            phase: SearchPhase::Ranking,
-            results_processed: response.hits.len(),
-            results_total: response.hits.len(),
-            estimated_remaining: Some(Duration::ZERO),
-        });
-        Ok(response)
+        self.sift
+            .search_with_progress(self.build_search_input(request), Some(progress))
     }
 }
 
@@ -157,21 +92,13 @@ impl ContextGatherer for SiftDirectGathererAdapter {
     ) -> Result<ContextGatherResult, anyhow::Error> {
         let event_sink = self.event_sink.lock().expect("event sink lock").clone();
         let strategy = request.planning.retrieval_strategy.label().to_string();
-        let search_summary = format!(
-            "query: \"{}\" · strategy={} · target {} hit(s)",
-            request.user_query.chars().take(96).collect::<String>(),
-            strategy,
-            request.budget.max_items
-        );
         if let Some(sink) = event_sink.as_ref() {
             sink.emit(TurnEvent::GathererSearchProgress {
                 phase: "searching".to_string(),
                 elapsed_seconds: 0,
                 eta_seconds: None,
                 strategy: Some(strategy.clone()),
-                detail: Some(format!(
-                    "{search_summary} · elapsed: 0s · status: initializing direct retrieval",
-                )),
+                detail: Some("initializing direct retrieval".to_string()),
             });
         }
 
@@ -200,25 +127,34 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         let request_for_search = request.clone();
         let event_sink_for_task = event_sink.clone();
         let strategy_for_task = strategy.clone();
-        let search_summary_for_task = search_summary.clone();
+        let sift = Arc::clone(&self.sift);
+        let latest_progress = Arc::new(Mutex::new(None::<SiftProgressDisplay>));
+        let latest_progress_for_task = Arc::clone(&latest_progress);
         let search_handle = tokio::task::spawn_blocking(move || {
+            let started_at = Instant::now();
             let adapter = SiftDirectGathererAdapter {
                 workspace_root,
+                sift,
                 verbose: AtomicU8::new(verbose),
                 event_sink: Mutex::new(None),
             };
-            let started_at = Instant::now();
+            let telemetry_sift = Arc::clone(&adapter.sift);
             let result =
                 adapter.search_workspace_with_progress(&request_for_search, move |progress| {
-                    let (phase, detail, eta_seconds) =
-                        describe_direct_sift_progress(progress, &search_summary_for_task);
+                    let display =
+                        describe_sift_progress(progress, &telemetry_sift.telemetry_snapshot());
+                    *latest_progress_for_task
+                        .lock()
+                        .expect("latest progress lock") = Some(display.clone());
                     if let Some(sink) = event_sink_for_task.as_ref() {
                         sink.emit(TurnEvent::GathererSearchProgress {
-                            phase,
+                            phase: display.phase,
                             elapsed_seconds: started_at.elapsed().as_secs(),
-                            eta_seconds: eta_seconds.map(|duration| duration.as_secs()),
+                            eta_seconds: display
+                                .estimated_remaining
+                                .map(|duration| duration.as_secs()),
                             strategy: Some(strategy_for_task.clone()),
-                            detail: Some(detail),
+                            detail: Some(display.detail),
                         });
                     }
                 });
@@ -234,14 +170,23 @@ impl ContextGatherer for SiftDirectGathererAdapter {
                     if let Some(elapsed_seconds) = event
                         && let Some(sink) = event_sink.as_ref()
                     {
+                        let latest = latest_progress.lock().expect("latest progress lock").clone();
                         sink.emit(TurnEvent::GathererSearchProgress {
-                            phase: "searching".to_string(),
+                            phase: latest
+                                .as_ref()
+                                .map(|progress| progress.phase.clone())
+                                .unwrap_or_else(|| "searching".to_string()),
                             elapsed_seconds,
-                            eta_seconds: None,
+                            eta_seconds: latest
+                                .as_ref()
+                                .and_then(|progress| progress.estimated_remaining.map(|duration| duration.as_secs())),
                             strategy: Some(strategy.clone()),
-                            detail: Some(format!(
-                                "{search_summary} · elapsed: {elapsed_seconds}s · status: direct retrieval in progress",
-                            )),
+                            detail: Some(
+                                latest
+                                    .as_ref()
+                                    .map(|progress| progress.detail.clone())
+                                    .unwrap_or_else(|| "direct retrieval in progress".to_string()),
+                            ),
                         });
                     }
                 }
@@ -334,72 +279,6 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         Ok(ContextGatherResult::available(
             EvidenceBundle::new(summary, items).with_planner(planner),
         ))
-    }
-}
-
-fn describe_direct_sift_progress(
-    progress: &SearchProgress,
-    search_summary: &str,
-) -> (String, String, Option<Duration>) {
-    match progress {
-        SearchProgress::Indexing {
-            phase,
-            files_processed,
-            files_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{search_summary} · indexing {files_processed}/{files_total} source(s)"),
-            *estimated_remaining,
-        ),
-        SearchProgress::Embedding {
-            phase,
-            chunks_processed,
-            chunks_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{phase} {chunks_processed}/{chunks_total} chunks"),
-            *estimated_remaining,
-        ),
-        SearchProgress::Retrieving {
-            phase,
-            turn_index,
-            turns_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{phase} turn {turn_index}/{turns_total}"),
-            *estimated_remaining,
-        ),
-        SearchProgress::Ranking {
-            phase,
-            results_processed,
-            results_total,
-            estimated_remaining,
-        } => (
-            phase.to_string(),
-            format!("{phase} ranking {results_processed}/{results_total} hits"),
-            *estimated_remaining,
-        ),
-        SearchProgress::PlannerStep { .. } => (
-            "searching".to_string(),
-            format!("{search_summary} · status: direct retrieval in progress"),
-            None,
-        ),
-    }
-}
-
-fn search_plan_for_strategy(strategy: crate::domain::ports::RetrievalStrategy) -> sift::SearchPlan {
-    match strategy {
-        crate::domain::ports::RetrievalStrategy::Lexical => sift::SearchPlan::default_lexical(),
-        crate::domain::ports::RetrievalStrategy::Vector => sift::SearchPlan {
-            name: "vector".to_string(),
-            query_expansion: sift::QueryExpansionPolicy::None,
-            retrievers: vec![sift::RetrieverPolicy::Vector],
-            fusion: sift::FusionPolicy::Rrf,
-            reranking: sift::RerankingPolicy::None,
-        },
     }
 }
 
@@ -576,6 +455,16 @@ mod tests {
             progress_details
                 .iter()
                 .any(|detail| detail.contains("indexing"))
+        );
+        assert!(
+            progress_details
+                .iter()
+                .any(|detail| detail.contains("bm25 cache"))
+        );
+        assert!(
+            progress_details
+                .iter()
+                .any(|detail| detail.contains("fresh"))
         );
         assert!(
             progress_details

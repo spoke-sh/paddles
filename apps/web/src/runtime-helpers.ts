@@ -630,6 +630,18 @@ export function manifoldSignalLabel(signal: ManifoldSignalState) {
   return signalKindLabel(signal.kind);
 }
 
+function formatDuration(seconds: number) {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (remainder === 0) {
+    return `${minutes}m`;
+  }
+  return `${minutes}m ${String(remainder).padStart(2, '0')}s`;
+}
+
 export function primitivePhase(
   turn: { frames: ManifoldFrame[] } | null,
   frameIndex: number,
@@ -677,10 +689,22 @@ export function eventRow(event: TurnEvent) {
     return { badge: 'gather', badgeClass: 'gatherer', text: String(event.summary || '') };
   }
   if (type === 'gatherer_search_progress') {
+    const strategy = String(event.strategy || '').trim();
+    const detail = String(event.detail || '').trim();
+    const etaSeconds =
+      typeof event.eta_seconds === 'number' ? Number(event.eta_seconds) : null;
+    const fallback = `searching (${String(event.phase || 'phase')})`;
+    const text = [
+      strategy || null,
+      detail || fallback,
+      etaSeconds == null ? null : `eta ${formatDuration(etaSeconds)}`,
+    ]
+      .filter(Boolean)
+      .join(' · ');
     return {
       badge: 'gather',
       badgeClass: 'gatherer',
-      text: `searching (${String(event.phase || 'phase')})`,
+      text,
     };
   }
   if (type === 'planner_summary') {
