@@ -30,15 +30,14 @@ await withServer({
       const page = await browser.newPage();
 
       await page.goto('http://127.0.0.1:4174/');
+      await page.getByTestId('runtime-root').waitFor({ state: 'visible' });
       assert(
-        (await page.getByRole('heading', { name: 'Turborepo Runtime Web App' }).textContent())?.includes(
-          'Turborepo Runtime Web App'
-        ),
-        'expected the rust server root route to serve the React runtime shell'
+        await page.getByTestId('runtime-root').isVisible(),
+        'expected the rust server root route to render the runtime root'
       );
       assert(
-        (await page.getByTitle('Conversation Route Shell').getAttribute('src')) === '/legacy',
-        'expected the root React route to embed the legacy conversation runtime'
+        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy',
+        'expected the root React route to proxy the legacy root runtime'
       );
 
       await page.goto('http://127.0.0.1:4174/legacy');

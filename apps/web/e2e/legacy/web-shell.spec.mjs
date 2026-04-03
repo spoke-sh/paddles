@@ -3,9 +3,9 @@ import { expect, test } from '@playwright/test';
 test('root route serves the react runtime shell from the rust server', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Turborepo Runtime Web App' })).toBeVisible();
-  await expect(page.getByTestId('route-chat')).toContainText('Conversation Route Shell');
-  await expect(page.getByTitle('Conversation Route Shell')).toHaveAttribute('src', '/legacy');
+  await expect(page.getByTestId('runtime-root')).toBeVisible();
+  await expect(page.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy');
+  await expect(page.getByRole('heading', { name: 'Turborepo Runtime Web App' })).toHaveCount(0);
 });
 
 test('legacy chat route submits a prompt and renders the live shared transcript', async ({ page }) => {

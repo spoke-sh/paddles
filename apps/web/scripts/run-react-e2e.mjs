@@ -27,39 +27,35 @@ await withServer({
       const page = await browser.newPage();
       await page.goto('http://127.0.0.1:4173/');
 
-      const header = page.getByRole('heading', { name: 'Turborepo Runtime Web App' });
-      assert(await header.isVisible(), 'expected the React app header to be visible');
-
-      const chatRoute = page.getByTestId('route-chat');
+      const runtimeRoot = page.getByTestId('runtime-root');
+      await runtimeRoot.waitFor({ state: 'visible' });
       assert(
-        (await chatRoute.textContent())?.includes('Conversation Route Shell'),
-        'expected the chat route shell to render'
+        await runtimeRoot.isVisible(),
+        'expected the runtime root to render'
       );
       assert(
-        (await page.getByTitle('Conversation Route Shell').getAttribute('src')) === '/legacy',
-        'expected the chat route shell to embed the legacy runtime'
-      );
-
-      await page.getByRole('link', { name: 'Transit' }).click();
-      assert(page.url().endsWith('/transit'), 'expected the transit route to be active');
-      assert(
-        (await page.getByTestId('route-transit').textContent())?.includes('Transit Route Shell'),
-        'expected the transit route shell to render'
+        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy',
+        'expected the runtime root to proxy the legacy root route'
       );
       assert(
-        (await page.getByTitle('Transit Route Shell').getAttribute('src')) === '/legacy/transit',
-        'expected the transit route shell to embed the legacy transit runtime'
+        (await page.getByRole('heading', { name: 'Turborepo Runtime Web App' }).count()) === 0,
+        'expected the outer shell heading to be absent'
+      );
+      assert(
+        (await page.getByRole('navigation').count()) === 0,
+        'expected the outer shell navigation to be absent'
       );
 
-      await page.getByRole('link', { name: 'Manifold' }).click();
-      assert(page.url().endsWith('/manifold'), 'expected the manifold route to be active');
+      await page.goto('http://127.0.0.1:4173/transit');
       assert(
-        (await page.getByTestId('route-manifold').textContent())?.includes('Manifold Route Shell'),
-        'expected the manifold route shell to render'
+        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy/transit',
+        'expected the transit route to proxy the legacy transit route'
       );
+
+      await page.goto('http://127.0.0.1:4173/manifold');
       assert(
-        (await page.getByTitle('Manifold Route Shell').getAttribute('src')) === '/legacy/manifold',
-        'expected the manifold route shell to embed the legacy manifold runtime'
+        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy/manifold',
+        'expected the manifold route to proxy the legacy manifold route'
       );
     } finally {
       await browser.close();
