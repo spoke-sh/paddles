@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 const SUPPORTED_RENDER_TYPES: [&str; 4] = ["paragraph", "bullet_list", "code_block", "citations"];
 pub const ANTHROPIC_RENDER_TOOL_NAME: &str = "render_final_answer";
+const INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES: usize = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderCapability {
@@ -378,7 +379,8 @@ pub fn assistant_response_json_schema(require_citations: bool) -> Value {
 pub fn normalize_assistant_response(response: &str) -> String {
     match AssistantResponse::parse(response) {
         Some(parsed) => parsed.to_plain_text(),
-        None => sanitize_markdownish_fallback(response.trim()),
+        None => invalid_structured_response_fallback(response)
+            .unwrap_or_else(|| sanitize_markdownish_fallback(response.trim())),
     }
 }
 
@@ -410,6 +412,44 @@ fn sanitize_markdownish_fallback(input: &str) -> String {
     }
 
     sanitized.join("\n")
+}
+
+fn invalid_structured_response_fallback(response: &str) -> Option<String> {
+    let trimmed = unwrap_jsonish_body(response).trim();
+    if !looks_like_structured_response_payload(trimmed) {
+        return None;
+    }
+
+    let excerpt_lines = trimmed
+        .lines()
+        .take(INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES)
+        .collect::<Vec<_>>();
+    let excerpt = if excerpt_lines.is_empty() {
+        trimmed.to_string()
+    } else {
+        excerpt_lines.join("\n").trim_end().to_string()
+    };
+
+    let truncation_note = if trimmed.lines().count() > INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES {
+        format!(
+            "\n\nPayload excerpt truncated after {} lines.",
+            INVALID_STRUCTURED_RESPONSE_EXCERPT_LINES
+        )
+    } else {
+        String::new()
+    };
+
+    Some(format!(
+        "The model returned an invalid structured answer.\n\nRaw payload excerpt:\n```json\n{}\n```{}",
+        excerpt, truncation_note
+    ))
+}
+
+fn looks_like_structured_response_payload(response: &str) -> bool {
+    response.starts_with('{')
+        || response.starts_with('[')
+        || response.contains("\"blocks\"")
+        || response.contains("\"render_types\"")
 }
 
 #[derive(Clone, Debug, Default)]
@@ -963,6 +1003,21 @@ mod tests {
             normalize_assistant_response(response),
             "Hey! How can I help you today?"
         );
+    }
+
+    #[test]
+    fn unrecoverable_structured_responses_render_debuggable_json_excerpt() {
+        let response = r#"{
+  "blocks": [
+    [
+      " "
+"#;
+
+        let normalized = normalize_assistant_response(response);
+        assert!(normalized.contains("invalid structured answer"));
+        assert!(normalized.contains("Raw payload excerpt"));
+        assert!(normalized.contains("\"blocks\""));
+        assert!(normalized.contains("```json"));
     }
 
     #[test]

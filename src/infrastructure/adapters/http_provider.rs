@@ -3942,6 +3942,28 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn inception_provider_surfaces_debuggable_excerpt_for_unrecoverable_structured_answers() {
+        let model_id = "mercury-2";
+        let structured = r#"{
+  "blocks": [
+    [
+      " "
+"#;
+
+        let (_, _, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Inception,
+            model_id,
+            structured,
+        )
+        .await;
+
+        assert!(response.contains("invalid structured answer"));
+        assert!(response.contains("Raw payload excerpt"));
+        assert!(response.contains("\"blocks\""));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn grounded_http_responses_fall_back_when_they_promise_future_command_work() {
         let workspace = tempfile::tempdir().expect("workspace");
         let server = start_mock_server(vec![MockResponse {
