@@ -41,6 +41,7 @@ frontend-test:
 
 # Run frontend workspace browser e2e verification.
 frontend-e2e:
+  just frontend-build
   npm run e2e
 
 # Build the runtime frontend workspace.
@@ -52,6 +53,7 @@ test:
   just frontend-install
   cargo nextest run --no-tests pass
   just frontend-test
+  just frontend-build
   just frontend-e2e
 
 # Run quality checks.

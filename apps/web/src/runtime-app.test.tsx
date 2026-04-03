@@ -1,31 +1,42 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { RuntimeShell } from './runtime-app';
+import { RuntimeApp } from './runtime-app';
 
 afterEach(() => {
   cleanup();
 });
 
-describe('RuntimeShell', () => {
-  it('renders no outer chrome and points the root route at the legacy runtime', () => {
-    render(<RuntimeShell pathname="/" />);
+function renderAtPath(pathname: string) {
+  window.history.pushState({}, '', pathname);
+  return render(<RuntimeApp />);
+}
 
-    expect(screen.queryByRole('heading', { name: 'Turborepo Runtime Web App' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
-    expect(screen.getByTestId('runtime-root')).toBeInTheDocument();
-    expect(screen.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy');
+describe('RuntimeApp', () => {
+  it('renders the primary conversation route without an iframe proxy', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByTestId('runtime-root')).toBeInTheDocument();
+    expect(document.getElementById('prompt')).toBeInTheDocument();
+    expect(document.getElementById('trace-board')).toBeInTheDocument();
+    expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
 
-  it('routes the transit path to the legacy transit surface', () => {
-    render(<RuntimeShell pathname="/transit" />);
+  it('renders the primary transit route through the client router', async () => {
+    renderAtPath('/transit');
 
-    expect(screen.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy/transit');
+    expect(await screen.findByTestId('runtime-root')).toBeInTheDocument();
+    expect(document.getElementById('prompt')).toBeInTheDocument();
+    expect(document.getElementById('trace-board')).toBeInTheDocument();
+    expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
 
-  it('routes the manifold path to the legacy manifold surface', () => {
-    render(<RuntimeShell pathname="/manifold" />);
+  it('renders the primary manifold route through the client router', async () => {
+    renderAtPath('/manifold');
 
-    expect(screen.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy/manifold');
+    expect(await screen.findByTestId('runtime-root')).toBeInTheDocument();
+    expect(document.getElementById('prompt')).toBeInTheDocument();
+    expect(document.getElementById('manifold-canvas')).toBeInTheDocument();
+    expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
 });

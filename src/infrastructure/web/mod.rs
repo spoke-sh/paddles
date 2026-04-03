@@ -151,9 +151,6 @@ pub fn router(
         .route("/", get(primary_index_page))
         .route("/manifold", get(primary_index_page))
         .route("/transit", get(primary_index_page))
-        .route("/legacy", get(legacy_index_page))
-        .route("/legacy/manifold", get(legacy_index_page))
-        .route("/legacy/transit", get(legacy_index_page))
         .route("/assets/{*path}", get(primary_frontend_asset))
         .route("/favicon.svg", get(primary_frontend_favicon))
         .route("/health", get(health))
@@ -227,10 +224,6 @@ impl ForensicUpdateSink for BroadcastForensicSink {
     }
 }
 
-fn legacy_shell_html() -> &'static str {
-    include_str!("index.html")
-}
-
 fn primary_frontend_dist_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("apps")
@@ -242,9 +235,24 @@ fn load_primary_shell_html_from(dist_dir: &FsPath) -> std::io::Result<String> {
     std::fs::read_to_string(dist_dir.join("index.html"))
 }
 
+fn primary_shell_fallback_html() -> &'static str {
+    r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Paddles</title>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+"#
+}
+
 fn load_primary_shell_html() -> String {
     load_primary_shell_html_from(&primary_frontend_dist_dir())
-        .unwrap_or_else(|_| legacy_shell_html().to_string())
+        .unwrap_or_else(|_| primary_shell_fallback_html().to_string())
 }
 
 fn resolve_frontend_asset_path(path: &str) -> Option<PathBuf> {
@@ -281,10 +289,6 @@ fn content_type_for_asset(path: &FsPath) -> &'static str {
 
 async fn primary_index_page() -> Html<String> {
     Html(load_primary_shell_html())
-}
-
-async fn legacy_index_page() -> Html<&'static str> {
-    Html(legacy_shell_html())
 }
 
 async fn primary_frontend_asset(
@@ -716,7 +720,7 @@ mod tests {
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use axum::Json;
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::extract::{Path, State};
     use axum::http::{HeaderMap, Request, StatusCode, Uri};
     use axum::response::{IntoResponse, Response};
@@ -1368,12 +1372,12 @@ mod tests {
     }
 
     #[test]
-    fn transit_trace_html_preserves_legacy_route_family_paths() {
+    fn transit_trace_html_uses_primary_route_paths_only() {
         let html = include_str!("index.html");
 
         assert!(html.contains("function traceRouteFamily(pathname)"));
-        assert!(html.contains("path === '/legacy' || path.startsWith('/legacy/')"));
-        assert!(html.contains("return routePath === '/' ? '/legacy' : `/legacy${routePath}`;"));
+        assert!(!html.contains("/legacy"));
+        assert!(!html.contains("return routePath === '/' ? '/legacy' : `/legacy${routePath}`;"));
     }
 
     #[tokio::test]
@@ -1399,13 +1403,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn web_router_serves_legacy_runtime_routes() {
+    async fn primary_runtime_routes_serve_the_primary_frontend_shell() {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
         let (app, _observer) = super::router(service, recorder);
 
-        for route in ["/legacy", "/legacy/manifold", "/legacy/transit"] {
+        for route in ["/", "/manifold", "/transit"] {
             let response = app
                 .clone()
                 .oneshot(
@@ -1416,7 +1420,52 @@ mod tests {
                 )
                 .await
                 .expect("response");
-            assert_eq!(response.status(), StatusCode::OK, "route {route}");
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            let html = String::from_utf8(body.to_vec()).expect("utf8 html");
+
+            assert!(
+                html.contains("<div id=\"root\"></div>"),
+                "route {route} should serve the primary React shell"
+            );
+            assert!(
+                !html.contains("id=\"prompt\""),
+                "route {route} should not fall back to the embedded runtime shell"
+            );
+            assert!(
+                !html.contains("/legacy"),
+                "route {route} should not expose legacy route families"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn web_router_does_not_expose_legacy_or_app_alias_routes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let (app, _observer) = super::router(service, recorder);
+
+        for route in [
+            "/legacy",
+            "/legacy/manifold",
+            "/legacy/transit",
+            "/app",
+            "/app/transit",
+            "/app/manifold",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(route)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "route {route}");
         }
     }
 
@@ -1438,13 +1487,14 @@ mod tests {
     }
 
     #[test]
-    fn primary_shell_loader_falls_back_to_legacy_shell_when_dist_is_missing() {
+    fn primary_shell_loader_falls_back_to_minimal_primary_shell_when_dist_is_missing() {
         let workspace = tempfile::tempdir().expect("workspace");
 
         let html = super::load_primary_shell_html_from(workspace.path())
-            .unwrap_or_else(|_| super::legacy_shell_html().to_string());
+            .unwrap_or_else(|_| super::primary_shell_fallback_html().to_string());
 
-        assert!(html.contains("id=\"prompt\""));
+        assert!(html.contains("<div id=\"root\"></div>"));
+        assert!(!html.contains("id=\"prompt\""));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1602,5 +1652,16 @@ mod tests {
         assert!(html.contains("data-detail-level"));
         assert!(html.contains("--trace-column-gap"));
         assert!(html.contains("--trace-row-gap"));
+    }
+
+    #[test]
+    fn transit_trace_html_uses_monospace_typography() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("--trace-mono-family"));
+        assert!(html.contains(".trace-transit-toggle"));
+        assert!(html.contains(".trace-node__label"));
+        assert!(html.contains(".trace-node__detail-title"));
+        assert!(html.contains("font-family: var(--trace-mono-family);"));
     }
 }

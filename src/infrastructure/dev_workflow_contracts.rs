@@ -53,6 +53,10 @@ fn just_test_runs_frontend_workspace_test_checks() {
         "test should run frontend workspace test checks",
     );
     assert!(
+        test_section.contains("just frontend-build"),
+        "test should build the runtime frontend before browser e2e runs against the Rust server",
+    );
+    assert!(
         test_section.contains("just frontend-e2e"),
         "test should run browser e2e checks",
     );
@@ -243,5 +247,24 @@ fn runtime_web_app_defines_a_build_script() {
     assert!(
         scripts.contains_key("build"),
         "runtime web app should define a build script for the paddles launch path",
+    );
+}
+
+#[test]
+fn runtime_web_app_uses_tanstack_router_instead_of_react_router() {
+    let package_json = read_repo_file("apps/web/package.json");
+    let package: Value =
+        serde_json::from_str(&package_json).expect("apps/web/package.json should parse");
+    let dependencies = package["dependencies"]
+        .as_object()
+        .expect("apps/web/package.json dependencies should be an object");
+
+    assert!(
+        dependencies.contains_key("@tanstack/react-router"),
+        "runtime web app should depend on TanStack Router",
+    );
+    assert!(
+        !dependencies.contains_key("react-router-dom"),
+        "runtime web app should not keep the old react-router-dom dependency",
     );
 }

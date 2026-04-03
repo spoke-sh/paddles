@@ -160,9 +160,9 @@ The important architectural limit is that the manifold route is metaphorical. It
 The frontend is now staged through a shared Turborepo workspace:
 
 - `apps/docs` owns the Docusaurus documentation site
-- `apps/web` owns the new React runtime web app shell
+- `apps/web` owns the TanStack-routed runtime application
 
-The Rust server now serves the built React runtime shell on the primary web routes. The previous embedded shell still exists as the live legacy runtime under `/legacy`, `/legacy/transit`, and `/legacy/manifold`, which lets the React app wrap the real local-first runtime while parity work continues. The manifold route therefore remains local-first and does not add remote visualization bundles, CDNs, or hosted dependencies while the migration is in progress.
+The Rust server now serves the built React runtime directly on the primary web routes `/`, `/transit`, and `/manifold`. There is no iframe proxy layer and no secondary `/app` or `/legacy` route family. The product path, the browser E2E path, and the frontend build artifact now share the same route ownership.
 
 ### Trace Recording
 
@@ -333,7 +333,7 @@ just test
 just quality
 ```
 
-`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for the docs app, the React runtime shell, and the legacy runtime mounted under `/legacy` so the migration stays honest.
+`just quality` now covers both the Rust checks and the shared frontend workspace lint path. `just test` covers `cargo nextest`, the frontend workspace test/build path, and browser E2E for the docs app plus the TanStack React runtime on the primary product routes `/`, `/transit`, and `/manifold`.
 
 Check board health:
 

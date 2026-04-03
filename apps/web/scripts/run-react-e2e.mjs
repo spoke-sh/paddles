@@ -25,37 +25,30 @@ await withServer({
     });
     try {
       const page = await browser.newPage();
+      await page.addInitScript(() => {
+        window.__PADDLES_DISABLE_RUNTIME_BOOTSTRAP__ = true;
+      });
       await page.goto('http://127.0.0.1:4173/');
+      await page.locator('[data-testid="runtime-root"]').waitFor({ state: 'visible' });
 
-      const runtimeRoot = page.getByTestId('runtime-root');
-      await runtimeRoot.waitFor({ state: 'visible' });
       assert(
-        await runtimeRoot.isVisible(),
-        'expected the runtime root to render'
+        await page.locator('[data-testid="runtime-root"]').isVisible(),
+        'expected the primary conversation route to mount the runtime shell'
       );
-      assert(
-        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy',
-        'expected the runtime root to proxy the legacy root route'
-      );
-      assert(
-        (await page.getByRole('heading', { name: 'Turborepo Runtime Web App' }).count()) === 0,
-        'expected the outer shell heading to be absent'
-      );
-      assert(
-        (await page.getByRole('navigation').count()) === 0,
-        'expected the outer shell navigation to be absent'
-      );
+      assert((await page.locator('iframe').count()) === 0, 'expected the React runtime to avoid iframe proxies');
 
       await page.goto('http://127.0.0.1:4173/transit');
+      await page.locator('[data-testid="runtime-root"]').waitFor({ state: 'visible' });
       assert(
-        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy/transit',
-        'expected the transit route to proxy the legacy transit route'
+        await page.locator('[data-testid="runtime-root"]').isVisible(),
+        'expected the transit route to render through the client router'
       );
 
       await page.goto('http://127.0.0.1:4173/manifold');
+      await page.locator('[data-testid="runtime-root"]').waitFor({ state: 'visible' });
       assert(
-        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy/manifold',
-        'expected the manifold route to proxy the legacy manifold route'
+        await page.locator('[data-testid="runtime-root"]').isVisible(),
+        'expected the manifold route to render through the client router'
       );
     } finally {
       await browser.close();

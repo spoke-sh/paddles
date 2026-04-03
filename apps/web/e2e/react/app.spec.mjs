@@ -1,15 +1,23 @@
 import { expect, test } from '@playwright/test';
 
-test('react runtime app proxies the legacy runtime routes without outer chrome', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__PADDLES_DISABLE_RUNTIME_BOOTSTRAP__ = true;
+  });
+});
+
+test('react runtime app serves the primary routes without iframe proxies', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByTestId('runtime-root')).toBeVisible();
-  await expect(page.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy');
-  await expect(page.getByRole('heading', { name: 'Turborepo Runtime Web App' })).toHaveCount(0);
-  await expect(page.getByRole('navigation')).toHaveCount(0);
+  await expect(page.locator('#prompt')).toBeVisible();
+  await expect(page.locator('#trace-board')).toBeVisible();
+  await expect(page.locator('iframe')).toHaveCount(0);
 
   await page.goto('/transit');
-  await expect(page.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy/transit');
+  await expect(page.locator('#prompt')).toBeVisible();
+  await expect(page.locator('#trace-board')).toBeVisible();
+  await expect(page.locator('iframe')).toHaveCount(0);
 
   await page.goto('/manifold');
-  await expect(page.getByTitle('Paddles Runtime')).toHaveAttribute('src', '/legacy/manifold');
+  await expect(page.locator('#manifold-canvas')).toBeVisible();
+  await expect(page.locator('iframe')).toHaveCount(0);
 });

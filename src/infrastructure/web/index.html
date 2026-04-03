@@ -1350,6 +1350,7 @@ body {
 .trace-view--transit {
   flex-direction: column;
   min-height: 0;
+  --trace-mono-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
 }
 .trace-transit-toolbar {
   display: flex;
@@ -1358,6 +1359,7 @@ body {
   justify-content: space-between;
   gap: 10px 14px;
   padding: 0 2px 10px;
+  font-family: var(--trace-mono-family);
 }
 .trace-transit-toggle-row {
   display: flex;
@@ -1387,6 +1389,7 @@ body {
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  font-family: var(--trace-mono-family);
 }
 .trace-transit-toggle.is-active {
   color: #142733;
@@ -1401,6 +1404,7 @@ body {
   line-height: 1.45;
   color: var(--muted);
   text-align: right;
+  font-family: var(--trace-mono-family);
 }
 .trace-board {
   --trace-scale: 1;
@@ -1623,6 +1627,7 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   text-align: center;
+  font-family: var(--trace-mono-family);
 }
 .trace-node__kind {
   position: absolute;
@@ -1638,6 +1643,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-family: var(--trace-mono-family);
 }
 .trace-node__label {
   font-size: calc(14px * var(--trace-scale));
@@ -1653,6 +1659,7 @@ body {
   text-overflow: ellipsis;
   word-break: break-word;
   text-align: center;
+  font-family: var(--trace-mono-family);
 }
 .trace-node__summary {
   margin-top: calc(8px * var(--trace-scale));
@@ -1663,6 +1670,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-family: var(--trace-mono-family);
 }
 .trace-node__branch {
   position: absolute;
@@ -1676,6 +1684,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-family: var(--trace-mono-family);
 }
 .trace-board[data-detail-level="focus"] .trace-node__sequence,
 .trace-board[data-detail-level="focus"] .trace-node__kind,
@@ -1761,12 +1770,14 @@ body {
   line-height: calc(1.25 * max(0.9, var(--trace-scale)));
   font-weight: 700;
   word-break: break-word;
+  font-family: var(--trace-mono-family);
 }
 .trace-node__detail-meta {
   margin-top: 8px;
   font-size: calc(11px * max(0.9, var(--trace-scale)));
   color: var(--muted);
   line-height: 1.45;
+  font-family: var(--trace-mono-family);
 }
 .trace-empty { color: var(--muted); font-size: 12px; font-style: italic; }
 
@@ -2155,18 +2166,12 @@ function normalizedTracePath(pathname) {
 }
 
 function traceRouteFamily(pathname) {
-  const path = normalizedTracePath(pathname);
-  if (path === '/legacy' || path.startsWith('/legacy/')) {
-    return 'legacy';
-  }
   return 'primary';
 }
 
 function traceViewFromPath(pathname) {
   const path = normalizedTracePath(pathname);
-  const relativePath = traceRouteFamily(path) === 'legacy'
-    ? path.slice('/legacy'.length) || '/'
-    : path;
+  const relativePath = path;
   if (relativePath === '/manifold') {
     return 'manifold';
   }
@@ -2178,9 +2183,6 @@ function traceViewFromPath(pathname) {
 
 function tracePathForView(view, pathname = window.location.pathname) {
   const routePath = TRACE_VIEW_PATHS[view] || '/';
-  if (traceRouteFamily(pathname) === 'legacy') {
-    return routePath === '/' ? '/legacy' : `/legacy${routePath}`;
-  }
   return routePath;
 }
 

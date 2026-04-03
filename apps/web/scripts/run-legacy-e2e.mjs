@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -12,6 +13,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const workspaceRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(workspaceRoot, '../..');
+
+execFileSync('npm', ['--workspace', '@paddles/web', 'run', 'build'], {
+  cwd: repoRoot,
+  stdio: 'inherit',
+});
 
 await withServer({
   command: 'node',
@@ -30,17 +36,16 @@ await withServer({
       const page = await browser.newPage();
 
       await page.goto('http://127.0.0.1:4174/');
-      await page.getByTestId('runtime-root').waitFor({ state: 'visible' });
       assert(
-        await page.getByTestId('runtime-root').isVisible(),
-        'expected the rust server root route to render the runtime root'
+        await page.locator('#prompt').isVisible(),
+        'expected the rust server root route to render the runtime shell directly'
       );
       assert(
-        (await page.getByTitle('Paddles Runtime').getAttribute('src')) === '/legacy',
-        'expected the root React route to proxy the legacy root runtime'
+        (await page.locator('iframe').count()) === 0,
+        'expected the product route to avoid iframe proxies'
       );
 
-      await page.goto('http://127.0.0.1:4174/legacy');
+      await page.goto('http://127.0.0.1:4174/');
       await page.locator('#prompt').fill('CI is failing. Can you debug it on this machine?');
       await page.locator('#send').click();
       await page.waitForFunction(() => {
@@ -53,16 +58,16 @@ await withServer({
         (await page.locator('.msg.user').textContent())?.includes(
           'CI is failing. Can you debug it on this machine?'
         ),
-        'expected the legacy shell to render the user message'
+        'expected the runtime shell to render the user message'
       );
       assert(
         (await page.locator('.msg.assistant').textContent())?.includes(
           'Mock provider completed the turn after local inspection.'
         ),
-        'expected the legacy shell to render the assistant response'
+        'expected the runtime shell to render the assistant response'
       );
 
-      await page.goto('http://127.0.0.1:4174/legacy/transit');
+      await page.goto('http://127.0.0.1:4174/transit');
       await page.waitForFunction(
         () => document.querySelectorAll('#trace-board .trace-node').length > 0
       );
@@ -81,7 +86,7 @@ await withServer({
         'expected the transit route to expand to the full trace'
       );
 
-      await page.goto('http://127.0.0.1:4174/legacy/manifold');
+      await page.goto('http://127.0.0.1:4174/manifold');
       assert(
         await page.locator('#manifold-canvas').isVisible(),
         'expected the manifold canvas to be visible'
