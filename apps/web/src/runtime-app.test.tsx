@@ -253,6 +253,7 @@ describe('RuntimeApp', () => {
     renderAtPath('/');
 
     expect(await screen.findByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+    expect(document.querySelector('.runtime-shell-host')).toBeInTheDocument();
     expect(screen.getByText('Forensic Inspector')).toBeInTheDocument();
     expect(document.getElementById('forensic-view')).toBeInTheDocument();
     expect(document.querySelectorAll('iframe')).toHaveLength(0);

@@ -1521,7 +1521,9 @@ export function RuntimeApp() {
 
   return (
     <RuntimeStoreProvider>
-      <RouterProvider router={router} />
+      <div className="runtime-shell-host">
+        <RouterProvider router={router} />
+      </div>
     </RuntimeStoreProvider>
   );
 }

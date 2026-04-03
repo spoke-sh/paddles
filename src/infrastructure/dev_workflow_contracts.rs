@@ -309,3 +309,33 @@ fn runtime_web_app_uses_tanstack_router_instead_of_react_router() {
         "runtime web app should not keep the old react-router-dom dependency",
     );
 }
+
+#[test]
+fn runtime_shell_host_keeps_panels_flush_to_the_viewport() {
+    let css = read_repo_file("apps/web/src/runtime-shell.css");
+
+    assert!(
+        css.contains(".runtime-shell-host {\n  font-family:") && css.contains("  padding: 0;"),
+        "runtime shell host should not add outer viewport padding around the two-panel layout",
+    );
+    assert!(
+        css.contains("@media (max-width: 960px) {\n  .runtime-shell-host { flex-direction: column; height: 100dvh; padding: 0; }"),
+        "mobile runtime shell should also avoid outer viewport padding",
+    );
+}
+
+#[test]
+fn runtime_shell_buttons_do_not_underline_and_transit_toggles_use_ui_font() {
+    let css = read_repo_file("apps/web/src/runtime-shell.css");
+
+    assert!(
+        css.contains(".trace-tab {\n  border: 0;") && css.contains("  text-decoration: none;"),
+        "runtime route tabs should explicitly suppress link underlines",
+    );
+    assert!(
+        css.contains(".trace-transit-toggle {\n  border: 0;")
+            && css.contains("  font-family: \"SF Pro Display\", \"SF Pro Text\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;")
+            && css.contains("  text-decoration: none;"),
+        "transit toggle buttons should use the regular UI font and suppress text underlines",
+    );
+}

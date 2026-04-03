@@ -22,6 +22,11 @@ body {
   background: transparent;
 }
 
+.runtime-shell-host,
+#root {
+  display: flex;
+}
+
 .runtime-shell-host {
   width: 100%;
   height: 100%;
