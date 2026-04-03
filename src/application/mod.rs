@@ -2744,9 +2744,7 @@ impl MechSuitService {
                     )
                 }
                 PlannerAction::Stop { reason } => {
-                    if planner_stop_answers_directly(&decision) {
-                        direct_answer = decision.answer.clone();
-                    }
+                    direct_answer = stop_reason_direct_answer(reason, decision.answer.clone());
                     stop_reason = Some(reason.clone());
                     format!("planner requested synthesis: {reason}")
                 }
@@ -3057,6 +3055,9 @@ enum PromptExecutionPath {
     PlannerThenSynthesize,
 }
 
+const POLICY_VIOLATION_DIRECT_REPLY: &str =
+    "I can't help with that because it violates policy.";
+
 fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
     PromptExecutionPlan {
         intent: TurnIntent::DirectResponse,
@@ -3082,28 +3083,49 @@ fn execution_plan_from_initial_action(
         edit,
     } = decision;
     match action {
-        InitialAction::Answer => PromptExecutionPlan {
-            intent: TurnIntent::DirectResponse,
-            path: PromptExecutionPath::SynthesizerOnly,
-            route_summary: format!(
-                "model selected a direct response on synthesizer lane '{}'",
-                prepared.synthesizer.model_id
-            ),
-            initial_planner_decision: None,
-            direct_answer: answer,
-            initial_edit: edit,
-        },
-        InitialAction::Stop { reason } => PromptExecutionPlan {
-            intent: TurnIntent::DirectResponse,
-            path: PromptExecutionPath::SynthesizerOnly,
-            route_summary: format!(
-                "model selected stop before recursive resource use ({reason}); synthesizer lane '{}' will answer directly",
-                prepared.synthesizer.model_id
-            ),
-            initial_planner_decision: None,
-            direct_answer: answer,
-            initial_edit: edit,
-        },
+        InitialAction::Answer => {
+            let direct_answer = normalized_direct_answer(answer);
+            let route_summary = if direct_answer.is_some() {
+                "model selected a direct response; controller will render it directly"
+                    .to_string()
+            } else {
+                format!(
+                    "model selected a direct response on synthesizer lane '{}'",
+                    prepared.synthesizer.model_id
+                )
+            };
+
+            PromptExecutionPlan {
+                intent: TurnIntent::DirectResponse,
+                path: PromptExecutionPath::SynthesizerOnly,
+                route_summary,
+                initial_planner_decision: None,
+                direct_answer,
+                initial_edit: edit,
+            }
+        }
+        InitialAction::Stop { reason } => {
+            let direct_answer = stop_reason_direct_answer(&reason, answer);
+            let route_summary = if direct_answer.is_some() {
+                format!(
+                    "model selected stop before recursive resource use ({reason}); controller will render the direct response"
+                )
+            } else {
+                format!(
+                    "model selected stop before recursive resource use ({reason}); synthesizer lane '{}' will answer directly",
+                    prepared.synthesizer.model_id
+                )
+            };
+
+            PromptExecutionPlan {
+                intent: TurnIntent::DirectResponse,
+                path: PromptExecutionPath::SynthesizerOnly,
+                route_summary,
+                initial_planner_decision: None,
+                direct_answer,
+                initial_edit: edit,
+            }
+        }
         resource_action => {
             let planner_action = resource_action
                 .as_planner_action()
@@ -4327,14 +4349,27 @@ fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
     })
 }
 
-fn planner_stop_answers_directly(decision: &RecursivePlannerDecision) -> bool {
-    matches!(
-        &decision.action,
-        PlannerAction::Stop { reason } if reason == "model selected answer"
-    ) && decision
-        .answer
-        .as_deref()
-        .is_some_and(|answer| !answer.trim().is_empty())
+fn normalized_direct_answer(answer: Option<String>) -> Option<String> {
+    answer.and_then(|answer| {
+        let trimmed = answer.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn stop_reason_direct_answer(reason: &str, answer: Option<String>) -> Option<String> {
+    if let Some(answer) = normalized_direct_answer(answer) {
+        return Some(answer);
+    }
+
+    if reason == "refusal" {
+        return Some(POLICY_VIOLATION_DIRECT_REPLY.to_string());
+    }
+
+    None
 }
 
 fn build_planner_evidence_bundle(
@@ -4543,8 +4578,8 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 mod tests {
     use crate::application::{
         ActiveRuntimeState, GathererProvider, MechSuitService, PreparedGathererLane,
-        PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
-        StructuredTurnTrace, TurnIntent,
+        POLICY_VIOLATION_DIRECT_REPLY, PreparedModelLane, PreparedRuntimeLanes,
+        RuntimeLaneConfig, RuntimeLaneRole, StructuredTurnTrace, TurnIntent,
     };
     use crate::domain::model::{CompactionPlan, CompactionRequest};
     use crate::domain::model::{
@@ -7188,6 +7223,136 @@ mod tests {
                 .expect("gathered summaries lock")
                 .is_empty(),
             "planner-authored stop answers should not be rewritten by the synthesizer"
+        );
+    }
+
+    #[test]
+    fn initial_refusals_render_policy_violation_without_synthesizer_rewrite() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let rationale = "the user requested disallowed automotive repair instructions".to_string();
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Stop {
+                    reason: "refusal".to_string(),
+                },
+                rationale: rationale.clone(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            },
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt("Where would I find the starter solenoid?")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, POLICY_VIOLATION_DIRECT_REPLY);
+        assert_ne!(reply, rationale);
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "planner-authored refusals should bypass the synthesizer"
+        );
+    }
+
+    #[test]
+    fn recursive_refusals_render_policy_violation_without_synthesizer_rewrite() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let rationale = "the user requested disallowed automotive repair instructions".to_string();
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "git status --short".to_string(),
+                    },
+                },
+                "inspect the local workspace before deciding",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "refusal".to_string(),
+                },
+                rationale: rationale.clone(),
+                answer: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt("Where would I find the starter solenoid?")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, POLICY_VIOLATION_DIRECT_REPLY);
+        assert_ne!(reply, rationale);
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "recursive planner refusals should bypass the synthesizer"
         );
     }
 
