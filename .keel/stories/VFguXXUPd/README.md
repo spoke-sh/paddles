@@ -1,0 +1,24 @@
+---
+# system-managed
+id: VFguXXUPd
+status: backlog
+created_at: 2026-04-02T19:29:36
+updated_at: 2026-04-02T19:32:06
+# authored
+title: Replace The Raw Runtime Shell Bridge With A React Projection Store
+type: feat
+operator-signal:
+scope: VFguTx9hQ/VFguUzvun
+index: 4
+---
+
+# Replace The Raw Runtime Shell Bridge With A React Projection Store
+
+## Summary
+
+Remove the raw HTML runtime bridge and replace it with a real React-side projection store/hook that owns session hydration, live updates, and route-visible projection state. After this slice, TanStack should own runtime state instead of merely hosting an imperative shell.
+
+## Acceptance Criteria
+
+- [ ] The primary React runtime consumes the canonical projection through a shared projection store/hook instead of mounting raw HTML and global imperative bootstrap logic [SRS-03/AC-01] <!-- verify: test, SRS-03:start:end -->
+- [ ] Bootstrap, session identity, and live update handling are owned once inside the React runtime rather than duplicated across route hosts or bridge layers [SRS-NFR-03/AC-02] <!-- verify: review, SRS-NFR-03:start:end -->

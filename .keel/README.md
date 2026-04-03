@@ -284,6 +284,12 @@
 |--------|--------|
 | [Bootstrap Turborepo Workspace And React Runtime App](epics/VFfuuVwYJ/voyages/VFfvAz07R/) | done |
 
+### [Shared Conversation Projection Architecture For Web And TUI](epics/VFguTx9hQ/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Unified Projection Store And Product-Route Sync](epics/VFguTx9hQ/voyages/VFguUzvun/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
