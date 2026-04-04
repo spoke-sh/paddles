@@ -1,0 +1,13 @@
+---
+recorded_at: 2026-04-04T00:15:38.688854512-07:00
+command: cargo nextest run applied_edit_events_render_diff_lines_in_the_tui_transcript
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID bd18d3ff-a07c-44f5-a35d-267d749c4bf8 with nextest profile: default
+    Starting 1 test across 2 binaries (388 tests skipped)
+        PASS [   0.010s] (1/1) paddles infrastructure::cli::interactive_tui::tests::applied_edit_events_render_diff_lines_in_the_tui_transcript
+────────────
+     Summary [   0.013s] 1 test run: 1 passed, 388 skipped
