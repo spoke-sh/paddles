@@ -1777,6 +1777,22 @@ impl MechSuitService {
         }
     }
 
+    fn finalize_turn_response(
+        &self,
+        trace: &StructuredTurnTrace,
+        session: &ConversationSession,
+        active_thread: &ConversationThreadRef,
+        prompt: &str,
+        response: &AuthoredResponse,
+    ) -> String {
+        let reply = response.to_plain_text();
+        trace.record_completion(response);
+        self.emit_transcript_update(&session.task_id());
+        session.note_thread_reply(active_thread, prompt, &reply);
+        self.persist_recent_turn_summary(prompt, &reply);
+        reply
+    }
+
     fn warn_history_store_error(&self, action: &str, err: &anyhow::Error) {
         if self.verbose.load(Ordering::Relaxed) >= 1 {
             eprintln!("[WARN] Could not {action}: {err:#}");
@@ -2175,16 +2191,13 @@ impl MechSuitService {
             } else {
                 reply
             };
-            let reply = response.to_plain_text();
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
-            trace.record_completion(&response);
-            self.emit_transcript_update(&session.task_id());
-            session.note_thread_reply(&active_thread, prompt, &reply);
-            self.persist_recent_turn_summary(prompt, &reply);
+            let reply =
+                self.finalize_turn_response(&trace, &session, &active_thread, prompt, &response);
             return Ok(reply);
         }
 
@@ -2206,16 +2219,18 @@ impl MechSuitService {
             .filter(|frame| frame.requires_applied_edit())
         {
             let response = blocked_edit_response(frame);
-            let reply = response.to_plain_text();
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
-            trace.record_completion(&response);
-            self.emit_transcript_update(&session.task_id());
-            session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
-            self.persist_recent_turn_summary(&prompt, &reply);
+            let reply = self.finalize_turn_response(
+                &trace,
+                &session_for_reply,
+                &thread_for_reply,
+                &prompt,
+                &response,
+            );
             return Ok(reply);
         }
         let reply = tokio::task::spawn_blocking(move || {
@@ -2234,12 +2249,13 @@ impl MechSuitService {
                 .completion_response_mode_for_synthesis(planner_outcome.instruction_frame.as_ref()),
             &reply,
         );
-        let reply = response.to_plain_text();
-
-        trace.record_completion(&response);
-        self.emit_transcript_update(&session.task_id());
-        session_for_reply.note_thread_reply(&thread_for_reply, &prompt, &reply);
-        self.persist_recent_turn_summary(&prompt, &reply);
+        let reply = self.finalize_turn_response(
+            &trace,
+            &session_for_reply,
+            &thread_for_reply,
+            &prompt,
+            &response,
+        );
         Ok(reply)
     }
 
@@ -8550,6 +8566,57 @@ mod tests {
                 if *step_number == 2
                     && action.contains("stop (reviewed evidence: current CI listing does not confirm a failure)")
         )));
+    }
+
+    #[test]
+    fn finalize_turn_response_records_shared_completion_side_effects() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let history_store = Arc::new(ConversationHistoryStore::with_path(
+            workspace.path().join("state/conversation-history.toml"),
+        ));
+        service.set_conversation_history_store(Arc::clone(&history_store));
+        let transcript_updates = Arc::new(RecordingTranscriptUpdateSink::default());
+        service.register_transcript_observer(transcript_updates.clone());
+
+        let session = service.shared_conversation_session();
+        let active_thread = session.active_thread().thread_ref;
+        let trace = StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            session.allocate_turn_id(),
+            active_thread.clone(),
+        );
+        let response = AuthoredResponse::from_plain_text(
+            ResponseMode::DirectAnswer,
+            "Shared completion helper reply.",
+        );
+
+        let reply = service.finalize_turn_response(
+            &trace,
+            &session,
+            &active_thread,
+            "What happened?",
+            &response,
+        );
+
+        assert_eq!(reply, "Shared completion helper reply.");
+        assert_eq!(transcript_updates.recorded().len(), 1);
+        let thread_summary = session
+            .recent_thread_summary(&active_thread)
+            .expect("thread summary should be recorded");
+        assert!(thread_summary.contains("What happened?"));
+        assert!(thread_summary.contains("Shared completion helper reply."));
+        let recent_turns = history_store
+            .recent_turn_summaries()
+            .expect("recent turn summaries");
+        assert_eq!(
+            recent_turns,
+            vec!["Q: What happened? A: Shared completion helper reply.".to_string()]
+        );
     }
 
     #[test]
