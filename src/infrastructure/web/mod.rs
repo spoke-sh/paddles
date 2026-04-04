@@ -4,8 +4,8 @@ use crate::domain::model::{
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
-    ManifoldTurnProjection, TaskTraceId, TranscriptUpdateSink, TurnEvent, TurnEventSink,
-    TurnTraceId,
+    ManifoldTurnProjection, RuntimeEventPresentation, TaskTraceId, TranscriptUpdateSink, TurnEvent,
+    TurnEventSink, TurnTraceId, project_runtime_event,
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
@@ -38,7 +38,14 @@ enum ConversationProjectionStreamEvent {
     TurnEvent {
         task_id: TaskTraceId,
         event: TurnEvent,
+        presentation: RuntimeEventPresentation,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ProjectionTurnEventResponse {
+    event: TurnEvent,
+    presentation: RuntimeEventPresentation,
 }
 
 #[derive(Serialize)]
@@ -113,6 +120,7 @@ impl TurnEventSink for BroadcastEventSink {
             .projection_tx
             .send(ConversationProjectionStreamEvent::TurnEvent {
                 task_id: self.task_id.clone(),
+                presentation: project_runtime_event(&event),
                 event,
             });
     }
@@ -258,6 +266,7 @@ impl TurnEventSink for GlobalBroadcastSink {
             .projection_tx
             .send(ConversationProjectionStreamEvent::TurnEvent {
                 task_id: self.task_id.clone(),
+                presentation: project_runtime_event(&event),
                 event,
             });
     }
@@ -541,10 +550,16 @@ async fn conversation_projection_event_stream(
             let json = serde_json::to_string(&update).unwrap_or_default();
             Some(Ok(Event::default().event("projection_update").data(json)))
         }
-        Ok(ConversationProjectionStreamEvent::TurnEvent { task_id, event })
-            if task_id.as_str() == id =>
-        {
-            let json = serde_json::to_string(&event).unwrap_or_default();
+        Ok(ConversationProjectionStreamEvent::TurnEvent {
+            task_id,
+            event,
+            presentation,
+        }) if task_id.as_str() == id => {
+            let json = serde_json::to_string(&ProjectionTurnEventResponse {
+                event,
+                presentation,
+            })
+            .unwrap_or_default();
             Some(Ok(Event::default().event("turn_event").data(json)))
         }
         _ => None,
@@ -1423,12 +1438,15 @@ mod tests {
         let ConversationProjectionStreamEvent::TurnEvent {
             task_id: received_task_id,
             event: received_projection_event,
+            presentation,
         } = projection_rx.try_recv().expect("projection event payload")
         else {
             panic!("expected turn event payload");
         };
         assert_eq!(received_task_id, task_id);
         assert_eq!(received_projection_event, event);
+        assert_eq!(presentation.badge, "tool");
+        assert_eq!(presentation.title, "• Ran shell");
     }
 
     #[test]

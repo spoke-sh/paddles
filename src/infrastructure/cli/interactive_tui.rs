@@ -1,7 +1,8 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
 use crate::domain::model::{
     ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
-    RenderBlock, RenderDocument, ThreadCandidate, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    RenderBlock, RenderDocument, RuntimeEventPresentation, ThreadCandidate, TranscriptUpdateSink,
+    TurnEvent, TurnEventSink, project_runtime_event,
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
@@ -829,6 +830,16 @@ fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
             "",
         ),
     }
+}
+
+fn transcript_row_from_runtime_event(presentation: RuntimeEventPresentation) -> TranscriptRow {
+    let content = if presentation.detail.is_empty() {
+        String::new()
+    } else {
+        collapse_event_details(&presentation.detail, EVENT_DETAIL_LINE_LIMIT)
+    };
+
+    TranscriptRow::new(TranscriptRowKind::Event, presentation.title, content)
 }
 
 struct InteractiveApp {
@@ -2691,6 +2702,14 @@ fn render_assistant_line(
 }
 
 fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
+    let prefer_custom_render = matches!(&event, TurnEvent::InterpretationContext { .. })
+        || (verbose >= 1 && matches!(&event, TurnEvent::PlannerStepProgress { .. }))
+        || (verbose >= 2 && matches!(&event, TurnEvent::PlannerSummary { .. }))
+        || matches!(&event, TurnEvent::ToolFinished { .. });
+    if !prefer_custom_render {
+        return transcript_row_from_runtime_event(project_runtime_event(&event));
+    }
+
     match event {
         TurnEvent::IntentClassified { intent } => {
             TranscriptRow::new(TranscriptRowKind::Event, "• Classified", intent.label())

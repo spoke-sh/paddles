@@ -193,4 +193,17 @@ export interface ConversationBootstrapResponse {
   projection: ConversationProjectionSnapshot;
 }
 
+export interface RuntimeEventPresentation {
+  badge: string;
+  badge_class: string;
+  title: string;
+  detail: string;
+  text: string;
+}
+
 export type TurnEvent = Record<string, unknown> & { type: string };
+
+export interface ProjectionTurnEvent {
+  event: TurnEvent;
+  presentation: RuntimeEventPresentation;
+}

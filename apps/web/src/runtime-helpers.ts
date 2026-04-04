@@ -7,6 +7,7 @@ import type {
   ManifoldPrimitiveBasis,
   ManifoldPrimitiveState,
   ManifoldSignalState,
+  ProjectionTurnEvent,
   TraceLineageRef,
   TraceSignalContribution,
   TurnEvent,
@@ -656,7 +657,16 @@ export function primitivePhase(
   return laterFrame ? 'accumulating' : 'bleed_off';
 }
 
-export function eventRow(event: TurnEvent) {
+export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
+  if ('presentation' in payload && payload.presentation) {
+    return {
+      badge: payload.presentation.badge,
+      badgeClass: payload.presentation.badge_class,
+      text: payload.presentation.text,
+    };
+  }
+
+  const event = ('event' in payload ? payload.event : payload) as TurnEvent;
   const type = String(event.type || '');
   if (type === 'intent_classified') {
     return { badge: 'route', badgeClass: 'route', text: `Intent: ${String(event.intent || '')}` };

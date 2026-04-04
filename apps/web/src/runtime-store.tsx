@@ -12,6 +12,7 @@ import type {
   ConversationBootstrapResponse,
   ConversationProjectionSnapshot,
   ConversationProjectionUpdate,
+  ProjectionTurnEvent,
   TurnEvent,
 } from './runtime-types';
 
@@ -78,7 +79,9 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
         setProjection(update.snapshot);
       });
       projectionSource.addEventListener('turn_event', (message) => {
-        const payload = JSON.parse((message as MessageEvent<string>).data) as TurnEvent;
+        const payload = JSON.parse((message as MessageEvent<string>).data) as
+          | ProjectionTurnEvent
+          | TurnEvent;
         const row = eventRow(payload);
         if (!row) {
           return;

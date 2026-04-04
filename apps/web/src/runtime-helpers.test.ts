@@ -3,6 +3,29 @@ import { describe, expect, it } from 'vitest';
 import { eventRow } from './runtime-helpers';
 
 describe('eventRow', () => {
+  it('prefers the rust-authored runtime presentation when the projection stream provides it', () => {
+    const row = eventRow({
+      event: {
+        type: 'tool_called',
+        tool_name: 'shell',
+        invocation: 'pwd',
+      },
+      presentation: {
+        badge: 'tool',
+        badge_class: 'tool',
+        title: '• Ran shell',
+        detail: 'pwd',
+        text: 'shell: pwd',
+      },
+    });
+
+    expect(row).toEqual({
+      badge: 'tool',
+      badgeClass: 'tool',
+      text: 'shell: pwd',
+    });
+  });
+
   it('surfaces gatherer progress detail instead of collapsing to a generic searching label', () => {
     const row = eventRow({
       type: 'gatherer_search_progress',

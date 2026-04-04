@@ -11,6 +11,7 @@ pub mod interpretation;
 pub mod manifold;
 pub mod projection;
 pub mod render;
+pub mod runtime_events;
 pub mod threading;
 pub mod traces;
 pub mod transcript;
@@ -52,6 +53,7 @@ pub use projection::{
     ConversationTraceGraphNode,
 };
 pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
+pub use runtime_events::{RuntimeEventPresentation, project_runtime_event};
 pub use threading::ConversationReplayView;
 pub use traces::{
     TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
