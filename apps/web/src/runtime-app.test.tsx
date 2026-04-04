@@ -384,4 +384,12 @@ describe('RuntimeApp', () => {
     expect(document.querySelectorAll('.manifold-node').length).toBeGreaterThan(0);
     expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
+
+  it('renders a compact playback banner instead of the empty-state filler once frames exist', async () => {
+    renderAtPath('/manifold');
+
+    const banner = await screen.findByText('Temporal manifold playback is active.');
+    expect(banner.closest('.manifold-playback-banner')).toBeInTheDocument();
+    expect(banner.closest('.manifold-empty-state')).toBeNull();
+  });
 });

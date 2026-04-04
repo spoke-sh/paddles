@@ -709,6 +709,19 @@ body {
   padding: 24px;
   color: #32414d;
 }
+.manifold-playback-banner {
+  border-radius: 18px;
+  border: 1px solid rgba(92, 109, 123, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.56), rgba(255,255,255,0.22)),
+    linear-gradient(155deg, rgba(222, 231, 237, 0.62), rgba(201, 213, 223, 0.72));
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  color: #32414d;
+}
 .manifold-empty-state strong {
   font-size: 18px;
   line-height: 1.3;
@@ -716,6 +729,15 @@ body {
 .manifold-empty-state p {
   font-size: 14px;
   line-height: 1.6;
+  color: #5c6d7a;
+}
+.manifold-playback-banner strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+.manifold-playback-banner p {
+  font-size: 12px;
+  line-height: 1.55;
   color: #5c6d7a;
 }
 .manifold-machine {
@@ -2577,7 +2599,7 @@ function renderManifoldShell() {
 
   canvas.innerHTML =
     '<div class="manifold-machine">' +
-      '<div class="manifold-empty-state">' +
+      '<div class="manifold-playback-banner">' +
         '<strong>Temporal manifold playback is active.</strong>' +
         '<p>The manifold stage now scrubs through replay frames. Fill tracks accumulation, dashed topology indicates supersession, and historical frames can fade as the route moves through stabilization and bleed-off.</p>' +
         '<p><strong>Current turn:</strong> ' + escapeHtml(turn ? turn.turn_id : 'none') + '<br>' +

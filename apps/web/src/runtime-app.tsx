@@ -1016,7 +1016,7 @@ function ManifoldRoute() {
               </div>
             ) : (
               <div className="manifold-machine">
-                <div className="manifold-empty-state">
+                <div className="manifold-playback-banner">
                   <strong>Temporal manifold playback is active.</strong>
                   <p>
                     Current turn: {currentTurn?.turn_id || 'none'}

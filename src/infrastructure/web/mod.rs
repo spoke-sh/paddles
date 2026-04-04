@@ -1528,6 +1528,15 @@ mod tests {
     }
 
     #[test]
+    fn manifold_route_html_uses_compact_playback_banner_once_frames_exist() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains(".manifold-playback-banner {"));
+        assert!(html.contains("<div class=\"manifold-playback-banner\">"));
+        assert!(!html.contains("<div class=\"manifold-empty-state\"><strong>Temporal manifold playback is active.</strong>"));
+    }
+
+    #[test]
     fn manifold_route_html_encodes_temporal_signal_phases() {
         let html = include_str!("index.html");
 
