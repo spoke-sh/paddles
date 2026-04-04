@@ -362,6 +362,102 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
     }
 }
 
+pub fn project_runtime_event_for_tui(event: &TurnEvent, verbose: u8) -> RuntimeEventPresentation {
+    let mut presentation = project_runtime_event(event);
+
+    match event {
+        TurnEvent::InterpretationContext { context } => {
+            let summary = if context.summary.trim().is_empty() {
+                "(no details)".to_string()
+            } else {
+                context.summary.clone()
+            };
+            let content = if verbose >= 2 {
+                if context.summary.trim().is_empty() && context.sources().is_empty() {
+                    "No operator interpretation context was assembled.".to_string()
+                } else {
+                    context.render()
+                }
+            } else if verbose == 1 {
+                let mut sections = vec![summary];
+                let sources = context.sources();
+                if !sources.is_empty() {
+                    sections.push(format!("Sources: {}", sources.join(", ")));
+                }
+                for doc in &context.documents {
+                    sections.push(format!(
+                        "--- {} [{:?}] ---\n{}",
+                        doc.source, doc.category, doc.excerpt
+                    ));
+                }
+                if !context.tool_hints.is_empty() {
+                    sections.push("--- Tool Hints ---".to_string());
+                    sections.extend(context.tool_hints.iter().map(|hint| {
+                        format!(
+                            "- {} ({}) — {}",
+                            hint.action.summary(),
+                            hint.source,
+                            hint.note
+                        )
+                    }));
+                }
+                sections.join("\n\n")
+            } else {
+                let mut content = summary;
+                let sources = context.sources();
+                if !sources.is_empty() {
+                    if !content.is_empty() {
+                        content.push('\n');
+                    }
+                    content.push_str("Sources: ");
+                    content.push_str(&sources.join(", "));
+                }
+                content
+            };
+            presentation.detail = content.clone();
+            presentation.text = content;
+        }
+        TurnEvent::PlannerStepProgress { .. } if verbose == 0 => {
+            presentation.detail = String::new();
+            presentation.text = String::new();
+        }
+        TurnEvent::PlannerSummary {
+            strategy,
+            mode,
+            turns,
+            steps,
+            stop_reason,
+            active_branch_id,
+            branch_count,
+            frontier_count,
+            node_count,
+            edge_count,
+            retained_artifact_count,
+        } if verbose >= 2 => {
+            let opt = |value: Option<usize>| {
+                value
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "n/a".to_string())
+            };
+            let text = format!(
+                "strategy={strategy}, mode={mode}, turns={turns}, steps={steps}, stop={}\nGraph: nodes={}, edges={}, branches={}, frontier={}, active={}, retained={}",
+                stop_reason.as_deref().unwrap_or("none"),
+                opt(*node_count),
+                opt(*edge_count),
+                opt(*branch_count),
+                opt(*frontier_count),
+                active_branch_id.as_deref().unwrap_or("none"),
+                opt(*retained_artifact_count),
+            );
+            presentation.detail = text.clone();
+            presentation.text = text;
+        }
+        _ => {}
+    }
+
+    presentation
+}
+
 fn format_duration_compact(duration: Duration) -> String {
     if duration < Duration::from_secs(1) {
         return format!("{}ms", duration.as_millis());
@@ -386,7 +482,7 @@ fn format_duration_compact(duration: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeEventPresentation, project_runtime_event};
+    use super::{RuntimeEventPresentation, project_runtime_event, project_runtime_event_for_tui};
     use crate::domain::model::{
         GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
         TurnEvent,
@@ -458,5 +554,48 @@ mod tests {
         assert!(presentation.detail.contains("status=active"));
         assert!(presentation.detail.contains("timeout=slow"));
         assert!(presentation.text.contains("gathering"));
+    }
+
+    #[test]
+    fn projects_planner_summary_adds_graph_stats_when_tui_verbosity_is_high() {
+        let presentation = project_runtime_event_for_tui(
+            &TurnEvent::PlannerSummary {
+                strategy: "direct".to_string(),
+                mode: "single".to_string(),
+                turns: 1,
+                steps: 3,
+                stop_reason: Some("planner_budget".to_string()),
+                active_branch_id: None,
+                branch_count: None,
+                frontier_count: None,
+                node_count: Some(12),
+                edge_count: Some(4),
+                retained_artifact_count: Some(0),
+            },
+            2,
+        );
+
+        assert_eq!(
+            presentation.text,
+            "strategy=direct, mode=single, turns=1, steps=3, stop=planner_budget\nGraph: nodes=12, edges=4, branches=n/a, frontier=n/a, active=none, retained=0"
+        );
+        assert_eq!(presentation.title, "• Reviewed planner trace");
+    }
+
+    #[test]
+    fn projects_planner_step_progress_hides_details_at_tui_low_verbosity() {
+        let presentation = project_runtime_event_for_tui(
+            &TurnEvent::PlannerStepProgress {
+                step_number: 2,
+                step_limit: 4,
+                action: "search".to_string(),
+                query: None,
+                evidence_count: 7,
+            },
+            0,
+        );
+
+        assert_eq!(presentation.detail, "");
+        assert_eq!(presentation.title, "• Step 2/4: search");
     }
 }

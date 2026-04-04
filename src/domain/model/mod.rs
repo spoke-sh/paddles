@@ -53,7 +53,9 @@ pub use projection::{
     ConversationTraceGraphNode,
 };
 pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
-pub use runtime_events::{RuntimeEventPresentation, project_runtime_event};
+pub use runtime_events::{
+    RuntimeEventPresentation, project_runtime_event, project_runtime_event_for_tui,
+};
 pub use threading::ConversationReplayView;
 pub use traces::{
     TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
