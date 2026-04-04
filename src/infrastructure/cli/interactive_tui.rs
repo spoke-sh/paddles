@@ -101,7 +101,7 @@ pub fn select_interactive_frontend(
 
 pub async fn run_interactive_tui(
     service: Arc<MechSuitService>,
-    mut tui_ctx: TuiContext,
+    tui_ctx: TuiContext,
 ) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
@@ -167,6 +167,15 @@ pub async fn run_interactive_tui(
             app.sync_transcript(&transcript);
         }
         app.tick();
+        if let Some(update) = app.dispatch_pending_runtime_update() {
+            dispatch_runtime_update(
+                update,
+                Arc::clone(&service),
+                Arc::clone(&tui_ctx.credential_store),
+                Arc::clone(&tui_ctx.runtime_preference_store),
+                tx.clone(),
+            );
+        }
         if let Some(prompt) = app.dispatch_next_prompt() {
             dispatch_prompt(prompt, Arc::clone(&service), session.clone(), tx.clone());
         }
@@ -177,7 +186,7 @@ pub async fn run_interactive_tui(
                 .credential_store
                 .save_api_key(&login.provider, &login.api_key)
             {
-                Ok(()) => match service.prepare_runtime_lanes(&tui_ctx.runtime_lanes).await {
+                Ok(()) => match service.prepare_runtime_lanes(&app.runtime_lanes).await {
                     Ok(_) => {
                         app.set_provider_availability(
                             tui_ctx.credential_store.all_provider_availability(),
@@ -204,45 +213,6 @@ pub async fn run_interactive_tui(
                     app.push_error(
                         "Login failed",
                         format!("Could not save credentials: {err:#}"),
-                    );
-                }
-            }
-        }
-
-        if let Some(update) = app.take_pending_runtime_update() {
-            match service.prepare_runtime_lanes(&update.runtime_lanes).await {
-                Ok(_) => {
-                    tui_ctx.runtime_lanes = update.runtime_lanes.clone();
-                    app.set_runtime_catalog(
-                        tui_ctx.runtime_lanes.clone(),
-                        tui_ctx.credential_store.all_provider_availability(),
-                    );
-                    match tui_ctx
-                        .runtime_preference_store
-                        .save(&update.persisted_preferences)
-                    {
-                        Ok(()) => app.push_event(
-                            "Model selection updated",
-                            format!(
-                                "{}\nSaved runtime lane preferences to `{}`.",
-                                update.summary,
-                                tui_ctx.runtime_preference_store.path().display()
-                            ),
-                        ),
-                        Err(err) => app.push_error(
-                            "Runtime preference save failed",
-                            format!(
-                                "{}\nThe lane switch is active, but `{}` could not be updated: {err:#}",
-                                update.summary,
-                                tui_ctx.runtime_preference_store.path().display()
-                            ),
-                        ),
-                    }
-                }
-                Err(err) => {
-                    app.push_error(
-                        "Model selection failed",
-                        format!("Could not activate requested runtime lanes: {err:#}"),
                     );
                 }
             }
@@ -462,6 +432,10 @@ enum UiMessage {
         result: std::result::Result<String, String>,
         occurred_at: Instant,
     },
+    RuntimeUpdateFinished {
+        result: std::result::Result<RuntimeUpdateCompletion, String>,
+        occurred_at: Instant,
+    },
 }
 
 impl UiMessage {
@@ -479,9 +453,27 @@ impl UiMessage {
         }
     }
 
+    fn runtime_update_finished(
+        result: std::result::Result<RuntimeUpdateCompletion, String>,
+    ) -> Self {
+        Self::RuntimeUpdateFinished {
+            result,
+            occurred_at: Instant::now(),
+        }
+    }
+
     fn transcript_updated(update: ConversationTranscriptUpdate) -> Self {
         Self::TranscriptUpdated { update }
     }
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeUpdateCompletion {
+    runtime_lanes: RuntimeLaneConfig,
+    provider_availability: Vec<ProviderAvailability>,
+    summary: String,
+    preference_path: PathBuf,
+    preference_save_error: Option<String>,
 }
 
 fn dispatch_prompt(
@@ -506,6 +498,34 @@ fn dispatch_prompt(
         }
         .map_err(|err| format!("{err:#}"));
         let _ = tx.send(UiMessage::turn_finished(result));
+    });
+}
+
+fn dispatch_runtime_update(
+    update: PendingRuntimeUpdate,
+    service: Arc<MechSuitService>,
+    credential_store: Arc<CredentialStore>,
+    runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
+    tx: UnboundedSender<UiMessage>,
+) {
+    tokio::spawn(async move {
+        let result = match service.prepare_runtime_lanes(&update.runtime_lanes).await {
+            Ok(_) => {
+                let preference_save_error = runtime_preference_store
+                    .save(&update.persisted_preferences)
+                    .err()
+                    .map(|err| format!("{err:#}"));
+                Ok(RuntimeUpdateCompletion {
+                    runtime_lanes: update.runtime_lanes,
+                    provider_availability: credential_store.all_provider_availability(),
+                    summary: update.summary,
+                    preference_path: runtime_preference_store.path().to_path_buf(),
+                    preference_save_error,
+                })
+            }
+            Err(err) => Err(format!("{err:#}")),
+        };
+        let _ = tx.send(UiMessage::runtime_update_finished(result));
     });
 }
 
@@ -752,6 +772,7 @@ fn busy_label(busy_phase: BusyPhase, last_event: Option<&TurnEvent>) -> String {
         BusyPhase::Thinking => last_event
             .map(|event| in_flight_label(event).to_ascii_lowercase())
             .unwrap_or_else(|| "thinking".to_string()),
+        BusyPhase::Reconfiguring => "reconfiguring".to_string(),
         BusyPhase::Rendering => "rendering".to_string(),
     }
 }
@@ -828,6 +849,7 @@ struct InteractiveApp {
     input_mode: InputMode,
     pending_login: Option<PendingLogin>,
     pending_runtime_update: Option<PendingRuntimeUpdate>,
+    runtime_update_started_at: Option<Instant>,
     slash_suggestion_index: usize,
     provider_name: String,
     credential_provider: Option<String>,
@@ -866,6 +888,7 @@ enum QueuedPrompt {
 enum BusyPhase {
     Idle,
     Thinking,
+    Reconfiguring,
     Rendering,
 }
 
@@ -998,6 +1021,7 @@ impl InteractiveApp {
             input_mode: InputMode::Normal,
             pending_login: None,
             pending_runtime_update: None,
+            runtime_update_started_at: None,
             slash_suggestion_index: 0,
             provider_name,
             credential_provider,
@@ -1354,8 +1378,13 @@ impl InteractiveApp {
         self.pending_login.take()
     }
 
+    #[cfg(test)]
     fn take_pending_runtime_update(&mut self) -> Option<PendingRuntimeUpdate> {
         self.pending_runtime_update.take()
+    }
+
+    fn dispatch_pending_runtime_update(&mut self) -> Option<PendingRuntimeUpdate> {
+        self.dispatch_pending_runtime_update_at(Instant::now())
     }
 
     fn handle_login_command(&mut self, raw: &str) {
@@ -1475,6 +1504,15 @@ impl InteractiveApp {
                     normalized_model,
                     accepted
                 ),
+            );
+            return;
+        }
+        if self.pending_runtime_update.is_some()
+            || matches!(self.busy_phase, BusyPhase::Reconfiguring)
+        {
+            self.push_error(
+                "Model selection busy",
+                "Another runtime lane activation is already in progress.",
             );
             return;
         }
@@ -1686,6 +1724,22 @@ impl InteractiveApp {
         self.busy_phase = BusyPhase::Thinking;
         self.active_turn_timing = Some(ActiveTurnTiming::new(started_at));
         Some(prompt)
+    }
+
+    fn dispatch_pending_runtime_update_at(
+        &mut self,
+        started_at: Instant,
+    ) -> Option<PendingRuntimeUpdate> {
+        if self.busy {
+            return None;
+        }
+
+        let update = self.pending_runtime_update.take()?;
+        self.busy = true;
+        self.busy_phase = BusyPhase::Reconfiguring;
+        self.runtime_update_started_at = Some(started_at);
+        self.push_event("Activating runtime lanes", update.summary.clone());
+        Some(update)
     }
 
     fn should_show_event(&self, event: &TurnEvent, pace: Pace, is_first_step: bool) -> bool {
@@ -1953,6 +2007,57 @@ impl InteractiveApp {
                     }
                 }
             }
+            UiMessage::RuntimeUpdateFinished { result, occurred_at } => {
+                let started_at = self.runtime_update_started_at.take();
+                self.pending_turn_total_timing = None;
+                match result {
+                    Ok(completion) => {
+                        self.set_runtime_catalog(
+                            completion.runtime_lanes,
+                            completion.provider_availability,
+                        );
+                        match completion.preference_save_error {
+                            None => self.push_event(
+                                "Model selection updated",
+                                format!(
+                                    "{}\nSaved runtime lane preferences to `{}`.",
+                                    completion.summary,
+                                    completion.preference_path.display()
+                                ),
+                            ),
+                            Some(err) => self.push_error(
+                                "Runtime preference save failed",
+                                format!(
+                                    "{}\nThe lane switch is active, but `{}` could not be updated: {}",
+                                    completion.summary,
+                                    completion.preference_path.display(),
+                                    err
+                                ),
+                            ),
+                        }
+                    }
+                    Err(error) => {
+                        let row = TranscriptRow::new(
+                            TranscriptRowKind::Error,
+                            "• Model selection failed",
+                            format!("Could not activate requested runtime lanes: {error}"),
+                        );
+                        let row = if let Some(started_at) = started_at {
+                            row.timed(TranscriptTiming {
+                                elapsed: occurred_at.duration_since(started_at),
+                                delta: None,
+                                kind: TranscriptTimingKind::TurnTotal,
+                                pace: Pace::Normal,
+                            })
+                        } else {
+                            row
+                        };
+                        self.rows.push(row);
+                    }
+                }
+                self.busy = false;
+                self.busy_phase = BusyPhase::Idle;
+            }
         }
         let _ = self.step_timing.flush(&self.step_timing_path);
     }
@@ -2030,7 +2135,9 @@ impl InteractiveApp {
         let status = match self.busy_phase {
             BusyPhase::Idle if self.queued_prompts.is_empty() => "idle".to_string(),
             BusyPhase::Idle => format!("idle · {} queued", self.queued_prompts.len()),
-            BusyPhase::Thinking | BusyPhase::Rendering => busy_label(self.busy_phase, last_event),
+            BusyPhase::Thinking | BusyPhase::Reconfiguring | BusyPhase::Rendering => {
+                busy_label(self.busy_phase, last_event)
+            }
         };
 
         let line = Line::from(vec![
@@ -2062,7 +2169,9 @@ impl InteractiveApp {
         let elapsed = self
             .active_turn_timing
             .as_ref()
-            .map(|t| Instant::now().duration_since(t.started_at).as_secs())
+            .map(|t| t.started_at)
+            .or(self.runtime_update_started_at)
+            .map(|started_at| Instant::now().duration_since(started_at).as_secs())
             .unwrap_or(0);
         let timer = if elapsed > 0 {
             format!(" {elapsed}s")
@@ -3078,7 +3187,8 @@ fn terminal_uses_light_background() -> bool {
 mod tests {
     use super::{
         BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
-        TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind, UiMessage,
+        RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
+        TranscriptTimingKind, UiMessage,
         collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
         inline_multiline_text, inline_viewport_height_for_terminal, render_row_lines,
         runtime_lane_summary, select_interactive_frontend,
@@ -3937,6 +4047,129 @@ mod tests {
         );
         assert!(update.persisted_preferences.planner_provider.is_none());
         assert!(update.persisted_preferences.planner_model.is_none());
+    }
+
+    #[test]
+    fn runtime_update_dispatch_enters_reconfiguring_phase_without_blocking() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Openai, true, "using local credential store"),
+            ],
+        );
+        app.input = "/model synthesizer openai gpt-4o".to_string();
+        app.submit_prompt();
+
+        let started_at = Instant::now();
+        let update = app
+            .dispatch_pending_runtime_update_at(started_at)
+            .expect("runtime update");
+
+        assert_eq!(update.runtime_lanes.synthesizer_provider(), ModelProvider::Openai);
+        assert!(app.busy);
+        assert_eq!(app.busy_phase, BusyPhase::Reconfiguring);
+        assert_eq!(app.runtime_update_started_at, Some(started_at));
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.header == "• Activating runtime lanes"
+                    && row.content.contains("openai:gpt-4o"))
+        );
+    }
+
+    #[test]
+    fn runtime_update_completion_updates_catalog_and_clears_busy_state() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let started_at = Instant::now();
+        app.busy = true;
+        app.busy_phase = BusyPhase::Reconfiguring;
+        app.runtime_update_started_at = Some(started_at);
+
+        app.handle_message(UiMessage::RuntimeUpdateFinished {
+            result: Ok(RuntimeUpdateCompletion {
+                runtime_lanes: RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+                    .with_synthesizer_provider(ModelProvider::Openai),
+                provider_availability: vec![
+                    provider_availability(ModelProvider::Sift, true, "auth not required"),
+                    provider_availability(
+                        ModelProvider::Openai,
+                        true,
+                        "using local credential store",
+                    ),
+                ],
+                summary: "Synthesizer lane now targets `openai:gpt-4o`.".to_string(),
+                preference_path: PathBuf::from("/tmp/runtime-lanes.toml"),
+                preference_save_error: None,
+            }),
+            occurred_at: started_at + Duration::from_secs(2),
+        });
+
+        assert!(!app.busy);
+        assert_eq!(app.busy_phase, BusyPhase::Idle);
+        assert!(app.runtime_update_started_at.is_none());
+        assert_eq!(app.runtime_lanes.synthesizer_provider(), ModelProvider::Openai);
+        assert_eq!(app.runtime_lanes.synthesizer_model_id(), "gpt-4o");
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.header == "• Model selection updated"
+                    && row.content.contains("runtime-lanes.toml"))
+        );
+    }
+
+    #[test]
+    fn model_command_rejects_overlapping_runtime_reconfiguration() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Openai, true, "using local credential store"),
+            ],
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Reconfiguring;
+
+        app.input = "/model synthesizer openai gpt-4o".to_string();
+        app.submit_prompt();
+
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.kind == TranscriptRowKind::Error
+                    && row.header == "• Model selection busy")
+        );
     }
 
     #[test]
