@@ -798,6 +798,7 @@ struct InteractiveApp {
     active_turn_timing: Option<ActiveTurnTiming>,
     flushed_row_count: usize,
     search_progress_row: Option<usize>,
+    gathering_harness_row: Option<usize>,
     planner_progress_row: Option<usize>,
     last_event: Option<(TurnEvent, Instant)>,
     emitted_in_flight: bool,
@@ -963,6 +964,7 @@ impl InteractiveApp {
             active_turn_timing: None,
             flushed_row_count: 0,
             search_progress_row: None,
+            gathering_harness_row: None,
             planner_progress_row: None,
             last_event: None,
             emitted_in_flight: false,
@@ -1654,6 +1656,22 @@ impl InteractiveApp {
         base.saturating_sub(promotion) <= self.verbose
     }
 
+    fn replace_or_push_tracked_row(
+        rows: &mut Vec<TranscriptRow>,
+        slot: &mut Option<usize>,
+        row: TranscriptRow,
+    ) {
+        if let Some(idx) = *slot {
+            if idx < rows.len() {
+                rows[idx] = row;
+                return;
+            }
+        }
+
+        *slot = Some(rows.len());
+        rows.push(row);
+    }
+
     fn handle_message(&mut self, message: UiMessage) {
         match message {
             UiMessage::TurnEvent { event, occurred_at } => {
@@ -1676,6 +1694,11 @@ impl InteractiveApp {
 
                 let is_search_progress = matches!(event, TurnEvent::GathererSearchProgress { .. });
                 let is_planner_progress = matches!(event, TurnEvent::PlannerStepProgress { .. });
+                let is_gathering_harness_progress = matches!(
+                    &event,
+                    TurnEvent::HarnessState { snapshot }
+                        if snapshot.chamber == crate::domain::model::HarnessChamber::Gathering
+                );
 
                 self.last_event = Some((event.clone(), occurred_at));
                 self.emitted_in_flight = false;
@@ -1689,34 +1712,26 @@ impl InteractiveApp {
                     };
 
                     if is_planner_progress {
-                        // Replace existing planner progress row in-place.
-                        if let Some(idx) = self.planner_progress_row {
-                            if idx < self.rows.len() {
-                                self.rows[idx] = row;
-                            } else {
-                                self.planner_progress_row = Some(self.rows.len());
-                                self.rows.push(row);
-                            }
-                        } else {
-                            self.planner_progress_row = Some(self.rows.len());
-                            self.rows.push(row);
-                        }
+                        Self::replace_or_push_tracked_row(
+                            &mut self.rows,
+                            &mut self.planner_progress_row,
+                            row,
+                        );
                     } else if is_search_progress {
-                        // Replace existing search progress row in-place.
-                        if let Some(idx) = self.search_progress_row {
-                            if idx < self.rows.len() {
-                                self.rows[idx] = row;
-                            } else {
-                                self.search_progress_row = Some(self.rows.len());
-                                self.rows.push(row);
-                            }
-                        } else {
-                            self.search_progress_row = Some(self.rows.len());
-                            self.rows.push(row);
-                        }
+                        Self::replace_or_push_tracked_row(
+                            &mut self.rows,
+                            &mut self.search_progress_row,
+                            row,
+                        );
+                    } else if is_gathering_harness_progress {
+                        Self::replace_or_push_tracked_row(
+                            &mut self.rows,
+                            &mut self.gathering_harness_row,
+                            row,
+                        );
                     } else {
-                        // Any non-progress event supersedes the search progress row.
                         self.search_progress_row = None;
+                        self.gathering_harness_row = None;
                         self.rows.push(row);
                     }
                 } else if let Some(timing) = self.active_turn_timing.as_mut() {
@@ -1733,6 +1748,7 @@ impl InteractiveApp {
                 occurred_at,
             } => {
                 self.search_progress_row = None;
+                self.gathering_harness_row = None;
                 self.planner_progress_row = None;
                 self.last_event = None;
                 self.emitted_in_flight = false;
@@ -3304,6 +3320,80 @@ mod tests {
         assert!(row.content.contains("status=active"));
         assert!(row.content.contains("timeout=slow"));
         assert!(row.content.contains("indexing 4/10 files"));
+    }
+
+    #[test]
+    fn alternating_hunting_and_gathering_updates_collapse_in_place() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        let rows_before = app.rows.len();
+        let started = Instant::now();
+
+        let hunt_event = |count: usize, fresh: usize, segments: usize| {
+            super::UiMessage::TurnEvent {
+                event: TurnEvent::GathererSearchProgress {
+                    phase: "Indexing".to_string(),
+                    elapsed_seconds: 110,
+                    eta_seconds: Some(0),
+                    strategy: Some("bm25".to_string()),
+                    detail: Some(format!(
+                        "indexing {count}/75934 files · blobs 1365 · fresh {fresh} · skipped 36239 · segments {segments} · bm25 cache 0 build 0"
+                    )),
+                },
+                occurred_at: started,
+            }
+        };
+        let governor_event = |count: usize, fresh: usize, segments: usize| {
+            super::UiMessage::TurnEvent {
+                event: TurnEvent::HarnessState {
+                    snapshot: crate::domain::model::HarnessSnapshot {
+                        chamber: crate::domain::model::HarnessChamber::Gathering,
+                        governor: crate::domain::model::GovernorState {
+                            status: crate::domain::model::HarnessStatus::Intervening,
+                            timeout: crate::domain::model::TimeoutState {
+                                phase: crate::domain::model::TimeoutPhase::Stalled,
+                                elapsed_seconds: Some(110),
+                                deadline_seconds: Some(110),
+                            },
+                            intervention: Some("search Indexing is stalled".to_string()),
+                        },
+                        detail: Some(format!(
+                            "indexing {count}/75934 files · blobs 1365 · fresh {fresh} · skipped 36239 · segments {segments} · bm25 cache 0 build 0"
+                        )),
+                    },
+                },
+                occurred_at: started,
+            }
+        };
+
+        app.handle_message(hunt_event(75921, 38318, 332391));
+        app.handle_message(governor_event(75921, 38318, 332391));
+        assert_eq!(app.rows.len(), rows_before + 2);
+
+        app.handle_message(hunt_event(75925, 38321, 332410));
+        app.handle_message(governor_event(75925, 38321, 332410));
+
+        assert_eq!(app.rows.len(), rows_before + 2);
+        assert_eq!(
+            app.rows[rows_before].header,
+            "• Hunting (Indexing) — 1m 50s (eta 0ms) strategy=bm25"
+        );
+        assert!(app.rows[rows_before].content.contains("75925/75934"));
+        assert_eq!(app.rows[rows_before + 1].header, "• Governor: gathering");
+        assert!(app.rows[rows_before + 1].content.contains("75925/75934"));
+        assert!(
+            app.rows[rows_before + 1]
+                .content
+                .contains("timeout=stalled")
+        );
     }
 
     #[test]
