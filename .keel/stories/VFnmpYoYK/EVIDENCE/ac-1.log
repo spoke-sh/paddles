@@ -1,0 +1,17 @@
+---
+recorded_at: 2026-04-04T00:15:15.135722793-07:00
+command: npm --workspace @paddles/web exec vitest run src/runtime-app.test.tsx
+---
+
+ RUN  v2.1.9 /home/alex/workspace/spoke-sh/paddles/apps/web
+
+ ✓ src/runtime-app.test.tsx (7 tests) 312ms
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  00:15:13
+   Duration  1.53s (transform 288ms, setup 62ms, collect 392ms, tests 312ms, environment 384ms, prepare 65ms)
+
+
+--- stderr ---
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
