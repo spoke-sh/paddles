@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-28T16:43:23
 achieved_at: 2026-03-28T17:24:07
 verified_at: 2026-03-28T18:04:51
+verification_artifact: verification.gif
 ---
 
 # Integrate Sift Autonomous Retrieval Planning

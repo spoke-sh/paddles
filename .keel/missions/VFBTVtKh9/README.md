@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-28T10:33:24
 achieved_at: 2026-03-28T13:25:12
 verified_at: 2026-03-28T14:14:58
+verification_artifact: verification.gif
 ---
 
 # Context-Gathering Subagent Routing

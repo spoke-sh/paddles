@@ -6,9 +6,19 @@ created_at: 2026-03-16T20:30:42
 updated_at: 2026-03-16T20:45:55
 watch: ~
 verified_at: 2026-03-16T20:45:55
+verification_artifact: verification.gif
 ---
 
 # Mission: The Interactive TUI
+
+## Documents
+
+| Document | Description |
+|----------|-------------|
+| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
+| [LOG.md](LOG.md) | Decision journal and session digest |
+| [record-cli.gif](record-cli.gif) | CLI verification proof |
+| [verification.gif](verification.gif) | High-dimension verification proof |
 
 ## Charter
 Implement interactive prompt loop in `main.rs` and execute `just paddles` to open the interactive interface.

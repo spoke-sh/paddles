@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-28T21:48:12
 achieved_at: 2026-03-29T08:38:42
 verified_at: 2026-03-29T08:42:04
+verification_artifact: verification.gif
 ---
 
 # Replace Heuristic Routing With Model-Directed Action Selection

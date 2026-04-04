@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-29T17:47:05
 achieved_at: 2026-03-29T18:28:19
 verified_at: 2026-03-29T19:42:13
+verification_artifact: verification.gif
 ---
 
 # Substitute Residual Reasoning Heuristics With Model-Judged Interpretation And Retrieval

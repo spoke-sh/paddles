@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-30T06:50:57
 achieved_at: 2026-03-30T07:00:01
 verified_at: 2026-03-30T07:00:01
+verification_artifact: verification.gif
 ---
 
 # Multi Provider Model Support

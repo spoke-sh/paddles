@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-28T18:17:23
 achieved_at: 2026-03-28T18:48:33
 verified_at: 2026-03-28T19:53:18
+verification_artifact: verification.gif
 ---
 
 # Make Paddles Evidence-First And Observable

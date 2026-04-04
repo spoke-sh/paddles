@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-31T16:24:53
 achieved_at: 2026-03-31T16:34:56
 verified_at: 2026-03-31T16:35:10
+verification_artifact: verification.gif
 ---
 
 # Adaptive Interpretation Context Refinement

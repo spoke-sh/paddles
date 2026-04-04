@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-30T06:41:54
 achieved_at: 2026-03-30T06:45:52
 verified_at: 2026-03-30T06:45:56
+verification_artifact: verification.gif
 ---
 
 # Web Interface And HTTP API For Paddles

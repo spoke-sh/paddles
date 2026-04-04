@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-04-01T21:29:44
 achieved_at: 2026-04-01T22:44:56
 verified_at: 2026-04-01T22:45:02
+verification_artifact: verification.gif
 ---
 
 # Build Web Forensic Transit Inspector

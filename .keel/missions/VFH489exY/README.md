@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-29T09:44:05
 achieved_at: 2026-03-29T09:57:55
 verified_at: 2026-03-29T10:09:27
+verification_artifact: verification.gif
 ---
 
 # Define Transit-Aligned Trace Recorder Boundary

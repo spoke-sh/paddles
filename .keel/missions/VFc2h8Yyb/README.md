@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-04-01T23:37:52
 achieved_at: 2026-04-02T06:16:27
 verified_at: 2026-04-02T06:16:27
+verification_artifact: verification.gif
 ---
 
 # Add Inception Provider Support

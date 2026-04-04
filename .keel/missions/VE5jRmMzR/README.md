@@ -6,9 +6,19 @@ created_at: 2026-03-16T20:24:35
 updated_at: 2026-03-27T07:40:40
 watch: ~
 verified_at: 2026-03-27T07:40:40
+verification_artifact: verification.gif
 ---
 
 # Mission: Local Neural Lattice
+
+## Documents
+
+| Document | Description |
+|----------|-------------|
+| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
+| [LOG.md](LOG.md) | Decision journal and session digest |
+| [record-cli.gif](record-cli.gif) | CLI verification proof |
+| [verification.gif](verification.gif) | High-dimension verification proof |
 
 ## Charter
 Implement real local inference in `CandleProvider` and execute a prompt with zero network dependency.

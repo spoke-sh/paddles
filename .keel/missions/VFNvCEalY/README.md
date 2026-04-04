@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-30T14:22:09
 achieved_at: 2026-03-30T15:55:54
 verified_at: 2026-03-30T21:51:00
+verification_artifact: verification.gif
 ---
 
 # Interpretation Context Quality And Visibility

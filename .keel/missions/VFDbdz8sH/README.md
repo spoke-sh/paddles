@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-28T19:15:10
 achieved_at: 2026-03-28T19:42:21
 verified_at: 2026-03-28T19:53:18
+verification_artifact: verification.gif
 ---
 
 # Codex-Style Interactive TUI For Paddles

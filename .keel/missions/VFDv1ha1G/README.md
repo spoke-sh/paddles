@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-28T20:37:02
 achieved_at: 2026-03-28T21:21:17
 verified_at: 2026-03-29T08:42:04
+verification_artifact: verification.gif
 ---
 
 # Make Paddles A Recursive In-Context Planning Harness

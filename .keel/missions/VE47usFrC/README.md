@@ -6,6 +6,7 @@ created_at: 2026-03-16T13:48:41
 updated_at: 2026-03-16T20:03:49
 watch: ~
 verified_at: 2026-03-16T20:03:49
+verification_artifact: verification.gif
 ---
 
 # Mission: Plug in the Chord

@@ -6,6 +6,7 @@ created_at: 2026-03-16T14:28:12
 updated_at: 2026-03-16T20:03:57
 watch: ~
 verified_at: 2026-03-16T20:03:57
+verification_artifact: verification.gif
 ---
 
 # Mission: Boot Sequence Credit System

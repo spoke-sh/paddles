@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-29T10:25:12
 achieved_at: 2026-03-29T11:58:43
 verified_at: 2026-03-29T19:42:11
+verification_artifact: verification.gif
 ---
 
 # Implement Model-Driven Auto-Threading With Transit

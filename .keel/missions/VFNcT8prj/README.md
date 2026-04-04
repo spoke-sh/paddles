@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-30T12:24:45
 achieved_at: 2026-03-30T12:40:25
 verified_at: 2026-03-30T12:40:25
+verification_artifact: verification.gif
 ---
 
 # Step Timing Baselines

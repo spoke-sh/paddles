@@ -6,9 +6,19 @@ created_at: 2026-03-16T20:44:32
 updated_at: 2026-03-16T21:00:36
 watch: ~
 verified_at: 2026-03-16T21:00:36
+verification_artifact: verification.gif
 ---
 
 # Mission: The Architectural Lattice
+
+## Documents
+
+| Document | Description |
+|----------|-------------|
+| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
+| [LOG.md](LOG.md) | Decision journal and session digest |
+| [record-cli.gif](record-cli.gif) | CLI verification proof |
+| [verification.gif](verification.gif) | High-dimension verification proof |
 
 ## Charter
 Refactor the `paddles` codebase into a Domain-Driven Design and Hexagonal Architecture to support modularity and long-term expansion.

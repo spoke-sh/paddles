@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-04-01T09:28:11
 achieved_at: 2026-04-01T10:53:26
 verified_at: 2026-04-01T10:53:26
+verification_artifact: verification.gif
 ---
 
 # Unify Conversation Transcript Projection Across Interfaces

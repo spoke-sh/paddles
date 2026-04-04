@@ -10,6 +10,7 @@ watch: ~
 activated_at: 2026-03-29T09:05:55
 achieved_at: 2026-03-29T09:41:14
 verified_at: 2026-03-29T10:09:27
+verification_artifact: verification.gif
 ---
 
 # Integrate Sift Graph Search Into The Gatherer Boundary
