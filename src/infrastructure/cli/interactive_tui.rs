@@ -1679,9 +1679,7 @@ impl InteractiveApp {
     }
 
     fn should_show_event(&self, event: &TurnEvent, pace: Pace, is_first_step: bool) -> bool {
-        if let TurnEvent::HarnessState { snapshot } = event
-            && !snapshot.governor_policy().should_emit_to_stream()
-        {
+        if !event.should_emit_to_projection_stream() {
             return false;
         }
 

@@ -1293,7 +1293,7 @@ fn render_turn_event(event: &TurnEvent) -> String {
             format!("• Classified turn\n  └ {}", intent.label())
         }
         TurnEvent::HarnessState { snapshot } => {
-            if !snapshot.governor_policy().should_emit_to_stream() {
+            if !event.should_emit_to_projection_stream() {
                 return String::new();
             }
 

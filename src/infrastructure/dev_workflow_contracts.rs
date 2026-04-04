@@ -335,12 +335,12 @@ fn runtime_shell_host_keeps_panels_flush_to_the_viewport() {
     let css = read_repo_file("apps/web/src/runtime-shell.css");
 
     assert!(
-        css.contains(".runtime-shell-host {\n  font-family:") && css.contains("  padding: 0;"),
-        "runtime shell host should not add outer viewport padding around the two-panel layout",
+        css.contains(".runtime-shell-host {\n  font-family:") && css.contains("  padding: 8px;"),
+        "runtime shell host should add around 8px padding around the two-panel layout",
     );
     assert!(
-        css.contains("@media (max-width: 960px) {\n  .runtime-shell-host { flex-direction: column; height: 100dvh; padding: 0; }"),
-        "mobile runtime shell should also avoid outer viewport padding",
+        css.contains("@media (max-width: 960px) {\n  .runtime-shell-host { flex-direction: column; height: 100dvh; padding: 8px; }"),
+        "mobile runtime shell should add outer viewport padding as well",
     );
 }
 

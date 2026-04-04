@@ -272,6 +272,14 @@ impl TurnEvent {
                 if snapshot.chamber == super::harness::HarnessChamber::Gathering
         )
     }
+
+    /// Whether this event should be forwarded to long-lived projection streams.
+    pub fn should_emit_to_projection_stream(&self) -> bool {
+        match self {
+            Self::HarnessState { snapshot } => snapshot.should_emit_to_stream(),
+            _ => true,
+        }
+    }
 }
 
 pub trait TurnEventSink: Send + Sync {
@@ -336,7 +344,7 @@ impl TurnEventSink for MultiplexEventSink {
 
 #[cfg(test)]
 mod tests {
-    use super::TurnEvent;
+    use super::{TurnEvent, TurnIntent};
     use crate::domain::model::{
         ContextStrain, GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, StrainFactor,
         TimeoutPhase, TimeoutState,
@@ -370,5 +378,30 @@ mod tests {
         };
 
         assert_eq!(event.event_type_key(), "harness_state");
+    }
+
+    #[test]
+    fn harness_state_respects_projection_stream_policy() {
+        let silent_snapshot = HarnessSnapshot::active(HarnessChamber::Gathering);
+        let active_event = TurnEvent::HarnessState {
+            snapshot: silent_snapshot,
+        };
+
+        let intervening_snapshot = HarnessSnapshot::intervening(HarnessChamber::Planning, "test");
+        let intervening_event = TurnEvent::HarnessState {
+            snapshot: intervening_snapshot,
+        };
+
+        assert!(!active_event.should_emit_to_projection_stream());
+        assert!(intervening_event.should_emit_to_projection_stream());
+    }
+
+    #[test]
+    fn non_harness_events_always_emit_to_projection_stream() {
+        let event = TurnEvent::IntentClassified {
+            intent: TurnIntent::Casual,
+        };
+
+        assert!(event.should_emit_to_projection_stream());
     }
 }
