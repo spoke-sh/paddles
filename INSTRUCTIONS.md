@@ -18,7 +18,7 @@ The `keel` CLI is the canonical reference surface for this rhythm. Every session
 5. **Close**:
    - Record your move in the mission `LOG.md` when operating under an active mission.
    - **Open-Loop Check**: Use `git status` if you need to inspect current worktree energy before the commit boundary.
-   - **Commit**: Execute `git commit`. The installed hooks automatically run repo checks and append `doctor --status` to the commit message. Resolve any issues if the commit is rejected.
+   - **Commit**: Execute `git commit`. The installed hooks automatically run repo checks and append a compact doctor snapshot to the commit message. Use full `keel doctor` for operator diagnosis, and resolve any issues if the commit is rejected.
 6. **Re-orient**: After the commit lands, run `keel doctor` and `keel flow --scene` to see what the board needs next. This is the "plug the cord back in" moment. If the delivery lane has ready work, start the next turn immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification) or when the user has explicitly redirected you.
 
 ## Primary Workflows
@@ -96,7 +96,7 @@ Apply these checks to **every change** before finalizing work:
    - **CIRCULATORY**: Workflow (Graph integrity, topology)
    - **PACEMAKER**: Heartbeat (derived repository activity and open-loop warning state)
    - **KINETIC**: Delivery (Backlog liquidity, execution capacity)
-3. **Pacemaker Protocol**: The system's heartbeat is derived from Git/worktree activity. Inspect the worktree directly with `git status`, use `keel flow --scene` and `keel doctor` to understand board pressure, and clear open-loop energy by landing the sealing commit. The installed pre-commit hook keeps quality checks and tests tied to the commit boundary, and the commit-msg hook appends `doctor --status` to the message body.
+3. **Pacemaker Protocol**: The system's heartbeat is derived from Git/worktree activity. Inspect the worktree directly with `git status`, use `keel flow --scene` and full `keel doctor` to understand board pressure, and clear open-loop energy by landing the sealing commit. The installed pre-commit hook keeps quality checks and tests tied to the commit boundary, and the commit-msg hook appends a compact doctor snapshot to the message body.
 4. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input.
 5. **Notification Threshold**: Only request human intervention when you reach a "Manual Lane" that requires design direction or a decision on application behavior (for example, assessing a Bearing, planning a Voyage, or human verification of a complex Story).
 6. **Automated Guardrails**: You no longer need to run `just quality` or `just test` manually before every commit. The git hooks installed via `keel hooks install` automatically enforce these checks, including the shared frontend workspace lint/build path and browser E2E coverage. If a commit fails, resolve the reported lints or test failures and try again.
@@ -123,7 +123,7 @@ To upgrade Keel to the latest version:
 2. **Verify the Board**: Run `keel doctor`. Upgrading Keel may introduce new validation rules or schema changes. Fix any reported diagnostic issues.
 3. **Update Hooks**: Run `keel hooks install` to align the local git hooks with the upgraded Keel version.
 4. **Sync Operator Docs**: Reconcile `AGENTS.md` and `INSTRUCTIONS.md` with the latest upstream Keel structure while preserving Paddles-specific runtime/model-routing guidance.
-5. **Seal & Commit**: Land the resulting `flake.lock` and instruction changes in one commit. The installed hooks append `doctor --status`.
+5. **Seal & Commit**: Land the resulting `flake.lock` and instruction changes in one commit. The installed hooks append a compact doctor snapshot, but the upgrade verification step remains full `keel doctor`.
 
 ## Compatibility Policy (Hard Cutover)
 

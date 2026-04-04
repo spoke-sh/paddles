@@ -7072,7 +7072,7 @@ mod tests {
             }],
             evidence_items: vec![EvidenceItem {
                 source: "apps/web/src/runtime-shell.css".to_string(),
-                snippet: ".runtime-shell-host { padding: 0; }".to_string(),
+                snippet: ".runtime-shell-host { padding: 8px; }".to_string(),
                 rationale: "likely css target".to_string(),
                 rank: 1,
             }],

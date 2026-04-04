@@ -46,7 +46,8 @@ Keel's operator rhythm in this repo is:
   - Run `git status` before the commit boundary when you need an open-loop
     check.
   - Land the sealing commit with `git commit`. Installed hooks run repo checks
-    and append `keel doctor --status` output to the commit message.
+    and append a compact doctor snapshot to the commit message; operators
+    should still diagnose board state with full `keel doctor`.
   - If the commit fails, fix the reported issue and retry instead of leaving the
     loop partially open.
 - **Re-orient**: After the commit lands, run `keel doctor` and

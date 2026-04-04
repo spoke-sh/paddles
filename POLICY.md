@@ -98,7 +98,10 @@ Follow strict transition gates for all `.keel/` entities:
 - **Verified**: Requires human sign-off of the submitted evidence.
 
 ## 6. Pacemaker Synchronization
-Every commit that modifies the board MUST be pace-set by `keel poke` and include the `keel doctor --status` Importance Snapshot in the commit message.
+Every commit that modifies the board MUST be pace-set by `keel poke` and
+include the hook-generated compact doctor snapshot in the commit message.
+Operator diagnosis and board repair always use full `keel doctor`, not the
+compact snapshot alone.
 
 ## 7. Mission Achievement
 A mission is **Achieved** only when:
