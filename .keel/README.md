@@ -290,6 +290,12 @@
 |--------|--------|
 | [Unified Projection Store And Product-Route Sync](epics/VFguTx9hQ/voyages/VFguUzvun/) | done |
 
+### [Workspace Editor Diff Visibility](epics/VFnmIbFW2/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Emit and Render Applied Edit Diffs](epics/VFnmIbFW2/voyages/VFnmfzD3E/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |

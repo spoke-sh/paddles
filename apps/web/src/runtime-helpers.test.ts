@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { eventRow } from './runtime-helpers';
+import { eventRow, sourceLabel } from './runtime-helpers';
 
 describe('eventRow', () => {
   it('prefers the rust-authored runtime presentation when the projection stream provides it', () => {
@@ -79,5 +79,9 @@ describe('eventRow', () => {
     expect(row?.text).toContain('gathering');
     expect(row?.text).toContain('slow');
     expect(row?.text).toContain('indexing 4/10 files');
+  });
+
+  it('labels workspace editor boundaries in the manifold source view', () => {
+    expect(sourceLabel('workspace_editor_boundary')).toBe('Workspace editor boundary');
   });
 });

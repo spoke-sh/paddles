@@ -1252,6 +1252,38 @@ fn fallback_signal_details(
 }
 
 fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSignalContribution>) {
+    if stop_reason.contains("workspace-editor-boundary") {
+        let secondary_source = if stop_reason.contains("search-budget") {
+            "search_budget"
+        } else if stop_reason.contains("inspect-budget") {
+            "inspect_budget"
+        } else if stop_reason.contains("read-budget") {
+            "read_budget"
+        } else if stop_reason.contains("planner-budget") {
+            "planner_budget"
+        } else {
+            "controller_policy"
+        };
+        return (
+            "high",
+            86,
+            vec![
+                TraceSignalContribution {
+                    source: "workspace_editor_boundary".to_string(),
+                    share_percent: 60,
+                    rationale: "The turn crossed the boundary where planning should yield to the workspace editor for an applied edit.".to_string(),
+                },
+                TraceSignalContribution {
+                    source: secondary_source.to_string(),
+                    share_percent: 40,
+                    rationale: format!(
+                        "The planner stop reason still carried `{stop_reason}` while the applied-edit obligation remained open."
+                    ),
+                },
+            ],
+        );
+    }
+
     let source = if stop_reason.contains("search-budget") {
         "search_budget"
     } else if stop_reason.contains("inspect-budget") {
@@ -2200,6 +2232,25 @@ impl MechSuitService {
                 let mut decision = planner_engine
                     .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
                     .await?;
+                let controller_edit = controller_prompt_edit_instruction(&self.workspace_root, prompt);
+                let provider_edit_missing = !decision.edit.known_edit && controller_edit.known_edit;
+                decision.edit = merge_initial_edit_instruction(&decision.edit, &controller_edit);
+                if provider_edit_missing {
+                    let candidate_summary = if decision.edit.candidate_files.is_empty() {
+                        "no candidate files surfaced yet".to_string()
+                    } else {
+                        format!(
+                            "candidate files: {}",
+                            decision.edit.candidate_files.join(", ")
+                        )
+                    };
+                    trace.emit(TurnEvent::Fallback {
+                        stage: "action-bias".to_string(),
+                        reason: format!(
+                            "controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; {candidate_summary}"
+                        ),
+                    });
+                }
                 if let Some(bootstrapped) = self
                     .bootstrap_known_edit_initial_action(
                         prompt,
@@ -2955,7 +3006,10 @@ impl MechSuitService {
         }
 
         let completed = stop_reason.is_some();
-        let stop_reason = stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string());
+        let stop_reason = annotate_stop_reason_for_pending_edit(
+            stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string()),
+            instruction_frame.as_ref(),
+        );
         trace.emit(TurnEvent::PlannerSummary {
             strategy: "model-driven".to_string(),
             mode: loop_state
@@ -3241,6 +3295,145 @@ fn merge_instruction_frame_with_edit_signal(
     }
 }
 
+fn merge_initial_edit_instruction(
+    current: &InitialEditInstruction,
+    inferred: &InitialEditInstruction,
+) -> InitialEditInstruction {
+    let mut candidate_files = current.candidate_files.clone();
+    for candidate in &inferred.candidate_files {
+        if !candidate_files.contains(candidate) {
+            candidate_files.push(candidate.clone());
+        }
+    }
+
+    InitialEditInstruction {
+        known_edit: current.known_edit || inferred.known_edit,
+        candidate_files,
+    }
+}
+
+fn controller_prompt_edit_instruction(
+    workspace_root: &Path,
+    prompt: &str,
+) -> InitialEditInstruction {
+    if !prompt_requests_workspace_edit(prompt) {
+        return InitialEditInstruction::default();
+    }
+
+    InitialEditInstruction {
+        known_edit: true,
+        candidate_files: known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3),
+    }
+}
+
+fn prompt_requests_workspace_edit(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    let tokens = lower
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let has_change_verb = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "fix"
+                | "change"
+                | "update"
+                | "edit"
+                | "add"
+                | "remove"
+                | "replace"
+                | "rename"
+                | "bump"
+                | "set"
+                | "make"
+                | "move"
+                | "delete"
+                | "revert"
+                | "apply"
+                | "show"
+                | "hide"
+                | "need"
+                | "needs"
+                | "should"
+                | "must"
+        )
+    });
+    if !has_change_verb {
+        return false;
+    }
+
+    if [
+        "src/",
+        "apps/",
+        "tests/",
+        "test/",
+        ".keel/",
+        "cargo.toml",
+        "cargo.lock",
+        "flake.nix",
+        "flake.lock",
+        "readme.md",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        return true;
+    }
+
+    if prompt
+        .split_whitespace()
+        .map(|token| {
+            token.trim_matches(|ch: char| {
+                !ch.is_ascii_alphanumeric()
+                    && ch != '.'
+                    && ch != '#'
+                    && ch != '/'
+                    && ch != '_'
+                    && ch != '-'
+            })
+        })
+        .any(is_code_anchor_token)
+    {
+        return true;
+    }
+
+    tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "css"
+                | "class"
+                | "selector"
+                | "component"
+                | "function"
+                | "module"
+                | "button"
+                | "div"
+                | "padding"
+                | "loop"
+                | "test"
+                | "file"
+        )
+    })
+}
+
+fn is_code_anchor_token(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+
+    if token.starts_with('.') || token.starts_with('#') {
+        return token
+            .chars()
+            .skip(1)
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+    }
+
+    Path::new(token)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some()
+}
+
 fn instruction_unsatisfied_note(frame: &InstructionFrame) -> String {
     if let Some(candidates) = frame.candidate_summary() {
         format!(
@@ -3256,6 +3449,26 @@ fn instruction_unsatisfied_direct_reply(frame: &InstructionFrame) -> String {
         format!("{EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY}\n\nLikely target files: {candidates}")
     } else {
         EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY.to_string()
+    }
+}
+
+fn annotate_stop_reason_for_pending_edit(
+    stop_reason: String,
+    instruction_frame: Option<&InstructionFrame>,
+) -> String {
+    let Some(frame) = instruction_frame else {
+        return stop_reason;
+    };
+    if !frame.requires_applied_edit() || stop_reason.contains("workspace-editor-boundary") {
+        return stop_reason;
+    }
+
+    if stop_reason == "instruction-unsatisfied" {
+        "workspace-editor-boundary".to_string()
+    } else if stop_reason.contains("budget") || stop_reason.contains("challenge") {
+        format!("workspace-editor-boundary:{stop_reason}")
+    } else {
+        stop_reason
     }
 }
 
@@ -3484,9 +3697,9 @@ async fn build_planner_prior_context(
 fn planner_budget_for_turn(initial_edit: &InitialEditInstruction) -> PlannerBudget {
     if initial_edit.known_edit {
         PlannerBudget {
-            max_steps: 8,
-            max_reads: 4,
-            max_inspects: 2,
+            max_steps: 6,
+            max_reads: 2,
+            max_inspects: 1,
             max_searches: 1,
             ..PlannerBudget::default()
         }
@@ -7363,14 +7576,14 @@ mod tests {
     }
 
     #[test]
-    fn controller_does_not_bootstrap_known_edit_without_model_edit_signal() {
+    fn controller_infers_known_edit_from_prompt_without_provider_signal() {
         let workspace = tempfile::tempdir().expect("workspace");
-        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create css dir");
         fs::write(
-            workspace.path().join("src/application/mod.rs"),
-            "fn planner_loop() {}\n",
+            workspace.path().join("apps/web/src/runtime-shell.css"),
+            ".runtime-shell-host {\n  padding: 0;\n}\n",
         )
-        .expect("write app file");
+        .expect("write css");
 
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
@@ -7390,16 +7603,26 @@ mod tests {
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
                 InitialAction::Answer,
-                "controller should answer directly if left alone",
+                "provider omitted the edit envelope",
             ),
-            vec![RecursivePlannerDecision {
-                action: PlannerAction::Stop {
-                    reason: "the file was enough".to_string(),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
-                rationale: "stop after the read".to_string(),
-                answer: None,
-                edit: InitialEditInstruction::default(),
-            }],
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                },
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
@@ -7414,7 +7637,9 @@ mod tests {
                 gatherer: None,
             });
             service
-                .process_prompt("fix the planner loop")
+                .process_prompt(
+                    "The .runtime-shell-host div needs some padding. Something around 8px",
+                )
                 .await
                 .expect("process prompt")
         });
@@ -7423,10 +7648,22 @@ mod tests {
             .executed_actions
             .lock()
             .expect("executed actions lock");
-        assert!(
-            executed_actions.is_empty(),
-            "without a model-authored edit signal, the controller should not invent a file read"
-        );
+        assert!(matches!(
+            executed_actions.first(),
+            Some(WorkspaceAction::Read { path }) if path == "apps/web/src/runtime-shell.css"
+        ));
+    }
+
+    #[test]
+    fn workspace_editor_boundary_budget_signal_credits_boundary_source() {
+        let (_, _, contributions) =
+            budget_signal_details("workspace-editor-boundary:planner-budget-exhausted");
+        assert!(contributions
+            .iter()
+            .any(|item| item.source == "workspace_editor_boundary"));
+        assert!(contributions
+            .iter()
+            .any(|item| item.source == "planner_budget"));
     }
 
     #[test]

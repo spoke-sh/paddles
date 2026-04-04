@@ -85,6 +85,7 @@ export const FORCE_SOURCE_LABELS: Record<string, string> = {
   candidate_file_evidence: 'Candidate file evidence',
   provider_or_parser: 'Provider or parser',
   controller_safety: 'Controller safety',
+  workspace_editor_boundary: 'Workspace editor boundary',
   search_budget: 'Search budget',
   inspect_budget: 'Inspect budget',
   read_budget: 'Read budget',
