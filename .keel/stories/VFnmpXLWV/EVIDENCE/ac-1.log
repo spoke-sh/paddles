@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-04T00:03:28.048388285-07:00
+mode: manual
+---
+Commit b9ca0c4 added structured AppliedEdit payloads to workspace editor success results for write_file, replace_in_file, and apply_patch; local editor tests and cargo nextest passed in commit hooks.

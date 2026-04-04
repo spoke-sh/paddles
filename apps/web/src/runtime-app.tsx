@@ -82,6 +82,30 @@ function responseModeLabel(mode: string | null | undefined) {
   return mode.split('_').join(' ');
 }
 
+function diffLineClass(line: string) {
+  if (
+    line.startsWith('+++') ||
+    line.startsWith('---') ||
+    line.startsWith('diff ') ||
+    line.startsWith('index ')
+  ) {
+    return 'meta';
+  }
+  if (line.startsWith('+')) {
+    return 'add';
+  }
+  if (line.startsWith('-')) {
+    return 'remove';
+  }
+  if (line.startsWith('@@')) {
+    return 'hunk';
+  }
+  if (line.startsWith('\\')) {
+    return 'noop';
+  }
+  return 'context';
+}
+
 function previousArtifactBaseline(
   turn: ForensicTurnProjection | null,
   recordProjection: ForensicRecordProjection | null
@@ -170,7 +194,18 @@ function RuntimeShellLayout() {
             {events.map((item) => (
               <div className="event-row" data-event-text={item.text} key={item.id}>
                 <span className={`event-badge ${item.badgeClass}`}>{item.badge}</span>
-                <span>{item.text}</span>
+                <span>
+                  <span>{item.text}</span>
+                  {item.diff ? (
+                    <span className="diff-lines">
+                      {item.diff.split('\n').map((line, index) => (
+                        <span className={`diff-line ${diffLineClass(line)}`} key={`${item.id}-${index}`}>
+                          {line}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                </span>
               </div>
             ))}
             {!connected && projection ? (

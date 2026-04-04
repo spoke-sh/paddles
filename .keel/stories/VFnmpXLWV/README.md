@@ -21,5 +21,5 @@ Extend the workspace editor result path so successful edit actions emit a struct
 
 ## Acceptance Criteria
 
-- [ ] Successful `apply_patch`, `replace_in_file`, and `write_file` actions return structured applied-edit data that can feed runtime events and projections [SRS-01/AC-01] <!-- verify: test, SRS-01:start:end -->
-- [ ] Successful workspace editor edits emit a shared applied-edit runtime artifact instead of only a generic tool summary [SRS-02/AC-02] <!-- verify: test, SRS-02:start:end -->
+- [ ] Successful `apply_patch`, `replace_in_file`, and `write_file` actions return structured applied-edit data that can feed runtime events and projections [SRS-01/AC-01] <!-- verify: test, SRS-01:start:end, proof: ac-1.log-->
+- [ ] Successful workspace editor edits emit a shared applied-edit runtime artifact instead of only a generic tool summary [SRS-02/AC-02] <!-- verify: test, SRS-02:start:end, proof: ac-2.log-->

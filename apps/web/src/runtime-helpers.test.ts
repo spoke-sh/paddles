@@ -84,4 +84,24 @@ describe('eventRow', () => {
   it('labels workspace editor boundaries in the manifold source view', () => {
     expect(sourceLabel('workspace_editor_boundary')).toBe('Workspace editor boundary');
   });
+
+  it('surfaces applied edits as diff rows instead of collapsing them to tool chatter', () => {
+    const row = eventRow({
+      type: 'workspace_edit_applied',
+      tool_name: 'apply_patch',
+      edit: {
+        files: ['sample.rs'],
+        diff: '--- a/sample.rs\n+++ b/sample.rs\n@@ -1 +1 @@\n-old\n+new',
+        insertions: 1,
+        deletions: 1,
+      },
+    });
+
+    expect(row).toEqual({
+      badge: 'tool',
+      badgeClass: 'tool-diff',
+      text: 'apply_patch applied',
+      diff: '--- a/sample.rs\n+++ b/sample.rs\n@@ -1 +1 @@\n-old\n+new',
+    });
+  });
 });

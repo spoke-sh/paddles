@@ -324,6 +324,35 @@ describe('RuntimeApp', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders applied edit diffs from the live runtime stream', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+
+    const [stream] = FakeEventSource.instances;
+    stream.dispatch('turn_event', {
+      type: 'workspace_edit_applied',
+      tool_name: 'apply_patch',
+      edit: {
+        files: ['sample.rs'],
+        diff: [
+          '--- a/sample.rs',
+          '+++ b/sample.rs',
+          '@@ -1 +1 @@',
+          '-    println!("hello");',
+          '+    println!("hi");',
+        ].join('\n'),
+        insertions: 1,
+        deletions: 1,
+      },
+    });
+
+    expect(await screen.findByText('apply_patch applied')).toBeInTheDocument();
+    expect(await screen.findByText('--- a/sample.rs')).toBeInTheDocument();
+    expect(document.querySelector('.diff-line.add')).toHaveTextContent('println!("hi");');
+    expect(document.querySelector('.event-badge.tool-diff')).toBeInTheDocument();
+  });
+
   it('renders assistant transcript blocks instead of flattening them to plain strings', async () => {
     renderAtPath('/');
 

@@ -3261,6 +3261,46 @@ mod tests {
     }
 
     #[test]
+    fn applied_edit_events_render_diff_lines_in_the_tui_transcript() {
+        let palette = detect_palette();
+        let row = format_turn_event_row(
+            TurnEvent::WorkspaceEditApplied {
+                call_id: "tool-2".to_string(),
+                tool_name: "write_file".to_string(),
+                edit: crate::domain::model::AppliedEdit {
+                    files: vec!["note.txt".to_string()],
+                    diff: "--- a/note.txt\n+++ b/note.txt\n@@ -0,0 +1 @@\n+hello".to_string(),
+                    insertions: 1,
+                    deletions: 0,
+                },
+            },
+            0,
+        );
+
+        assert_eq!(row.header, "• Applied write_file");
+        assert!(row.content.contains("+++ b/note.txt"));
+
+        let rendered_lines = render_row_lines(&row, &palette);
+        let rendered_text: Vec<String> = rendered_lines
+            .iter()
+            .skip(1)
+            .map(|line| line.spans.iter().map(|span| span.content.clone()).collect())
+            .collect();
+
+        assert!(
+            rendered_text
+                .iter()
+                .any(|line| line.contains("--- a/note.txt"))
+        );
+        assert!(
+            rendered_text
+                .iter()
+                .any(|line| line.contains("+++ b/note.txt"))
+        );
+        assert!(rendered_text.iter().any(|line| line.contains("+hello")));
+    }
+
+    #[test]
     fn gatherer_progress_rows_use_hunting_language() {
         let row = format_turn_event_row(
             TurnEvent::GathererSearchProgress {

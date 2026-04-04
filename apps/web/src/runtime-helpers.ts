@@ -660,12 +660,14 @@ export function primitivePhase(
 
 export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
   const projectionEvent = payload as Partial<ProjectionTurnEvent>;
+  const diff = eventDiff(payload);
   if (projectionEvent.presentation) {
-    return {
+    const row = {
       badge: projectionEvent.presentation.badge,
       badgeClass: projectionEvent.presentation.badge_class,
       text: projectionEvent.presentation.text,
     };
+    return diff ? { ...row, diff } : row;
   }
 
   const event = ('event' in payload ? payload.event : payload) as TurnEvent;
@@ -690,12 +692,22 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
       text: `${String(event.tool_name || 'tool')}: ${truncate(String(event.invocation || ''), 60)}`,
     };
   }
-  if (type === 'tool_finished') {
-    return {
+  if (type === 'workspace_edit_applied') {
+    const row = {
       badge: 'tool',
-      badgeClass: 'tool',
-      text: `${String(event.tool_name || 'tool')} done`,
+      badgeClass: 'tool-diff',
+      text: `${String(event.tool_name || 'tool')} applied`,
     };
+    return diff ? { ...row, diff } : row;
+  }
+  if (type === 'tool_finished') {
+    const toolName = String(event.tool_name || 'tool');
+    const row = {
+      badge: 'tool',
+      badgeClass: diff ? 'tool-diff' : 'tool',
+      text: `${toolName} done`,
+    };
+    return diff ? { ...row, diff } : row;
   }
   if (type === 'gatherer_summary') {
     return { badge: 'gather', badgeClass: 'gatherer', text: String(event.summary || '') };
@@ -780,4 +792,49 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
     };
   }
   return null;
+}
+
+function eventDiff(payload: ProjectionTurnEvent | TurnEvent) {
+  const event = ('event' in payload ? payload.event : payload) as TurnEvent;
+  const type = String(event.type || '');
+  if (type === 'workspace_edit_applied') {
+    const diff = String(
+      ((event as Record<string, unknown>).edit as Record<string, unknown> | undefined)?.diff || ''
+    ).trim();
+    return diff || null;
+  }
+  if (type === 'tool_finished') {
+    return extractMutationDiff(
+      String((event as Record<string, unknown>).tool_name || ''),
+      String((event as Record<string, unknown>).summary || '')
+    );
+  }
+  return null;
+}
+
+function isMutationTool(toolName: string) {
+  return toolName === 'diff' || toolName === 'apply_patch';
+}
+
+function extractMutationDiff(toolName: string, summary: string) {
+  if (!isMutationTool(toolName)) {
+    return null;
+  }
+  if (toolName === 'diff') {
+    if (summary === 'No diff output.') {
+      return summary;
+    }
+    return (
+      stripPrefix(summary, 'Diff output:\n') || stripPrefix(summary, 'Diff output:\r\n') || null
+    );
+  }
+  if (toolName === 'apply_patch' && summary.startsWith('Applied patch:\n')) {
+    const body = summary.slice('Applied patch:\n'.length);
+    return body.split('\n\nExit status:')[0].split('\nExit status:')[0].trim();
+  }
+  return null;
+}
+
+function stripPrefix(text: string, prefix: string) {
+  return text.startsWith(prefix) ? text.slice(prefix.length) : null;
 }

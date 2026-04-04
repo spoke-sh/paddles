@@ -21,6 +21,7 @@ interface RuntimeEventRow {
   badge: string;
   badgeClass: string;
   text: string;
+  diff?: string;
 }
 
 interface RuntimeStoreValue {
