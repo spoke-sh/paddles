@@ -2463,6 +2463,14 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
         return lines;
     }
 
+    if let Some(tool_name) = row.header.strip_prefix("• Applied ").map(str::trim)
+        && is_mutation_tool_name(tool_name)
+    {
+        let mutation_lines = render_mutation_diff_lines(&row.content, palette);
+        lines.extend(mutation_lines);
+        return lines;
+    }
+
     if let Some(tool_name) = row.header.strip_prefix("• Completed ").map(str::trim)
         && is_mutation_tool_name(tool_name)
         && let Some(diff_content) = mutation_tool_payload(tool_name, &row.content)
@@ -2662,6 +2670,17 @@ fn render_assistant_line(
 }
 
 fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
+    if let TurnEvent::WorkspaceEditApplied {
+        tool_name, edit, ..
+    } = &event
+    {
+        return TranscriptRow::new(
+            TranscriptRowKind::Event,
+            format!("• Applied {tool_name}"),
+            edit.diff.clone(),
+        );
+    }
+
     if let TurnEvent::ToolFinished {
         tool_name, summary, ..
     } = &event
@@ -2843,7 +2862,10 @@ fn format_hunting_history_snapshot(sample: &HuntingTelemetrySample) -> String {
 }
 
 fn is_mutation_tool_name(tool_name: &str) -> bool {
-    matches!(tool_name, "diff" | "apply_patch")
+    matches!(
+        tool_name,
+        "diff" | "apply_patch" | "write_file" | "replace_in_file"
+    )
 }
 
 fn mutation_tool_payload(tool_name: &str, summary: &str) -> Option<String> {

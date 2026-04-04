@@ -1015,6 +1015,7 @@ Rules:
                 Ok(WorkspaceActionResult {
                     name: "read".to_string(),
                     summary: truncate(&content, 4000),
+                    applied_edit: None,
                 })
             }
             WorkspaceAction::ListFiles { pattern } => {
@@ -1027,6 +1028,7 @@ Rules:
                 Ok(WorkspaceActionResult {
                     name: "list_files".to_string(),
                     summary: String::from_utf8_lossy(&output.stdout).to_string(),
+                    applied_edit: None,
                 })
             }
             WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command } => {
@@ -1049,11 +1051,13 @@ Rules:
                     } else {
                         truncate(&format!("{stdout}\n{stderr}"), 4000)
                     },
+                    applied_edit: None,
                 })
             }
             WorkspaceAction::Search { query, .. } => Ok(WorkspaceActionResult {
                 name: "search".to_string(),
                 summary: format!("search not available via HTTP provider for: {query}"),
+                applied_edit: None,
             }),
             WorkspaceAction::Diff { path } => workspace_editor.diff(path.as_deref()),
             WorkspaceAction::WriteFile { path, content } => {
@@ -3598,7 +3602,17 @@ mod tests {
             .expect("apply patch");
 
         assert_eq!(result.name, "apply_patch");
-        assert!(result.summary.starts_with("Applied patch:\n"));
+        assert!(
+            result
+                .summary
+                .starts_with("Applied apply_patch to sample.rs (+1 -1).")
+        );
+        assert!(
+            result
+                .applied_edit
+                .as_ref()
+                .is_some_and(|edit| edit.diff.contains("+    println!(\"hi\");"))
+        );
         assert_eq!(
             fs::read_to_string(workspace.path().join("sample.rs")).expect("read sample file"),
             "fn greet() {\n    println!(\"hi\");\n}\n"

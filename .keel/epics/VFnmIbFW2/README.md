@@ -25,5 +25,5 @@ mission: VFnmIZWWb
 **Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Emit and Render Applied Edit Diffs](voyages/VFnmfzD3E/) | planned | 0/4 |
+| [Emit and Render Applied Edit Diffs](voyages/VFnmfzD3E/) | in-progress | 0/4 |
 <!-- END GENERATED -->

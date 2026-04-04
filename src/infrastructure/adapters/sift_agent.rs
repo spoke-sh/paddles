@@ -137,6 +137,7 @@ enum ToolCall {
 pub(crate) struct ToolResult {
     pub(crate) name: &'static str,
     pub(crate) summary: String,
+    pub(crate) applied_edit: Option<crate::domain::model::AppliedEdit>,
     pub(crate) retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
@@ -1783,6 +1784,7 @@ impl SiftAgentAdapter {
                     Err(err) => ToolResult {
                         name: tool_call.name(),
                         summary: format!("Tool `{}` failed: {err:#}", tool_call.name()),
+                        applied_edit: None,
                         retained_artifacts: None,
                     },
                 };
@@ -1790,11 +1792,19 @@ impl SiftAgentAdapter {
                 if let Some(retained) = result.retained_artifacts {
                     working_retained = retained;
                 }
-                event_sink.emit(TurnEvent::ToolFinished {
-                    call_id: call_id.clone(),
-                    tool_name: result.name.to_string(),
-                    summary: result.summary.clone(),
-                });
+                if let Some(edit) = result.applied_edit.clone() {
+                    event_sink.emit(TurnEvent::WorkspaceEditApplied {
+                        call_id: call_id.clone(),
+                        tool_name: result.name.to_string(),
+                        edit,
+                    });
+                } else {
+                    event_sink.emit(TurnEvent::ToolFinished {
+                        call_id: call_id.clone(),
+                        tool_name: result.name.to_string(),
+                        summary: result.summary.clone(),
+                    });
+                }
 
                 push_local_context(
                     &mut working_local_context,
@@ -2086,6 +2096,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "search",
                     summary: format_search_summary(query, &assembly),
+                    applied_edit: None,
                     retained_artifacts: Some(assembly.retained_artifacts),
                 })
             }
@@ -2099,6 +2110,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "list_files",
                     summary: trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS),
+                    applied_edit: None,
                     retained_artifacts: None,
                 })
             }
@@ -2115,6 +2127,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "read_file",
                     summary,
+                    applied_edit: None,
                     retained_artifacts: None,
                 })
             }
@@ -2124,6 +2137,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "write_file",
                     summary: result.summary,
+                    applied_edit: result.applied_edit,
                     retained_artifacts: None,
                 })
             }
@@ -2138,6 +2152,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "replace_in_file",
                     summary: result.summary,
+                    applied_edit: result.applied_edit,
                     retained_artifacts: None,
                 })
             }
@@ -2155,6 +2170,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "shell",
                     summary,
+                    applied_edit: None,
                     retained_artifacts: None,
                 })
             }
@@ -2164,6 +2180,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "diff",
                     summary: result.summary,
+                    applied_edit: result.applied_edit,
                     retained_artifacts: None,
                 })
             }
@@ -2173,6 +2190,7 @@ impl SiftAgentAdapter {
                 Ok(ToolResult {
                     name: "apply_patch",
                     summary: result.summary,
+                    applied_edit: result.applied_edit,
                     retained_artifacts: None,
                 })
             }
@@ -2341,6 +2359,7 @@ impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
         Ok(crate::domain::ports::WorkspaceActionResult {
             name: result.name.to_string(),
             summary: result.summary,
+            applied_edit: result.applied_edit,
         })
     }
 }

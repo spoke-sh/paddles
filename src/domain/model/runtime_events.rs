@@ -1,4 +1,4 @@
-use super::TurnEvent;
+use super::{AppliedEdit, TurnEvent};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -295,6 +295,15 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             detail: summary.clone(),
             text: format!("{tool_name} done"),
         },
+        TurnEvent::WorkspaceEditApplied {
+            tool_name, edit, ..
+        } => RuntimeEventPresentation {
+            badge: "tool".to_string(),
+            badge_class: "tool-diff".to_string(),
+            title: format!("• Applied {tool_name}"),
+            detail: format_applied_edit_detail(edit),
+            text: format_applied_edit_text(tool_name, edit),
+        },
         TurnEvent::Fallback { stage, reason } => {
             let detail = format!("{stage}: {reason}");
             RuntimeEventPresentation {
@@ -458,6 +467,37 @@ pub fn project_runtime_event_for_tui(event: &TurnEvent, verbose: u8) -> RuntimeE
     presentation
 }
 
+fn format_applied_edit_detail(edit: &AppliedEdit) -> String {
+    let files = if edit.files.is_empty() {
+        "(unknown file)".to_string()
+    } else {
+        edit.files.join(", ")
+    };
+    if edit.diff.trim().is_empty() {
+        format!(
+            "Files: {files}\nChange: +{} -{}",
+            edit.insertions, edit.deletions
+        )
+    } else {
+        format!(
+            "Files: {files}\nChange: +{} -{}\n\n{}",
+            edit.insertions, edit.deletions, edit.diff
+        )
+    }
+}
+
+fn format_applied_edit_text(tool_name: &str, edit: &AppliedEdit) -> String {
+    let files = if edit.files.is_empty() {
+        "unknown file".to_string()
+    } else {
+        edit.files.join(", ")
+    };
+    format!(
+        "{tool_name}: {files} (+{} -{})",
+        edit.insertions, edit.deletions
+    )
+}
+
 fn format_duration_compact(duration: Duration) -> String {
     if duration < Duration::from_secs(1) {
         return format!("{}ms", duration.as_millis());
@@ -484,8 +524,8 @@ fn format_duration_compact(duration: Duration) -> String {
 mod tests {
     use super::{RuntimeEventPresentation, project_runtime_event, project_runtime_event_for_tui};
     use crate::domain::model::{
-        GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
-        TurnEvent,
+        AppliedEdit, GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase,
+        TimeoutState, TurnEvent,
     };
 
     #[test]
@@ -529,6 +569,27 @@ mod tests {
             presentation.text,
             "bm25 · indexing 75914/75934 files · eta 0ms"
         );
+    }
+
+    #[test]
+    fn projects_applied_workspace_edits_into_diff_presentations() {
+        let presentation = project_runtime_event(&TurnEvent::WorkspaceEditApplied {
+            call_id: "tool-2".to_string(),
+            tool_name: "apply_patch".to_string(),
+            edit: AppliedEdit {
+                files: vec!["src/app.rs".to_string()],
+                diff: "--- a/src/app.rs\n+++ b/src/app.rs\n@@ -1 +1 @@\n-old\n+new".to_string(),
+                insertions: 1,
+                deletions: 1,
+            },
+        });
+
+        assert_eq!(presentation.badge, "tool");
+        assert_eq!(presentation.badge_class, "tool-diff");
+        assert_eq!(presentation.title, "• Applied apply_patch");
+        assert!(presentation.detail.contains("Files: src/app.rs"));
+        assert!(presentation.detail.contains("+new"));
+        assert_eq!(presentation.text, "apply_patch: src/app.rs (+1 -1)");
     }
 
     #[test]

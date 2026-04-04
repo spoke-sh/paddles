@@ -47,6 +47,14 @@ impl fmt::Display for TurnIntent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AppliedEdit {
+    pub files: Vec<String>,
+    pub diff: String,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
     IntentClassified {
@@ -149,6 +157,11 @@ pub enum TurnEvent {
         tool_name: String,
         summary: String,
     },
+    WorkspaceEditApplied {
+        call_id: String,
+        tool_name: String,
+        edit: AppliedEdit,
+    },
     Fallback {
         stage: String,
         reason: String,
@@ -186,6 +199,7 @@ impl TurnEvent {
             Self::ContextAssembly { .. } => "context_assembly",
             Self::ToolCalled { .. } => "tool_called",
             Self::ToolFinished { .. } => "tool_finished",
+            Self::WorkspaceEditApplied { .. } => "workspace_edit_applied",
             Self::Fallback { .. } => "fallback",
             Self::ContextStrain { .. } => "context_strain",
             Self::SynthesisReady { .. } => "synthesis_ready",
@@ -200,6 +214,7 @@ impl TurnEvent {
             | Self::GathererSearchProgress { .. }
             | Self::ToolCalled { .. }
             | Self::ToolFinished { .. }
+            | Self::WorkspaceEditApplied { .. }
             | Self::Fallback { .. }
             | Self::SynthesisReady { .. } => 0,
 
@@ -248,7 +263,7 @@ impl TurnEvent {
             Self::ContextAssembly { .. } | Self::ContextStrain { .. } => "Thinking",
             Self::RefinementApplied { .. } => "Applying refinement",
             Self::ToolCalled { .. } => "Running tool",
-            Self::ToolFinished { .. } => "Thinking",
+            Self::ToolFinished { .. } | Self::WorkspaceEditApplied { .. } => "Thinking",
             Self::ThreadCandidateCaptured { .. }
             | Self::ThreadDecisionApplied { .. }
             | Self::ThreadMerged { .. } => "Threading",

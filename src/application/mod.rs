@@ -1506,6 +1506,19 @@ fn render_turn_event(event: &TurnEvent) -> String {
             "• Completed {tool_name}\n  └ {}",
             trim_event_detail(summary, 6)
         ),
+        TurnEvent::WorkspaceEditApplied {
+            tool_name, edit, ..
+        } => format!(
+            "• Applied {tool_name}\n  └ files: {}\n  └ change: +{} -{}\n  └ {}",
+            if edit.files.is_empty() {
+                "(unknown file)".to_string()
+            } else {
+                trim_event_detail(&edit.files.join(", "), 1)
+            },
+            edit.insertions,
+            edit.deletions,
+            trim_event_detail(&edit.diff, 4)
+        ),
         TurnEvent::Fallback { stage, reason } => {
             format!("• Fell back\n  └ {stage}: {}", trim_event_detail(reason, 3))
         }
@@ -2232,7 +2245,8 @@ impl MechSuitService {
                 let mut decision = planner_engine
                     .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
                     .await?;
-                let controller_edit = controller_prompt_edit_instruction(&self.workspace_root, prompt);
+                let controller_edit =
+                    controller_prompt_edit_instruction(&self.workspace_root, prompt);
                 let provider_edit_missing = !decision.edit.known_edit && controller_edit.known_edit;
                 decision.edit = merge_initial_edit_instruction(&decision.edit, &controller_edit);
                 if provider_edit_missing {
@@ -2794,11 +2808,19 @@ impl MechSuitService {
                                     if let Some(frame) = instruction_frame.as_mut() {
                                         frame.note_successful_workspace_action(action);
                                     }
-                                    trace.emit(TurnEvent::ToolFinished {
-                                        call_id,
-                                        tool_name: result.name.to_string(),
-                                        summary: result.summary.clone(),
-                                    });
+                                    if let Some(edit) = result.applied_edit.clone() {
+                                        trace.emit(TurnEvent::WorkspaceEditApplied {
+                                            call_id,
+                                            tool_name: result.name.to_string(),
+                                            edit,
+                                        });
+                                    } else {
+                                        trace.emit(TurnEvent::ToolFinished {
+                                            call_id,
+                                            tool_name: result.name.to_string(),
+                                            summary: result.summary.clone(),
+                                        });
+                                    }
                                     append_evidence_item(
                                         &mut loop_state.evidence_items,
                                         EvidenceItem {
@@ -5092,7 +5114,7 @@ mod tests {
     use crate::application::{
         ActiveRuntimeState, GathererProvider, MechSuitService, POLICY_VIOLATION_DIRECT_REPLY,
         PreparedGathererLane, PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig,
-        RuntimeLaneRole, StructuredTurnTrace, TurnIntent, render_turn_event,
+        RuntimeLaneRole, StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
     };
     use crate::domain::model::{AuthoredResponse, CompactionPlan, CompactionRequest, ResponseMode};
     use crate::domain::model::{
@@ -5446,7 +5468,54 @@ mod tests {
             Ok(crate::domain::ports::WorkspaceActionResult {
                 name: action.label().to_string(),
                 summary: format!("executed {}", action.summary()),
+                applied_edit: mock_applied_edit_for_action(action),
             })
+        }
+    }
+
+    fn mock_applied_edit_for_action(
+        action: &WorkspaceAction,
+    ) -> Option<crate::domain::model::AppliedEdit> {
+        match action {
+            WorkspaceAction::WriteFile { path, content } => {
+                Some(mock_applied_edit(path, "", content))
+            }
+            WorkspaceAction::ReplaceInFile { path, old, new, .. } => {
+                Some(mock_applied_edit(path, old, new))
+            }
+            WorkspaceAction::ApplyPatch { patch } => Some(crate::domain::model::AppliedEdit {
+                files: Vec::new(),
+                diff: patch.clone(),
+                insertions: patch
+                    .lines()
+                    .filter(|line| line.starts_with('+') && !line.starts_with("+++"))
+                    .count(),
+                deletions: patch
+                    .lines()
+                    .filter(|line| line.starts_with('-') && !line.starts_with("---"))
+                    .count(),
+            }),
+            _ => None,
+        }
+    }
+
+    fn mock_applied_edit(
+        path: &str,
+        before: &str,
+        after: &str,
+    ) -> crate::domain::model::AppliedEdit {
+        let mut diff = vec![
+            format!("--- a/{path}"),
+            format!("+++ b/{path}"),
+            "@@".to_string(),
+        ];
+        diff.extend(before.lines().map(|line| format!("-{line}")));
+        diff.extend(after.lines().map(|line| format!("+{line}")));
+        crate::domain::model::AppliedEdit {
+            files: vec![path.to_string()],
+            diff: diff.join("\n"),
+            insertions: after.lines().count(),
+            deletions: before.lines().count(),
         }
     }
 
@@ -7601,10 +7670,7 @@ mod tests {
             gatherer: None,
         };
         let planner = Arc::new(TestPlanner::new(
-            initial_action_decision(
-                InitialAction::Answer,
-                "provider omitted the edit envelope",
-            ),
+            initial_action_decision(InitialAction::Answer, "provider omitted the edit envelope"),
             vec![
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7658,12 +7724,16 @@ mod tests {
     fn workspace_editor_boundary_budget_signal_credits_boundary_source() {
         let (_, _, contributions) =
             budget_signal_details("workspace-editor-boundary:planner-budget-exhausted");
-        assert!(contributions
-            .iter()
-            .any(|item| item.source == "workspace_editor_boundary"));
-        assert!(contributions
-            .iter()
-            .any(|item| item.source == "planner_budget"));
+        assert!(
+            contributions
+                .iter()
+                .any(|item| item.source == "workspace_editor_boundary")
+        );
+        assert!(
+            contributions
+                .iter()
+                .any(|item| item.source == "planner_budget")
+        );
     }
 
     #[test]
@@ -7836,6 +7906,77 @@ mod tests {
             event,
             TurnEvent::ToolFinished { tool_name, summary, .. }
                 if tool_name == "inspect" && summary.contains("# Workspace")
+        )));
+    }
+
+    #[test]
+    fn workspace_editor_edits_emit_applied_edit_events() {
+        let workspace = tempfile::tempdir().expect("workspace");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::WriteFile {
+                        path: "note.txt".to_string(),
+                        content: "hello\n".to_string(),
+                    },
+                },
+                "apply the requested edit",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "edit complete".to_string(),
+                },
+                rationale: "stop after the edit".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("write the local file", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::WorkspaceEditApplied { tool_name, edit, .. }
+                if tool_name == "write_file"
+                    && edit.files == vec!["note.txt".to_string()]
+                    && edit.diff.contains("+++ b/note.txt")
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolFinished { tool_name, .. } if tool_name == "write_file"
         )));
     }
 
@@ -8228,17 +8369,30 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
             },
-            vec![RecursivePlannerDecision {
-                action: PlannerAction::Stop {
-                    reason: "model selected answer".to_string(),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested padding edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction {
+                        known_edit: true,
+                        candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                    },
                 },
-                rationale: "describe the requested padding edit".to_string(),
-                answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
-                edit: InitialEditInstruction {
-                    known_edit: true,
-                    candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested padding edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction {
+                        known_edit: true,
+                        candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                    },
                 },
-            }],
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());

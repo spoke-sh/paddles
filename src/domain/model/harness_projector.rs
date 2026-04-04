@@ -167,6 +167,20 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             HarnessSnapshot::active(HarnessChamber::Tooling)
                 .with_detail(format!("{tool_name}: {summary}")),
         ),
+        TurnEvent::WorkspaceEditApplied {
+            tool_name, edit, ..
+        } => Some(
+            HarnessSnapshot::active(HarnessChamber::Tooling).with_detail(format!(
+                "{tool_name}: {} (+{} -{})",
+                if edit.files.is_empty() {
+                    "(unknown file)".to_string()
+                } else {
+                    edit.files.join(", ")
+                },
+                edit.insertions,
+                edit.deletions
+            )),
+        ),
         TurnEvent::Fallback { stage, reason } => Some(
             HarnessSnapshot::intervening(HarnessChamber::Governor, format!("{stage}: {reason}"))
                 .with_detail(format!("{stage}: {reason}")),

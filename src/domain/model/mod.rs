@@ -70,8 +70,8 @@ pub use transcript::{
     ConversationTranscriptUpdate, NullTranscriptUpdateSink, TranscriptUpdateSink,
 };
 pub use turns::{
-    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink, TurnEvent,
-    TurnEventSink, TurnIntent,
+    AppliedEdit, ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink,
+    TurnEvent, TurnEventSink, TurnIntent,
 };
 
 /// Constitutional bounds for environmental calibration.

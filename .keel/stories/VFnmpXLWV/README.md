@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFnmpXLWV
-status: backlog
+status: in-progress
 created_at: 2026-04-03T23:42:53
-updated_at: 2026-04-03T23:44:17
+updated_at: 2026-04-03T23:49:05
 # authored
 title: Emit Structured Applied Edit Artifacts From The Workspace Editor
 type: feat
 operator-signal:
 scope: VFnmIbFW2/VFnmfzD3E
 index: 1
+started_at: 2026-04-03T23:49:05
 ---
 
 # Emit Structured Applied Edit Artifacts From The Workspace Editor

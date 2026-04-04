@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFnmfzD3E
-status: planned
+status: in-progress
 epic: VFnmIbFW2
 created_at: 2026-04-03T23:42:17
 # authored
 title: Emit and Render Applied Edit Diffs
 index: 1
 updated_at: 2026-04-03T23:44:17
+started_at: 2026-04-03T23:49:05
 ---
 
 # Emit and Render Applied Edit Diffs
@@ -30,7 +31,7 @@ updated_at: 2026-04-03T23:44:17
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Emit Structured Applied Edit Artifacts From The Workspace Editor](../../../../stories/VFnmpXLWV/README.md) | feat | backlog |
+| [Emit Structured Applied Edit Artifacts From The Workspace Editor](../../../../stories/VFnmpXLWV/README.md) | feat | in-progress |
 | [Render Applied Edit Diffs In The Web Runtime Stream](../../../../stories/VFnmpYoYK/README.md) | feat | backlog |
 | [Render Applied Edit Diffs In The TUI Transcript Stream](../../../../stories/VFnmpaHZS/README.md) | feat | backlog |
 | [Lock Diff Visibility With Projection And Contract Tests](../../../../stories/VFnmpbfZe/README.md) | feat | backlog |

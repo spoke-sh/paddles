@@ -3169,12 +3169,12 @@ function diffLineClass(line) {
   return 'context';
 }
 
-function formatDiffForEvent(toolName, diff) {
+function formatDiffForEvent(label, diff) {
   const lines = diff
     .split('\n')
     .map((line) => '<span class="diff-line ' + diffLineClass(line) + '">' + escapeHtml(line) + '</span>')
     .join('<br>');
-  return escapeHtml(toolName + ' done') + '<br><span class="diff-lines">' + lines + '</span>';
+  return escapeHtml(label) + '<br><span class="diff-lines">' + lines + '</span>';
 }
 
 function handleEvent(ev) {
@@ -3187,11 +3187,28 @@ function handleEvent(ev) {
     addEventRow('planner', 'planner', 'Step ' + ev.sequence + ': ' + ev.action);
   } else if (t === 'tool_called') {
     addEventRow('tool', 'tool', ev.tool_name + ': ' + truncate(ev.invocation, 60));
+  } else if (t === 'workspace_edit_applied') {
+    const diff = ev.edit && typeof ev.edit.diff === 'string' ? ev.edit.diff : '';
+    if (diff) {
+      addEventRow(
+        'tool',
+        'tool-diff',
+        ev.tool_name + ' applied',
+        formatDiffForEvent(ev.tool_name + ' applied', diff)
+      );
+    } else {
+      addEventRow('tool', 'tool', ev.tool_name + ' applied');
+    }
   } else if (t === 'tool_finished') {
     if (isMutationTool(ev.tool_name)) {
       const diff = extractMutationDiff(ev.tool_name, ev.summary);
       if (diff) {
-        addEventRow('tool', 'tool-diff', ev.tool_name + ' done', formatDiffForEvent(ev.tool_name, diff));
+        addEventRow(
+          'tool',
+          'tool-diff',
+          ev.tool_name + ' done',
+          formatDiffForEvent(ev.tool_name + ' done', diff)
+        );
       } else {
         addEventRow('tool', 'tool', ev.tool_name + ' done');
       }

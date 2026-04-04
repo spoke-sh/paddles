@@ -1,4 +1,4 @@
-use crate::domain::model::{InstructionFrame, TurnEventSink, TurnIntent};
+use crate::domain::model::{AppliedEdit, InstructionFrame, TurnEventSink, TurnIntent};
 use crate::domain::ports::context_gathering::EvidenceBundle;
 use crate::domain::ports::planning::WorkspaceAction;
 use anyhow::Result;
@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub struct WorkspaceActionResult {
     pub name: String,
     pub summary: String,
+    pub applied_edit: Option<AppliedEdit>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

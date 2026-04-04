@@ -294,7 +294,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Emit and Render Applied Edit Diffs](epics/VFnmIbFW2/voyages/VFnmfzD3E/) | planned |
+| [Emit and Render Applied Edit Diffs](epics/VFnmIbFW2/voyages/VFnmfzD3E/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
