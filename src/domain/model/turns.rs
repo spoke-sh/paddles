@@ -222,6 +222,56 @@ impl TurnEvent {
             | Self::ThreadCandidateCaptured { .. } => 2,
         }
     }
+
+    pub fn in_flight_label(&self) -> &'static str {
+        match self {
+            Self::HarnessState { snapshot } => match snapshot.chamber {
+                super::harness::HarnessChamber::Idle => "Thinking",
+                super::harness::HarnessChamber::Interpretation => "Interpreting",
+                super::harness::HarnessChamber::Routing => "Routing",
+                super::harness::HarnessChamber::Planning => "Planning",
+                super::harness::HarnessChamber::Gathering => "Hunting",
+                super::harness::HarnessChamber::Tooling => "Running tool",
+                super::harness::HarnessChamber::Threading => "Threading",
+                super::harness::HarnessChamber::Generation => "Generating response",
+                super::harness::HarnessChamber::Rendering => "Rendering",
+                super::harness::HarnessChamber::Governor => "Intervening",
+            },
+            Self::PlannerCapability { .. } => "Planning",
+            Self::GathererCapability { .. } => "Gathering evidence",
+            Self::IntentClassified { .. } | Self::InterpretationContext { .. } => "Routing",
+            Self::GuidanceGraphExpanded { .. } => "Interpreting",
+            Self::RouteSelected { .. } => "Synthesizing",
+            Self::PlannerActionSelected { .. } | Self::PlannerStepProgress { .. } => "Planning",
+            Self::PlannerSummary { .. } => "Synthesizing",
+            Self::GathererSearchProgress { .. } | Self::GathererSummary { .. } => "Hunting",
+            Self::ContextAssembly { .. } | Self::ContextStrain { .. } => "Thinking",
+            Self::RefinementApplied { .. } => "Applying refinement",
+            Self::ToolCalled { .. } => "Running tool",
+            Self::ToolFinished { .. } => "Thinking",
+            Self::ThreadCandidateCaptured { .. }
+            | Self::ThreadDecisionApplied { .. }
+            | Self::ThreadMerged { .. } => "Threading",
+            Self::Fallback { .. } => "Recovering",
+            Self::SynthesisReady { .. } => "Rendering",
+        }
+    }
+
+    pub fn is_search_progress(&self) -> bool {
+        matches!(self, Self::GathererSearchProgress { .. })
+    }
+
+    pub fn is_planner_progress(&self) -> bool {
+        matches!(self, Self::PlannerStepProgress { .. })
+    }
+
+    pub fn is_gathering_harness_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::HarnessState { snapshot }
+                if snapshot.chamber == super::harness::HarnessChamber::Gathering
+        )
+    }
 }
 
 pub trait TurnEventSink: Send + Sync {

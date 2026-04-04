@@ -743,58 +743,7 @@ const HUNTING_HISTORY_MIN_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Infer what the system is currently doing based on the last completed event.
 fn in_flight_label(last_event: &TurnEvent) -> &'static str {
-    match last_event {
-        TurnEvent::HarnessState { snapshot } => match snapshot.chamber {
-            crate::domain::model::HarnessChamber::Idle => "Thinking",
-            crate::domain::model::HarnessChamber::Interpretation => "Interpreting",
-            crate::domain::model::HarnessChamber::Routing => "Routing",
-            crate::domain::model::HarnessChamber::Planning => "Planning",
-            crate::domain::model::HarnessChamber::Gathering => "Hunting",
-            crate::domain::model::HarnessChamber::Tooling => "Running tool",
-            crate::domain::model::HarnessChamber::Threading => "Threading",
-            crate::domain::model::HarnessChamber::Generation => "Generating response",
-            crate::domain::model::HarnessChamber::Rendering => "Rendering",
-            crate::domain::model::HarnessChamber::Governor => "Intervening",
-        },
-        // After capability checks → planner or gatherer is about to run.
-        TurnEvent::PlannerCapability { .. } => "Planning",
-        TurnEvent::GathererCapability { .. } => "Gathering evidence",
-
-        // After classification/interpretation → routing next.
-        TurnEvent::IntentClassified { .. } | TurnEvent::InterpretationContext { .. } => "Routing",
-        TurnEvent::GuidanceGraphExpanded { .. } => "Interpreting",
-
-        // After route selected → depends on the route, but synthesis or planning follows.
-        TurnEvent::RouteSelected { .. } => "Synthesizing",
-
-        // Planner is running or just finished a step.
-        TurnEvent::PlannerActionSelected { .. } | TurnEvent::PlannerStepProgress { .. } => {
-            "Planning"
-        }
-
-        // After planner summary → synthesis follows.
-        TurnEvent::PlannerSummary { .. } => "Synthesizing",
-
-        // Gathering evidence.
-        TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. } => "Hunting",
-
-        // Context assembly → model is about to think.
-        TurnEvent::ContextAssembly { .. } | TurnEvent::ContextStrain { .. } => "Thinking",
-        TurnEvent::RefinementApplied { .. } => "Applying refinement",
-
-        // Tool is running.
-        TurnEvent::ToolCalled { .. } => "Running tool",
-        TurnEvent::ToolFinished { .. } => "Thinking",
-
-        // Threading.
-        TurnEvent::ThreadCandidateCaptured { .. }
-        | TurnEvent::ThreadDecisionApplied { .. }
-        | TurnEvent::ThreadMerged { .. } => "Threading",
-
-        // Fallback / synthesis.
-        TurnEvent::Fallback { .. } => "Recovering",
-        TurnEvent::SynthesisReady { .. } => "Rendering",
-    }
+    last_event.in_flight_label()
 }
 
 fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
@@ -820,7 +769,7 @@ fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
         {
             if let Some(in_flight_title) = snapshot
                 .governor_policy()
-                .should_show_in_flight_row("gathering")
+                .should_show_in_flight_row(snapshot.chamber)
             {
                 TranscriptRow::new(
                     TranscriptRowKind::InFlightEvent,
@@ -1901,13 +1850,9 @@ impl InteractiveApp {
                     .map(|d| self.step_timing.classify(key, d))
                     .unwrap_or(Pace::Normal);
 
-                let is_search_progress = matches!(event, TurnEvent::GathererSearchProgress { .. });
-                let is_planner_progress = matches!(event, TurnEvent::PlannerStepProgress { .. });
-                let is_gathering_harness_progress = matches!(
-                    &event,
-                    TurnEvent::HarnessState { snapshot }
-                        if snapshot.chamber == crate::domain::model::HarnessChamber::Gathering
-                );
+                let is_search_progress = event.is_search_progress();
+                let is_planner_progress = event.is_planner_progress();
+                let is_gathering_harness_progress = event.is_gathering_harness_progress();
 
                 self.last_event = Some((event.clone(), occurred_at));
                 self.emitted_in_flight = false;

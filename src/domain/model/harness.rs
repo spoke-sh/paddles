@@ -101,7 +101,7 @@ impl GovernorPolicy {
         self != Self::Silent
     }
 
-    pub fn should_show_in_flight_row(self, chamber: &str) -> Option<String> {
+    pub fn should_show_in_flight_row(self, chamber: HarnessChamber) -> Option<String> {
         if self == Self::Intervening {
             Some(format!("• Governor: {chamber}..."))
         } else {
