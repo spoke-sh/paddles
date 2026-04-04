@@ -233,6 +233,11 @@ is restored even when a project-local `./paddles.toml` also sets `provider` or
 `model`. Other settings such as `port`, verbosity, gatherer configuration, and
 CLI flags keep their normal precedence.
 
+Local `sift` retrieval artifacts are machine-managed too. Paddles stores the
+search cache under `~/.cache/paddles/sift/workspaces/<workspace-key>` instead
+of inside the repository workspace, and the repo-level `.siftignore` excludes
+workspace-local `.sift/**` paths so search never indexes its own cache tree.
+
 For OpenAI-compatible remote providers, planner turns now use native tool calls
 to select the next bounded workspace action. The provider chooses the action
 through the planner tool, and Paddles executes that action locally in the

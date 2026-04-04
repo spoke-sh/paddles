@@ -4,13 +4,14 @@ use crate::domain::ports::{
     GathererCapability, PlannerDecision, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
+use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
     EnvironmentFactInput, LocalContextSource, SearchInput, SearchOptions, SearchProgress,
     SearchResponse, Sift,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,7 +30,7 @@ impl SiftDirectGathererAdapter {
             workspace_root: workspace_root.clone(),
             sift: Arc::new(
                 Sift::builder()
-                    .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                    .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
                     .build(),
             ),
             verbose: AtomicU8::new(0),
@@ -280,10 +281,6 @@ impl ContextGatherer for SiftDirectGathererAdapter {
             EvidenceBundle::new(summary, items).with_planner(planner),
         ))
     }
-}
-
-fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".sift").join("cache")
 }
 
 fn trim_for_budget(input: &str, limit: usize) -> String {

@@ -268,6 +268,7 @@ A few areas are still maturing:
 - Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect or switch planner/synthesizer lanes.
 - OpenAI-compatible remote planners now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
 - Successful `/model` changes persist to the machine-managed runtime state file at `~/.local/state/paddles/runtime-lanes.toml` so they survive restarts without rewriting authored `paddles.toml`.
+- Local `sift` search artifacts now live under the machine-managed cache root at `~/.cache/paddles/sift/workspaces/<workspace-key>` instead of inside the repo workspace, so search does not index its own cache on restart.
 - That runtime lane state overrides authored config for planner/synthesizer lane selection on startup, while non-lane settings like `port` still come from layered config and CLI flags still win over everything.
 - Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model synthesizer inception mercury-2` or `/model planner inception mercury-2`.
 - `mercury-2` remains the supported Inception planner/synthesizer chat model. When an Inception-backed turn executes `apply_patch`, paddles now uses the provider-native `mercury-edit` companion endpoint behind the scenes for single-file patch application.

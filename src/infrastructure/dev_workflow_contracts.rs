@@ -207,6 +207,16 @@ fn frontend_playwright_artifacts_are_gitignored() {
 }
 
 #[test]
+fn siftignore_excludes_workspace_local_sift_artifacts_from_search() {
+    let siftignore = read_repo_file(".siftignore");
+
+    assert!(
+        siftignore.contains(".sift/**"),
+        "repo should exclude workspace-local .sift artifacts so paddles search does not index its own cache"
+    );
+}
+
+#[test]
 fn docs_static_favicon_exists_for_docusaurus_builds() {
     assert!(
         repo_file("apps/docs/static/img/favicon.svg").exists(),

@@ -7,6 +7,7 @@ use crate::domain::ports::{
     RetainedEvidence, RetrievalMode, RetrievalStrategy,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
+use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
@@ -17,7 +18,7 @@ use sift::{
     SearchEmission, SearchPlan, SearchProgress, Sift,
 };
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
@@ -37,7 +38,7 @@ impl SiftAutonomousGathererAdapter {
             workspace_root: workspace_root.clone(),
             sift: Arc::new(
                 Sift::builder()
-                    .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                    .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
                     .build(),
             ),
             verbose: AtomicU8::new(0),
@@ -101,10 +102,6 @@ impl SiftAutonomousGathererAdapter {
             .with_local_context(local_context)
             .with_verbose(self.verbose.load(Ordering::Relaxed))
     }
-}
-
-fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".sift").join("cache")
 }
 
 #[async_trait]

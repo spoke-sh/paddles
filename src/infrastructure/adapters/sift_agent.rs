@@ -18,6 +18,7 @@ use crate::infrastructure::rendering::{
     RenderCapability, ensure_citation_section, final_answer_contract_prompt,
     normalize_assistant_response,
 };
+use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -1116,7 +1117,7 @@ impl SiftAgentAdapter {
             workspace_root: workspace_root.clone(),
             model_id: model_id.to_string(),
             sift: Sift::builder()
-                .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
                 .build(),
             conversation_factory,
             base_context,
@@ -2383,10 +2384,6 @@ fn summarize_apply_patch_result(
     summary.push('\n');
     summary.push_str(&format_command_summary("git apply", command, output));
     trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
-}
-
-fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".sift").join("cache")
 }
 
 impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {

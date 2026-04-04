@@ -2,6 +2,7 @@ use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
     GathererCapability, RetrievalStrategy,
 };
+use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
@@ -9,7 +10,7 @@ use sift::{
     FusionPolicy, LocalContextSource, QueryExpansionPolicy, RerankingPolicy, RetrieverPolicy,
     SearchPlan, Sift,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 const DEFAULT_RETAINED_LIMIT: usize = 5;
@@ -28,7 +29,7 @@ impl SiftContextGathererAdapter {
             workspace_root: workspace_root.clone(),
             model_id: model_id.into(),
             sift: Sift::builder()
-                .with_cache_dir(cache_dir_for_sift(&workspace_root))
+                .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
                 .build(),
             verbose: AtomicU8::new(0),
         }
@@ -129,10 +130,6 @@ fn search_plan_for_strategy(strategy: RetrievalStrategy) -> SearchPlan {
             reranking: RerankingPolicy::None,
         },
     }
-}
-
-fn cache_dir_for_sift(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(".sift").join("cache")
 }
 
 fn trim_for_budget(input: &str, limit: usize) -> String {

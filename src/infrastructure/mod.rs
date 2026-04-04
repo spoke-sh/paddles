@@ -6,6 +6,7 @@ pub mod credentials;
 pub mod providers;
 pub mod rendering;
 pub mod runtime_preferences;
+pub mod sift_cache;
 pub mod step_timing;
 pub mod web;
 
