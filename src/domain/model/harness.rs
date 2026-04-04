@@ -100,6 +100,14 @@ impl GovernorPolicy {
     pub fn should_emit_to_stream(self) -> bool {
         self != Self::Silent
     }
+
+    pub fn should_show_in_flight_row(self, chamber: &str) -> Option<String> {
+        if self == Self::Intervening {
+            Some(format!("• Governor: {chamber}..."))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

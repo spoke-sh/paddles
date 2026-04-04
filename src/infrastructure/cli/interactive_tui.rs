@@ -818,10 +818,13 @@ fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
         TurnEvent::HarnessState { snapshot }
             if snapshot.chamber == crate::domain::model::HarnessChamber::Gathering =>
         {
-            if snapshot.governor_policy().should_emit_to_stream() {
+            if let Some(in_flight_title) = snapshot
+                .governor_policy()
+                .should_show_in_flight_row("gathering")
+            {
                 TranscriptRow::new(
                     TranscriptRowKind::InFlightEvent,
-                    "• Governor: gathering...".to_string(),
+                    in_flight_title,
                     snapshot.detail.clone().unwrap_or_default(),
                 )
             } else {
