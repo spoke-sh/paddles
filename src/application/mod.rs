@@ -261,7 +261,10 @@ struct ConsoleTurnEventSink {
 impl TurnEventSink for ConsoleTurnEventSink {
     fn emit(&self, event: TurnEvent) {
         let _guard = self.render_lock.lock().expect("turn event render lock");
-        println!("{}", render_turn_event(&event));
+        let rendered = render_turn_event(&event);
+        if !rendered.is_empty() {
+            println!("{}", rendered);
+        }
     }
 }
 
@@ -1290,6 +1293,10 @@ fn render_turn_event(event: &TurnEvent) -> String {
             format!("• Classified turn\n  └ {}", intent.label())
         }
         TurnEvent::HarnessState { snapshot } => {
+            if !snapshot.should_emit_to_stream() {
+                return String::new();
+            }
+
             let mut parts = vec![
                 format!("status={}", snapshot.governor.status),
                 format!("timeout={}", snapshot.governor.timeout.phase),

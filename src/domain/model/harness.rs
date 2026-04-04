@@ -173,4 +173,10 @@ impl HarnessSnapshot {
         self.governor = governor;
         self
     }
+
+    pub fn should_emit_to_stream(&self) -> bool {
+        self.governor.status != HarnessStatus::Active
+            || self.governor.timeout.phase != TimeoutPhase::Nominal
+            || self.governor.intervention.is_some()
+    }
 }

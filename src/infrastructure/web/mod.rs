@@ -113,16 +113,25 @@ struct BroadcastEventSink {
     projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
 
+fn should_forward_projection_event(event: &TurnEvent) -> bool {
+    match event {
+        TurnEvent::HarnessState { snapshot } => snapshot.should_emit_to_stream(),
+        _ => true,
+    }
+}
+
 impl TurnEventSink for BroadcastEventSink {
     fn emit(&self, event: TurnEvent) {
         let _ = self.event_tx.send((self.session_id.clone(), event.clone()));
-        let _ = self
-            .projection_tx
-            .send(ConversationProjectionStreamEvent::TurnEvent {
-                task_id: self.task_id.clone(),
-                presentation: project_runtime_event(&event),
-                event,
-            });
+        if should_forward_projection_event(&event) {
+            let _ = self
+                .projection_tx
+                .send(ConversationProjectionStreamEvent::TurnEvent {
+                    task_id: self.task_id.clone(),
+                    presentation: project_runtime_event(&event),
+                    event,
+                });
+        }
     }
 }
 
@@ -262,13 +271,15 @@ struct GlobalBroadcastSink {
 impl TurnEventSink for GlobalBroadcastSink {
     fn emit(&self, event: TurnEvent) {
         let _ = self.event_tx.send((self.session_id.clone(), event.clone()));
-        let _ = self
-            .projection_tx
-            .send(ConversationProjectionStreamEvent::TurnEvent {
-                task_id: self.task_id.clone(),
-                presentation: project_runtime_event(&event),
-                event,
-            });
+        if should_forward_projection_event(&event) {
+            let _ = self
+                .projection_tx
+                .send(ConversationProjectionStreamEvent::TurnEvent {
+                    task_id: self.task_id.clone(),
+                    presentation: project_runtime_event(&event),
+                    event,
+                });
+        }
     }
 }
 

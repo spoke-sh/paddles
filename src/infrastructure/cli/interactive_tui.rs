@@ -818,11 +818,19 @@ fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
         TurnEvent::HarnessState { snapshot }
             if snapshot.chamber == crate::domain::model::HarnessChamber::Gathering =>
         {
-            TranscriptRow::new(
-                TranscriptRowKind::InFlightEvent,
-                "• Governor: gathering...".to_string(),
-                snapshot.detail.clone().unwrap_or_default(),
-            )
+            if snapshot.should_emit_to_stream() {
+                TranscriptRow::new(
+                    TranscriptRowKind::InFlightEvent,
+                    "• Governor: gathering...".to_string(),
+                    snapshot.detail.clone().unwrap_or_default(),
+                )
+            } else {
+                TranscriptRow::new(
+                    TranscriptRowKind::InFlightEvent,
+                    format!("• {}...", in_flight_label(last_event)),
+                    "".to_string(),
+                )
+            }
         }
         event => TranscriptRow::new(
             TranscriptRowKind::InFlightEvent,
@@ -1719,6 +1727,12 @@ impl InteractiveApp {
     }
 
     fn should_show_event(&self, event: &TurnEvent, pace: Pace, is_first_step: bool) -> bool {
+        if let TurnEvent::HarnessState { snapshot } = event
+            && !snapshot.should_emit_to_stream()
+        {
+            return false;
+        }
+
         if is_first_step {
             return true;
         }
