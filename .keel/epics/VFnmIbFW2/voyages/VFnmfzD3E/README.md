@@ -27,12 +27,12 @@ started_at: 2026-04-03T23:49:05
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Emit Structured Applied Edit Artifacts From The Workspace Editor](../../../../stories/VFnmpXLWV/README.md) | feat | done |
 | [Render Applied Edit Diffs In The Web Runtime Stream](../../../../stories/VFnmpYoYK/README.md) | feat | done |
 | [Render Applied Edit Diffs In The TUI Transcript Stream](../../../../stories/VFnmpaHZS/README.md) | feat | done |
-| [Lock Diff Visibility With Projection And Contract Tests](../../../../stories/VFnmpbfZe/README.md) | feat | backlog |
+| [Lock Diff Visibility With Projection And Contract Tests](../../../../stories/VFnmpbfZe/README.md) | feat | done |
 <!-- END GENERATED -->

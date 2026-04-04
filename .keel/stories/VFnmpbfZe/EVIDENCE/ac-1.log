@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-04-04T00:16:06.861249192-07:00
+command: cargo nextest run projects_applied_workspace_edits_into_diff_presentations workspace_editor_boundary_budget_signal_credits_boundary_source workspace_editor_edits_emit_applied_edit_events applied_edit_events_render_diff_lines_in_the_tui_transcript && npm --workspace @paddles/web exec vitest run src/runtime-helpers.test.ts src/runtime-app.test.tsx
+---
+
+ RUN  v2.1.9 /home/alex/workspace/spoke-sh/paddles/apps/web
+
+ ✓ src/runtime-helpers.test.ts (6 tests) 4ms
+ ✓ src/runtime-app.test.tsx (7 tests) 335ms
+
+ Test Files  2 passed (2)
+      Tests  13 passed (13)
+   Start at  00:16:05
+   Duration  1.37s (transform 217ms, setup 100ms, collect 337ms, tests 339ms, environment 697ms, prepare 142ms)
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID 6ebc8b90-d68f-4e06-9181-bd29801bb4c9 with nextest profile: default
+    Starting 4 tests across 2 binaries (385 tests skipped)
+        PASS [   0.015s] (1/4) paddles application::tests::workspace_editor_boundary_budget_signal_credits_boundary_source
+        PASS [   0.016s] (2/4) paddles domain::model::runtime_events::tests::projects_applied_workspace_edits_into_diff_presentations
+        PASS [   0.016s] (3/4) paddles infrastructure::cli::interactive_tui::tests::applied_edit_events_render_diff_lines_in_the_tui_transcript
+        PASS [   0.222s] (4/4) paddles application::tests::workspace_editor_edits_emit_applied_edit_events
+────────────
+     Summary [   0.223s] 4 tests run: 4 passed, 385 skipped
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
