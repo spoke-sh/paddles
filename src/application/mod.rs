@@ -880,7 +880,7 @@ impl StructuredTurnTrace {
 impl TurnEventSink for StructuredTurnTrace {
     fn emit(&self, event: TurnEvent) {
         self.downstream.emit(event.clone());
-        if let Some(snapshot) = event.derived_harness_snapshot() {
+        if let Some(snapshot) = crate::domain::model::derive_harness_snapshot(&event) {
             self.downstream.emit(TurnEvent::HarnessState { snapshot });
         }
         match event {
