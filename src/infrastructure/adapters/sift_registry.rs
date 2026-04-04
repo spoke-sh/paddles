@@ -2,8 +2,13 @@ use crate::domain::ports::{ModelPaths, ModelRegistry};
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use sift::{ModelRuntimeContract, ModelSource, prepare_model};
+use std::sync::Arc;
 
-pub struct SiftRegistryAdapter;
+type PreparationReporter = Arc<dyn Fn(&str) + Send + Sync>;
+
+pub struct SiftRegistryAdapter {
+    preparation_reporter: Option<PreparationReporter>,
+}
 
 const BONSAI_GGUF_REPO: &str = "prism-ml/Bonsai-8B-gguf";
 
@@ -69,7 +74,24 @@ fn prepared_model_to_paths(prepared: sift::PreparedModel) -> ModelPaths {
 
 impl SiftRegistryAdapter {
     pub fn new() -> Self {
-        Self
+        Self {
+            preparation_reporter: None,
+        }
+    }
+
+    pub fn with_preparation_reporter<F>(reporter: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        Self {
+            preparation_reporter: Some(Arc::new(reporter)),
+        }
+    }
+
+    fn report_model_preparing(&self, model_id: &str) {
+        if let Some(reporter) = &self.preparation_reporter {
+            reporter(model_id);
+        }
     }
 }
 
@@ -83,8 +105,8 @@ impl Default for SiftRegistryAdapter {
 impl ModelRegistry for SiftRegistryAdapter {
     async fn get_model_paths(&self, model_id: &str) -> Result<ModelPaths> {
         let model_id = model_id.to_string();
+        self.report_model_preparing(&model_id);
         tokio::task::spawn_blocking(move || {
-            println!("[SIFT] Preparing model: {}", model_id);
             let source = model_source_for(&model_id)?;
             let prepared = prepare_model(source, ModelRuntimeContract::CandleSafetensorsBundle)?;
             Ok(prepared_model_to_paths(prepared))
@@ -95,7 +117,7 @@ impl ModelRegistry for SiftRegistryAdapter {
 
 #[cfg(test)]
 mod tests {
-    use super::{BONSAI_GGUF_REPO, model_source_for, supported_model_ids};
+    use super::{BONSAI_GGUF_REPO, SiftRegistryAdapter, model_source_for, supported_model_ids};
     use crate::infrastructure::sift_cache::TEST_SIFT_ENV_LOCK;
     use candle_core::Tensor;
     use candle_core::quantized::gguf_file;
@@ -104,6 +126,7 @@ mod tests {
     use std::fs::{self, File};
     use std::io::{BufWriter, Write};
     use std::path::Path;
+    use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
 
     #[test]
@@ -134,6 +157,32 @@ mod tests {
     fn rejects_unknown_model_ids() {
         let err = model_source_for("mystery-model").expect_err("unknown model should fail");
         assert!(err.to_string().contains("unsupported model id"));
+    }
+
+    #[test]
+    fn registry_is_silent_by_default_when_reporting_preparation() {
+        let registry = SiftRegistryAdapter::new();
+
+        registry.report_model_preparing("bonsai-8b");
+    }
+
+    #[test]
+    fn registry_can_report_model_preparation_through_opt_in_reporter() {
+        let reported = Arc::new(Mutex::new(Vec::<String>::new()));
+        let reporter = Arc::clone(&reported);
+        let registry = SiftRegistryAdapter::with_preparation_reporter(move |model_id| {
+            reporter
+                .lock()
+                .expect("reported lock")
+                .push(model_id.to_string());
+        });
+
+        registry.report_model_preparing("bonsai-8b");
+
+        assert_eq!(
+            reported.lock().expect("reported lock").as_slice(),
+            ["bonsai-8b"]
+        );
     }
 
     #[test]

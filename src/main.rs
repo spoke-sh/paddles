@@ -342,7 +342,15 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
-    let registry = Arc::new(SiftRegistryAdapter::new());
+    let registry = match frontend {
+        InteractiveFrontend::Tui => Arc::new(SiftRegistryAdapter::new()),
+        InteractiveFrontend::PlainLines if verbose >= 1 => {
+            Arc::new(SiftRegistryAdapter::with_preparation_reporter(|model_id| {
+                println!("[SIFT] Preparing model: {model_id}");
+            }))
+        }
+        InteractiveFrontend::PlainLines => Arc::new(SiftRegistryAdapter::new()),
+    };
     let operator_memory = Arc::new(AgentMemory::load(&root_path));
 
     // Resolve API key: env var first, then credential store.
