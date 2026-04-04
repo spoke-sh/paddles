@@ -4459,7 +4459,9 @@ fn edit_instruction_from_fields(
     })
 }
 
-fn initial_edit_instruction_from_envelope(envelope: &InitialActionEnvelope) -> Result<InitialEditInstruction> {
+fn initial_edit_instruction_from_envelope(
+    envelope: &InitialActionEnvelope,
+) -> Result<InitialEditInstruction> {
     edit_instruction_from_fields(envelope.edit.as_deref(), envelope.candidate_files.as_ref())
 }
 

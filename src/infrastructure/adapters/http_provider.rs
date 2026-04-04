@@ -2326,7 +2326,9 @@ struct InceptionApplyEditRequest {
     update_snippet: String,
 }
 
-fn edit_instruction_from_http_envelope(envelope: &PlannerEnvelope) -> Result<InitialEditInstruction> {
+fn edit_instruction_from_http_envelope(
+    envelope: &PlannerEnvelope,
+) -> Result<InitialEditInstruction> {
     let edit_value = envelope
         .edit
         .as_deref()
@@ -2646,10 +2648,10 @@ mod tests {
         TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, InitialAction, InitialEditInstruction,
-        InterpretationContext, ModelPaths, ModelRegistry, PlannerAction, PlannerBudget,
-        PlannerLoopState, PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
-        SynthesisHandoff, SynthesizerEngine, TraceRecorder, WorkspaceAction,
+        EvidenceBundle, EvidenceItem, InitialAction, InitialEditInstruction, InterpretationContext,
+        ModelPaths, ModelRegistry, PlannerAction, PlannerBudget, PlannerLoopState, PlannerRequest,
+        RecursivePlanner, RecursivePlannerDecision, SynthesisHandoff, SynthesizerEngine,
+        TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
