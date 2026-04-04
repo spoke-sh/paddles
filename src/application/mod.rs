@@ -3244,10 +3244,10 @@ fn merge_instruction_frame_with_edit_signal(
 fn instruction_unsatisfied_note(frame: &InstructionFrame) -> String {
     if let Some(candidates) = frame.candidate_summary() {
         format!(
-            "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Apply a workspace write before finishing. Candidate files: {candidates}"
+            "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: {candidates}"
         )
     } else {
-        "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Apply a workspace write before finishing.".to_string()
+        "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing.".to_string()
     }
 }
 
@@ -4018,7 +4018,7 @@ fn collect_steering_review_notes(
             note: format_action_bias_review_note(
                 decision,
                 &likely_targets,
-                exact_diff_pressure(loop_state, decision, &likely_targets),
+                workspace_editor_pressure(loop_state, decision, &likely_targets),
             ),
         });
     }
@@ -4039,7 +4039,7 @@ fn should_apply_execution_review(
         return true;
     }
 
-    let pressure = exact_diff_pressure(loop_state, decision, likely_targets);
+    let pressure = workspace_editor_pressure(loop_state, decision, likely_targets);
     pressure.has_read_target || pressure.repeated_read.is_some()
 }
 
@@ -4079,16 +4079,16 @@ fn format_premise_challenge_review_note(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-struct ExactDiffPressure {
+struct WorkspaceEditorPressure {
     has_read_target: bool,
     repeated_read: Option<(String, usize)>,
 }
 
-fn exact_diff_pressure(
+fn workspace_editor_pressure(
     loop_state: &PlannerLoopState,
     decision: &RecursivePlannerDecision,
     likely_targets: &[String],
-) -> ExactDiffPressure {
+) -> WorkspaceEditorPressure {
     let read_counts = prior_read_counts(loop_state);
     let has_read_target = likely_targets
         .iter()
@@ -4104,7 +4104,7 @@ fn exact_diff_pressure(
         _ => None,
     };
 
-    ExactDiffPressure {
+    WorkspaceEditorPressure {
         has_read_target,
         repeated_read,
     }
@@ -4137,15 +4137,16 @@ fn decision_is_exact_edit(action: &PlannerAction) -> bool {
 fn format_action_bias_review_note(
     decision: &RecursivePlannerDecision,
     likely_targets: &[String],
-    pressure: ExactDiffPressure,
+    pressure: WorkspaceEditorPressure,
 ) -> String {
     let mut lines = vec![
         "Steering review [action-bias]".to_string(),
         format!("Proposed action under review: {}", decision.action.summary()),
         "This turn is edit-oriented. Action produces information.".to_string(),
+        "Workspace editor pressure: active.".to_string(),
         "If there is a plausible target file, prefer read/diff/edit over another broad search or generic inspect.".to_string(),
         "If the requested change is local and mechanical (padding, copy, one selector, one condition, or a small UI tweak), move into exact-diff state space now.".to_string(),
-        "Use `replace_in_file` when you can name the exact old and new text. Use `apply_patch` when the change spans a few nearby lines.".to_string(),
+        "Hand the turn to the workspace editor. Use `replace_in_file` when you can name the exact old and new text. Use `apply_patch` when the change spans a few nearby lines.".to_string(),
     ];
 
     if !likely_targets.is_empty() {
@@ -4157,11 +4158,11 @@ fn format_action_bias_review_note(
 
     if let Some((path, count)) = pressure.repeated_read {
         lines.push(format!(
-            "`{path}` has already been read {count} time(s). Another read is unlikely to add information."
+            "`{path}` has already been read {count} time(s). The workspace editor already has enough context; another read is unlikely to add information."
         ));
     } else if pressure.has_read_target {
         lines.push(
-            "A likely target file has already been read. If the requested change is concrete, edit it directly instead of rereading."
+            "A likely target file has already been read. If the requested change is concrete, let the workspace editor act directly instead of rereading."
                 .to_string(),
         );
     }
@@ -7100,6 +7101,7 @@ mod tests {
             .iter()
             .find(|note| note.kind == super::SteeringReviewKind::Execution)
             .expect("action bias note should be present");
+        assert!(note.note.contains("Workspace editor pressure: active."));
         assert!(note.note.contains("exact-diff state space"));
         assert!(note.note.contains("replace_in_file"));
         assert!(note.note.contains("apply_patch"));
@@ -7255,6 +7257,9 @@ mod tests {
             note.contains("exact-diff state space")
                 && note.contains("replace_in_file")
                 && note.contains("apply_patch")
+        }));
+        assert!(review_request.loop_state.notes.iter().any(|note| {
+            note.contains("Workspace editor pressure: active.") && note.contains("workspace editor")
         }));
 
         let executed_actions = synthesizer

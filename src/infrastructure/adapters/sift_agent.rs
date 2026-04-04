@@ -1,4 +1,5 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
+use super::local_workspace_editor::LocalWorkspaceEditor;
 use crate::domain::model::{
     CompactionDecision, ConversationThreadRef, ForensicArtifactCapture, NullTurnEventSink,
     StrainFactor, StrainTracker, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
@@ -12,7 +13,7 @@ use crate::domain::ports::{
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
     InterpretationToolHint, ModelPaths, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
     PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
-    ThreadDecisionRequest, WorkspaceAction,
+    ThreadDecisionRequest, WorkspaceAction, WorkspaceEditor,
 };
 use crate::infrastructure::rendering::{
     RenderCapability, ensure_citation_section, final_answer_contract_prompt,
@@ -37,9 +38,8 @@ use sift::{
     ToolOutputInput,
 };
 use std::fs;
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -2119,21 +2119,11 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::WriteFile { path, content } => {
-                let resolved = resolve_workspace_path(&self.workspace_root, path, true)?;
-                if let Some(parent) = resolved.parent() {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!("failed to create parent directory {}", parent.display())
-                    })?;
-                }
-                fs::write(&resolved, content)
-                    .with_context(|| format!("failed to write {}", resolved.display()))?;
+                let result = LocalWorkspaceEditor::new(self.workspace_root.clone())
+                    .write_file(path, content)?;
                 Ok(ToolResult {
                     name: "write_file",
-                    summary: format!(
-                        "Wrote {} byte(s) to {}.",
-                        content.len(),
-                        relative_path(&self.workspace_root, &resolved)
-                    ),
+                    summary: result.summary,
                     retained_artifacts: None,
                 })
             }
@@ -2143,26 +2133,11 @@ impl SiftAgentAdapter {
                 new,
                 replace_all,
             } => {
-                let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
-                let original = fs::read_to_string(&resolved)
-                    .with_context(|| format!("failed to read {}", resolved.display()))?;
-                if !original.contains(old) {
-                    bail!("pattern not found in {}", resolved.display());
-                }
-                let updated = if *replace_all {
-                    original.replace(old, new)
-                } else {
-                    original.replacen(old, new, 1)
-                };
-                fs::write(&resolved, updated)
-                    .with_context(|| format!("failed to write {}", resolved.display()))?;
+                let result = LocalWorkspaceEditor::new(self.workspace_root.clone())
+                    .replace_in_file(path, old, new, *replace_all)?;
                 Ok(ToolResult {
                     name: "replace_in_file",
-                    summary: format!(
-                        "Updated {} by replacing {} occurrence(s) of the requested text.",
-                        relative_path(&self.workspace_root, &resolved),
-                        if *replace_all { "all" } else { "one" }
-                    ),
+                    summary: result.summary,
                     retained_artifacts: None,
                 })
             }
@@ -2184,69 +2159,20 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::Diff { path } => {
-                let mut command = Command::new("git");
-                command
-                    .arg("diff")
-                    .arg("--no-ext-diff")
-                    .current_dir(&self.workspace_root);
-                if let Some(path) = path {
-                    let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
-                    let rel = relative_path(&self.workspace_root, &resolved);
-                    command.arg("--").arg(rel);
-                }
-                let output = command.output().context("failed to run git diff")?;
-                if !output.status.success() {
-                    bail!(
-                        "{}",
-                        format_command_summary("git diff", "git diff --no-ext-diff", &output)
-                    );
-                }
-                let diff = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let summary = if diff.is_empty() && stderr.is_empty() {
-                    "No diff output.".to_string()
-                } else {
-                    format!(
-                        "Diff output:\n{}\n{}",
-                        trim_for_context(&diff, MAX_TOOL_OUTPUT_CHARS),
-                        trim_for_context(&stderr, MAX_TOOL_OUTPUT_CHARS / 2)
-                    )
-                };
+                let result =
+                    LocalWorkspaceEditor::new(self.workspace_root.clone()).diff(path.as_deref())?;
                 Ok(ToolResult {
                     name: "diff",
-                    summary,
+                    summary: result.summary,
                     retained_artifacts: None,
                 })
             }
             ToolCall::ApplyPatch { patch } => {
-                let mut child = Command::new("git")
-                    .arg("apply")
-                    .arg("--whitespace=nowarn")
-                    .arg("-")
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .current_dir(&self.workspace_root)
-                    .spawn()
-                    .context("failed to spawn git apply")?;
-
-                if let Some(stdin) = child.stdin.as_mut() {
-                    stdin
-                        .write_all(patch.as_bytes())
-                        .context("failed to write patch to git apply")?;
-                }
-
-                let output = child
-                    .wait_with_output()
-                    .context("failed to wait for git apply")?;
-                let summary =
-                    summarize_apply_patch_result(patch, "git apply --whitespace=nowarn -", &output);
-                if !output.status.success() {
-                    bail!("{summary}");
-                }
+                let result =
+                    LocalWorkspaceEditor::new(self.workspace_root.clone()).apply_patch(patch)?;
                 Ok(ToolResult {
                     name: "apply_patch",
-                    summary,
+                    summary: result.summary,
                     retained_artifacts: None,
                 })
             }
@@ -2379,21 +2305,6 @@ impl SiftAgentAdapter {
 
         Ok(all_documents)
     }
-}
-
-fn summarize_apply_patch_result(
-    patch: &str,
-    command: &str,
-    output: &std::process::Output,
-) -> String {
-    let patch_preview = trim_for_context(patch, MAX_TOOL_OUTPUT_CHARS / 2);
-    let mut summary = String::new();
-    summary.push_str("Applied patch:\n");
-    summary.push_str(&patch_preview);
-    summary.push('\n');
-    summary.push('\n');
-    summary.push_str(&format_command_summary("git apply", command, output));
-    trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
 }
 
 impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {

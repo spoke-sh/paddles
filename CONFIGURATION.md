@@ -249,10 +249,9 @@ For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 For Inception, the supported core model path is `mercury-2`. Authenticate with
 `/login inception`, then select it with `/model synthesizer inception mercury-2`
 or `/model planner inception mercury-2`. That chat-completions compatibility
-path is usable today without provider-native streaming/diffusion views. For
-single-file `apply_patch` workspace actions on an Inception-backed lane,
-Paddles now uses the provider-native `mercury-edit` companion endpoint behind
-the scenes.
+path is usable today without provider-native streaming/diffusion views.
+Workspace edits still execute locally through the shared workspace editor
+boundary, even when the planner lane is Inception-backed.
 
 For the local `sift` provider, `bonsai-8b` is now available as an opt-in local
 model path:
@@ -289,9 +288,9 @@ raw.
 The supported Inception boundary is now:
 
 - Core chat compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
-- Native edit companion: single-file `apply_patch` mutations on an Inception-backed lane use `v1/apply/completions` with the `mercury-edit` companion model.
+- Local workspace editor: `write_file`, `replace_in_file`, `diff`, and `apply_patch` execute through one provider-agnostic local workspace editor boundary.
 - Optional native capabilities: provider-specific streaming/diffusion behavior remains a follow-on slice.
-- Operator expectation: Inception is usable today for planner or synthesizer lanes, and patch-style mutation actions can use the native edit companion without requiring a separate visible model lane.
+- Operator expectation: Inception is usable today for planner or synthesizer lanes without changing local workspace edit semantics.
 
 ### Experimental Context-1 Boundary
 

@@ -7,7 +7,7 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     sift = {
-      url = "github:rupurt/sift?rev=a7f7a2f0554db556d39a7e51e4c7d1e564c6df5c";
+      url = "github:rupurt/sift?rev=52daf4ffc054a8162c208d936b9b7689de85ea36";
       inputs.keel.follows = "keel";
     };
 
@@ -45,13 +45,14 @@
           src = ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
+            allowBuiltinFetchGit = true;
             outputHashes = {
               "candle-core-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-nn-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-transformers-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-kernels-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-ug-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
-              "sift-0.2.0" = "sha256-rYaEiRkzL2UBhG5DTosQlGe3i8OjigD9dh6EYZGg3rY=";
+              "sift-0.2.0" = "sha256-DkwrZueWJ63nbhBaZ9forBKRfgf+6kL3UJhNG8P47wE=";
               "transit-core-0.1.0" = "sha256-4VvRHAf+ABRDe1q5giH/VtsJo66JJjsCKbmP/7RlXN0=";
             };
           };

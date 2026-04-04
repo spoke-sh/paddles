@@ -4,6 +4,7 @@ mod operator_memory;
 mod planning;
 mod synthesis;
 mod trace_recording;
+mod workspace_editing;
 
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ pub use planning::{
 };
 pub use synthesis::{SynthesisHandoff, SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
+pub use workspace_editing::WorkspaceEditor;
 
 /// Port for model discovery and acquisition.
 #[async_trait]

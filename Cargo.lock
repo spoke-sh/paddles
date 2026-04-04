@@ -3770,7 +3770,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "sift"
 version = "0.2.0"
-source = "git+https://github.com/rupurt/sift?rev=2932cb44422f218a8ef96b45929813b7849a9379#2932cb44422f218a8ef96b45929813b7849a9379"
+source = "git+https://github.com/rupurt/sift?rev=52daf4ffc054a8162c208d936b9b7689de85ea36#52daf4ffc054a8162c208d936b9b7689de85ea36"
 dependencies = [
  "anyhow",
  "bincode",

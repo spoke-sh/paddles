@@ -9,7 +9,9 @@ use crate::domain::ports::{
     InterpretationContext, InterpretationRequest, PlannerAction, PlannerCapability, PlannerRequest,
     RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
     SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
+    WorkspaceEditor,
 };
+use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
 use crate::infrastructure::rendering::{
     ANTHROPIC_RENDER_TOOL_NAME, RenderCapability, assistant_response_json_schema,
     ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
@@ -1003,117 +1005,8 @@ Rules:
         })
     }
 
-    fn inception_edit_model_id(&self) -> Option<&'static str> {
-        if self.provider_name != "inception" {
-            return None;
-        }
-
-        match self.model_id.as_str() {
-            "mercury-2" => Some("mercury-edit"),
-            "mercury-edit" => Some("mercury-edit"),
-            "mercury-coder" => Some("mercury-coder"),
-            _ => None,
-        }
-    }
-
-    fn send_inception_apply_edit_blocking(
-        &self,
-        edit_model_id: &str,
-        path: &str,
-        original_code: &str,
-        update_snippet: &str,
-    ) -> Result<String> {
-        let rt = tokio::runtime::Handle::try_current()
-            .map_err(|_| anyhow!("no tokio runtime for HTTP provider"))?;
-        tokio::task::block_in_place(|| {
-            rt.block_on(self.send_inception_apply_edit_async(
-                edit_model_id,
-                path,
-                original_code,
-                update_snippet,
-            ))
-        })
-    }
-
-    async fn send_inception_apply_edit_async(
-        &self,
-        edit_model_id: &str,
-        path: &str,
-        original_code: &str,
-        update_snippet: &str,
-    ) -> Result<String> {
-        let url = format!(
-            "{}/v1/apply/completions",
-            self.base_url.trim_end_matches('/')
-        );
-        let body = json!({
-            "model": edit_model_id,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": build_inception_apply_edit_prompt(path, original_code, update_snippet),
-                }
-            ],
-            "max_tokens": 4096,
-        });
-
-        let text = send_with_retry("Inception", || {
-            self.client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(&body)
-        })
-        .await?;
-
-        let parsed: OpenAiResponse = serde_json::from_str(&text)?;
-        let content = parsed
-            .choices
-            .first()
-            .and_then(|choice| choice.message.content.clone())
-            .ok_or_else(|| anyhow!("empty Inception apply-edit response"))?;
-
-        extract_first_code_block(&content)
-            .or_else(|| {
-                let trimmed = content.trim();
-                (!trimmed.is_empty()).then(|| trimmed.to_string())
-            })
-            .ok_or_else(|| anyhow!("Inception apply-edit response did not contain edited code"))
-    }
-
-    fn try_execute_inception_apply_patch(
-        &self,
-        patch: &str,
-    ) -> Result<Option<WorkspaceActionResult>> {
-        let edit_model_id = match self.inception_edit_model_id() {
-            Some(model_id) => model_id,
-            None => return Ok(None),
-        };
-        let request = match parse_single_file_patch_for_inception_apply_edit(patch) {
-            Some(request) => request,
-            None => return Ok(None),
-        };
-
-        let full_path = self.workspace_root.join(&request.path);
-        let original_code = std::fs::read_to_string(&full_path)?;
-        let updated_code = self.send_inception_apply_edit_blocking(
-            edit_model_id,
-            &request.path,
-            &original_code,
-            &request.update_snippet,
-        )?;
-        std::fs::write(&full_path, updated_code)?;
-
-        Ok(Some(WorkspaceActionResult {
-            name: "apply_patch".to_string(),
-            summary: format!(
-                "applied patch to {} via {} on /v1/apply/completions",
-                request.path, edit_model_id
-            ),
-        }))
-    }
-
     fn execute_local_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
+        let workspace_editor = LocalWorkspaceEditor::new(self.workspace_root.clone());
         match action {
             WorkspaceAction::Read { path } => {
                 let full = self.workspace_root.join(path);
@@ -1162,73 +1055,17 @@ Rules:
                 name: "search".to_string(),
                 summary: format!("search not available via HTTP provider for: {query}"),
             }),
-            WorkspaceAction::Diff { path } => {
-                let cmd = match path {
-                    Some(p) if !p.trim().is_empty() => format!("git diff --no-ext-diff -- {p}"),
-                    _ => "git diff --no-ext-diff".to_string(),
-                };
-                let output = std::process::Command::new("sh")
-                    .arg("-lc")
-                    .arg(&cmd)
-                    .current_dir(&self.workspace_root)
-                    .output()?;
-                Ok(WorkspaceActionResult {
-                    name: "diff".to_string(),
-                    summary: truncate(&String::from_utf8_lossy(&output.stdout), 4000),
-                })
-            }
+            WorkspaceAction::Diff { path } => workspace_editor.diff(path.as_deref()),
             WorkspaceAction::WriteFile { path, content } => {
-                let full = self.workspace_root.join(path);
-                std::fs::write(&full, content)?;
-                Ok(WorkspaceActionResult {
-                    name: "write_file".to_string(),
-                    summary: format!("wrote {path}"),
-                })
+                workspace_editor.write_file(path, content)
             }
             WorkspaceAction::ReplaceInFile {
                 path,
                 old,
                 new,
                 replace_all,
-            } => {
-                let full = self.workspace_root.join(path);
-                let content = std::fs::read_to_string(&full)?;
-                let updated = if *replace_all {
-                    content.replace(old, new)
-                } else {
-                    content.replacen(old, new, 1)
-                };
-                std::fs::write(&full, updated)?;
-                Ok(WorkspaceActionResult {
-                    name: "replace_in_file".to_string(),
-                    summary: format!("replaced text in {path}"),
-                })
-            }
-            WorkspaceAction::ApplyPatch { patch } => {
-                if let Some(result) = self.try_execute_inception_apply_patch(patch)? {
-                    return Ok(result);
-                }
-                let mut child = std::process::Command::new("git")
-                    .args(["apply", "--whitespace=nowarn", "-"])
-                    .current_dir(&self.workspace_root)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()?;
-                if let Some(stdin) = child.stdin.as_mut() {
-                    use std::io::Write;
-                    stdin.write_all(patch.as_bytes())?;
-                }
-                let output = child.wait_with_output()?;
-                Ok(WorkspaceActionResult {
-                    name: "apply_patch".to_string(),
-                    summary: if output.status.success() {
-                        "patch applied".to_string()
-                    } else {
-                        format!("patch failed: {}", String::from_utf8_lossy(&output.stderr))
-                    },
-                })
-            }
+            } => workspace_editor.replace_in_file(path, old, new, *replace_all),
+            WorkspaceAction::ApplyPatch { patch } => workspace_editor.apply_patch(patch),
         }
     }
 }
@@ -2320,12 +2157,6 @@ fn planner_transport_retry_instruction(format: ApiFormat, initial: bool) -> Stri
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InceptionApplyEditRequest {
-    path: String,
-    update_snippet: String,
-}
-
 fn edit_instruction_from_http_envelope(
     envelope: &PlannerEnvelope,
 ) -> Result<InitialEditInstruction> {
@@ -2364,117 +2195,6 @@ fn edit_instruction_from_http_envelope(
         known_edit,
         candidate_files,
     })
-}
-
-fn parse_single_file_patch_for_inception_apply_edit(
-    patch: &str,
-) -> Option<InceptionApplyEditRequest> {
-    let mut path: Option<String> = None;
-    let mut hunks: Vec<Vec<String>> = Vec::new();
-    let mut current_hunk: Vec<String> = Vec::new();
-    let mut in_hunk = false;
-
-    for line in patch.lines() {
-        if let Some(candidate) = line.strip_prefix("+++ ") {
-            let normalized = normalize_patch_path(candidate)?;
-            if let Some(existing) = &path {
-                if existing != &normalized {
-                    return None;
-                }
-            } else {
-                path = Some(normalized);
-            }
-            continue;
-        }
-
-        if line.starts_with("@@") {
-            if !current_hunk.is_empty() {
-                hunks.push(std::mem::take(&mut current_hunk));
-            }
-            in_hunk = true;
-            continue;
-        }
-
-        if !in_hunk {
-            continue;
-        }
-
-        if let Some(content) = line.strip_prefix('+') {
-            current_hunk.push(content.to_string());
-            continue;
-        }
-        if let Some(content) = line.strip_prefix(' ') {
-            current_hunk.push(content.to_string());
-            continue;
-        }
-        if line.starts_with('-') || line.starts_with('\\') {
-            continue;
-        }
-    }
-
-    if !current_hunk.is_empty() {
-        hunks.push(current_hunk);
-    }
-
-    let path = path?;
-    let rendered_hunks = hunks
-        .into_iter()
-        .map(|hunk| hunk.join("\n"))
-        .map(|hunk| hunk.trim_matches('\n').to_string())
-        .filter(|hunk| !hunk.trim().is_empty())
-        .collect::<Vec<_>>();
-    if rendered_hunks.is_empty() {
-        return None;
-    }
-
-    Some(InceptionApplyEditRequest {
-        path,
-        update_snippet: render_inception_update_snippet(&rendered_hunks),
-    })
-}
-
-fn normalize_patch_path(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    let trimmed = trimmed
-        .strip_prefix("a/")
-        .or_else(|| trimmed.strip_prefix("b/"))
-        .unwrap_or(trimmed)
-        .trim();
-    (!trimmed.is_empty() && trimmed != "/dev/null").then(|| trimmed.to_string())
-}
-
-fn render_inception_update_snippet(hunks: &[String]) -> String {
-    let mut rendered = String::new();
-    for hunk in hunks {
-        rendered.push_str("// ... existing code ...\n");
-        rendered.push_str(hunk.trim_end_matches('\n'));
-        rendered.push('\n');
-    }
-    rendered.push_str("// ... existing code ...");
-    rendered
-}
-
-fn build_inception_apply_edit_prompt(
-    path: &str,
-    original_code: &str,
-    update_snippet: &str,
-) -> String {
-    format!(
-        "<|original_code|>\n{original_code}<|/original_code|>\n\n<|update_snippet|>\n{update_snippet}\n<|/update_snippet|>\n\n# Target file\n{path}\n"
-    )
-}
-
-fn extract_first_code_block(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if !trimmed.starts_with("```") {
-        return None;
-    }
-
-    let after_fence = &trimmed[3..];
-    let content_start = after_fence.find('\n')?;
-    let content = &after_fence[content_start + 1..];
-    let end = content.rfind("```")?;
-    Some(content[..end].trim_end_matches('\n').to_string() + "\n")
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -3838,7 +3558,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn inception_apply_patch_actions_use_the_native_edit_endpoint() {
+    async fn http_provider_apply_patch_actions_stay_local_even_on_inception() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
             workspace.path().join("sample.rs"),
@@ -3848,10 +3568,7 @@ mod tests {
 
         let server = start_mock_server(vec![MockResponse {
             status: StatusCode::OK,
-            body: provider_response(
-                ApiFormat::OpenAi,
-                "```rust\nfn greet() {\n    println!(\"hi\");\n}\n```",
-            ),
+            body: provider_response(ApiFormat::OpenAi, "unused"),
         }])
         .await;
 
@@ -3881,26 +3598,14 @@ mod tests {
             .expect("apply patch");
 
         assert_eq!(result.name, "apply_patch");
-        assert!(
-            result.summary.contains("mercury-edit"),
-            "summary should mention the native edit model: {}",
-            result.summary
-        );
+        assert!(result.summary.starts_with("Applied patch:\n"));
         assert_eq!(
             fs::read_to_string(workspace.path().join("sample.rs")).expect("read sample file"),
             "fn greet() {\n    println!(\"hi\");\n}\n"
         );
 
         let requests = server.recorded_requests();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].uri, "/v1/apply/completions");
-        assert_eq!(requests[0].body["model"].as_str(), Some("mercury-edit"));
-        let prompt = requests[0].body["messages"][0]["content"]
-            .as_str()
-            .expect("native edit prompt");
-        assert!(prompt.contains("<|original_code|>"));
-        assert!(prompt.contains("<|update_snippet|>"));
-        assert!(prompt.contains("println!(\"hi\")"));
+        assert!(requests.is_empty(), "apply_patch should stay local");
     }
 
     #[tokio::test(flavor = "multi_thread")]
