@@ -550,6 +550,26 @@ struct TranscriptRow {
     timing: Option<TranscriptTiming>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HuntingTelemetrySample {
+    phase: String,
+    headline: Option<ProgressHeadline>,
+    metrics: Vec<ProgressMetric>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProgressHeadline {
+    label: String,
+    current: u64,
+    total: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProgressMetric {
+    label: String,
+    value: u64,
+}
+
 impl TranscriptRow {
     fn new(kind: TranscriptRowKind, header: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
@@ -718,6 +738,7 @@ impl PendingReveal {
 
 /// After this duration of silence during a busy turn, an in-flight row appears.
 const IN_FLIGHT_SILENCE_THRESHOLD: Duration = Duration::from_secs(2);
+const HUNTING_HISTORY_MIN_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Infer what the system is currently doing based on the last completed event.
 fn in_flight_label(last_event: &TurnEvent) -> &'static str {
@@ -775,6 +796,41 @@ fn in_flight_label(last_event: &TurnEvent) -> &'static str {
     }
 }
 
+fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
+    match last_event {
+        TurnEvent::GathererSearchProgress {
+            phase,
+            strategy,
+            detail,
+            ..
+        } => {
+            let strategy = strategy
+                .as_deref()
+                .map(|value| format!(" strategy={value}"))
+                .unwrap_or_default();
+            TranscriptRow::new(
+                TranscriptRowKind::InFlightEvent,
+                format!("• Hunting ({phase})...{strategy}"),
+                detail.clone().unwrap_or_default(),
+            )
+        }
+        TurnEvent::HarnessState { snapshot }
+            if snapshot.chamber == crate::domain::model::HarnessChamber::Gathering =>
+        {
+            TranscriptRow::new(
+                TranscriptRowKind::InFlightEvent,
+                "• Governor: gathering...".to_string(),
+                snapshot.detail.clone().unwrap_or_default(),
+            )
+        }
+        event => TranscriptRow::new(
+            TranscriptRowKind::InFlightEvent,
+            format!("• {}...", in_flight_label(event)),
+            "",
+        ),
+    }
+}
+
 struct InteractiveApp {
     model_label: String,
     palette: Palette,
@@ -800,6 +856,10 @@ struct InteractiveApp {
     search_progress_row: Option<usize>,
     gathering_harness_row: Option<usize>,
     planner_progress_row: Option<usize>,
+    last_hunting_sample: Option<HuntingTelemetrySample>,
+    last_hunting_history_sample: Option<HuntingTelemetrySample>,
+    last_hunting_history_at: Option<Instant>,
+    in_flight_row: Option<usize>,
     last_event: Option<(TurnEvent, Instant)>,
     emitted_in_flight: bool,
     step_timing: StepTimingReservoir,
@@ -966,6 +1026,10 @@ impl InteractiveApp {
             search_progress_row: None,
             gathering_harness_row: None,
             planner_progress_row: None,
+            last_hunting_sample: None,
+            last_hunting_history_sample: None,
+            last_hunting_history_at: None,
+            in_flight_row: None,
             last_event: None,
             emitted_in_flight: false,
             step_timing: StepTimingReservoir::load(&step_timing_cache_path()),
@@ -1661,20 +1725,137 @@ impl InteractiveApp {
         slot: &mut Option<usize>,
         row: TranscriptRow,
     ) {
-        if let Some(idx) = *slot {
-            if idx < rows.len() {
-                rows[idx] = row;
-                return;
-            }
+        if let Some(idx) = *slot
+            && idx < rows.len()
+        {
+            rows[idx] = row;
+            return;
         }
 
         *slot = Some(rows.len());
         rows.push(row);
     }
 
+    fn remove_in_flight_row(&mut self) {
+        let Some(index) = self.in_flight_row.take() else {
+            return;
+        };
+        if index >= self.rows.len() {
+            return;
+        }
+
+        self.rows.remove(index);
+        if self.flushed_row_count > index {
+            self.flushed_row_count -= 1;
+        }
+        if let Some(pending) = self.pending_reveal.as_mut()
+            && pending.row_index > index
+        {
+            pending.row_index -= 1;
+        }
+        for slot in [
+            &mut self.search_progress_row,
+            &mut self.gathering_harness_row,
+            &mut self.planner_progress_row,
+        ] {
+            if let Some(slot_index) = *slot {
+                if slot_index == index {
+                    *slot = None;
+                } else if slot_index > index {
+                    *slot = Some(slot_index - 1);
+                }
+            }
+        }
+    }
+
+    fn insert_hunting_history_row(&mut self, row: TranscriptRow) {
+        let insert_at = [
+            self.search_progress_row,
+            self.gathering_harness_row,
+            self.planner_progress_row,
+            self.in_flight_row,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or(self.rows.len());
+
+        self.rows.insert(insert_at, row);
+
+        for slot in [
+            &mut self.search_progress_row,
+            &mut self.gathering_harness_row,
+            &mut self.planner_progress_row,
+            &mut self.in_flight_row,
+        ] {
+            if let Some(index) = slot.as_mut()
+                && *index >= insert_at
+            {
+                *index += 1;
+            }
+        }
+
+        if let Some(pending) = self.pending_reveal.as_mut()
+            && pending.row_index >= insert_at
+        {
+            pending.row_index += 1;
+        }
+    }
+
+    fn maybe_record_hunting_history(
+        &mut self,
+        event: &TurnEvent,
+        timing: Option<TranscriptTiming>,
+        occurred_at: Instant,
+    ) {
+        let TurnEvent::GathererSearchProgress { phase, detail, .. } = event else {
+            return;
+        };
+        let Some(detail) = detail.as_deref() else {
+            self.last_hunting_sample = None;
+            self.last_hunting_history_sample = None;
+            self.last_hunting_history_at = None;
+            return;
+        };
+        let Some(sample) = parse_hunting_telemetry_sample(phase, detail) else {
+            self.last_hunting_sample = None;
+            self.last_hunting_history_sample = None;
+            self.last_hunting_history_at = None;
+            return;
+        };
+
+        let should_emit = self
+            .last_hunting_history_at
+            .map(|last| occurred_at.duration_since(last) >= HUNTING_HISTORY_MIN_INTERVAL)
+            .unwrap_or(false);
+
+        if should_emit
+            && let Some(previous) = self.last_hunting_history_sample.as_ref()
+            && let Some(history_content) = format_hunting_history_delta(previous, &sample)
+        {
+            let mut row = TranscriptRow::new(
+                TranscriptRowKind::Event,
+                format!("• Hunting sample ({})", sample.phase),
+                history_content,
+            );
+            if let Some(timing) = timing {
+                row = row.timed(timing);
+            }
+            self.insert_hunting_history_row(row);
+            self.last_hunting_history_sample = Some(sample.clone());
+            self.last_hunting_history_at = Some(occurred_at);
+        } else if self.last_hunting_history_sample.is_none() {
+            self.last_hunting_history_sample = Some(sample.clone());
+            self.last_hunting_history_at = Some(occurred_at);
+        }
+
+        self.last_hunting_sample = Some(sample);
+    }
+
     fn handle_message(&mut self, message: UiMessage) {
         match message {
             UiMessage::TurnEvent { event, occurred_at } => {
+                self.remove_in_flight_row();
                 let key = event.event_type_key();
                 let is_first_step = self
                     .active_turn_timing
@@ -1704,12 +1885,14 @@ impl InteractiveApp {
                 self.emitted_in_flight = false;
 
                 if self.should_show_event(&event, pace, is_first_step) {
-                    let row = format_turn_event_row(event, self.verbose);
+                    let row = format_turn_event_row(event.clone(), self.verbose);
                     let row = if let Some(timing) = self.active_turn_timing.as_mut() {
                         row.timed(timing.mark_step(occurred_at, pace))
                     } else {
                         row
                     };
+                    let row_timing = row.timing;
+                    self.maybe_record_hunting_history(&event, row_timing, occurred_at);
 
                     if is_planner_progress {
                         Self::replace_or_push_tracked_row(
@@ -1732,6 +1915,9 @@ impl InteractiveApp {
                     } else {
                         self.search_progress_row = None;
                         self.gathering_harness_row = None;
+                        self.last_hunting_sample = None;
+                        self.last_hunting_history_sample = None;
+                        self.last_hunting_history_at = None;
                         self.rows.push(row);
                     }
                 } else if let Some(timing) = self.active_turn_timing.as_mut() {
@@ -1747,9 +1933,13 @@ impl InteractiveApp {
                 result,
                 occurred_at,
             } => {
+                self.remove_in_flight_row();
                 self.search_progress_row = None;
                 self.gathering_harness_row = None;
                 self.planner_progress_row = None;
+                self.last_hunting_sample = None;
+                self.last_hunting_history_sample = None;
+                self.last_hunting_history_at = None;
                 self.last_event = None;
                 self.emitted_in_flight = false;
                 match result {
@@ -1797,12 +1987,8 @@ impl InteractiveApp {
         {
             let silence = Instant::now().duration_since(last_at);
             if silence >= IN_FLIGHT_SILENCE_THRESHOLD {
-                let label = in_flight_label(event);
-                self.rows.push(TranscriptRow::new(
-                    TranscriptRowKind::InFlightEvent,
-                    format!("• {label}..."),
-                    "",
-                ));
+                let row = format_in_flight_row(event);
+                Self::replace_or_push_tracked_row(&mut self.rows, &mut self.in_flight_row, row);
                 self.emitted_in_flight = true;
             }
         }
@@ -2877,6 +3063,170 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
     }
 }
 
+fn parse_hunting_telemetry_sample(phase: &str, detail: &str) -> Option<HuntingTelemetrySample> {
+    let mut segments = detail.split(" · ");
+    let first = segments.next()?.trim();
+    let headline = parse_progress_headline(first);
+    let mut metrics = Vec::new();
+
+    for segment in segments {
+        metrics.extend(parse_progress_metrics(segment.trim()));
+    }
+
+    Some(HuntingTelemetrySample {
+        phase: phase.to_string(),
+        headline,
+        metrics,
+    })
+}
+
+fn parse_progress_headline(segment: &str) -> Option<ProgressHeadline> {
+    if let Some(rest) = segment.strip_prefix("indexing ")
+        && let Some(rest) = rest.strip_suffix(" files")
+    {
+        let (current, total) = parse_fraction(rest)?;
+        return Some(ProgressHeadline {
+            label: "files".to_string(),
+            current,
+            total: Some(total),
+        });
+    }
+    if let Some(rest) = segment.strip_prefix("embedding ")
+        && let Some(rest) = rest.strip_suffix(" chunks")
+    {
+        let (current, total) = parse_fraction(rest)?;
+        return Some(ProgressHeadline {
+            label: "chunks".to_string(),
+            current,
+            total: Some(total),
+        });
+    }
+    if let Some(rest) = segment.strip_prefix("retrieving turn ") {
+        let (current, total) = parse_fraction(rest)?;
+        return Some(ProgressHeadline {
+            label: "turns".to_string(),
+            current,
+            total: Some(total),
+        });
+    }
+    if let Some(rest) = segment.strip_prefix("ranking ")
+        && let Some(rest) = rest.strip_suffix(" hits")
+    {
+        let (current, total) = parse_fraction(rest)?;
+        return Some(ProgressHeadline {
+            label: "hits".to_string(),
+            current,
+            total: Some(total),
+        });
+    }
+    None
+}
+
+fn parse_progress_metrics(segment: &str) -> Vec<ProgressMetric> {
+    if let Some(rest) = segment.strip_prefix("bm25 cache ") {
+        let mut metrics = Vec::new();
+        let mut parts = rest.split_whitespace();
+        if let Some(value) = parts.next().and_then(|value| value.parse::<u64>().ok()) {
+            metrics.push(ProgressMetric {
+                label: "bm25 cache".to_string(),
+                value,
+            });
+        }
+        if let Some("build") = parts.next()
+            && let Some(value) = parts.next().and_then(|value| value.parse::<u64>().ok())
+        {
+            metrics.push(ProgressMetric {
+                label: "build".to_string(),
+                value,
+            });
+        }
+        return metrics;
+    }
+
+    if let Some((label, value)) = segment.rsplit_once(' ')
+        && let Ok(value) = value.parse::<u64>()
+    {
+        return vec![ProgressMetric {
+            label: label.to_string(),
+            value,
+        }];
+    }
+
+    Vec::new()
+}
+
+fn parse_fraction(value: &str) -> Option<(u64, u64)> {
+    let (current, total) = value.split_once('/')?;
+    Some((current.parse().ok()?, total.parse().ok()?))
+}
+
+fn format_hunting_history_delta(
+    previous: &HuntingTelemetrySample,
+    current: &HuntingTelemetrySample,
+) -> Option<String> {
+    if previous.phase != current.phase {
+        return Some(format_hunting_history_snapshot(current));
+    }
+
+    let mut parts = Vec::new();
+    if let Some(current_headline) = current.headline.as_ref() {
+        let delta = previous
+            .headline
+            .as_ref()
+            .filter(|headline| headline.label == current_headline.label)
+            .map(|headline| current_headline.current.saturating_sub(headline.current))
+            .unwrap_or(0);
+        let total = current_headline
+            .total
+            .map(|total| format!("/{}", total))
+            .unwrap_or_default();
+        parts.push(format!(
+            "{} {}{} (+{})",
+            current_headline.label, current_headline.current, total, delta
+        ));
+    }
+
+    for metric in &current.metrics {
+        let previous_value = previous
+            .metrics
+            .iter()
+            .find(|candidate| candidate.label == metric.label)
+            .map(|candidate| candidate.value);
+        if let Some(previous_value) = previous_value {
+            let delta = metric.value as i64 - previous_value as i64;
+            if delta != 0 {
+                parts.push(format!("{} {} ({:+})", metric.label, metric.value, delta));
+            }
+        } else {
+            parts.push(format!("{} {}", metric.label, metric.value));
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
+}
+
+fn format_hunting_history_snapshot(sample: &HuntingTelemetrySample) -> String {
+    let mut parts = Vec::new();
+    if let Some(headline) = sample.headline.as_ref() {
+        let total = headline
+            .total
+            .map(|total| format!("/{}", total))
+            .unwrap_or_default();
+        parts.push(format!("{} {}{}", headline.label, headline.current, total));
+    }
+    parts.extend(
+        sample
+            .metrics
+            .iter()
+            .map(|metric| format!("{} {}", metric.label, metric.value)),
+    );
+    parts.join(" · ")
+}
+
 fn is_mutation_tool_name(tool_name: &str) -> bool {
     matches!(tool_name, "diff" | "apply_patch")
 }
@@ -3088,7 +3438,7 @@ fn terminal_uses_light_background() -> bool {
 mod tests {
     use super::{
         BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
-        TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind,
+        TranscriptRow, TranscriptRowKind, TranscriptTiming, TranscriptTimingKind, UiMessage,
         collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
         inline_multiline_text, inline_viewport_height_for_terminal, render_row_lines,
         runtime_lane_summary, select_interactive_frontend,
@@ -3337,7 +3687,7 @@ mod tests {
         let rows_before = app.rows.len();
         let started = Instant::now();
 
-        let hunt_event = |count: usize, fresh: usize, segments: usize| {
+        let hunt_event = |count: usize, fresh: usize, segments: usize, occurred_at: Instant| {
             super::UiMessage::TurnEvent {
                 event: TurnEvent::GathererSearchProgress {
                     phase: "Indexing".to_string(),
@@ -3348,10 +3698,10 @@ mod tests {
                         "indexing {count}/75934 files · blobs 1365 · fresh {fresh} · skipped 36239 · segments {segments} · bm25 cache 0 build 0"
                     )),
                 },
-                occurred_at: started,
+                occurred_at,
             }
         };
-        let governor_event = |count: usize, fresh: usize, segments: usize| {
+        let governor_event = |count: usize, fresh: usize, segments: usize, occurred_at: Instant| {
             super::UiMessage::TurnEvent {
                 event: TurnEvent::HarnessState {
                     snapshot: crate::domain::model::HarnessSnapshot {
@@ -3370,27 +3720,64 @@ mod tests {
                         )),
                     },
                 },
-                occurred_at: started,
+                occurred_at,
             }
         };
 
-        app.handle_message(hunt_event(75921, 38318, 332391));
-        app.handle_message(governor_event(75921, 38318, 332391));
+        app.handle_message(hunt_event(75921, 38318, 332391, started));
+        app.handle_message(governor_event(75921, 38318, 332391, started));
         assert_eq!(app.rows.len(), rows_before + 2);
 
-        app.handle_message(hunt_event(75925, 38321, 332410));
-        app.handle_message(governor_event(75925, 38321, 332410));
+        app.handle_message(hunt_event(
+            75922,
+            38319,
+            332405,
+            started + Duration::from_millis(250),
+        ));
+        app.handle_message(governor_event(
+            75922,
+            38319,
+            332405,
+            started + Duration::from_millis(250),
+        ));
 
         assert_eq!(app.rows.len(), rows_before + 2);
+
+        app.handle_message(hunt_event(
+            75925,
+            38321,
+            332410,
+            started + Duration::from_millis(1500),
+        ));
+        app.handle_message(governor_event(
+            75925,
+            38321,
+            332410,
+            started + Duration::from_millis(1500),
+        ));
+
+        assert_eq!(app.rows.len(), rows_before + 3);
+        assert_eq!(app.rows[rows_before].header, "• Hunting sample (Indexing)");
+        assert!(
+            app.rows[rows_before]
+                .content
+                .contains("files 75925/75934 (+4)")
+        );
+        assert!(app.rows[rows_before].content.contains("fresh 38321 (+3)"));
+        assert!(
+            app.rows[rows_before]
+                .content
+                .contains("segments 332410 (+19)")
+        );
         assert_eq!(
-            app.rows[rows_before].header,
+            app.rows[rows_before + 1].header,
             "• Hunting (Indexing) — 1m 50s (eta 0ms) strategy=bm25"
         );
-        assert!(app.rows[rows_before].content.contains("75925/75934"));
-        assert_eq!(app.rows[rows_before + 1].header, "• Governor: gathering");
         assert!(app.rows[rows_before + 1].content.contains("75925/75934"));
+        assert_eq!(app.rows[rows_before + 2].header, "• Governor: gathering");
+        assert!(app.rows[rows_before + 2].content.contains("75925/75934"));
         assert!(
-            app.rows[rows_before + 1]
+            app.rows[rows_before + 2]
                 .content
                 .contains("timeout=stalled")
         );
@@ -4525,7 +4912,104 @@ mod tests {
 
         app.tick();
         let row = app.rows.last().expect("in-flight row");
-        assert_eq!(row.header, "• Hunting...");
+        assert_eq!(row.header, "• Hunting (Indexing)... strategy=bm25");
+        assert_eq!(row.content, "indexing 4/10 files");
+    }
+
+    #[test]
+    fn hunting_in_flight_row_is_reused_instead_of_accumulating() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+
+        let first_at = Instant::now() - Duration::from_secs(3);
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::GathererSearchProgress {
+                phase: "Indexing".to_string(),
+                elapsed_seconds: 3,
+                eta_seconds: Some(12),
+                strategy: Some("bm25".to_string()),
+                detail: Some("indexing 4/10 files".to_string()),
+            },
+            occurred_at: first_at,
+        });
+        let rows_after_progress = app.rows.len();
+
+        app.last_event = Some((
+            TurnEvent::GathererSearchProgress {
+                phase: "Indexing".to_string(),
+                elapsed_seconds: 3,
+                eta_seconds: Some(12),
+                strategy: Some("bm25".to_string()),
+                detail: Some("indexing 4/10 files".to_string()),
+            },
+            Instant::now() - Duration::from_secs(3),
+        ));
+        app.tick();
+        assert_eq!(app.rows.len(), rows_after_progress + 1);
+        assert_eq!(
+            app.rows.last().expect("in-flight row").header,
+            "• Hunting (Indexing)... strategy=bm25"
+        );
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::GathererSearchProgress {
+                phase: "Indexing".to_string(),
+                elapsed_seconds: 5,
+                eta_seconds: Some(10),
+                strategy: Some("bm25".to_string()),
+                detail: Some("indexing 5/10 files".to_string()),
+            },
+            occurred_at: Instant::now(),
+        });
+        assert_eq!(
+            app.rows
+                .iter()
+                .filter(|row| row.kind == TranscriptRowKind::InFlightEvent)
+                .count(),
+            0,
+            "new gather progress should clear the stale in-flight fallback before rendering the next live update"
+        );
+        assert_eq!(
+            app.rows
+                .iter()
+                .filter(|row| row.header.starts_with("• Hunting sample"))
+                .count(),
+            1,
+            "aggregated hunting history may be recorded, but stale in-flight rows should not accumulate"
+        );
+
+        app.last_event = Some((
+            TurnEvent::GathererSearchProgress {
+                phase: "Indexing".to_string(),
+                elapsed_seconds: 5,
+                eta_seconds: Some(10),
+                strategy: Some("bm25".to_string()),
+                detail: Some("indexing 5/10 files".to_string()),
+            },
+            Instant::now() - Duration::from_secs(3),
+        ));
+        app.tick();
+        assert_eq!(
+            app.rows
+                .iter()
+                .filter(|row| row.kind == TranscriptRowKind::InFlightEvent)
+                .count(),
+            1,
+            "only one live hunting in-flight row should exist after silence resumes"
+        );
+        let row = app.rows.last().expect("updated in-flight row");
+        assert_eq!(row.header, "• Hunting (Indexing)... strategy=bm25");
+        assert_eq!(row.content, "indexing 5/10 files");
     }
 
     #[test]
