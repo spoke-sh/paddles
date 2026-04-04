@@ -746,6 +746,16 @@ fn in_flight_label(last_event: &TurnEvent) -> &'static str {
     last_event.in_flight_label()
 }
 
+fn busy_label(busy_phase: BusyPhase, last_event: Option<&TurnEvent>) -> String {
+    match busy_phase {
+        BusyPhase::Idle => "working".to_string(),
+        BusyPhase::Thinking => last_event
+            .map(|event| in_flight_label(event).to_ascii_lowercase())
+            .unwrap_or_else(|| "thinking".to_string()),
+        BusyPhase::Rendering => "rendering".to_string(),
+    }
+}
+
 fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
     match last_event {
         TurnEvent::GathererSearchProgress {
@@ -2016,11 +2026,11 @@ impl InteractiveApp {
 
     fn render_status_bar(&self) -> Paragraph<'static> {
         let active_thread = self.session.active_thread().thread_ref.stable_id();
+        let last_event = self.last_event.as_ref().map(|(event, _)| event);
         let status = match self.busy_phase {
             BusyPhase::Idle if self.queued_prompts.is_empty() => "idle".to_string(),
             BusyPhase::Idle => format!("idle · {} queued", self.queued_prompts.len()),
-            BusyPhase::Thinking => "thinking".to_string(),
-            BusyPhase::Rendering => "rendering".to_string(),
+            BusyPhase::Thinking | BusyPhase::Rendering => busy_label(self.busy_phase, last_event),
         };
 
         let line = Line::from(vec![
@@ -2045,17 +2055,10 @@ impl InteractiveApp {
 
     fn render_activity_indicator(&self) -> Paragraph<'static> {
         let spinner = SPINNER_FRAMES[self.spinner_index];
-        let label = match self.last_event.as_ref() {
-            Some((
-                TurnEvent::GathererSearchProgress { .. } | TurnEvent::GathererSummary { .. },
-                _,
-            )) => "hunting",
-            _ => match self.busy_phase {
-                BusyPhase::Thinking => "thinking",
-                BusyPhase::Rendering => "rendering",
-                _ => "working",
-            },
-        };
+        let label = busy_label(
+            self.busy_phase,
+            self.last_event.as_ref().map(|(event, _)| event),
+        );
         let elapsed = self
             .active_turn_timing
             .as_ref()
@@ -3345,7 +3348,9 @@ mod tests {
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Governor: gathering");
         assert!(row.content.contains("status=active"));
-        assert!(row.content.contains("timeout=slow"));
+        assert!(row.content.contains("watch=slow"));
+        assert!(row.content.contains("projected_total=30s"));
+        assert!(!row.content.contains("timeout="));
         assert!(row.content.contains("indexing 4/10 files"));
     }
 
@@ -3453,11 +3458,7 @@ mod tests {
         assert!(app.rows[rows_before + 1].content.contains("75925/75934"));
         assert_eq!(app.rows[rows_before + 2].header, "• Governor: gathering");
         assert!(app.rows[rows_before + 2].content.contains("75925/75934"));
-        assert!(
-            app.rows[rows_before + 2]
-                .content
-                .contains("timeout=stalled")
-        );
+        assert!(app.rows[rows_before + 2].content.contains("watch=stalled"));
     }
 
     #[test]
@@ -4591,6 +4592,32 @@ mod tests {
         let row = app.rows.last().expect("in-flight row");
         assert_eq!(row.header, "• Hunting (Indexing)... strategy=bm25");
         assert_eq!(row.content, "indexing 4/10 files");
+    }
+
+    #[test]
+    fn busy_label_uses_gathering_context_for_harness_snapshots() {
+        let label = super::busy_label(
+            BusyPhase::Thinking,
+            Some(&TurnEvent::HarnessState {
+                snapshot: crate::domain::model::HarnessSnapshot {
+                    chamber: crate::domain::model::HarnessChamber::Gathering,
+                    governor: crate::domain::model::GovernorState {
+                        status: crate::domain::model::HarnessStatus::Intervening,
+                        timeout: crate::domain::model::TimeoutState {
+                            phase: crate::domain::model::TimeoutPhase::Expired,
+                            elapsed_seconds: Some(303),
+                            deadline_seconds: Some(1652),
+                        },
+                        intervention: Some(
+                            "search Indexing has exceeded the watch threshold".to_string(),
+                        ),
+                    },
+                    detail: Some("indexing 13617/76961 files".to_string()),
+                },
+            }),
+        );
+
+        assert_eq!(label, "hunting");
     }
 
     #[test]

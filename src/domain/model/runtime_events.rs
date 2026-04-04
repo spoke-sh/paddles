@@ -211,7 +211,7 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             let mut text_parts = vec![
                 snapshot.chamber.to_string(),
                 format!("status {}", snapshot.governor.status),
-                format!("timeout {}", snapshot.governor.timeout.phase),
+                format!("watch {}", snapshot.governor.timeout.phase.watch_label()),
             ];
             if let Some(detail) = snapshot.detail.as_deref().filter(|value| !value.is_empty()) {
                 text_parts.push(detail.to_string());
@@ -613,8 +613,11 @@ mod tests {
         assert_eq!(presentation.badge, "gov");
         assert_eq!(presentation.title, "• Governor: gathering");
         assert!(presentation.detail.contains("status=active"));
-        assert!(presentation.detail.contains("timeout=slow"));
+        assert!(presentation.detail.contains("watch=slow"));
+        assert!(presentation.detail.contains("projected_total=30s"));
+        assert!(!presentation.detail.contains("timeout="));
         assert!(presentation.text.contains("gathering"));
+        assert!(presentation.text.contains("watch slow"));
     }
 
     #[test]

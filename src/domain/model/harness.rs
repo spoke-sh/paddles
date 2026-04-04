@@ -81,6 +81,15 @@ impl TimeoutPhase {
             Self::Expired => "expired",
         }
     }
+
+    pub fn watch_label(self) -> &'static str {
+        match self {
+            Self::Nominal => "nominal",
+            Self::Slow => "slow",
+            Self::Stalled => "stalled",
+            Self::Expired => "overtime",
+        }
+    }
 }
 
 impl fmt::Display for TimeoutPhase {
@@ -219,7 +228,7 @@ impl HarnessSnapshot {
     pub fn governor_summary(&self, include_timing: bool) -> String {
         let mut parts = vec![
             format!("status={}", self.governor.status),
-            format!("timeout={}", self.governor.timeout.phase),
+            format!("watch={}", self.governor.timeout.phase.watch_label()),
         ];
 
         if include_timing {
@@ -227,7 +236,7 @@ impl HarnessSnapshot {
                 parts.push(format!("elapsed={elapsed_seconds}s"));
             }
             if let Some(deadline_seconds) = self.governor.timeout.deadline_seconds {
-                parts.push(format!("deadline={deadline_seconds}s"));
+                parts.push(format!("projected_total={deadline_seconds}s"));
             }
         }
 
@@ -239,5 +248,36 @@ impl HarnessSnapshot {
         }
 
         parts.join(" · ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
+    };
+
+    #[test]
+    fn governor_summary_uses_watch_language_for_supervisory_timing() {
+        let summary = HarnessSnapshot {
+            chamber: HarnessChamber::Gathering,
+            governor: GovernorState {
+                status: HarnessStatus::Intervening,
+                timeout: TimeoutState {
+                    phase: TimeoutPhase::Expired,
+                    elapsed_seconds: Some(293),
+                    deadline_seconds: Some(1652),
+                },
+                intervention: Some("search Indexing has exceeded the watch threshold".to_string()),
+            },
+            detail: Some("indexing 13617/76961 files".to_string()),
+        }
+        .governor_summary(true);
+
+        assert!(summary.contains("status=intervening"));
+        assert!(summary.contains("watch=overtime"));
+        assert!(summary.contains("projected_total=1652s"));
+        assert!(!summary.contains("timeout="));
+        assert!(!summary.contains("deadline="));
     }
 }

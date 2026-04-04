@@ -50,10 +50,10 @@ The important architectural change is that these are now first-class runtime sta
 
 - the active chamber
 - governor status
-- timeout phase
+- a supervisory watch phase for long-running work
 - optional intervention/detail text
 
-That gives TUI, web, and future API clients one shared harness manifold instead of separate ad hoc interpretations of planner/gatherer/tool progress.
+That gives TUI, web, and future API clients one shared harness manifold instead of separate ad hoc interpretations of planner/gatherer/tool progress. UI projection should treat that watch phase as a pacing signal rather than proof that execution has terminated; a gathering row can legitimately report `watch=overtime` while the turn remains actively hunting and the projected total continues to move.
 
 ### Act 3: Synthesis
 

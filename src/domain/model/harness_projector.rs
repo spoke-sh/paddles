@@ -101,10 +101,8 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
                 TimeoutPhase::Stalled | TimeoutPhase::Expired
             ) {
                 governor.status = HarnessStatus::Intervening;
-                governor.intervention = Some(format!(
-                    "search {phase} is {}",
-                    governor.timeout.phase.label()
-                ));
+                governor.intervention =
+                    Some(search_watch_intervention(phase, governor.timeout.phase));
             }
             let detail = detail
                 .clone()
@@ -236,6 +234,14 @@ fn timeout_state(elapsed_seconds: u64, eta_seconds: Option<u64>) -> TimeoutState
     }
 }
 
+fn search_watch_intervention(phase: &str, timeout_phase: TimeoutPhase) -> String {
+    match timeout_phase {
+        TimeoutPhase::Stalled => format!("search {phase} is taking longer than expected"),
+        TimeoutPhase::Expired => format!("search {phase} has exceeded the watch threshold"),
+        _ => format!("search {phase} is {}", timeout_phase.label()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::derive_harness_snapshot;
@@ -254,5 +260,25 @@ mod tests {
         assert_eq!(snapshot.governor.status, HarnessStatus::Active);
         assert_eq!(snapshot.governor.timeout.phase, TimeoutPhase::Nominal);
         assert_eq!(snapshot.detail.as_deref(), Some("intent=planned"));
+    }
+
+    #[test]
+    fn projector_describes_expired_search_as_watch_threshold_breach() {
+        let snapshot = derive_harness_snapshot(&TurnEvent::GathererSearchProgress {
+            phase: "Indexing".to_string(),
+            elapsed_seconds: 121,
+            eta_seconds: Some(60),
+            strategy: Some("bm25".to_string()),
+            detail: Some("indexing 14/100 files".to_string()),
+        })
+        .expect("snapshot");
+
+        assert_eq!(snapshot.chamber, HarnessChamber::Gathering);
+        assert_eq!(snapshot.governor.status, HarnessStatus::Intervening);
+        assert_eq!(snapshot.governor.timeout.phase, TimeoutPhase::Expired);
+        assert_eq!(
+            snapshot.governor.intervention.as_deref(),
+            Some("search Indexing has exceeded the watch threshold")
+        );
     }
 }
