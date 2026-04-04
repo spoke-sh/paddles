@@ -115,7 +115,9 @@ struct BroadcastEventSink {
 
 fn should_forward_projection_event(event: &TurnEvent) -> bool {
     match event {
-        TurnEvent::HarnessState { snapshot } => snapshot.should_emit_to_stream(),
+        TurnEvent::HarnessState { snapshot } => {
+            snapshot.governor_policy().should_emit_to_stream()
+        }
         _ => true,
     }
 }

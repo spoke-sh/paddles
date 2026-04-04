@@ -89,6 +89,19 @@ impl fmt::Display for TimeoutPhase {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GovernorPolicy {
+    Silent,
+    Active,
+    Intervening,
+}
+
+impl GovernorPolicy {
+    pub fn should_emit_to_stream(self) -> bool {
+        self != Self::Silent
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeoutState {
     pub phase: TimeoutPhase,
@@ -148,6 +161,19 @@ pub struct HarnessSnapshot {
 }
 
 impl HarnessSnapshot {
+    pub fn governor_policy(&self) -> GovernorPolicy {
+        if self.governor.intervention.is_some()
+            || self.governor.status == HarnessStatus::Intervening
+            || self.governor.timeout.phase != TimeoutPhase::Nominal
+        {
+            GovernorPolicy::Intervening
+        } else if self.governor.status == HarnessStatus::Active {
+            GovernorPolicy::Silent
+        } else {
+            GovernorPolicy::Active
+        }
+    }
+
     pub fn active(chamber: HarnessChamber) -> Self {
         Self {
             chamber,
@@ -175,9 +201,7 @@ impl HarnessSnapshot {
     }
 
     pub fn should_emit_to_stream(&self) -> bool {
-        self.governor.status != HarnessStatus::Active
-            || self.governor.timeout.phase != TimeoutPhase::Nominal
-            || self.governor.intervention.is_some()
+        self.governor_policy().should_emit_to_stream()
     }
 
     pub fn governor_header(&self) -> String {
