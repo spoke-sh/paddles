@@ -1,15 +1,12 @@
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-    GathererCapability, RetrievalStrategy,
+    GathererCapability,
 };
+use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::Result;
 use async_trait::async_trait;
-use sift::{
-    ContextAssemblyBudget, ContextAssemblyRequest, ContextAssemblyResponse, EnvironmentFactInput,
-    FusionPolicy, LocalContextSource, QueryExpansionPolicy, RerankingPolicy, RetrieverPolicy,
-    SearchPlan, Sift,
-};
+use sift::{ContextAssemblyResponse, Sift};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -40,29 +37,12 @@ impl SiftContextGathererAdapter {
     }
 
     fn assemble_context(&self, request: &ContextGatherRequest) -> Result<ContextAssemblyResponse> {
-        let local_context = request
-            .prior_context
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                LocalContextSource::EnvironmentFact(EnvironmentFactInput::new(
-                    format!("prior_context_{index}"),
-                    value.clone(),
-                ))
-            })
-            .collect::<Vec<_>>();
-
-        self.sift.assemble_context(
-            ContextAssemblyRequest::new(&self.workspace_root, &request.user_query)
-                .with_plan(search_plan_for_strategy(
-                    request.planning.retrieval_strategy,
-                ))
-                .with_intent(request.intent_reason.clone())
-                .with_limit(request.budget.max_items)
-                .with_shortlist(request.budget.max_items)
-                .with_budget(ContextAssemblyBudget::new(DEFAULT_RETAINED_LIMIT))
-                .with_local_context(local_context),
-        )
+        self.sift
+            .assemble_context(SiftRequestFactory::context_assembly_request(
+                &self.workspace_root,
+                request,
+                DEFAULT_RETAINED_LIMIT,
+            ))
     }
 }
 
@@ -116,19 +96,6 @@ impl ContextGatherer for SiftContextGathererAdapter {
         Ok(ContextGatherResult::available(EvidenceBundle::new(
             summary, items,
         )))
-    }
-}
-
-fn search_plan_for_strategy(strategy: RetrievalStrategy) -> SearchPlan {
-    match strategy {
-        RetrievalStrategy::Lexical => SearchPlan::default_lexical(),
-        RetrievalStrategy::Vector => SearchPlan {
-            name: "vector".to_string(),
-            query_expansion: QueryExpansionPolicy::None,
-            retrievers: vec![RetrieverPolicy::Vector],
-            fusion: FusionPolicy::Rrf,
-            reranking: RerankingPolicy::None,
-        },
     }
 }
 

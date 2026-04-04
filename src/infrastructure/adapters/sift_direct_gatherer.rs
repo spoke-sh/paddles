@@ -4,13 +4,11 @@ use crate::domain::ports::{
     GathererCapability, PlannerDecision, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
+use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::Result;
 use async_trait::async_trait;
-use sift::{
-    EnvironmentFactInput, LocalContextSource, SearchInput, SearchOptions, SearchProgress,
-    SearchResponse, Sift,
-};
+use sift::{SearchInput, SearchProgress, SearchResponse, Sift};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,28 +41,11 @@ impl SiftDirectGathererAdapter {
     }
 
     fn build_search_input(&self, request: &ContextGatherRequest) -> SearchInput {
-        let local_context = request
-            .prior_context
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                LocalContextSource::EnvironmentFact(EnvironmentFactInput::new(
-                    format!("prior_context_{index}"),
-                    value.clone(),
-                ))
-            })
-            .collect::<Vec<_>>();
-
-        SearchInput::new(&self.workspace_root, request.user_query.clone())
-            .with_intent(request.intent_reason.clone())
-            .with_options(
-                SearchOptions::default()
-                    .with_strategy(request.planning.retrieval_strategy.label())
-                    .with_limit(request.budget.max_items)
-                    .with_shortlist(request.budget.max_items)
-                    .with_verbose(self.verbose.load(Ordering::Relaxed))
-                    .with_local_context(local_context),
-            )
+        SiftRequestFactory::direct_search_input(
+            &self.workspace_root,
+            request,
+            self.verbose.load(Ordering::Relaxed),
+        )
     }
 
     fn search_workspace_with_progress<F: Fn(&SearchProgress)>(

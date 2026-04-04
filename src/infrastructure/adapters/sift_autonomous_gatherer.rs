@@ -4,18 +4,18 @@ use crate::domain::ports::{
     GathererCapability, PlannerDecision, PlannerGraphBranch, PlannerGraphBranchStatus,
     PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode, PlannerGraphFrontierEntry,
     PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RetainedEvidence, RetrievalMode, RetrievalStrategy,
+    RetainedEvidence, RetrievalMode,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
+use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
     AutonomousGraphBranchStatus, AutonomousGraphEdgeKind, AutonomousPlannerAction,
     AutonomousPlannerStopReason, AutonomousPlannerStrategy, AutonomousPlannerStrategyKind,
-    AutonomousSearchMode, AutonomousSearchRequest, AutonomousSearchResponse, EnvironmentFactInput,
-    FusionPolicy, LocalContextSource, QueryExpansionPolicy, RerankingPolicy, RetrieverPolicy,
-    SearchEmission, SearchPlan, SearchProgress, Sift,
+    AutonomousSearchMode, AutonomousSearchRequest, AutonomousSearchResponse, SearchEmission,
+    SearchProgress, Sift,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -76,31 +76,12 @@ impl SiftAutonomousGathererAdapter {
     }
 
     fn build_search_request(&self, request: &ContextGatherRequest) -> AutonomousSearchRequest {
-        let local_context = request
-            .prior_context
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                LocalContextSource::EnvironmentFact(EnvironmentFactInput::new(
-                    format!("prior_context_{index}"),
-                    value.clone(),
-                ))
-            })
-            .collect::<Vec<_>>();
-
-        AutonomousSearchRequest::new(&self.workspace_root, &request.user_query)
-            .with_plan(search_plan_for_strategy(
-                request.planning.retrieval_strategy,
-            ))
-            .with_mode(map_retrieval_mode(request.planning.mode))
-            .with_intent(request.intent_reason.clone())
-            .with_planner_strategy(self.planner_strategy(request))
-            .with_step_limit(request.planning.step_limit)
-            .with_limit(request.budget.max_items)
-            .with_shortlist(request.budget.max_items)
-            .with_retained_artifact_limit(request.planning.retained_artifact_limit)
-            .with_local_context(local_context)
-            .with_verbose(self.verbose.load(Ordering::Relaxed))
+        SiftRequestFactory::autonomous_search_request(
+            &self.workspace_root,
+            request,
+            self.verbose.load(Ordering::Relaxed),
+            self.planner_strategy(request),
+        )
     }
 }
 
@@ -422,13 +403,6 @@ fn map_planner_strategy_kind(kind: AutonomousPlannerStrategyKind) -> PlannerStra
     }
 }
 
-fn map_retrieval_mode(mode: RetrievalMode) -> AutonomousSearchMode {
-    match mode {
-        RetrievalMode::Linear => AutonomousSearchMode::Linear,
-        RetrievalMode::Graph => AutonomousSearchMode::Graph,
-    }
-}
-
 fn map_response_mode(mode: AutonomousSearchMode) -> RetrievalMode {
     match mode {
         AutonomousSearchMode::Linear => RetrievalMode::Linear,
@@ -541,19 +515,6 @@ fn retained_evidence_from_response(response: &AutonomousSearchResponse) -> Vec<R
             locator: None,
         })
         .collect()
-}
-
-fn search_plan_for_strategy(strategy: RetrievalStrategy) -> SearchPlan {
-    match strategy {
-        RetrievalStrategy::Lexical => SearchPlan::default_lexical(),
-        RetrievalStrategy::Vector => SearchPlan {
-            name: "vector".to_string(),
-            query_expansion: QueryExpansionPolicy::None,
-            retrievers: vec![RetrieverPolicy::Vector],
-            fusion: FusionPolicy::Rrf,
-            reranking: RerankingPolicy::None,
-        },
-    }
 }
 
 fn format_action(action: AutonomousPlannerAction) -> String {

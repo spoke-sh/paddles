@@ -10,6 +10,7 @@ pub mod sift_direct_gatherer;
 pub mod sift_planner;
 pub(crate) mod sift_progress;
 pub mod sift_registry;
+pub(crate) mod sift_request_factory;
 pub mod trace_recorders;
 pub mod transit_resolver;
 
