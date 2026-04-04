@@ -83,6 +83,16 @@ The harness manifold carries:
 
 ## Consequences
 
+## Constraints
+
+- The engine/governor vocabulary must remain a top-level orchestration model and
+  must not erase precise lower-level contracts such as `RenderDocument`,
+  `InstructionFrame`, or `WorkspaceAction`.
+- Supervisory state must be derived from typed runtime events rather than
+  reconstructed from surface-specific string heuristics.
+- New chambers and governor states must remain serializable across TUI, web, and
+  future API projections without introducing presentation-only variants.
+
 ### Positive
 
 - TUI and web can project one explicit runtime state instead of maintaining
