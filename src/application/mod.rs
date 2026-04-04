@@ -1873,13 +1873,18 @@ impl MechSuitService {
         let Some(gatherer) = context.gatherer.as_ref() else {
             return missing_backend_message.to_string();
         };
+        let planning = PlannerConfig::default()
+            .with_mode(mode)
+            .with_retrieval_strategy(strategy)
+            .with_step_limit(1);
+        let capability = gatherer.capability_for_planning(&planning);
 
         trace.emit(TurnEvent::GathererCapability {
             provider: gatherer_provider.to_string(),
-            capability: format_gatherer_capability(&gatherer.capability()),
+            capability: format_gatherer_capability(&capability),
         });
 
-        match gatherer.capability() {
+        match capability {
             GathererCapability::Available => {
                 let request = ContextGatherRequest::new(
                     query.clone(),
@@ -1887,12 +1892,7 @@ impl MechSuitService {
                     intent_reason,
                     EvidenceBudget::default(),
                 )
-                .with_planning(
-                    PlannerConfig::default()
-                        .with_mode(mode)
-                        .with_retrieval_strategy(strategy)
-                        .with_step_limit(1),
-                )
+                .with_planning(planning)
                 .with_prior_context(
                     build_planner_prior_context(
                         &context.interpretation,
@@ -1945,7 +1945,8 @@ impl MechSuitService {
                     Err(err) => format!("{failure_label}: {err:#}"),
                 }
             }
-            GathererCapability::Unsupported { reason }
+            GathererCapability::Warming { reason }
+            | GathererCapability::Unsupported { reason }
             | GathererCapability::HarnessRequired { reason } => {
                 format!("{unavailable_label}: {reason}")
             }
@@ -2239,7 +2240,8 @@ impl MechSuitService {
             PlannerBudget::default(),
         )
         .with_recent_turns(recent_turns.clone())
-        .with_recent_thread_summary(recent_thread_summary.clone());
+        .with_recent_thread_summary(recent_thread_summary.clone())
+        .with_runtime_notes(planner_runtime_notes_for_gatherer(gatherer.as_ref()));
 
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
@@ -2684,6 +2686,9 @@ impl MechSuitService {
                 )
                 .with_recent_turns(context.recent_turns.clone())
                 .with_recent_thread_summary(context.recent_thread_summary.clone())
+                .with_runtime_notes(planner_runtime_notes_for_gatherer(
+                    context.gatherer.as_ref(),
+                ))
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone());
                 context
@@ -3823,11 +3828,66 @@ fn execution_plan_from_initial_action(
 fn format_gatherer_capability(capability: &GathererCapability) -> String {
     match capability {
         GathererCapability::Available => "available".to_string(),
+        GathererCapability::Warming { reason } => format!("warming: {reason}"),
         GathererCapability::Unsupported { reason } => format!("unsupported: {reason}"),
         GathererCapability::HarnessRequired { reason } => {
             format!("harness-required: {reason}")
         }
     }
+}
+
+fn gatherer_readiness_label(capability: &GathererCapability) -> &'static str {
+    match capability {
+        GathererCapability::Available => "available",
+        GathererCapability::Warming { .. } => "warming",
+        GathererCapability::Unsupported { .. } => "unsupported",
+        GathererCapability::HarnessRequired { .. } => "harness-required",
+    }
+}
+
+fn planner_runtime_notes_for_gatherer(gatherer: Option<&Arc<dyn ContextGatherer>>) -> Vec<String> {
+    let Some(gatherer) = gatherer else {
+        return Vec::new();
+    };
+
+    let lexical = gatherer.capability_for_planning(
+        &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Lexical),
+    );
+    let vector = gatherer.capability_for_planning(
+        &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Vector),
+    );
+
+    if matches!(lexical, GathererCapability::Available)
+        && matches!(vector, GathererCapability::Available)
+    {
+        return Vec::new();
+    }
+
+    let guidance = match (&lexical, &vector) {
+        (GathererCapability::Available, GathererCapability::Warming { .. }) => {
+            "Prefer bm25 if search is needed immediately; avoid vector until warmup completes."
+                .to_string()
+        }
+        (GathererCapability::Warming { .. }, GathererCapability::Available) => {
+            "Prefer vector if semantic retrieval is already warm; avoid bm25 until warmup completes."
+                .to_string()
+        }
+        (GathererCapability::Warming { .. }, GathererCapability::Warming { .. }) => {
+            "Avoid `search` or `refine` until the requested strategy is ready. Prefer `list_files`, `read`, or `inspect` for now."
+                .to_string()
+        }
+        _ => {
+            "Do not choose `search` or `refine` unless the requested retrieval strategy reports available."
+                .to_string()
+        }
+    };
+
+    vec![format!(
+        "Workspace retrieval readiness: bm25={}, vector={}. {}",
+        gatherer_readiness_label(&lexical),
+        gatherer_readiness_label(&vector),
+        guidance
+    )]
 }
 
 fn format_planner_capability(capability: &PlannerCapability) -> String {
@@ -4264,7 +4324,14 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
     recent_turns: &[String],
     candidates: &[String],
 ) -> Vec<String> {
-    if !matches!(gatherer.capability(), GathererCapability::Available) {
+    let planning = PlannerConfig::default()
+        .with_mode(RetrievalMode::Linear)
+        .with_retrieval_strategy(RetrievalStrategy::Vector)
+        .with_step_limit(1);
+    if !matches!(
+        gatherer.capability_for_planning(&planning),
+        GathererCapability::Available
+    ) {
         return candidates.to_vec();
     }
 
@@ -4284,12 +4351,7 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
         "known-edit-bootstrap",
         EvidenceBudget::default(),
     )
-    .with_planning(
-        PlannerConfig::default()
-            .with_mode(RetrievalMode::Linear)
-            .with_retrieval_strategy(RetrievalStrategy::Vector)
-            .with_step_limit(1),
-    )
+    .with_planning(planning)
     .with_prior_context(prior_context);
 
     let Ok(result) = gatherer.gather_context(&request).await else {
@@ -4412,6 +4474,9 @@ async fn review_decision_under_signals(
     )
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
+    .with_runtime_notes(planner_runtime_notes_for_gatherer(
+        context.gatherer.as_ref(),
+    ))
     .with_loop_state(review_loop_state)
     .with_resolver(context.resolver.clone());
 
@@ -9580,6 +9645,214 @@ mod tests {
             recent_turns,
             vec!["Q: What happened? A: Shared completion helper reply.".to_string()]
         );
+    }
+
+    #[test]
+    fn planner_requests_include_runtime_notes_when_retrieval_is_still_warming() {
+        struct WarmingGatherer;
+
+        #[async_trait]
+        impl ContextGatherer for WarmingGatherer {
+            fn capability(&self) -> crate::domain::ports::GathererCapability {
+                crate::domain::ports::GathererCapability::Warming {
+                    reason: "background lexical bootstrap is still running".to_string(),
+                }
+            }
+
+            fn capability_for_planning(
+                &self,
+                planning: &crate::domain::ports::PlannerConfig,
+            ) -> crate::domain::ports::GathererCapability {
+                match planning.retrieval_strategy {
+                    RetrievalStrategy::Lexical => {
+                        crate::domain::ports::GathererCapability::Warming {
+                            reason: "bm25 warmup in progress".to_string(),
+                        }
+                    }
+                    RetrievalStrategy::Vector => {
+                        crate::domain::ports::GathererCapability::Warming {
+                            reason: "vector warmup in progress".to_string(),
+                        }
+                    }
+                }
+            }
+
+            async fn gather_context(
+                &self,
+                _request: &ContextGatherRequest,
+            ) -> Result<ContextGatherResult> {
+                panic!("warming gatherer should not be invoked")
+            }
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: Some(PreparedGathererLane {
+                provider: GathererProvider::SiftDirect,
+                label: "sift-direct".to_string(),
+                model_id: None,
+                paths: None,
+            }),
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "this can be answered directly".to_string(),
+                answer: Some("direct answer".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+            Vec::new(),
+            Arc::clone(&recorded_requests),
+        ));
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+                gatherer: Some(Arc::new(WarmingGatherer) as Arc<dyn ContextGatherer>),
+            });
+            service
+                .process_prompt("Should we search the workspace yet?")
+                .await
+                .expect("process prompt");
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        let request = requests.first().expect("initial planner request");
+        assert!(request.runtime_notes.iter().any(|note| {
+            note.contains("Workspace retrieval readiness")
+                && note.contains("bm25=warming")
+                && note.contains("vector=warming")
+        }));
+    }
+
+    #[test]
+    fn execute_planner_gather_step_refuses_warming_retrieval_without_invoking_gatherer() {
+        #[derive(Default)]
+        struct StrategyCapabilityGatherer {
+            recorded_requests: Arc<Mutex<Vec<ContextGatherRequest>>>,
+        }
+
+        #[async_trait]
+        impl ContextGatherer for StrategyCapabilityGatherer {
+            fn capability(&self) -> crate::domain::ports::GathererCapability {
+                crate::domain::ports::GathererCapability::Warming {
+                    reason: "boot warmup in progress".to_string(),
+                }
+            }
+
+            fn capability_for_planning(
+                &self,
+                planning: &crate::domain::ports::PlannerConfig,
+            ) -> crate::domain::ports::GathererCapability {
+                match planning.retrieval_strategy {
+                    RetrievalStrategy::Lexical => {
+                        crate::domain::ports::GathererCapability::Available
+                    }
+                    RetrievalStrategy::Vector => {
+                        crate::domain::ports::GathererCapability::Warming {
+                            reason: "vector warmup in progress".to_string(),
+                        }
+                    }
+                }
+            }
+
+            async fn gather_context(
+                &self,
+                request: &ContextGatherRequest,
+            ) -> Result<ContextGatherResult> {
+                self.recorded_requests
+                    .lock()
+                    .expect("gatherer requests lock")
+                    .push(request.clone());
+                Ok(ContextGatherResult::unsupported(
+                    "should not run while warming",
+                ))
+            }
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+        let gatherer = Arc::new(StrategyCapabilityGatherer::default());
+        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        context.gatherer = Some(gatherer.clone() as Arc<dyn ContextGatherer>);
+        let session = service.shared_conversation_session();
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let trace = Arc::new(StructuredTurnTrace::new(
+            sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            session.allocate_turn_id(),
+            session.active_thread().thread_ref,
+        ));
+        let mut loop_state = PlannerLoopState::default();
+        let mut used_workspace_resources = false;
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let summary = runtime.block_on(async {
+            service
+                .execute_planner_gather_step(
+                    &context,
+                    &mut loop_state,
+                    trace,
+                    "sift-direct",
+                    super::PlannerGatherSpec {
+                        query: "semantic target".to_string(),
+                        intent_reason: "planner-search".to_string(),
+                        mode: RetrievalMode::Linear,
+                        strategy: RetrievalStrategy::Vector,
+                        max_evidence_items: 8,
+                        success_summary_override: None,
+                        no_bundle_message: "planner search returned no evidence bundle",
+                        failure_label: "planner search failed",
+                        unavailable_label: "planner search backend unavailable",
+                        missing_backend_message:
+                            "no gatherer backend is configured for planner search",
+                    },
+                    &mut used_workspace_resources,
+                )
+                .await
+        });
+
+        assert_eq!(
+            summary,
+            "planner search backend unavailable: vector warmup in progress"
+        );
+        assert!(
+            gatherer
+                .recorded_requests
+                .lock()
+                .expect("gatherer requests lock")
+                .is_empty(),
+            "cold vector retrieval should be refused before gather_context runs"
+        );
+        assert!(!used_workspace_resources);
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::GathererCapability { capability, .. }
+                if capability.contains("warming: vector warmup in progress")
+        )));
     }
 
     #[test]

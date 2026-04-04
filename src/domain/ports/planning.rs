@@ -169,6 +169,7 @@ pub struct PlannerRequest {
     pub interpretation: InterpretationContext,
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
+    pub runtime_notes: Vec<String>,
     pub loop_state: PlannerLoopState,
     pub budget: PlannerBudget,
     pub resolver: Option<Arc<dyn ContextResolver>>,
@@ -187,6 +188,7 @@ impl PlannerRequest {
             interpretation,
             recent_turns: Vec::new(),
             recent_thread_summary: None,
+            runtime_notes: Vec::new(),
             loop_state: PlannerLoopState::default(),
             budget,
             resolver: None,
@@ -205,6 +207,11 @@ impl PlannerRequest {
 
     pub fn with_recent_thread_summary(mut self, recent_thread_summary: Option<String>) -> Self {
         self.recent_thread_summary = recent_thread_summary;
+        self
+    }
+
+    pub fn with_runtime_notes(mut self, runtime_notes: Vec<String>) -> Self {
+        self.runtime_notes = runtime_notes;
         self
     }
 

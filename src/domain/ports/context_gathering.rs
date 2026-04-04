@@ -9,6 +9,11 @@ pub trait ContextGatherer: Send + Sync {
     /// Report whether this gatherer is actually usable in the current runtime.
     fn capability(&self) -> GathererCapability;
 
+    /// Report whether the gatherer can satisfy a concrete retrieval plan right now.
+    fn capability_for_planning(&self, _planning: &PlannerConfig) -> GathererCapability {
+        self.capability()
+    }
+
     /// Gather ranked evidence for a retrieval-heavy request.
     async fn gather_context(
         &self,
@@ -177,6 +182,7 @@ impl RetrievalStrategy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GathererCapability {
     Available,
+    Warming { reason: String },
     Unsupported { reason: String },
     HarnessRequired { reason: String },
 }

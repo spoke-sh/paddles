@@ -35,6 +35,7 @@ impl ContextGatherer for Context1GathererAdapter {
             GathererCapability::Available => ContextGatherResult::unsupported(
                 "Context-1 capability probing reported available without a provider implementation.",
             ),
+            GathererCapability::Warming { reason } => ContextGatherResult::unsupported(reason),
             GathererCapability::Unsupported { reason } => ContextGatherResult::unsupported(reason),
             GathererCapability::HarnessRequired { reason } => {
                 ContextGatherResult::harness_required(reason)

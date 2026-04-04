@@ -1909,6 +1909,15 @@ fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
         context.push('\n');
     }
 
+    if !request.runtime_notes.is_empty() {
+        context.push_str("\nRuntime notes:\n");
+        for note in &request.runtime_notes {
+            context.push_str("- ");
+            context.push_str(note);
+            context.push('\n');
+        }
+    }
+
     context
 }
 
@@ -3519,6 +3528,9 @@ mod tests {
             InterpretationContext::default(),
             PlannerBudget::default(),
         )
+        .with_runtime_notes(vec![
+            "Workspace retrieval readiness: bm25=available, vector=warming. Prefer bm25 if search is needed immediately.".to_string(),
+        ])
         .with_loop_state(PlannerLoopState {
             steps: vec![crate::domain::ports::PlannerStepRecord {
                 step_id: "planner-step-1".to_string(),
@@ -3548,6 +3560,8 @@ mod tests {
         let prompt = super::build_http_planner_action_prompt(&request, ApiFormat::OpenAi);
 
         assert!(prompt.contains("Current loop state"));
+        assert!(prompt.contains("Runtime notes"));
+        assert!(prompt.contains("Workspace retrieval readiness: bm25=available, vector=warming"));
         assert!(prompt.contains("Current evidence"));
         assert!(prompt.contains("Current notes"));
         assert!(prompt.contains("Steering review [premise-challenge]"));

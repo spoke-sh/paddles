@@ -2991,6 +2991,9 @@ Recent turns:\n\
 Active thread summary:\n\
 {}\n\
 \n\
+Runtime notes:\n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         planner_grounding_rules(),
@@ -3004,6 +3007,7 @@ Current user request:\n\
             .recent_thread_summary
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
+        format_runtime_notes(&prompt.request.runtime_notes),
         prompt.user_prompt,
     )
 }
@@ -3055,6 +3059,9 @@ Recent turns:\n\
 Active thread summary:\n\
 {}\n\
 \n\
+Runtime notes:\n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         planner_grounding_rules(),
@@ -3066,6 +3073,7 @@ Current user request:\n\
             .recent_thread_summary
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
+        format_runtime_notes(&request.runtime_notes),
         request.user_prompt,
     )
 }
@@ -3121,6 +3129,9 @@ Recent turns:\n\
 Active thread summary:\n\
 {}\n\
 \n\
+Runtime notes:\n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         trim_for_context(invalid_reply, 800),
@@ -3133,6 +3144,7 @@ Current user request:\n\
             .recent_thread_summary
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
+        format_runtime_notes(&request.runtime_notes),
         request.user_prompt,
     )
 }
@@ -3198,6 +3210,9 @@ Recent turns:\n\
 Active thread summary:\n\
 {}\n\
 \n\
+Runtime notes:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -3214,6 +3229,7 @@ Current user request:\n\
             .recent_thread_summary
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
+        format_runtime_notes(&prompt.request.runtime_notes),
         format_planner_loop_state_digest(prompt.request),
         prompt.user_prompt,
     )
@@ -3263,6 +3279,9 @@ Recent turns:\n\
 Active thread summary:\n\
 {}\n\
 \n\
+Runtime notes:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -3277,6 +3296,7 @@ Current user request:\n\
             .recent_thread_summary
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
+        format_runtime_notes(&request.runtime_notes),
         format_planner_loop_state_digest(request),
         request.user_prompt,
     )
@@ -3327,6 +3347,9 @@ Recent turns:\n\
 Active thread summary:\n\
 {}\n\
 \n\
+Runtime notes:\n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -3341,6 +3364,7 @@ Current user request:\n\
             .recent_thread_summary
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
+        format_runtime_notes(&request.runtime_notes),
         format_planner_loop_state_digest(request),
         request.user_prompt,
     )
@@ -4013,6 +4037,14 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
     }
 
     lines.join("\n")
+}
+
+fn format_runtime_notes(runtime_notes: &[String]) -> String {
+    if runtime_notes.is_empty() {
+        "No runtime notes.".to_string()
+    } else {
+        runtime_notes.join("\n")
+    }
 }
 
 fn planner_likely_target_files(loop_state: &PlannerLoopState) -> Vec<String> {
@@ -6030,6 +6062,9 @@ mod tests {
             interpretation,
             crate::domain::ports::PlannerBudget::default(),
         )
+        .with_runtime_notes(vec![
+            "Workspace retrieval readiness: bm25=warming, vector=warming. Avoid search or refine until warmup completes.".to_string(),
+        ])
         .with_recent_turns(vec!["user: previous turn".to_string()]);
 
         let decision = adapter
@@ -6053,6 +6088,7 @@ mod tests {
         assert!(prompt.contains("Inspect (INSTRUCTIONS.md)"));
         assert!(prompt.contains("Recent turns"));
         assert!(prompt.contains("user: previous turn"));
+        assert!(prompt.contains("Workspace retrieval readiness: bm25=warming, vector=warming"));
         assert!(prompt.contains("\"edit\":\"yes|no\""));
         assert!(prompt.contains("\"candidate_files\":[\"path1\",\"path2\",\"path3\"]"));
         assert!(prompt.contains("exact-diff state space"));

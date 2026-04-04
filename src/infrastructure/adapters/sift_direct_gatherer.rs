@@ -1,41 +1,126 @@
 use crate::domain::model::{TurnEvent, TurnEventSink};
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-    GathererCapability, PlannerDecision, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+    GathererCapability, PlannerConfig, PlannerDecision, PlannerTraceMetadata, PlannerTraceStep,
+    RetainedEvidence, RetrievalStrategy,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use sift::{SearchInput, SearchProgress, SearchResponse, Sift};
-use std::path::PathBuf;
+use sift::{SearchInput, SearchOptions, SearchProgress, SearchResponse, Sift};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+const WARMUP_WARMING: u8 = 0;
+const WARMUP_READY: u8 = 1;
+const WARMUP_FAILED: u8 = 2;
+
+struct WarmupReadiness {
+    lexical_state: AtomicU8,
+    vector_state: AtomicU8,
+    lexical_reason: Mutex<String>,
+    vector_reason: Mutex<String>,
+}
+
+impl WarmupReadiness {
+    fn new() -> Self {
+        Self {
+            lexical_state: AtomicU8::new(WARMUP_WARMING),
+            vector_state: AtomicU8::new(WARMUP_WARMING),
+            lexical_reason: Mutex::new("bm25 warmup in progress".to_string()),
+            vector_reason: Mutex::new("vector warmup in progress".to_string()),
+        }
+    }
+
+    fn capability_for_strategy(&self, strategy: RetrievalStrategy) -> GathererCapability {
+        let (state, reason) = match strategy {
+            RetrievalStrategy::Lexical => (
+                self.lexical_state.load(Ordering::Relaxed),
+                self.lexical_reason
+                    .lock()
+                    .expect("lexical reason lock")
+                    .clone(),
+            ),
+            RetrievalStrategy::Vector => (
+                self.vector_state.load(Ordering::Relaxed),
+                self.vector_reason
+                    .lock()
+                    .expect("vector reason lock")
+                    .clone(),
+            ),
+        };
+
+        match state {
+            WARMUP_READY => GathererCapability::Available,
+            WARMUP_FAILED => GathererCapability::Unsupported { reason },
+            _ => GathererCapability::Warming { reason },
+        }
+    }
+
+    fn mark_ready(&self, strategy: RetrievalStrategy) {
+        match strategy {
+            RetrievalStrategy::Lexical => {
+                self.lexical_state.store(WARMUP_READY, Ordering::Relaxed);
+                *self.lexical_reason.lock().expect("lexical reason lock") =
+                    "bm25 ready from background warmup".to_string();
+            }
+            RetrievalStrategy::Vector => {
+                self.vector_state.store(WARMUP_READY, Ordering::Relaxed);
+                *self.vector_reason.lock().expect("vector reason lock") =
+                    "vector ready from background warmup".to_string();
+            }
+        }
+    }
+
+    fn mark_failed(&self, strategy: RetrievalStrategy, reason: String) {
+        match strategy {
+            RetrievalStrategy::Lexical => {
+                self.lexical_state.store(WARMUP_FAILED, Ordering::Relaxed);
+                *self.lexical_reason.lock().expect("lexical reason lock") = reason;
+            }
+            RetrievalStrategy::Vector => {
+                self.vector_state.store(WARMUP_FAILED, Ordering::Relaxed);
+                *self.vector_reason.lock().expect("vector reason lock") = reason;
+            }
+        }
+    }
+}
 
 pub struct SiftDirectGathererAdapter {
     workspace_root: PathBuf,
     sift: Arc<Sift>,
     verbose: AtomicU8,
     event_sink: Mutex<Option<Arc<dyn TurnEventSink>>>,
+    warmup: Arc<WarmupReadiness>,
 }
 
 impl SiftDirectGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = workspace_root.into();
         ensure_sift_process_cache_dirs();
+        let sift = Arc::new(
+            Sift::builder()
+                .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
+                .build(),
+        );
+        let warmup = Arc::new(WarmupReadiness::new());
+        Self::spawn_boot_warmup(
+            workspace_root.clone(),
+            Arc::clone(&sift),
+            Arc::clone(&warmup),
+        );
         Self {
-            workspace_root: workspace_root.clone(),
-            sift: Arc::new(
-                Sift::builder()
-                    .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
-                    .build(),
-            ),
+            workspace_root,
+            sift,
             verbose: AtomicU8::new(0),
             event_sink: Mutex::new(None),
+            warmup,
         }
     }
 
@@ -51,6 +136,50 @@ impl SiftDirectGathererAdapter {
         )
     }
 
+    fn build_bootstrap_search_input(
+        workspace_root: &Path,
+        strategy: RetrievalStrategy,
+    ) -> SearchInput {
+        SearchInput::new(
+            workspace_root,
+            format!("paddles {} warmup", strategy.label()),
+        )
+        .with_intent(format!("boot warmup {}", strategy.label()))
+        .with_options(
+            SearchOptions::default()
+                .with_strategy(strategy.label())
+                .with_limit(1)
+                .with_shortlist(1),
+        )
+    }
+
+    fn spawn_boot_warmup(workspace_root: PathBuf, sift: Arc<Sift>, warmup: Arc<WarmupReadiness>) {
+        let warmup_for_task = Arc::clone(&warmup);
+        let spawn_result = std::thread::Builder::new()
+            .name("paddles-sift-direct-warmup".to_string())
+            .spawn(move || {
+                for strategy in [RetrievalStrategy::Lexical, RetrievalStrategy::Vector] {
+                    let result = sift.search(Self::build_bootstrap_search_input(
+                        &workspace_root,
+                        strategy,
+                    ));
+                    match result {
+                        Ok(_) => warmup_for_task.mark_ready(strategy),
+                        Err(err) => warmup_for_task.mark_failed(
+                            strategy,
+                            format!("{} warmup failed: {err:#}", strategy.label()),
+                        ),
+                    }
+                }
+            });
+
+        if let Err(err) = spawn_result {
+            let reason = format!("failed to start background warmup: {err}");
+            warmup.mark_failed(RetrievalStrategy::Lexical, reason.clone());
+            warmup.mark_failed(RetrievalStrategy::Vector, reason);
+        }
+    }
+
     fn search_workspace_with_progress<F: Fn(&SearchProgress)>(
         &self,
         request: &ContextGatherRequest,
@@ -64,7 +193,13 @@ impl SiftDirectGathererAdapter {
 #[async_trait]
 impl ContextGatherer for SiftDirectGathererAdapter {
     fn capability(&self) -> GathererCapability {
-        GathererCapability::Available
+        self.warmup
+            .capability_for_strategy(RetrievalStrategy::Lexical)
+    }
+
+    fn capability_for_planning(&self, planning: &PlannerConfig) -> GathererCapability {
+        self.warmup
+            .capability_for_strategy(planning.retrieval_strategy)
     }
 
     fn set_event_sink(&self, sink: Option<Arc<dyn TurnEventSink>>) {
@@ -75,6 +210,18 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         &self,
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
+        match self.capability_for_planning(&request.planning) {
+            GathererCapability::Available => {}
+            GathererCapability::Warming { reason }
+            | GathererCapability::Unsupported { reason }
+            | GathererCapability::HarnessRequired { reason } => {
+                return Err(anyhow!(
+                    "{} retrieval unavailable: {reason}",
+                    request.planning.retrieval_strategy.label()
+                ));
+            }
+        }
+
         let event_sink = self.event_sink.lock().expect("event sink lock").clone();
         let strategy = request.planning.retrieval_strategy.label().to_string();
         if let Some(sink) = event_sink.as_ref() {
@@ -113,6 +260,7 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         let event_sink_for_task = event_sink.clone();
         let strategy_for_task = strategy.clone();
         let sift = Arc::clone(&self.sift);
+        let warmup = Arc::clone(&self.warmup);
         let latest_progress = Arc::new(Mutex::new(None::<SiftProgressDisplay>));
         let latest_progress_for_task = Arc::clone(&latest_progress);
         let search_handle = tokio::task::spawn_blocking(move || {
@@ -122,6 +270,7 @@ impl ContextGatherer for SiftDirectGathererAdapter {
                 sift,
                 verbose: AtomicU8::new(verbose),
                 event_sink: Mutex::new(None),
+                warmup,
             };
             let telemetry_sift = Arc::clone(&adapter.sift);
             let result =
@@ -306,6 +455,7 @@ mod tests {
     };
     use crate::infrastructure::sift_cache::TEST_SIFT_ENV_LOCK;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
     use tempfile::tempdir;
 
     #[derive(Default)]
@@ -325,6 +475,28 @@ mod tests {
         }
     }
 
+    fn wait_for_strategy_ready(adapter: &SiftDirectGathererAdapter, strategy: RetrievalStrategy) {
+        let planning = PlannerConfig::default().with_retrieval_strategy(strategy);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            match adapter.capability_for_planning(&planning) {
+                GathererCapability::Available => return,
+                GathererCapability::Warming { .. } if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                GathererCapability::Unsupported { reason } => {
+                    panic!("direct gatherer warmup failed: {reason}");
+                }
+                GathererCapability::HarnessRequired { reason } => {
+                    panic!("unexpected harness requirement during warmup: {reason}");
+                }
+                GathererCapability::Warming { reason } => {
+                    panic!("direct gatherer warmup timed out: {reason}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn direct_gatherer_returns_direct_retrieval_metadata_and_evidence() {
         let _env_guard = TEST_SIFT_ENV_LOCK.lock().expect("env lock");
@@ -336,6 +508,7 @@ mod tests {
         .expect("write alpha");
 
         let adapter = SiftDirectGathererAdapter::new(workspace.path());
+        wait_for_strategy_ready(&adapter, RetrievalStrategy::Lexical);
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let result = runtime
             .block_on(adapter.gather_context(&ContextGatherRequest::new(
@@ -372,6 +545,7 @@ mod tests {
         .expect("write beta");
 
         let adapter = SiftDirectGathererAdapter::new(workspace.path());
+        wait_for_strategy_ready(&adapter, RetrievalStrategy::Vector);
         let request = ContextGatherRequest::new(
             "runtime details",
             workspace.path(),
@@ -414,6 +588,7 @@ mod tests {
         .expect("write alpha");
 
         let adapter = SiftDirectGathererAdapter::new(workspace.path());
+        wait_for_strategy_ready(&adapter, RetrievalStrategy::Lexical);
         let sink = Arc::new(RecordingSink::default());
         adapter.set_event_sink(Some(sink.clone() as Arc<dyn TurnEventSink>));
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -439,17 +614,7 @@ mod tests {
         assert!(
             progress_details
                 .iter()
-                .any(|detail| detail.contains("indexing"))
-        );
-        assert!(
-            progress_details
-                .iter()
-                .any(|detail| detail.contains("bm25 cache"))
-        );
-        assert!(
-            progress_details
-                .iter()
-                .any(|detail| detail.contains("fresh"))
+                .any(|detail| detail.contains("direct retrieval"))
         );
         assert!(
             progress_details
