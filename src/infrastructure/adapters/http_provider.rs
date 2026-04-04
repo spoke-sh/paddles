@@ -867,6 +867,7 @@ Rules:
         let json = extract_json(response).unwrap_or(response);
         let envelope: PlannerEnvelope = serde_json::from_str(json)
             .map_err(|e| anyhow!("failed to parse planner action: {e}\nresponse: {response}"))?;
+        let edit = edit_instruction_from_http_envelope(&envelope)?;
         let action_name = infer_planner_action_name(&envelope).ok_or_else(|| {
             anyhow!(
                 "failed to parse planner action: missing action field and no inferrable selector\nresponse: {response}"
@@ -956,6 +957,7 @@ Rules:
             action,
             rationale,
             answer,
+            edit,
         })
     }
 
@@ -997,7 +999,7 @@ Rules:
             },
             rationale: decision.rationale,
             answer: decision.answer,
-            edit: initial_edit_instruction_from_http_envelope(&envelope)?,
+            edit: edit_instruction_from_http_envelope(&envelope)?,
         })
     }
 
@@ -2216,6 +2218,7 @@ fn fail_closed_http_planner_action() -> RecursivePlannerDecision {
         },
         rationale: "controller failed closed after repeated invalid planner replies".to_string(),
         answer: None,
+        edit: InitialEditInstruction::default(),
     }
 }
 
@@ -2323,9 +2326,7 @@ struct InceptionApplyEditRequest {
     update_snippet: String,
 }
 
-fn initial_edit_instruction_from_http_envelope(
-    envelope: &PlannerEnvelope,
-) -> Result<InitialEditInstruction> {
+fn edit_instruction_from_http_envelope(envelope: &PlannerEnvelope) -> Result<InitialEditInstruction> {
     let edit_value = envelope
         .edit
         .as_deref()
@@ -2645,10 +2646,10 @@ mod tests {
         TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext, ModelPaths,
-        ModelRegistry, PlannerAction, PlannerBudget, PlannerLoopState, PlannerRequest,
-        RecursivePlanner, RecursivePlannerDecision, SynthesisHandoff, SynthesizerEngine,
-        TraceRecorder, WorkspaceAction,
+        EvidenceBundle, EvidenceItem, InitialAction, InitialEditInstruction,
+        InterpretationContext, ModelPaths, ModelRegistry, PlannerAction, PlannerBudget,
+        PlannerLoopState, PlannerRequest, RecursivePlanner, RecursivePlannerDecision,
+        SynthesisHandoff, SynthesizerEngine, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -3435,7 +3436,7 @@ mod tests {
 
         let decision = adapter
             .parse_planner_action(
-                r#"{"command":"nix build .#paddles -L","rationale":"Run the nix-build job to see why CI is failing"}"#,
+                r#"{"command":"nix build .#paddles -L","rationale":"Run the nix-build job to see why CI is failing","edit":"no","candidate_files":[]}"#,
             )
             .expect("planner decision");
 
@@ -3449,6 +3450,7 @@ mod tests {
                 },
                 rationale: "Run the nix-build job to see why CI is failing".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }
         );
     }
@@ -3468,7 +3470,7 @@ mod tests {
 
         let decision = adapter
             .parse_planner_action(
-                r#"{"action":"apply_patch","patch":"*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-fn old() {}\n+fn new() {}\n*** End Patch\n","rationale":"apply the requested code change"}"#,
+                r#"{"action":"apply_patch","patch":"*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-fn old() {}\n+fn new() {}\n*** End Patch\n","rationale":"apply the requested code change","edit":"no","candidate_files":[]}"#,
             )
             .expect("planner decision");
 
@@ -3482,6 +3484,7 @@ mod tests {
                 },
                 rationale: "apply the requested code change".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }
         );
     }
@@ -3501,7 +3504,7 @@ mod tests {
 
         let decision = adapter
             .parse_planner_action(
-                "{\n  \"action\": \"inspect\",\n  \"command\": \"git status --short\",\n  \"rationale\": \"check the local workspace state before deeper diagnosis\"\n}",
+                "{\n  \"action\": \"inspect\",\n  \"command\": \"git status --short\",\n  \"rationale\": \"check the local workspace state before deeper diagnosis\",\n  \"edit\": \"no\",\n  \"candidate_files\": []\n}",
             )
             .expect("planner decision");
 
@@ -3515,6 +3518,7 @@ mod tests {
                 },
                 rationale: "check the local workspace state before deeper diagnosis".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }
         );
     }
@@ -3534,7 +3538,7 @@ mod tests {
 
         let decision = adapter
             .parse_planner_action(
-                r#"{"action":"answer","answer":"Starter circuit\n\n[battery]---(solenoid)---(starter)","rationale":"the user asked for a direct ASCII diagram"}"#,
+                r#"{"action":"answer","answer":"Starter circuit\n\n[battery]---(solenoid)---(starter)","rationale":"the user asked for a direct ASCII diagram","edit":"no","candidate_files":[]}"#,
             )
             .expect("planner decision");
 
@@ -3546,6 +3550,7 @@ mod tests {
                 },
                 rationale: "the user asked for a direct ASCII diagram".to_string(),
                 answer: Some("Starter circuit\n\n[battery]---(solenoid)---(starter)".to_string()),
+                edit: InitialEditInstruction::default(),
             }
         );
     }
@@ -3781,7 +3786,7 @@ mod tests {
                 status: StatusCode::OK,
                 body: provider_response(
                     ApiFormat::OpenAi,
-                    r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis"}"#,
+                    r#"{"action":"inspect","command":"git status --short","rationale":"check the local workspace state before deeper diagnosis","edit":"no","candidate_files":[]}"#,
                 ),
             },
         ])
@@ -3817,6 +3822,7 @@ mod tests {
                 },
                 rationale: "check the local workspace state before deeper diagnosis".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }
         );
         let requests = server.recorded_requests();

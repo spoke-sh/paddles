@@ -463,6 +463,7 @@ pub struct PlannerDecision {
     pub action: PlannerAction,
     pub rationale: String,
     pub answer: Option<String>,
+    pub edit: InitialEditInstruction,
 }
 
 #[cfg(test)]

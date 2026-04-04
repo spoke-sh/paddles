@@ -2631,6 +2631,9 @@ impl MechSuitService {
                 trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
             }
 
+            instruction_frame =
+                merge_instruction_frame_with_edit_signal(instruction_frame, &decision.edit);
+
             trace.emit(TurnEvent::PlannerStepProgress {
                 step_number: sequence,
                 step_limit: budget.max_steps,
@@ -3218,6 +3221,29 @@ fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<
     }
 }
 
+fn merge_instruction_frame_with_edit_signal(
+    instruction_frame: Option<InstructionFrame>,
+    edit: &InitialEditInstruction,
+) -> Option<InstructionFrame> {
+    if !edit.known_edit {
+        return instruction_frame;
+    }
+
+    match instruction_frame {
+        Some(mut frame) => {
+            if frame.primary_intent == InstructionIntent::Edit {
+                for candidate in &edit.candidate_files {
+                    if !frame.candidate_files.contains(candidate) {
+                        frame.candidate_files.push(candidate.clone());
+                    }
+                }
+            }
+            Some(frame)
+        }
+        None => Some(InstructionFrame::for_edit(edit.candidate_files.clone())),
+    }
+}
+
 fn instruction_unsatisfied_note(frame: &InstructionFrame) -> String {
     if let Some(candidates) = frame.candidate_summary() {
         format!(
@@ -3329,6 +3355,7 @@ fn execution_plan_from_initial_action(
                     action: planner_action,
                     rationale,
                     answer: None,
+                    edit: edit.clone(),
                 }),
                 direct_answer: None,
                 instruction_frame,
@@ -6836,6 +6863,7 @@ mod tests {
                 },
                 rationale: "synthesize after the graph gather".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7008,6 +7036,7 @@ mod tests {
             },
             rationale: "run a check first".to_string(),
             answer: None,
+            edit: InitialEditInstruction::default(),
         };
 
         let notes = super::collect_steering_review_notes(
@@ -7057,6 +7086,7 @@ mod tests {
             },
             rationale: "read the CSS file again before editing".to_string(),
             answer: None,
+            edit: InitialEditInstruction::default(),
         };
 
         let notes = super::collect_steering_review_notes(
@@ -7139,6 +7169,7 @@ mod tests {
                     },
                     rationale: "continue exploring".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -7148,6 +7179,7 @@ mod tests {
                     },
                     rationale: "read the likely target file before more retrieval".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7155,6 +7187,7 @@ mod tests {
                     },
                     rationale: "stop after acting".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7162,6 +7195,7 @@ mod tests {
                     },
                     rationale: "stop after acting".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::clone(&request_log),
@@ -7286,6 +7320,7 @@ mod tests {
                     },
                     rationale: "stop after the read".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7293,6 +7328,7 @@ mod tests {
                     },
                     rationale: "stop after the read".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7360,6 +7396,7 @@ mod tests {
                 },
                 rationale: "stop after the read".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7441,6 +7478,7 @@ mod tests {
                     },
                     rationale: "stop".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7448,6 +7486,7 @@ mod tests {
                     },
                     rationale: "stop".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7526,6 +7565,7 @@ mod tests {
                 },
                 rationale: "stop after the inspect".to_string(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7598,6 +7638,7 @@ mod tests {
                 },
                 rationale: rationale.clone(),
                 answer: Some(answer.clone()),
+                edit: InitialEditInstruction::default(),
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7728,6 +7769,7 @@ mod tests {
                 },
                 rationale: rationale.clone(),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7865,6 +7907,7 @@ mod tests {
                     },
                     rationale: "describe the requested edit".to_string(),
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7872,6 +7915,7 @@ mod tests {
                     },
                     rationale: "describe the requested edit".to_string(),
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7906,6 +7950,88 @@ mod tests {
                 .expect("handoffs lock")
                 .is_empty(),
             "unsatisfied edit turns should not fall through to the synthesizer"
+        );
+    }
+
+    #[test]
+    fn recursive_edit_signals_promote_turns_into_edit_obligations() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create css dir");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-shell.css"),
+            ".runtime-shell-host {\n  padding: 0;\n}\n",
+        )
+        .expect("write css");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "apps/web/src/runtime-shell.css".to_string(),
+                    },
+                },
+                rationale: "inspect the likely CSS file before deciding".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            },
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "model selected answer".to_string(),
+                },
+                rationale: "describe the requested padding edit".to_string(),
+                answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                },
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt(
+                    "The .runtime-shell-host class needs some padding. Something around 8px",
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(
+            reply.contains("haven't completed the requested repository edit yet"),
+            "recursive edit signals should promote the turn into an applied-edit obligation: {reply}"
+        );
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "late-discovered edit turns should still block advice-only completion"
         );
     }
 
@@ -7954,6 +8080,7 @@ mod tests {
                     },
                     rationale: "apply the requested padding change".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7961,6 +8088,7 @@ mod tests {
                     },
                     rationale: "the requested edit is complete".to_string(),
                     answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7968,6 +8096,7 @@ mod tests {
                     },
                     rationale: "the requested edit is complete".to_string(),
                     answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8179,6 +8308,7 @@ mod tests {
             },
             rationale: "get the run id for the failing job".to_string(),
             answer: None,
+            edit: InitialEditInstruction::default(),
         };
 
         let notes = super::collect_steering_review_notes(
@@ -8239,6 +8369,7 @@ mod tests {
                     },
                     rationale: "repeat the same status probe".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8248,6 +8379,7 @@ mod tests {
                     rationale: "the gathered sources weaken the premise, so stop and judge them"
                         .to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::clone(&recorded_requests),
@@ -8333,6 +8465,7 @@ mod tests {
             },
             rationale: "check a smaller recent window".to_string(),
             answer: None,
+            edit: InitialEditInstruction::default(),
         };
 
         let notes = super::collect_steering_review_notes(
@@ -8392,6 +8525,7 @@ mod tests {
                     },
                     rationale: "repeat the same status probe".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8401,6 +8535,7 @@ mod tests {
                     rationale: "the gathered sources weaken the premise, so stop and judge them"
                         .to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8507,6 +8642,7 @@ mod tests {
                     },
                     rationale: "narrow the list size".to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8516,6 +8652,7 @@ mod tests {
                     rationale: "the gathered sources weaken the premise, so stop and judge them"
                         .to_string(),
                     answer: None,
+                    edit: InitialEditInstruction::default(),
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8740,6 +8877,7 @@ mod tests {
             },
             rationale: "run a check first".to_string(),
             answer: None,
+            edit: InitialEditInstruction::default(),
         };
 
         let notes = super::collect_steering_review_notes(

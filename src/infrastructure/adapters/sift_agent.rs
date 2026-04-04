@@ -221,6 +221,16 @@ enum PlannerActionEnvelope {
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+struct RecursiveActionEnvelope {
+    #[serde(flatten)]
+    action: PlannerActionEnvelope,
+    #[serde(default)]
+    edit: Option<String>,
+    #[serde(default)]
+    candidate_files: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 struct InitialActionEnvelope {
     #[serde(flatten)]
     action: InitialActionVariantEnvelope,
@@ -4092,7 +4102,7 @@ fn parse_planner_action(response: &str) -> Result<Option<RecursivePlannerDecisio
     let Some(json) = extract_json_payload(trimmed) else {
         return Ok(None);
     };
-    let Ok(action) = serde_json::from_str::<PlannerActionEnvelope>(json) else {
+    let Ok(action) = serde_json::from_str::<RecursiveActionEnvelope>(json) else {
         return Ok(None);
     };
 
@@ -4412,24 +4422,21 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
     Ok(decision)
 }
 
-fn initial_edit_instruction_from_envelope(
-    envelope: &InitialActionEnvelope,
+fn edit_instruction_from_fields(
+    edit: Option<&str>,
+    candidate_files: Option<&Vec<String>>,
 ) -> Result<InitialEditInstruction> {
-    let edit_value = envelope
-        .edit
-        .as_deref()
+    let edit_value = edit
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("initial action reply must include top-level `edit`"))?;
+        .ok_or_else(|| anyhow!("planner reply must include top-level `edit`"))?;
     let known_edit = match edit_value {
         "yes" | "true" => true,
         "no" | "false" => false,
         other => bail!("edit must be `yes` or `no`, got `{other}`"),
     };
-    let candidate_files = envelope
-        .candidate_files
-        .as_ref()
-        .ok_or_else(|| anyhow!("initial action reply must include top-level `candidate_files`"))?
+    let candidate_files = candidate_files
+        .ok_or_else(|| anyhow!("planner reply must include top-level `candidate_files`"))?
         .iter()
         .map(|path| path.trim().replace('\\', "/"))
         .filter(|path| !path.is_empty())
@@ -4452,10 +4459,21 @@ fn initial_edit_instruction_from_envelope(
     })
 }
 
+fn initial_edit_instruction_from_envelope(envelope: &InitialActionEnvelope) -> Result<InitialEditInstruction> {
+    edit_instruction_from_fields(envelope.edit.as_deref(), envelope.candidate_files.as_ref())
+}
+
+fn recursive_edit_instruction_from_envelope(
+    envelope: &RecursiveActionEnvelope,
+) -> Result<InitialEditInstruction> {
+    edit_instruction_from_fields(envelope.edit.as_deref(), envelope.candidate_files.as_ref())
+}
+
 fn planner_action_from_envelope(
-    envelope: PlannerActionEnvelope,
+    envelope: RecursiveActionEnvelope,
 ) -> Result<RecursivePlannerDecision> {
-    let decision = match envelope {
+    let edit = recursive_edit_instruction_from_envelope(&envelope)?;
+    let decision = match envelope.action {
         PlannerActionEnvelope::Search {
             query,
             mode,
@@ -4476,6 +4494,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::ListFiles { pattern, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4488,6 +4507,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::Read { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4497,6 +4517,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::Inspect { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4506,6 +4527,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::Shell { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4515,6 +4537,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::Diff { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4527,6 +4550,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::WriteFile {
             path,
@@ -4541,6 +4565,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::ReplaceInFile {
             path,
@@ -4559,6 +4584,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::ApplyPatch { patch, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4568,6 +4594,7 @@ fn planner_action_from_envelope(
             },
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
+            edit: InitialEditInstruction::default(),
         },
         PlannerActionEnvelope::Refine {
             query,
@@ -4589,6 +4616,7 @@ fn planner_action_from_envelope(
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }
         }
         PlannerActionEnvelope::Branch {
@@ -4610,6 +4638,7 @@ fn planner_action_from_envelope(
                 },
                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
                 answer: None,
+                edit: InitialEditInstruction::default(),
             }
         }
         PlannerActionEnvelope::Stop {
@@ -4626,10 +4655,10 @@ fn planner_action_from_envelope(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string),
+            edit: InitialEditInstruction::default(),
         },
     };
-
-    Ok(decision)
+    Ok(RecursivePlannerDecision { edit, ..decision })
 }
 
 fn thread_decision_from_envelope(
@@ -4747,6 +4776,7 @@ fn fail_closed_planner_action() -> RecursivePlannerDecision {
         },
         rationale: "controller failed closed after repeated invalid planner replies".to_string(),
         answer: None,
+        edit: InitialEditInstruction::default(),
     }
 }
 
@@ -5847,7 +5877,7 @@ mod tests {
             workspace.path(),
             "qwen-1.5b",
             Box::new(RecordingConversation::new(
-                r#"{"action":"stop","reason":"done","rationale":"enough context","answer":"patched the css"}"#,
+                r#"{"action":"stop","reason":"done","rationale":"enough context","answer":"patched the css","edit":"yes","candidate_files":["apps/web/src/runtime-shell.css"]}"#,
                 Arc::clone(&recorded_messages),
             )),
         );
