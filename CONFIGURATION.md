@@ -261,12 +261,11 @@ model path:
 paddles --provider sift --model bonsai-8b
 ```
 
-That path uses the stable `sift` local model boundary, but Bonsai currently
-loads from Prism's official unpacked safetensors bundle rather than the GGUF
-release. The published 1-bit GGUF artifact is not yet executable through the
-upstream `metamorph` -> Candle compatibility path for this model, so paddles
-uses the unpacked compatibility bundle instead. This is still a compatibility
-path and does not preserve the original 1-bit runtime efficiency.
+That path uses the stable `sift` local model boundary. Bonsai now resolves from
+Prism's published GGUF source through the upstream `metamorph` -> Candle
+compatibility path rather than a direct unpacked-bundle download. This is still
+a compatibility path and does not preserve the original 1-bit runtime
+efficiency.
 
 ### Final Answer Render Capability
 

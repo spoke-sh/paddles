@@ -40,6 +40,9 @@ paddles-conversation = { path = "crates/paddles-conversation" }
 [features]
 cuda = ["sift/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 
+[replace]
+"git+https://github.com/rupurt/metamorph?rev=00ac826973d378ce7670b1057bfd467f6cf8de29#metamorph@0.1.0" = { git = "https://github.com/rupurt/metamorph", rev = "509b6718aa07333f2c763b618cdcf4a5d43d27cc" }
+
 [dev-dependencies]
 tempfile = "3.17.1"
 tower = "0.5"

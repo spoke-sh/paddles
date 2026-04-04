@@ -658,11 +658,12 @@ export function primitivePhase(
 }
 
 export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
-  if ('presentation' in payload && payload.presentation) {
+  const projectionEvent = payload as Partial<ProjectionTurnEvent>;
+  if (projectionEvent.presentation) {
     return {
-      badge: payload.presentation.badge,
-      badgeClass: payload.presentation.badge_class,
-      text: payload.presentation.text,
+      badge: projectionEvent.presentation.badge,
+      badgeClass: projectionEvent.presentation.badge_class,
+      text: projectionEvent.presentation.text,
     };
   }
 

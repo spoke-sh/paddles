@@ -30,16 +30,6 @@ impl HFHubAdapter {
     }
 }
 
-pub(crate) fn build_hf_api_from_env() -> Result<Api> {
-    let mut builder = ApiBuilder::new();
-    if let Ok(token) = std::env::var("HF_TOKEN")
-        && !token.is_empty()
-    {
-        builder = builder.with_token(Some(token));
-    }
-    builder.build().map_err(Into::into)
-}
-
 pub(crate) async fn download_hf_model_paths(
     api: &Api,
     repo_id: &str,
