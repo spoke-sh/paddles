@@ -99,10 +99,7 @@ pub fn select_interactive_frontend(
     }
 }
 
-pub async fn run_interactive_tui(
-    service: Arc<MechSuitService>,
-    tui_ctx: TuiContext,
-) -> Result<()> {
+pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiContext) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::with_options(
@@ -2007,7 +2004,10 @@ impl InteractiveApp {
                     }
                 }
             }
-            UiMessage::RuntimeUpdateFinished { result, occurred_at } => {
+            UiMessage::RuntimeUpdateFinished {
+                result,
+                occurred_at,
+            } => {
                 let started_at = self.runtime_update_started_at.take();
                 self.pending_turn_total_timing = None;
                 match result {
@@ -3188,10 +3188,10 @@ mod tests {
     use super::{
         BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
         RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
-        TranscriptTimingKind, UiMessage,
-        collapse_event_details, detect_palette, format_duration_compact, format_turn_event_row,
-        inline_multiline_text, inline_viewport_height_for_terminal, render_row_lines,
-        runtime_lane_summary, select_interactive_frontend,
+        TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
+        format_duration_compact, format_turn_event_row, inline_multiline_text,
+        inline_viewport_height_for_terminal, render_row_lines, runtime_lane_summary,
+        select_interactive_frontend,
     };
     use crate::application::{ConversationSession, RuntimeLaneConfig};
     use crate::domain::model::{
@@ -4077,7 +4077,10 @@ mod tests {
             .dispatch_pending_runtime_update_at(started_at)
             .expect("runtime update");
 
-        assert_eq!(update.runtime_lanes.synthesizer_provider(), ModelProvider::Openai);
+        assert_eq!(
+            update.runtime_lanes.synthesizer_provider(),
+            ModelProvider::Openai
+        );
         assert!(app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Reconfiguring);
         assert_eq!(app.runtime_update_started_at, Some(started_at));
@@ -4128,7 +4131,10 @@ mod tests {
         assert!(!app.busy);
         assert_eq!(app.busy_phase, BusyPhase::Idle);
         assert!(app.runtime_update_started_at.is_none());
-        assert_eq!(app.runtime_lanes.synthesizer_provider(), ModelProvider::Openai);
+        assert_eq!(
+            app.runtime_lanes.synthesizer_provider(),
+            ModelProvider::Openai
+        );
         assert_eq!(app.runtime_lanes.synthesizer_model_id(), "gpt-4o");
         assert!(
             app.rows
