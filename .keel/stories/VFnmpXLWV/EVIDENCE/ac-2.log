@@ -1,5 +1,14 @@
 ---
-recorded_at: 2026-04-04T00:03:28.101753502-07:00
-mode: manual
+recorded_at: 2026-04-04T00:13:04.866830101-07:00
+command: cargo nextest run workspace_editor_edits_emit_applied_edit_events projects_applied_workspace_edits_into_diff_presentations
 ---
-Commit b9ca0c4 emits TurnEvent::WorkspaceEditApplied from shared workspace editor success paths in the planner loop and Sift adapter; application/runtime event tests passed in commit hooks.
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+────────────
+ Nextest run ID 66e71d16-aea3-4cef-918e-3e6e4f322e4d with nextest profile: default
+    Starting 2 tests across 2 binaries (387 tests skipped)
+        PASS [   0.014s] (1/2) paddles domain::model::runtime_events::tests::projects_applied_workspace_edits_into_diff_presentations
+        PASS [   0.223s] (2/2) paddles application::tests::workspace_editor_edits_emit_applied_edit_events
+────────────
+     Summary [   0.224s] 2 tests run: 2 passed, 387 skipped

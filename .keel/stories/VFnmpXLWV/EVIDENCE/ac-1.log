@@ -1,5 +1,13 @@
 ---
-recorded_at: 2026-04-04T00:03:28.048388285-07:00
-mode: manual
+recorded_at: 2026-04-04T00:13:03.931091485-07:00
+command: cargo nextest run edit_actions_return_structured_applied_edit_artifacts
 ---
-Commit b9ca0c4 added structured AppliedEdit payloads to workspace editor success results for write_file, replace_in_file, and apply_patch; local editor tests and cargo nextest passed in commit hooks.
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 1b3d620a-fca5-46fe-9091-26aa622acf64 with nextest profile: default
+    Starting 1 test across 2 binaries (388 tests skipped)
+        PASS [   0.015s] (1/1) paddles infrastructure::adapters::local_workspace_editor::tests::edit_actions_return_structured_applied_edit_artifacts
+────────────
+     Summary [   0.016s] 1 test run: 1 passed, 388 skipped

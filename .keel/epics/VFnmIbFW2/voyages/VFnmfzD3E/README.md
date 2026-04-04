@@ -27,11 +27,11 @@ started_at: 2026-04-03T23:49:05
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Emit Structured Applied Edit Artifacts From The Workspace Editor](../../../../stories/VFnmpXLWV/README.md) | feat | in-progress |
+| [Emit Structured Applied Edit Artifacts From The Workspace Editor](../../../../stories/VFnmpXLWV/README.md) | feat | done |
 | [Render Applied Edit Diffs In The Web Runtime Stream](../../../../stories/VFnmpYoYK/README.md) | feat | backlog |
 | [Render Applied Edit Diffs In The TUI Transcript Stream](../../../../stories/VFnmpaHZS/README.md) | feat | backlog |
 | [Lock Diff Visibility With Projection And Contract Tests](../../../../stories/VFnmpbfZe/README.md) | feat | backlog |
