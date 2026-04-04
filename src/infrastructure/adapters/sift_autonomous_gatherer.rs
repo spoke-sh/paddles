@@ -8,7 +8,9 @@ use crate::domain::ports::{
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
-use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
+use crate::infrastructure::sift_cache::{
+    default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
@@ -34,6 +36,7 @@ pub struct SiftAutonomousGathererAdapter {
 impl SiftAutonomousGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = workspace_root.into();
+        ensure_sift_process_cache_dirs();
         Self {
             workspace_root: workspace_root.clone(),
             sift: Arc::new(

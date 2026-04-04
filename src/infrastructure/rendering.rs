@@ -87,6 +87,7 @@ Rules:\n\
 - Use `code_block` only for literal code or terminal output.\n\
 - A `code_block` block must include `code`.\n\
 - Do not use markdown headings, `**bold**`, or list markers inside `paragraph` text; use `heading` or `bullet_list` blocks instead.\n\
+- Do not emit external web URLs unless they are backed by attached verified evidence for this turn.\n\
 - `citations` sources must be plain repository/file references.\n\
 - A `citations` block must include `sources`.\n\
 - {citation_rule}",
@@ -197,6 +198,38 @@ pub fn ensure_citation_section(reply: &str, citations: &[String]) -> String {
     format!("{reply}\n\nSources: {}", citations.join(", "))
 }
 
+pub fn extract_http_urls(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+
+    for token in text.split_whitespace() {
+        let candidate = token
+            .find("https://")
+            .or_else(|| token.find("http://"))
+            .map(|index| &token[index..]);
+        let Some(candidate) = candidate else {
+            continue;
+        };
+
+        let trimmed = candidate
+            .trim_end_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '.' | ',' | ';' | ':' | ')' | ']' | '}' | '"' | '\'' | '!'
+                )
+            })
+            .trim_end_matches('/');
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = trimmed.to_string();
+        if !urls.contains(&normalized) {
+            urls.push(normalized);
+        }
+    }
+
+    urls
+}
+
 fn invalid_structured_response_fallback(response: &str) -> Option<String> {
     let trimmed = unwrap_jsonish_body(response).trim();
     if !looks_like_structured_response_payload(trimmed) {
@@ -303,7 +336,7 @@ fn unwrap_jsonish_body(response: &str) -> &str {
 mod tests {
     use super::{
         RenderCapability, assistant_response_json_schema, ensure_citation_section,
-        final_answer_contract_prompt, normalize_assistant_response,
+        extract_http_urls, final_answer_contract_prompt, normalize_assistant_response,
     };
     use crate::domain::model::{RenderBlock, RenderDocument};
 
@@ -442,6 +475,19 @@ mod tests {
         assert!(prompt.contains(
             "If the evidence weakens or contradicts that premise, say so explicitly instead of repeating the original claim as fact."
         ));
+    }
+
+    #[test]
+    fn extract_http_urls_normalizes_and_deduplicates_urls() {
+        assert_eq!(
+            extract_http_urls(
+                "Read https://example.com/docs, then https://example.com/docs/ and https://api.example.com/v1?q=1."
+            ),
+            vec![
+                "https://example.com/docs".to_string(),
+                "https://api.example.com/v1?q=1".to_string(),
+            ]
+        );
     }
 
     #[test]

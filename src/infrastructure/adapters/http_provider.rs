@@ -5,22 +5,23 @@ use crate::domain::model::{
     TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
-    EvidenceBundle, InitialAction, InitialActionDecision, InitialEditInstruction,
-    InterpretationContext, InterpretationRequest, PlannerAction, PlannerCapability, PlannerRequest,
-    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
-    SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction, WorkspaceActionResult,
-    WorkspaceEditor,
+    EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
+    InitialEditInstruction, InterpretationContext, InterpretationRequest, PlannerAction,
+    PlannerCapability, PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
+    SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction,
+    WorkspaceActionResult, WorkspaceEditor,
 };
 use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
 use crate::infrastructure::rendering::{
     ANTHROPIC_RENDER_TOOL_NAME, RenderCapability, assistant_response_json_schema,
-    ensure_citation_section, final_answer_contract_prompt, normalize_assistant_response,
+    ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
+    normalize_assistant_response,
 };
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -827,6 +828,11 @@ Rules:
 - If `stop.reason` is `model selected answer`, include `answer` with the user-facing reply instead of putting the reply in `rationale`.
 - When the user is clearly asking for a code or file edit, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.
 - When the user is not asking for an edit, set `edit` to `no` and use an empty `candidate_files` array.
+- Add optional top-level `grounding` when the answer requires verified evidence before it can be trusted.
+- `grounding` must be `{{"domain":"repository|external|mixed","reason":"..."}}`.
+- Use `grounding.domain = "external"` for websites, docs links, package pages, or any request to read about something on the web.
+- Use `grounding.domain = "repository"` for repository claims that require local evidence.
+- Use `grounding.domain = "mixed"` when both repository and external evidence are required.
 - Do not invent action names outside the schema above.
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
 - When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
@@ -841,7 +847,7 @@ Rules:
 
     fn build_answer_system_prompt(&self, require_citations: bool) -> String {
         format!(
-            "You are Paddles, a helpful AI assistant. Provide concise, accurate answers.\n\n{}",
+            "You are Paddles, a helpful AI assistant. Provide concise, accurate answers. Do not invent package names, crate names, websites, or URLs.\n\n{}",
             final_answer_contract_prompt(self.render_capability, require_citations)
         )
     }
@@ -960,6 +966,7 @@ Rules:
             rationale,
             answer,
             edit,
+            grounding: envelope.grounding,
         })
     }
 
@@ -1002,6 +1009,7 @@ Rules:
             rationale: decision.rationale,
             answer: decision.answer,
             edit: edit_instruction_from_http_envelope(&envelope)?,
+            grounding: envelope.grounding,
         })
     }
 
@@ -1123,6 +1131,11 @@ impl SynthesizerEngine for HttpProviderAdapter {
             }
             user_msg.push('\n');
         }
+        if let Some(grounding) = handoff.grounding.as_ref() {
+            user_msg.push_str("## Grounding Contract\n");
+            user_msg.push_str(&format_grounding_contract(grounding));
+            user_msg.push_str("\n\n");
+        }
         user_msg.push_str("## Current User Request\n");
         user_msg.push_str(prompt);
         if let Some(evidence) = gathered_evidence {
@@ -1154,7 +1167,26 @@ impl SynthesizerEngine for HttpProviderAdapter {
             Some(capture.clone()),
         )?;
         let mut response = normalize_assistant_response(&raw_response);
-        if let Some(evidence) = gathered_evidence
+        let verified_external_urls = gathered_evidence
+            .map(verified_external_urls_from_evidence)
+            .unwrap_or_default();
+        if external_grounding_required_without_verified_sources(handoff, &verified_external_urls) {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "grounding-governor".to_string(),
+                reason: "planner declared external grounding, but no verified external sources were attached".to_string(),
+            });
+            response = external_grounding_unavailable_fallback(prompt);
+        } else if let Some(unverified_url) =
+            first_unverified_external_url(&response, &verified_external_urls)
+        {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "grounding-governor".to_string(),
+                reason: format!(
+                    "drafted answer referenced an unverified external URL without verified external sources: {unverified_url}"
+                ),
+            });
+            response = unverified_external_url_fallback(prompt);
+        } else if let Some(evidence) = gathered_evidence
             && grounded_response_defers_executed_command_work(&response, evidence)
         {
             response = grounded_command_evidence_fallback(evidence);
@@ -1666,6 +1698,8 @@ struct PlannerEnvelope {
     edit: Option<String>,
     #[serde(default)]
     candidate_files: Option<Vec<String>>,
+    #[serde(default)]
+    grounding: Option<GroundingRequirement>,
 }
 
 fn planner_action_json_schema() -> Value {
@@ -1768,6 +1802,23 @@ fn planner_action_json_schema() -> Value {
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Optional likely edit targets for initial actions."
+            },
+            "grounding": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Optional grounding contract when the final answer requires verified repository or external evidence.",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": ["repository", "external", "mixed"],
+                        "description": "Evidence domain required before the final answer can be trusted."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Short planner rationale for why grounding is required."
+                    }
+                },
+                "required": ["domain"]
             }
         },
         "required": ["action", "rationale"],
@@ -2049,6 +2100,7 @@ fn fail_closed_http_initial_action(request: &PlannerRequest) -> InitialActionDec
             .to_string(),
         answer: None,
         edit: InitialEditInstruction::default(),
+        grounding: None,
     }
 }
 
@@ -2060,6 +2112,7 @@ fn fail_closed_http_planner_action() -> RecursivePlannerDecision {
         rationale: "controller failed closed after repeated invalid planner replies".to_string(),
         answer: None,
         edit: InitialEditInstruction::default(),
+        grounding: None,
     }
 }
 
@@ -2363,6 +2416,96 @@ fn grounded_unverified_failure_fallback(evidence: &EvidenceBundle) -> String {
     lines.join("\n")
 }
 
+fn format_grounding_contract(grounding: &GroundingRequirement) -> String {
+    let mut lines = Vec::new();
+    match grounding.domain {
+        GroundingDomain::Repository => {
+            lines.push("Repository grounding is required for this turn.".to_string());
+            lines.push(
+                "Do not invent repository-specific claims without attached evidence.".to_string(),
+            );
+        }
+        GroundingDomain::External => {
+            lines.push("External source grounding is required for this turn.".to_string());
+        }
+        GroundingDomain::Mixed => {
+            lines.push(
+                "Repository and external grounding are both required for this turn.".to_string(),
+            );
+            lines.push(
+                "Do not invent repository-specific claims without attached evidence.".to_string(),
+            );
+        }
+    }
+    if grounding.requires_external() {
+        lines.push(
+            "Do not emit package names, website names, or external URLs unless they are verified by attached evidence."
+                .to_string(),
+        );
+        lines.push(
+            "If no verified external source is attached, say that you cannot verify a web link from this environment."
+                .to_string(),
+        );
+    }
+    if let Some(reason) = grounding
+        .reason
+        .as_deref()
+        .filter(|reason| !reason.trim().is_empty())
+    {
+        lines.push(format!("Reason: {}", reason.trim()));
+    }
+    lines.join("\n")
+}
+
+fn verified_external_urls_from_evidence(evidence: &EvidenceBundle) -> Vec<String> {
+    let mut urls = BTreeSet::new();
+    for url in extract_http_urls(&evidence.summary) {
+        urls.insert(url);
+    }
+    for item in &evidence.items {
+        for field in [&item.source, &item.snippet, &item.rationale] {
+            for url in extract_http_urls(field) {
+                urls.insert(url);
+            }
+        }
+    }
+    urls.into_iter().collect()
+}
+
+fn first_unverified_external_url(reply: &str, verified_external_urls: &[String]) -> Option<String> {
+    let verified = verified_external_urls
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    extract_http_urls(reply)
+        .into_iter()
+        .find(|url| !verified.contains(url.as_str()))
+}
+
+fn external_grounding_required_without_verified_sources(
+    handoff: &SynthesisHandoff,
+    verified_external_urls: &[String],
+) -> bool {
+    handoff
+        .grounding
+        .as_ref()
+        .is_some_and(|grounding| grounding.requires_external() && verified_external_urls.is_empty())
+}
+
+fn external_grounding_unavailable_fallback(prompt: &str) -> String {
+    format!(
+        "I can't provide a verified external link or source for `{}` because this turn has no verified external sources attached.",
+        prompt.trim()
+    )
+}
+
+fn unverified_external_url_fallback(prompt: &str) -> String {
+    format!(
+        "I can't provide a verified external link for `{}` because the drafted answer included an unverified URL.",
+        prompt.trim()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
@@ -2372,10 +2515,11 @@ mod tests {
         TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, InitialAction, InitialEditInstruction, InterpretationContext,
-        ModelPaths, ModelRegistry, PlannerAction, PlannerBudget, PlannerLoopState, PlannerRequest,
-        RecursivePlanner, RecursivePlannerDecision, SynthesisHandoff, SynthesizerEngine,
-        TraceRecorder, WorkspaceAction,
+        EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
+        InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
+        PlannerBudget, PlannerLoopState, PlannerRequest, RecursivePlanner,
+        RecursivePlannerDecision, SynthesisHandoff, SynthesizerEngine, TraceRecorder,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -3177,6 +3321,7 @@ mod tests {
                 rationale: "Run the nix-build job to see why CI is failing".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }
         );
     }
@@ -3211,6 +3356,7 @@ mod tests {
                 rationale: "apply the requested code change".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }
         );
     }
@@ -3245,6 +3391,7 @@ mod tests {
                 rationale: "check the local workspace state before deeper diagnosis".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }
         );
     }
@@ -3277,7 +3424,36 @@ mod tests {
                 rationale: "the user asked for a direct ASCII diagram".to_string(),
                 answer: Some("Starter circuit\n\n[battery]---(solenoid)---(starter)".to_string()),
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }
+        );
+    }
+
+    #[test]
+    fn parse_initial_action_decision_preserves_grounding_contract() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_initial_action_decision(
+                r#"{"action":"answer","answer":"I need a verified link before I answer.","rationale":"external source grounding is required","edit":"no","candidate_files":[],"grounding":{"domain":"external","reason":"need a verified docs link"}}"#,
+            )
+            .expect("initial action decision");
+
+        assert_eq!(
+            decision.grounding,
+            Some(GroundingRequirement {
+                domain: GroundingDomain::External,
+                reason: Some("need a verified docs link".to_string()),
+            })
         );
     }
 
@@ -3549,6 +3725,7 @@ mod tests {
                 rationale: "check the local workspace state before deeper diagnosis".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }
         );
         let requests = server.recorded_requests();
@@ -4029,6 +4206,57 @@ mod tests {
                 .contains("The reported failure is not yet confirmed by the gathered evidence.")
         );
         assert!(response.contains("command: gh run list --limit 10"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn external_grounding_rejects_unverified_urls_in_http_responses() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: final_answer_response(
+                ApiFormat::OpenAi,
+                &structured_answer_json(
+                    "You can read about it here: https://inception.ai/diffusion-llm",
+                ),
+            ),
+        }])
+        .await;
+
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let response = adapter
+            .respond_for_turn(
+                "Can you give me the docs link?",
+                TurnIntent::DirectResponse,
+                None,
+                &SynthesisHandoff {
+                    grounding: Some(GroundingRequirement {
+                        domain: GroundingDomain::External,
+                        reason: Some("need a verified web source before answering".to_string()),
+                    }),
+                    ..SynthesisHandoff::default()
+                },
+                sink.clone(),
+            )
+            .expect("response");
+
+        assert!(!response.contains("https://inception.ai/diffusion-llm"));
+        assert!(response.contains("can't provide a verified external link"));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::Fallback { stage, reason }
+                if stage == "grounding-governor"
+                    && reason.contains("verified external sources")
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread")]

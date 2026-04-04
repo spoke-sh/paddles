@@ -7,19 +7,22 @@ use crate::domain::model::{
     TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
-    CompactionPlan, CompactionRequest, EvidenceBundle, GuidanceCategory, InitialAction,
-    InitialActionDecision, InitialEditInstruction, InterpretationConflict, InterpretationContext,
-    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, ModelPaths, OperatorMemoryDocument, PlannerAction, PlannerLoopState,
-    PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
+    CompactionPlan, CompactionRequest, EvidenceBundle, GroundingDomain, GroundingRequirement,
+    GuidanceCategory, InitialAction, InitialActionDecision, InitialEditInstruction,
+    InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
+    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
+    OperatorMemoryDocument, PlannerAction, PlannerLoopState, PlannerRequest,
+    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
     ThreadDecisionRequest, WorkspaceAction, WorkspaceEditor,
 };
 use crate::infrastructure::rendering::{
-    RenderCapability, ensure_citation_section, final_answer_contract_prompt,
+    RenderCapability, ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
 };
-use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
+use crate::infrastructure::sift_cache::{
+    default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -37,6 +40,7 @@ use sift::{
     Conversation, EnvironmentFactInput, LocalContextSource, RetainedArtifact, SearchPlan, Sift,
     ToolOutputInput,
 };
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -229,6 +233,8 @@ struct RecursiveActionEnvelope {
     edit: Option<String>,
     #[serde(default)]
     candidate_files: Option<Vec<String>>,
+    #[serde(default)]
+    grounding: Option<GroundingRequirement>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -239,6 +245,8 @@ struct InitialActionEnvelope {
     edit: Option<String>,
     #[serde(default)]
     candidate_files: Option<Vec<String>>,
+    #[serde(default)]
+    grounding: Option<GroundingRequirement>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -1123,6 +1131,7 @@ impl SiftAgentAdapter {
                 "sift-native",
             )),
         ];
+        ensure_sift_process_cache_dirs();
 
         Self {
             workspace_root: workspace_root.clone(),
@@ -1576,6 +1585,7 @@ impl SiftAgentAdapter {
                     recent_thread_summary,
                     &instruction_handoff,
                     &memory_prompt,
+                    handoff,
                     self.render_capability,
                 ),
                 event_sink,
@@ -1674,6 +1684,7 @@ impl SiftAgentAdapter {
                             recent_thread_summary,
                             &instruction_handoff,
                             &memory_prompt,
+                            handoff,
                             self.render_capability,
                         ),
                         event_sink,
@@ -1711,6 +1722,7 @@ impl SiftAgentAdapter {
                                     recent_thread_summary,
                                     &memory_prompt,
                                     evidence,
+                                    handoff,
                                     self.render_capability,
                                 ),
                                 event_sink,
@@ -1751,6 +1763,7 @@ impl SiftAgentAdapter {
                             recent_thread_summary,
                             &instruction_handoff,
                             &memory_prompt,
+                            handoff,
                             self.render_capability,
                         ),
                         event_sink,
@@ -1862,6 +1875,7 @@ impl SiftAgentAdapter {
             reply,
             &turn_intent,
             gathered_evidence,
+            handoff,
             event_sink,
         );
         self.record_rendered_turn_response(
@@ -2477,6 +2491,7 @@ fn build_direct_turn_prompt(
     recent_thread_summary: Option<&str>,
     instruction_handoff: &str,
     memory_prompt: &str,
+    handoff: &SynthesisHandoff,
     render_capability: RenderCapability,
 ) -> String {
     let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
@@ -2499,9 +2514,11 @@ Active thread summary:\n\
 Instruction manifold:\n\
 {instruction_handoff}\n\
 \n\
+{}\
 Current user request:\n\
 {user_prompt}\n",
         final_answer_contract_prompt(render_capability, false),
+        format_grounding_contract_section(handoff),
     )
 }
 
@@ -2551,6 +2568,7 @@ fn build_direct_retry_prompt(
     recent_thread_summary: Option<&str>,
     instruction_handoff: &str,
     memory_prompt: &str,
+    handoff: &SynthesisHandoff,
     render_capability: RenderCapability,
 ) -> String {
     let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
@@ -2571,14 +2589,16 @@ Active thread summary:\n\
 Instruction manifold:\n\
 {instruction_handoff}\n\
 \n\
+{}\
 Current user request:\n\
         {user_prompt}\n",
         final_answer_contract_prompt(render_capability, false),
+        format_grounding_contract_section(handoff),
     )
 }
 
 fn format_instruction_handoff(handoff: &SynthesisHandoff) -> String {
-    match handoff.instruction_frame.as_ref() {
+    let base = match handoff.instruction_frame.as_ref() {
         Some(frame) if frame.requires_applied_edit() => {
             if let Some(candidates) = frame.candidate_summary() {
                 format!(
@@ -2591,7 +2611,77 @@ fn format_instruction_handoff(handoff: &SynthesisHandoff) -> String {
         }
         Some(_) => "Instruction obligations are currently satisfied.".to_string(),
         None => "No explicit instruction obligations are active.".to_string(),
+    };
+
+    let grounding = format_grounding_contract_section(handoff);
+    if grounding.is_empty() {
+        base
+    } else {
+        format!("{base}\n\n{}", grounding.trim_end())
     }
+}
+
+fn format_grounding_contract_section(handoff: &SynthesisHandoff) -> String {
+    handoff
+        .grounding
+        .as_ref()
+        .map(|grounding| {
+            format!(
+                "Grounding contract:\n{}\n\n",
+                format_grounding_contract(grounding)
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn format_grounding_contract(grounding: &GroundingRequirement) -> String {
+    let mut lines = Vec::new();
+    match grounding.domain {
+        GroundingDomain::Repository => {
+            lines.push("Repository grounding is required for this turn.".to_string());
+            lines.push(
+                "Do not invent repository-specific claims without attached evidence.".to_string(),
+            );
+        }
+        GroundingDomain::External => {
+            lines.push("External source grounding is required for this turn.".to_string());
+        }
+        GroundingDomain::Mixed => {
+            lines.push(
+                "Repository and external grounding are both required for this turn.".to_string(),
+            );
+            lines.push(
+                "Do not invent repository-specific claims without attached evidence.".to_string(),
+            );
+        }
+    }
+    if grounding.requires_external() {
+        lines.push(
+            "Do not emit package names, website names, or external URLs unless they are verified by attached evidence."
+                .to_string(),
+        );
+        lines.push(
+            "If no verified external source is attached, say that you cannot verify a web link from this environment."
+                .to_string(),
+        );
+    }
+    if let Some(reason) = grounding
+        .reason
+        .as_deref()
+        .filter(|reason| !reason.trim().is_empty())
+    {
+        lines.push(format!("Reason: {}", reason.trim()));
+    }
+    lines.join("\n")
+}
+
+fn planner_grounding_rules() -> &'static str {
+    "- Add optional top-level `grounding` when the final answer requires verified evidence before it can be trusted.\n\
+- `grounding` must be {\"domain\":\"repository|external|mixed\",\"reason\":\"...\"}.\n\
+- Use `grounding.domain = \"external\"` for websites, docs links, package pages, or any request to read about something on the web.\n\
+- Use `grounding.domain = \"repository\"` for repository claims that need local evidence.\n\
+- Use `grounding.domain = \"mixed\"` when both repository and external evidence are required.\n\
+"
 }
 
 fn build_interpretation_validation_prompt(
@@ -2881,6 +2971,7 @@ Rules:\n\
 - Stop when the turn should not recurse further before synthesis.\n\
 - Never answer the user directly here.\n\
 - Inspect commands must stay read-only.\n\
+{}\n\
 \n\
 Workspace root:\n\
 {}\n\
@@ -2902,6 +2993,7 @@ Active thread summary:\n\
 \n\
 Current user request:\n\
 {}\n",
+        planner_grounding_rules(),
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
         format_interpretation_tool_hints(prompt.interpretation),
@@ -2946,6 +3038,7 @@ When the user requests a specific code or UI change, use at most one bounded sea
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+{}\n\
 \n\
 Interpretation context:\n\
 {}\n\
@@ -2964,6 +3057,7 @@ Active thread summary:\n\
 \n\
 Current user request:\n\
 {}\n",
+        planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
@@ -3010,6 +3104,7 @@ When the user requests a specific code or UI change, use at most one bounded sea
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+{}\n\
 \n\
 Interpretation context:\n\
 {}\n\
@@ -3029,6 +3124,7 @@ Active thread summary:\n\
 Current user request:\n\
 {}\n",
         trim_for_context(invalid_reply, 800),
+        planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
@@ -3082,6 +3178,7 @@ Rules:\n\
 - If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 - Never answer the user directly here.\n\
 - Inspect commands must stay read-only.\n\
+{}\n\
 \n\
 Workspace root:\n\
 {}\n\
@@ -3106,6 +3203,7 @@ Current loop state:\n\
 \n\
 Current user request:\n\
 {}\n",
+        planner_grounding_rules(),
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
         format_interpretation_tool_hints(prompt.interpretation),
@@ -3148,6 +3246,7 @@ Action produces information. Once you have a plausible target file, prefer readi
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+{}\n\
 \n\
 Interpretation context:\n\
 {}\n\
@@ -3169,6 +3268,7 @@ Current loop state:\n\
 \n\
 Current user request:\n\
 {}\n",
+        planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
@@ -3213,6 +3313,7 @@ If one likely target file is already known or already read, move into exact-diff
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+{}\n\
 \n\
 Interpretation context:\n\
 {}\n\
@@ -3232,6 +3333,7 @@ Current loop state:\n\
 Current user request:\n\
 {}\n",
         trim_for_context(invalid_reply, 800),
+        planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
         format_decision_framework(&request.interpretation),
         format_recent_turn_list(&request.recent_turns),
@@ -3337,6 +3439,7 @@ fn build_grounded_retry_prompt(
     recent_thread_summary: Option<&str>,
     memory_prompt: &str,
     evidence: &EvidenceBundle,
+    handoff: &SynthesisHandoff,
     render_capability: RenderCapability,
 ) -> String {
     let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
@@ -3360,10 +3463,12 @@ Active thread summary:\n\
 Gathered repository evidence:\n\
 {}\n\
 \n\
+{}\
 Current user request:\n\
 {user_prompt}\n",
         final_answer_contract_prompt(render_capability, true),
         format_gathered_evidence_digest(Some(evidence)),
+        format_grounding_contract_section(handoff),
     )
 }
 
@@ -3435,9 +3540,40 @@ fn finalize_turn_reply(
     reply: String,
     turn_intent: &TurnIntent,
     gathered_evidence: Option<&EvidenceBundle>,
+    handoff: &SynthesisHandoff,
     event_sink: &dyn TurnEventSink,
 ) -> String {
     let reply = normalize_assistant_response(&reply);
+    let verified_external_urls = gathered_evidence
+        .map(verified_external_urls_from_evidence)
+        .unwrap_or_default();
+    if external_grounding_required_without_verified_sources(handoff, &verified_external_urls) {
+        event_sink.emit(TurnEvent::Fallback {
+            stage: "grounding-governor".to_string(),
+            reason: "planner declared external grounding, but no verified external sources were attached"
+                .to_string(),
+        });
+        event_sink.emit(TurnEvent::SynthesisReady {
+            grounded: false,
+            citations: Vec::new(),
+            insufficient_evidence: true,
+        });
+        return external_grounding_unavailable_fallback(prompt);
+    }
+    if let Some(unverified_url) = first_unverified_external_url(&reply, &verified_external_urls) {
+        event_sink.emit(TurnEvent::Fallback {
+            stage: "grounding-governor".to_string(),
+            reason: format!(
+                "drafted answer referenced an unverified external URL without verified external sources: {unverified_url}"
+            ),
+        });
+        event_sink.emit(TurnEvent::SynthesisReady {
+            grounded: false,
+            citations: Vec::new(),
+            insufficient_evidence: false,
+        });
+        return unverified_external_url_fallback(prompt);
+    }
     let Some(evidence) = gathered_evidence else {
         event_sink.emit(TurnEvent::SynthesisReady {
             grounded: false,
@@ -3536,6 +3672,55 @@ fn response_looks_ungrounded(reply: &str) -> bool {
         || normalized.contains("couldn't produce a usable response")
         || normalized.contains("official documentation")
         || normalized.contains("refer to")
+}
+
+fn verified_external_urls_from_evidence(evidence: &EvidenceBundle) -> Vec<String> {
+    let mut urls = BTreeSet::new();
+    for url in extract_http_urls(&evidence.summary) {
+        urls.insert(url);
+    }
+    for item in &evidence.items {
+        for field in [&item.source, &item.snippet, &item.rationale] {
+            for url in extract_http_urls(field) {
+                urls.insert(url);
+            }
+        }
+    }
+    urls.into_iter().collect()
+}
+
+fn first_unverified_external_url(reply: &str, verified_external_urls: &[String]) -> Option<String> {
+    let verified = verified_external_urls
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    extract_http_urls(reply)
+        .into_iter()
+        .find(|url| !verified.contains(url.as_str()))
+}
+
+fn external_grounding_required_without_verified_sources(
+    handoff: &SynthesisHandoff,
+    verified_external_urls: &[String],
+) -> bool {
+    handoff
+        .grounding
+        .as_ref()
+        .is_some_and(|grounding| grounding.requires_external() && verified_external_urls.is_empty())
+}
+
+fn external_grounding_unavailable_fallback(prompt: &str) -> String {
+    format!(
+        "I can't provide a verified external link or source for `{}` because this turn has no verified external sources attached.",
+        prompt.trim()
+    )
+}
+
+fn unverified_external_url_fallback(prompt: &str) -> String {
+    format!(
+        "I can't provide a verified external link for `{}` because the drafted answer included an unverified URL.",
+        prompt.trim()
+    )
 }
 
 fn grounded_answer_fallback(workspace_root: &Path, evidence: &EvidenceBundle) -> String {
@@ -4157,12 +4342,14 @@ fn interpretation_context_from_envelope(
 
 fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<InitialActionDecision> {
     let edit = initial_edit_instruction_from_envelope(&envelope)?;
+    let grounding = envelope.grounding.clone();
     let decision = match envelope.action {
         InitialActionVariantEnvelope::Answer { answer, rationale } => InitialActionDecision {
             action: InitialAction::Answer,
             rationale: required_planner_field("rationale", rationale)?,
             answer: Some(required_planner_field("answer", answer)?),
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::Search {
             query,
@@ -4185,6 +4372,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::ListFiles { pattern, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
@@ -4198,6 +4386,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::Read { path, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
@@ -4208,6 +4397,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::Inspect { command, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
@@ -4218,6 +4408,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::Shell { command, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
@@ -4228,6 +4419,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::Diff { path, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
@@ -4241,6 +4433,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::WriteFile {
             path,
@@ -4256,6 +4449,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::ReplaceInFile {
             path,
@@ -4275,6 +4469,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::ApplyPatch { patch, rationale } => InitialActionDecision {
             action: InitialAction::Workspace {
@@ -4285,6 +4480,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit,
+            grounding: grounding.clone(),
         },
         InitialActionVariantEnvelope::Refine {
             query,
@@ -4307,6 +4503,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
                 answer: None,
                 edit,
+                grounding: grounding.clone(),
             }
         }
         InitialActionVariantEnvelope::Branch {
@@ -4329,6 +4526,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
                 answer: None,
                 edit,
+                grounding: grounding.clone(),
             }
         }
         InitialActionVariantEnvelope::Stop {
@@ -4346,6 +4544,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                 .filter(|value| !value.is_empty())
                 .map(str::to_string),
             edit,
+            grounding,
         },
     };
 
@@ -4405,6 +4604,7 @@ fn planner_action_from_envelope(
     envelope: RecursiveActionEnvelope,
 ) -> Result<RecursivePlannerDecision> {
     let edit = recursive_edit_instruction_from_envelope(&envelope)?;
+    let grounding = envelope.grounding.clone();
     let decision = match envelope.action {
         PlannerActionEnvelope::Search {
             query,
@@ -4427,6 +4627,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::ListFiles { pattern, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4440,6 +4641,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::Read { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4450,6 +4652,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::Inspect { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4460,6 +4663,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::Shell { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4470,6 +4674,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::Diff { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4483,6 +4688,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::WriteFile {
             path,
@@ -4498,6 +4704,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::ReplaceInFile {
             path,
@@ -4517,6 +4724,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::ApplyPatch { patch, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4527,6 +4735,7 @@ fn planner_action_from_envelope(
             rationale: required_planner_field("rationale", rationale)?,
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
         },
         PlannerActionEnvelope::Refine {
             query,
@@ -4549,6 +4758,7 @@ fn planner_action_from_envelope(
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: grounding.clone(),
             }
         }
         PlannerActionEnvelope::Branch {
@@ -4571,6 +4781,7 @@ fn planner_action_from_envelope(
                 rationale: rationale.unwrap_or_else(|| "branch the investigation".to_string()),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: grounding.clone(),
             }
         }
         PlannerActionEnvelope::Stop {
@@ -4588,6 +4799,7 @@ fn planner_action_from_envelope(
                 .filter(|value| !value.is_empty())
                 .map(str::to_string),
             edit: InitialEditInstruction::default(),
+            grounding,
         },
     };
     Ok(RecursivePlannerDecision { edit, ..decision })
@@ -4698,6 +4910,7 @@ fn fail_closed_initial_action(request: &PlannerRequest) -> InitialActionDecision
             .to_string(),
         answer: None,
         edit: InitialEditInstruction::default(),
+        grounding: None,
     }
 }
 
@@ -4709,6 +4922,7 @@ fn fail_closed_planner_action() -> RecursivePlannerDecision {
         rationale: "controller failed closed after repeated invalid planner replies".to_string(),
         answer: None,
         edit: InitialEditInstruction::default(),
+        grounding: None,
     }
 }
 
@@ -5033,12 +5247,13 @@ mod tests {
         TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, InitialAction, InterpretationContext,
-        InterpretationDecisionFramework, InterpretationProcedure, InterpretationProcedureStep,
-        InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
-        PlannerDecision, PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
-        PlannerTraceMetadata, PlannerTraceStep, RefinementPolicy, RetainedEvidence, RetrievalMode,
-        RetrievalStrategy, SynthesisHandoff, WorkspaceAction,
+        EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
+        InterpretationContext, InterpretationDecisionFramework, InterpretationProcedure,
+        InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
+        OperatorMemoryDocument, PlannerAction, PlannerDecision, PlannerLoopState, PlannerRequest,
+        PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+        RefinementPolicy, RetainedEvidence, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_agent::{
         DEFAULT_QWEN_MAX_LENGTH, QwenModelFamily, infer_qwen_family, infer_qwen_runtime_max_length,
@@ -5528,6 +5743,50 @@ mod tests {
 
         assert!(reply.contains("couldn't gather enough repository evidence"));
         assert!(reply.contains("Sources: none"));
+    }
+
+    #[test]
+    fn external_grounding_rejects_unverified_urls_in_sift_responses() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                "You can read about it here: https://inception.ai/diffusion-llm".to_string(),
+            ])),
+        );
+        let sink = Arc::new(RecordingForensicSink::default());
+
+        let reply = adapter
+            .respond_for_turn(
+                "Can you give me the docs link?",
+                TurnIntent::DirectResponse,
+                None,
+                &SynthesisHandoff {
+                    grounding: Some(GroundingRequirement {
+                        domain: GroundingDomain::External,
+                        reason: Some("need a verified web source before answering".to_string()),
+                    }),
+                    ..SynthesisHandoff::default()
+                },
+                sink.clone(),
+            )
+            .expect("response");
+
+        assert!(!reply.contains("https://inception.ai/diffusion-llm"));
+        assert!(reply.contains("can't provide a verified external link"));
+        assert!(
+            sink.events
+                .lock()
+                .expect("events lock")
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    TurnEvent::Fallback { stage, reason }
+                        if stage == "grounding-governor"
+                            && reason.contains("verified external sources")
+                ))
+        );
     }
 
     #[test]

@@ -272,6 +272,30 @@ pub struct PlannerLoopState {
     pub refinement_policy: RefinementPolicy,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundingDomain {
+    Repository,
+    External,
+    Mixed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroundingRequirement {
+    pub domain: GroundingDomain,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+impl GroundingRequirement {
+    pub fn requires_external(&self) -> bool {
+        matches!(
+            self.domain,
+            GroundingDomain::External | GroundingDomain::Mixed
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannerStepRecord {
     pub step_id: String,
@@ -376,6 +400,7 @@ pub struct InitialActionDecision {
     pub rationale: String,
     pub answer: Option<String>,
     pub edit: InitialEditInstruction,
+    pub grounding: Option<GroundingRequirement>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -464,6 +489,7 @@ pub struct PlannerDecision {
     pub rationale: String,
     pub answer: Option<String>,
     pub edit: InitialEditInstruction,
+    pub grounding: Option<GroundingRequirement>,
 }
 
 #[cfg(test)]

@@ -1,17 +1,30 @@
 use directories::ProjectDirs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::Mutex;
 
 const SIFT_CACHE_ROOT_DIR: &str = "sift";
 const SIFT_CACHE_WORKSPACES_DIR: &str = "workspaces";
 
 pub fn default_sift_cache_dir_for_workspace(workspace_root: &Path) -> PathBuf {
-    default_sift_cache_root()
+    let cache_dir = default_sift_cache_root()
         .join(SIFT_CACHE_WORKSPACES_DIR)
         .join(workspace_cache_leaf(
             &workspace_root
                 .canonicalize()
                 .unwrap_or_else(|_| workspace_root.to_path_buf()),
-        ))
+        ));
+    let _ = std::fs::create_dir_all(&cache_dir);
+    cache_dir
+}
+
+pub fn ensure_sift_process_cache_dirs() {
+    if let Some(cache_dir) = std::env::var_os("SIFT_CACHE") {
+        let _ = std::fs::create_dir_all(cache_dir);
+    }
+    if let Some(cache_dir) = std::env::var_os("METAMORPH_CACHE_DIR") {
+        let _ = std::fs::create_dir_all(cache_dir);
+    }
 }
 
 fn default_sift_cache_root() -> PathBuf {
@@ -68,6 +81,9 @@ fn stable_workspace_hash(path: &Path) -> u64 {
 }
 
 #[cfg(test)]
+pub(crate) static TEST_SIFT_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::default_sift_cache_dir_for_workspace;
 
@@ -106,6 +122,17 @@ mod tests {
         assert_ne!(
             default_sift_cache_dir_for_workspace(first.path()),
             default_sift_cache_dir_for_workspace(second.path())
+        );
+    }
+
+    #[test]
+    fn default_sift_cache_dir_is_created_when_resolved() {
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let cache_dir = default_sift_cache_dir_for_workspace(workspace.path());
+
+        assert!(
+            cache_dir.is_dir(),
+            "cache dir should exist after resolution"
         );
     }
 }

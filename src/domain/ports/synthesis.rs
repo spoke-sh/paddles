@@ -1,6 +1,6 @@
 use crate::domain::model::{AppliedEdit, InstructionFrame, TurnEventSink, TurnIntent};
 use crate::domain::ports::context_gathering::EvidenceBundle;
-use crate::domain::ports::planning::WorkspaceAction;
+use crate::domain::ports::planning::{GroundingRequirement, WorkspaceAction};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -17,6 +17,7 @@ pub struct SynthesisHandoff {
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
     pub instruction_frame: Option<InstructionFrame>,
+    pub grounding: Option<GroundingRequirement>,
 }
 
 /// Port for the synthesizer engine that drives conversation turns and workspace actions.

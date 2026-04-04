@@ -5,7 +5,9 @@ use crate::domain::ports::{
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
-use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
+use crate::infrastructure::sift_cache::{
+    default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{SearchInput, SearchProgress, SearchResponse, Sift};
@@ -24,6 +26,7 @@ pub struct SiftDirectGathererAdapter {
 impl SiftDirectGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = workspace_root.into();
+        ensure_sift_process_cache_dirs();
         Self {
             workspace_root: workspace_root.clone(),
             sift: Arc::new(
@@ -301,6 +304,7 @@ mod tests {
         ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability, PlannerConfig,
         RetrievalMode, RetrievalStrategy,
     };
+    use crate::infrastructure::sift_cache::TEST_SIFT_ENV_LOCK;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
 
@@ -321,8 +325,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn direct_gatherer_returns_direct_retrieval_metadata_and_evidence() {
+    #[test]
+    fn direct_gatherer_returns_direct_retrieval_metadata_and_evidence() {
+        let _env_guard = TEST_SIFT_ENV_LOCK.lock().expect("env lock");
         let workspace = tempdir().expect("workspace");
         std::fs::write(
             workspace.path().join("alpha.txt"),
@@ -331,14 +336,14 @@ mod tests {
         .expect("write alpha");
 
         let adapter = SiftDirectGathererAdapter::new(workspace.path());
-        let result = adapter
-            .gather_context(&ContextGatherRequest::new(
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let result = runtime
+            .block_on(adapter.gather_context(&ContextGatherRequest::new(
                 "find alpha runtime details",
                 workspace.path(),
                 "repo investigation",
                 EvidenceBudget::default(),
-            ))
-            .await
+            )))
             .expect("gather result");
 
         assert_eq!(adapter.capability(), GathererCapability::Available);
@@ -351,8 +356,9 @@ mod tests {
         assert!(bundle.summary.contains("Direct sift retrieval gathered"));
     }
 
-    #[tokio::test]
-    async fn direct_gatherer_respects_budget_and_requested_mode_metadata() {
+    #[test]
+    fn direct_gatherer_respects_budget_and_requested_mode_metadata() {
+        let _env_guard = TEST_SIFT_ENV_LOCK.lock().expect("env lock");
         let workspace = tempdir().expect("workspace");
         std::fs::write(
             workspace.path().join("alpha.txt"),
@@ -382,9 +388,9 @@ mod tests {
         )
         .with_prior_context(vec!["Prefer runtime-related files first.".to_string()]);
 
-        let result = adapter
-            .gather_context(&request)
-            .await
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let result = runtime
+            .block_on(adapter.gather_context(&request))
             .expect("gather result");
         let bundle = result.evidence_bundle.expect("bundle");
         let planner = bundle.planner.expect("planner metadata");
@@ -397,8 +403,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn direct_gatherer_emits_concrete_progress_without_planner_labels() {
+    #[test]
+    fn direct_gatherer_emits_concrete_progress_without_planner_labels() {
+        let _env_guard = TEST_SIFT_ENV_LOCK.lock().expect("env lock");
         let workspace = tempdir().expect("workspace");
         std::fs::write(
             workspace.path().join("alpha.txt"),
@@ -409,14 +416,14 @@ mod tests {
         let adapter = SiftDirectGathererAdapter::new(workspace.path());
         let sink = Arc::new(RecordingSink::default());
         adapter.set_event_sink(Some(sink.clone() as Arc<dyn TurnEventSink>));
-        adapter
-            .gather_context(&ContextGatherRequest::new(
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime
+            .block_on(adapter.gather_context(&ContextGatherRequest::new(
                 "find alpha runtime details",
                 workspace.path(),
                 "repo investigation",
                 EvidenceBudget::default(),
-            ))
-            .await
+            )))
             .expect("gather result");
 
         let progress_details = sink

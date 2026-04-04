@@ -96,6 +96,7 @@ impl ModelRegistry for SiftRegistryAdapter {
 #[cfg(test)]
 mod tests {
     use super::{BONSAI_GGUF_REPO, model_source_for, supported_model_ids};
+    use crate::infrastructure::sift_cache::TEST_SIFT_ENV_LOCK;
     use candle_core::Tensor;
     use candle_core::quantized::gguf_file;
     use candle_core::quantized::{GgmlDType, QTensor};
@@ -103,10 +104,7 @@ mod tests {
     use std::fs::{self, File};
     use std::io::{BufWriter, Write};
     use std::path::Path;
-    use std::sync::Mutex;
     use tempfile::tempdir;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn supports_runtime_aliases_and_bonsai() {
@@ -140,7 +138,7 @@ mod tests {
 
     #[test]
     fn prepares_bonsai_alias_through_sift_gguf_compatibility_path() {
-        let _env_guard = ENV_LOCK.lock().expect("env lock");
+        let _env_guard = TEST_SIFT_ENV_LOCK.lock().expect("env lock");
         let temp = tempdir().expect("tempdir");
         let sift_cache = temp.path().join("sift-cache");
         let metamorph_cache = temp.path().join("metamorph-cache");

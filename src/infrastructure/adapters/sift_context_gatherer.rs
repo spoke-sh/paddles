@@ -3,7 +3,9 @@ use crate::domain::ports::{
     GathererCapability,
 };
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
-use crate::infrastructure::sift_cache::default_sift_cache_dir_for_workspace;
+use crate::infrastructure::sift_cache::{
+    default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{ContextAssemblyResponse, Sift};
@@ -22,6 +24,7 @@ pub struct SiftContextGathererAdapter {
 impl SiftContextGathererAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>, model_id: impl Into<String>) -> Self {
         let workspace_root = workspace_root.into();
+        ensure_sift_process_cache_dirs();
         Self {
             workspace_root: workspace_root.clone(),
             model_id: model_id.into(),

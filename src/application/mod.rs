@@ -23,14 +23,14 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
-    EvidenceItem, GathererCapability, InitialAction, InitialActionDecision, InitialEditInstruction,
-    InterpretationContext, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationRequest, InterpretationToolHint, ModelPaths, ModelRegistry, NoopTraceRecorder,
-    OperatorMemory, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
-    RetrievalStrategy, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
-    WorkspaceAction,
+    EvidenceItem, GathererCapability, GroundingRequirement, InitialAction, InitialActionDecision,
+    InitialEditInstruction, InterpretationContext, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
+    ModelRegistry, NoopTraceRecorder, OperatorMemory, PlannerAction, PlannerBudget,
+    PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner,
+    RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
+    SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -238,6 +238,7 @@ struct PlannerLoopContext {
     recent_thread_summary: Option<String>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
+    grounding: Option<GroundingRequirement>,
 }
 
 struct PlannerGatherSpec {
@@ -2359,6 +2360,7 @@ impl MechSuitService {
                         recent_thread_summary: recent_thread_summary.clone(),
                         instruction_frame: execution_plan.instruction_frame.clone(),
                         initial_edit: execution_plan.initial_edit.clone(),
+                        grounding: execution_plan.grounding.clone(),
                     },
                     execution_plan.initial_planner_decision.clone(),
                     Arc::clone(&trace),
@@ -2369,6 +2371,7 @@ impl MechSuitService {
                 evidence: None,
                 direct_answer: execution_plan.direct_answer.clone(),
                 instruction_frame: execution_plan.instruction_frame.clone(),
+                grounding: execution_plan.grounding.clone(),
             },
         };
 
@@ -2403,6 +2406,7 @@ impl MechSuitService {
             recent_turns,
             recent_thread_summary,
             instruction_frame: planner_outcome.instruction_frame.clone(),
+            grounding: planner_outcome.grounding.clone(),
         };
         if let Some(frame) = planner_outcome
             .instruction_frame
@@ -2504,6 +2508,7 @@ impl MechSuitService {
                 known_edit: decision.edit.known_edit,
                 candidate_files: ranked_candidates,
             },
+            grounding: decision.grounding.clone(),
         }))
     }
 
@@ -3096,6 +3101,7 @@ impl MechSuitService {
                         .map(blocked_edit_response)
                 }),
                 instruction_frame,
+                grounding: context.grounding.clone(),
             });
         }
 
@@ -3114,6 +3120,7 @@ impl MechSuitService {
                     .map(blocked_edit_response)
             }),
             instruction_frame,
+            grounding: context.grounding.clone(),
         })
     }
 
@@ -3256,12 +3263,14 @@ struct PromptExecutionPlan {
     direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
+    grounding: Option<GroundingRequirement>,
 }
 
 struct PlannerLoopOutcome {
     evidence: Option<EvidenceBundle>,
     direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
+    grounding: Option<GroundingRequirement>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3296,6 +3305,7 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
         direct_answer: None,
         instruction_frame: None,
         initial_edit: InitialEditInstruction::default(),
+        grounding: None,
     }
 }
 
@@ -3535,6 +3545,7 @@ fn bootstrap_repository_grounding_initial_action(
                 .to_string(),
         answer: None,
         edit: decision.edit.clone(),
+        grounding: decision.grounding.clone(),
     })
 }
 
@@ -3717,6 +3728,7 @@ fn execution_plan_from_initial_action(
         rationale,
         answer,
         edit,
+        grounding,
     } = decision;
     let instruction_frame = instruction_frame_from_initial_edit(&edit);
     match action {
@@ -3739,6 +3751,7 @@ fn execution_plan_from_initial_action(
                 direct_answer,
                 instruction_frame,
                 initial_edit: edit,
+                grounding,
             }
         }
         InitialAction::Stop { reason } => {
@@ -3762,6 +3775,7 @@ fn execution_plan_from_initial_action(
                 direct_answer,
                 instruction_frame,
                 initial_edit: edit,
+                grounding,
             }
         }
         resource_action => {
@@ -3795,10 +3809,12 @@ fn execution_plan_from_initial_action(
                     rationale,
                     answer: None,
                     edit: edit.clone(),
+                    grounding: grounding.clone(),
                 }),
                 direct_answer: None,
                 instruction_frame,
                 initial_edit: edit,
+                grounding,
             }
         }
     }
@@ -5334,13 +5350,13 @@ mod tests {
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-        InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
-        InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction, PlannerCapability,
-        PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState,
-        PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
-        RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
-        RetrievalStrategy, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest,
-        TraceRecorder, WorkspaceAction,
+        GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
+        InitialEditInstruction, InterpretationContext, InterpretationRequest, ModelPaths,
+        ModelRegistry, PlannerAction, PlannerCapability, PlannerGraphBranch,
+        PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState, PlannerRequest,
+        PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
+        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+        SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -5732,6 +5748,7 @@ mod tests {
             rationale: rationale.to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: None,
         }
     }
 
@@ -5767,6 +5784,7 @@ mod tests {
             recent_thread_summary: None,
             instruction_frame: super::instruction_frame_from_initial_edit(&initial_edit),
             initial_edit,
+            grounding: None,
         }
     }
 
@@ -7361,6 +7379,7 @@ mod tests {
                 rationale: "synthesize after the graph gather".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -7534,6 +7553,7 @@ mod tests {
             rationale: "run a check first".to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -7584,6 +7604,7 @@ mod tests {
             rationale: "read the CSS file again before editing".to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -7654,6 +7675,7 @@ mod tests {
                     known_edit: true,
                     candidate_files: vec!["src/application/mod.rs".to_string()],
                 },
+                grounding: None,
             },
             vec![
                 RecursivePlannerDecision {
@@ -7668,6 +7690,7 @@ mod tests {
                     rationale: "continue exploring".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -7678,6 +7701,7 @@ mod tests {
                     rationale: "read the likely target file before more retrieval".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7686,6 +7710,7 @@ mod tests {
                     rationale: "stop after acting".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7694,6 +7719,7 @@ mod tests {
                     rationale: "stop after acting".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::clone(&request_log),
@@ -7813,6 +7839,7 @@ mod tests {
                         "src/application/mod.rs".to_string(),
                     ],
                 },
+                grounding: None,
             },
             vec![
                 RecursivePlannerDecision {
@@ -7822,6 +7849,7 @@ mod tests {
                     rationale: "stop after the read".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7830,6 +7858,7 @@ mod tests {
                     rationale: "stop after the read".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7896,6 +7925,7 @@ mod tests {
                     rationale: "stop after the read".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -7904,6 +7934,7 @@ mod tests {
                     rationale: "stop after the read".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -7996,6 +8027,7 @@ mod tests {
                     known_edit: true,
                     candidate_files: vec!["src/one.rs".to_string(), "src/two.rs".to_string()],
                 },
+                grounding: None,
             },
             vec![
                 RecursivePlannerDecision {
@@ -8005,6 +8037,7 @@ mod tests {
                     rationale: "stop".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8013,6 +8046,7 @@ mod tests {
                     rationale: "stop".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8092,6 +8126,7 @@ mod tests {
                 rationale: "stop after the inspect".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -8162,6 +8197,7 @@ mod tests {
                 rationale: "stop after the edit".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -8236,6 +8272,7 @@ mod tests {
                 rationale: rationale.clone(),
                 answer: Some(answer.clone()),
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -8297,6 +8334,7 @@ mod tests {
                 rationale: rationale.clone(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             },
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
@@ -8367,6 +8405,7 @@ mod tests {
                 rationale: rationale.clone(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -8429,6 +8468,7 @@ mod tests {
                 rationale: rationale.clone(),
                 answer: Some(answer.clone()),
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             },
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
@@ -8496,6 +8536,7 @@ mod tests {
                     known_edit: true,
                     candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
                 },
+                grounding: None,
             },
             vec![
                 RecursivePlannerDecision {
@@ -8505,6 +8546,7 @@ mod tests {
                     rationale: "describe the requested edit".to_string(),
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8513,6 +8555,7 @@ mod tests {
                     rationale: "describe the requested edit".to_string(),
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8585,6 +8628,7 @@ mod tests {
                 rationale: "inspect the likely CSS file before deciding".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             },
             vec![
                 RecursivePlannerDecision {
@@ -8597,6 +8641,7 @@ mod tests {
                         known_edit: true,
                         candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
                     },
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8608,6 +8653,7 @@ mod tests {
                         known_edit: true,
                         candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
                     },
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8677,6 +8723,7 @@ mod tests {
                     known_edit: true,
                     candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
                 },
+                grounding: None,
             },
             vec![
                 RecursivePlannerDecision {
@@ -8691,6 +8738,7 @@ mod tests {
                     rationale: "apply the requested padding change".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8699,6 +8747,7 @@ mod tests {
                     rationale: "the requested edit is complete".to_string(),
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -8707,6 +8756,7 @@ mod tests {
                     rationale: "the requested edit is complete".to_string(),
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -8768,6 +8818,7 @@ mod tests {
                 rationale: "conversational request can go straight to the answer lane".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             },
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
@@ -8826,6 +8877,7 @@ mod tests {
                 rationale: "answer lane should handle this directly".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             },
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
@@ -8887,6 +8939,71 @@ mod tests {
     }
 
     #[test]
+    fn synthesizer_only_turns_receive_planner_declared_grounding_handoff() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "external evidence should be required before synthesis".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: Some(GroundingRequirement {
+                    domain: GroundingDomain::External,
+                    reason: Some("need a verified web source before answering".to_string()),
+                }),
+            },
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "Can you give me the website where I can read about that crate?",
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        let handoffs = synthesizer.handoffs.lock().expect("handoffs lock").clone();
+        let handoff = handoffs.last().expect("synthesis handoff");
+        assert!(
+            handoff
+                .grounding
+                .as_ref()
+                .is_some_and(|grounding| grounding.requires_external()),
+            "planner-declared external grounding should be preserved into synthesis"
+        );
+    }
+
+    #[test]
     fn repo_scoped_followups_bootstrap_a_grounding_probe_before_direct_answer() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -8923,6 +9040,7 @@ mod tests {
                 rationale: "this follow-up can be answered directly".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             },
             vec![RecursivePlannerDecision {
                 action: PlannerAction::Stop {
@@ -8932,6 +9050,7 @@ mod tests {
                 rationale: "the local rg probe already found the repository references".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
+                grounding: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -9013,6 +9132,7 @@ mod tests {
             rationale: "get the run id for the failing job".to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+                grounding: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -9074,6 +9194,7 @@ mod tests {
                     rationale: "repeat the same status probe".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -9084,6 +9205,7 @@ mod tests {
                         .to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::clone(&recorded_requests),
@@ -9170,6 +9292,7 @@ mod tests {
             rationale: "check a smaller recent window".to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -9230,6 +9353,7 @@ mod tests {
                     rationale: "repeat the same status probe".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -9240,6 +9364,7 @@ mod tests {
                         .to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -9347,6 +9472,7 @@ mod tests {
                     rationale: "narrow the list size".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -9357,6 +9483,7 @@ mod tests {
                         .to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
+                    grounding: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -9582,6 +9709,7 @@ mod tests {
             rationale: "run a check first".to_string(),
             answer: None,
             edit: InitialEditInstruction::default(),
+            grounding: None,
         };
 
         let notes = super::collect_steering_review_notes(
