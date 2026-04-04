@@ -2940,26 +2940,10 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             )
         }
         TurnEvent::HarnessState { snapshot } => {
-            let mut parts = vec![
-                format!("status={}", snapshot.governor.status),
-                format!("timeout={}", snapshot.governor.timeout.phase),
-            ];
-            if let Some(elapsed_seconds) = snapshot.governor.timeout.elapsed_seconds {
-                parts.push(format!("elapsed={elapsed_seconds}s"));
-            }
-            if let Some(deadline_seconds) = snapshot.governor.timeout.deadline_seconds {
-                parts.push(format!("deadline={deadline_seconds}s"));
-            }
-            if let Some(intervention) = snapshot.governor.intervention.as_deref() {
-                parts.push(format!("intervention={intervention}"));
-            }
-            if let Some(detail) = snapshot.detail.as_deref() {
-                parts.push(detail.to_string());
-            }
             TranscriptRow::new(
                 TranscriptRowKind::Event,
-                format!("• Governor: {}", snapshot.chamber),
-                parts.join(" · "),
+                snapshot.governor_header(),
+                snapshot.governor_summary(true),
             )
         }
         TurnEvent::PlannerSummary {

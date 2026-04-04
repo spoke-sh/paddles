@@ -1297,20 +1297,10 @@ fn render_turn_event(event: &TurnEvent) -> String {
                 return String::new();
             }
 
-            let mut parts = vec![
-                format!("status={}", snapshot.governor.status),
-                format!("timeout={}", snapshot.governor.timeout.phase),
-            ];
-            if let Some(intervention) = snapshot.governor.intervention.as_deref() {
-                parts.push(format!("intervention={intervention}"));
-            }
-            if let Some(detail) = snapshot.detail.as_deref() {
-                parts.push(detail.to_string());
-            }
             format!(
-                "• Governor: {}\n  └ {}",
-                snapshot.chamber,
-                trim_event_detail(&parts.join(" · "), 3)
+                "{}\n  └ {}",
+                snapshot.governor_header(),
+                trim_event_detail(&snapshot.governor_summary(false), 3)
             )
         }
         TurnEvent::InterpretationContext { context } => {

@@ -207,23 +207,7 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             }
         }
         TurnEvent::HarnessState { snapshot } => {
-            let mut parts = vec![
-                format!("status={}", snapshot.governor.status),
-                format!("timeout={}", snapshot.governor.timeout.phase),
-            ];
-            if let Some(elapsed_seconds) = snapshot.governor.timeout.elapsed_seconds {
-                parts.push(format!("elapsed={elapsed_seconds}s"));
-            }
-            if let Some(deadline_seconds) = snapshot.governor.timeout.deadline_seconds {
-                parts.push(format!("deadline={deadline_seconds}s"));
-            }
-            if let Some(intervention) = snapshot.governor.intervention.as_deref() {
-                parts.push(format!("intervention={intervention}"));
-            }
-            if let Some(detail) = snapshot.detail.as_deref() {
-                parts.push(detail.to_string());
-            }
-            let detail = parts.join(" · ");
+            let detail = snapshot.governor_summary(true);
             let mut text_parts = vec![
                 snapshot.chamber.to_string(),
                 format!("status {}", snapshot.governor.status),

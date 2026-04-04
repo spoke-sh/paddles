@@ -179,4 +179,33 @@ impl HarnessSnapshot {
             || self.governor.timeout.phase != TimeoutPhase::Nominal
             || self.governor.intervention.is_some()
     }
+
+    pub fn governor_header(&self) -> String {
+        format!("• Governor: {}", self.chamber)
+    }
+
+    pub fn governor_summary(&self, include_timing: bool) -> String {
+        let mut parts = vec![
+            format!("status={}", self.governor.status),
+            format!("timeout={}", self.governor.timeout.phase),
+        ];
+
+        if include_timing {
+            if let Some(elapsed_seconds) = self.governor.timeout.elapsed_seconds {
+                parts.push(format!("elapsed={elapsed_seconds}s"));
+            }
+            if let Some(deadline_seconds) = self.governor.timeout.deadline_seconds {
+                parts.push(format!("deadline={deadline_seconds}s"));
+            }
+        }
+
+        if let Some(intervention) = self.governor.intervention.as_deref() {
+            parts.push(format!("intervention={intervention}"));
+        }
+        if let Some(detail) = self.detail.as_deref() {
+            parts.push(detail.to_string());
+        }
+
+        parts.join(" · ")
+    }
 }
