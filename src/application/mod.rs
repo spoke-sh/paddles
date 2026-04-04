@@ -2294,6 +2294,19 @@ impl MechSuitService {
                     });
                     decision = bootstrapped;
                 }
+                if let Some(bootstrapped) =
+                    bootstrap_repository_grounding_initial_action(prompt, &decision)
+                {
+                    trace.emit(TurnEvent::Fallback {
+                        stage: "grounding-bootstrap".to_string(),
+                        reason: format!(
+                            "repo-scoped conversational turn bypassed initial `{}` and forced `{}` to ground the reply locally",
+                            decision.action.summary(),
+                            bootstrapped.action.summary()
+                        ),
+                    });
+                    decision = bootstrapped;
+                }
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence: 1,
                     action: decision.action.summary(),
@@ -3436,6 +3449,200 @@ fn prompt_requests_workspace_edit(prompt: &str) -> bool {
                 | "file"
         )
     })
+}
+
+fn prompt_requires_repository_grounding(prompt: &str) -> bool {
+    let tokens = normalized_prompt_tokens(prompt);
+    if tokens.is_empty() {
+        return false;
+    }
+
+    let mentions_workspace = tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "paddles" | "repository" | "repo" | "codebase" | "workspace"
+        )
+    });
+    let local_reference = tokens
+        .iter()
+        .any(|token| matches!(token.as_str(), "our" | "we" | "this" | "that" | "here"));
+    let architecture_subject = tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "layer"
+                | "layers"
+                | "architecture"
+                | "architectural"
+                | "component"
+                | "components"
+                | "feature"
+                | "features"
+                | "pipeline"
+                | "pipelines"
+                | "system"
+                | "systems"
+                | "stack"
+                | "runtime"
+                | "runtimes"
+                | "planner"
+                | "planners"
+                | "synthesizer"
+                | "synthesizers"
+                | "framework"
+                | "frameworks"
+                | "model"
+                | "models"
+                | "adapter"
+                | "adapters"
+                | "integration"
+                | "integrations"
+                | "generative"
+                | "multimodal"
+        )
+    });
+    let relation_probe = tokens.iter().any(|token| {
+        matches!(
+            token.as_str(),
+            "fit" | "fits" | "belong" | "belongs" | "part" | "lives" | "live" | "used"
+        )
+    });
+
+    (mentions_workspace && (architecture_subject || relation_probe))
+        || (local_reference && architecture_subject)
+}
+
+fn bootstrap_repository_grounding_initial_action(
+    prompt: &str,
+    decision: &InitialActionDecision,
+) -> Option<InitialActionDecision> {
+    match decision.action {
+        InitialAction::Answer | InitialAction::Stop { .. } => {}
+        _ => return None,
+    }
+
+    if !prompt_requires_repository_grounding(prompt) {
+        return None;
+    }
+
+    Some(InitialActionDecision {
+        action: InitialAction::Workspace {
+            action: WorkspaceAction::Inspect {
+                command: repository_grounding_probe_command(prompt),
+            },
+        },
+        rationale:
+            "controller bootstrapped a local repository grounding probe before direct synthesis"
+                .to_string(),
+        answer: None,
+        edit: decision.edit.clone(),
+    })
+}
+
+fn repository_grounding_probe_command(prompt: &str) -> String {
+    let terms = repository_grounding_probe_terms(prompt);
+    let pattern = if terms.is_empty() {
+        "paddles|generative|planner|synthesizer|runtime".to_string()
+    } else {
+        terms.join("|")
+    };
+
+    format!(
+        "rg -n -i --hidden --glob '!target' --glob '!node_modules' --glob '!.git' \"({pattern})\" ."
+    )
+}
+
+fn repository_grounding_probe_terms(prompt: &str) -> Vec<String> {
+    let tokens = normalized_prompt_tokens(prompt);
+    let mut prioritized = Vec::new();
+
+    for token in &tokens {
+        if matches!(
+            token.as_str(),
+            "paddles"
+                | "repository"
+                | "repo"
+                | "codebase"
+                | "workspace"
+                | "layer"
+                | "layers"
+                | "architecture"
+                | "architectural"
+                | "component"
+                | "components"
+                | "feature"
+                | "features"
+                | "pipeline"
+                | "pipelines"
+                | "system"
+                | "systems"
+                | "stack"
+                | "runtime"
+                | "runtimes"
+                | "planner"
+                | "planners"
+                | "synthesizer"
+                | "synthesizers"
+                | "framework"
+                | "frameworks"
+                | "model"
+                | "models"
+                | "adapter"
+                | "adapters"
+                | "integration"
+                | "integrations"
+                | "generative"
+                | "multimodal"
+        ) && !prioritized.contains(token)
+        {
+            prioritized.push(token.clone());
+        }
+    }
+
+    if !prioritized.is_empty() {
+        prioritized.truncate(4);
+        return prioritized;
+    }
+
+    let mut fallback = Vec::new();
+    for token in tokens {
+        if token.len() < 4
+            || matches!(
+                token.as_str(),
+                "that"
+                    | "this"
+                    | "with"
+                    | "from"
+                    | "into"
+                    | "your"
+                    | "have"
+                    | "think"
+                    | "would"
+                    | "could"
+                    | "should"
+                    | "there"
+                    | "here"
+                    | "perfect"
+            )
+        {
+            continue;
+        }
+        if !fallback.contains(&token) {
+            fallback.push(token);
+        }
+        if fallback.len() >= 4 {
+            break;
+        }
+    }
+
+    fallback
+}
+
+fn normalized_prompt_tokens(prompt: &str) -> Vec<String> {
+    prompt
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_ascii_lowercase())
+        .collect()
 }
 
 fn is_code_anchor_token(token: &str) -> bool {
@@ -5785,6 +5992,16 @@ mod tests {
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
         assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
+    }
+
+    #[test]
+    fn repository_grounding_heuristic_flags_our_generative_layer_followup() {
+        assert!(super::prompt_requires_repository_grounding(
+            "I think this is a perfect fit for our generative layer"
+        ));
+        assert!(!super::prompt_requires_repository_grounding(
+            "What is the capital of France?"
+        ));
     }
 
     #[test]
@@ -8666,6 +8883,100 @@ mod tests {
                 .as_deref()
                 .is_some_and(|summary| summary.contains("Chevy C20 truck")),
             "thread summary should carry the active conversational subject into the answer lane"
+        );
+    }
+
+    #[test]
+    fn repo_scoped_followups_bootstrap_a_grounding_probe_before_direct_answer() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("ARCHITECTURE.md"),
+            "The generative layer lives in src/domain/model/generative.rs.\n",
+        )
+        .expect("write architecture");
+        fs::create_dir_all(workspace.path().join("src/domain/model")).expect("create src dir");
+        fs::write(
+            workspace.path().join("src/domain/model/generative.rs"),
+            "pub enum ResponseMode { GroundedAnswer, DirectAnswer }\n",
+        )
+        .expect("write generative module");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "this follow-up can be answered directly".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            },
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "local grounding probe captured the relevant repository evidence"
+                        .to_string(),
+                },
+                rationale: "the local rg probe already found the repository references".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "I think this is a perfect fit for our generative layer",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Applied the bounded action.");
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::Fallback { stage, reason }
+                if stage == "grounding-bootstrap"
+                    && reason.contains("repo-scoped")
+        )));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, invocation, .. }
+                if tool_name == "inspect"
+                    && invocation.contains("rg -n -i --hidden")
+                    && invocation.contains("generative|layer")
+        )));
+        assert!(
+            !synthesizer
+                .gathered_summaries
+                .lock()
+                .expect("gathered summaries lock")
+                .is_empty(),
+            "the synthesizer should receive repository evidence after the grounding probe"
         );
     }
 

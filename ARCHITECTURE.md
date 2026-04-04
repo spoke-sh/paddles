@@ -27,6 +27,8 @@ The loop continues until the planner determines it has enough evidence, the budg
 
 The important routing boundary is that the controller does not infer intent from prompt-token heuristics. The planner decides whether a turn should answer directly, inspect locally, recurse, or stop. The controller validates that choice and keeps the loop safe.
 
+One fail-closed exception now exists for repository-scoped follow-ups. If the planner selects a direct answer for a turn that appears to refer to local architecture or ownership without grounded evidence, the controller bootstraps a local read-only probe before synthesis instead of permitting an ungrounded reply.
+
 The missing control seam here used to be instruction satisfaction. The planner could correctly identify an edit turn, but nothing in the loop remembered that "make the edit" was an unsatisfied obligation, so a later prose recommendation could be mistaken for completion. Paddles now carries an explicit instruction frame for edit turns. That frame survives through recursive planning and answer handoff, and the controller will not accept advice-only completion while an `applied_edit` obligation is still open.
 
 ### The Engine, Its Chambers, And The Governor
