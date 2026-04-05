@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::task::JoinHandle;
 
 /// Context passed from main to the TUI for credential management.
 pub struct TuiContext {
@@ -165,16 +166,27 @@ pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiCont
         }
         app.tick();
         if let Some(update) = app.dispatch_pending_runtime_update() {
-            dispatch_runtime_update(
+            let work_id = app.next_work_id();
+            let handle = dispatch_runtime_update(
                 update,
                 Arc::clone(&service),
                 Arc::clone(&tui_ctx.credential_store),
                 Arc::clone(&tui_ctx.runtime_preference_store),
                 tx.clone(),
+                work_id,
             );
+            app.set_active_work(InFlightWorkKind::RuntimeUpdate, work_id, handle);
         }
         if let Some(prompt) = app.dispatch_next_prompt() {
-            dispatch_prompt(prompt, Arc::clone(&service), session.clone(), tx.clone());
+            let work_id = app.next_work_id();
+            let handle = dispatch_prompt(
+                prompt,
+                Arc::clone(&service),
+                session.clone(),
+                tx.clone(),
+                work_id,
+            );
+            app.set_active_work(InFlightWorkKind::Prompt, work_id, handle);
         }
 
         // Handle completed /login actions.
@@ -259,8 +271,16 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
                 app.push_event("Login cancelled", "Returned to normal input.");
                 false
             } else {
-                if app.input.is_empty() {
+                if app.busy {
+                    if app.abort_active_work() {
+                        app.clear_queued_prompts();
+                    } else if app.input.is_empty() {
+                        app.cancel_latest_queued_steering_prompt();
+                    }
+                    return false;
+                } else if app.input.is_empty() {
                     app.cancel_latest_queued_steering_prompt();
+                    return false;
                 }
                 false
             }
@@ -421,6 +441,7 @@ enum UiMessage {
     TurnEvent {
         event: TurnEvent,
         occurred_at: Instant,
+        work_id: Option<u64>,
     },
     TranscriptUpdated {
         update: ConversationTranscriptUpdate,
@@ -428,40 +449,59 @@ enum UiMessage {
     TurnFinished {
         result: std::result::Result<String, String>,
         occurred_at: Instant,
+        work_id: Option<u64>,
     },
     RuntimeUpdateFinished {
         result: std::result::Result<RuntimeUpdateCompletion, String>,
         occurred_at: Instant,
+        work_id: Option<u64>,
     },
 }
 
 impl UiMessage {
-    fn turn_event(event: TurnEvent) -> Self {
+    fn turn_event_with_id(event: TurnEvent, work_id: u64) -> Self {
         Self::TurnEvent {
             event,
             occurred_at: Instant::now(),
+            work_id: Some(work_id),
         }
     }
 
-    fn turn_finished(result: std::result::Result<String, String>) -> Self {
+    fn turn_finished_with_id(result: std::result::Result<String, String>, work_id: u64) -> Self {
         Self::TurnFinished {
             result,
             occurred_at: Instant::now(),
+            work_id: Some(work_id),
         }
     }
 
-    fn runtime_update_finished(
+    fn runtime_update_finished_with_id(
         result: std::result::Result<RuntimeUpdateCompletion, String>,
+        work_id: u64,
     ) -> Self {
         Self::RuntimeUpdateFinished {
             result,
             occurred_at: Instant::now(),
+            work_id: Some(work_id),
         }
     }
 
     fn transcript_updated(update: ConversationTranscriptUpdate) -> Self {
         Self::TranscriptUpdated { update }
     }
+}
+
+#[derive(Debug)]
+enum InFlightWorkKind {
+    Prompt,
+    RuntimeUpdate,
+}
+
+#[derive(Debug)]
+struct InFlightWork {
+    id: u64,
+    kind: InFlightWorkKind,
+    handle: JoinHandle<()>,
 }
 
 #[derive(Clone, Debug)]
@@ -478,8 +518,12 @@ fn dispatch_prompt(
     service: Arc<MechSuitService>,
     session: ConversationSession,
     tx: UnboundedSender<UiMessage>,
-) {
-    let sink = Arc::new(InteractiveTurnEventSink { tx: tx.clone() });
+    work_id: u64,
+) -> JoinHandle<()> {
+    let sink = Arc::new(InteractiveTurnEventSink {
+        tx: tx.clone(),
+        work_id: Some(work_id),
+    });
     tokio::spawn(async move {
         let result = match prompt {
             QueuedPrompt::Prompt(prompt) => {
@@ -494,8 +538,8 @@ fn dispatch_prompt(
             }
         }
         .map_err(|err| format!("{err:#}"));
-        let _ = tx.send(UiMessage::turn_finished(result));
-    });
+        let _ = tx.send(UiMessage::turn_finished_with_id(result, work_id));
+    })
 }
 
 fn dispatch_runtime_update(
@@ -504,7 +548,8 @@ fn dispatch_runtime_update(
     credential_store: Arc<CredentialStore>,
     runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
     tx: UnboundedSender<UiMessage>,
-) {
+    work_id: u64,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let result = match service.prepare_runtime_lanes(&update.runtime_lanes).await {
             Ok(_) => {
@@ -522,18 +567,21 @@ fn dispatch_runtime_update(
             }
             Err(err) => Err(format!("{err:#}")),
         };
-        let _ = tx.send(UiMessage::runtime_update_finished(result));
-    });
+        let _ = tx.send(UiMessage::runtime_update_finished_with_id(result, work_id));
+    })
 }
 
 #[derive(Clone)]
 struct InteractiveTurnEventSink {
     tx: UnboundedSender<UiMessage>,
+    work_id: Option<u64>,
 }
 
 impl TurnEventSink for InteractiveTurnEventSink {
     fn emit(&self, event: TurnEvent) {
-        let _ = self.tx.send(UiMessage::turn_event(event));
+        if let Some(work_id) = self.work_id {
+            let _ = self.tx.send(UiMessage::turn_event_with_id(event, work_id));
+        }
     }
 }
 
@@ -841,6 +889,8 @@ struct InteractiveApp {
     queued_prompts: VecDeque<QueuedPrompt>,
     busy: bool,
     busy_phase: BusyPhase,
+    next_work_id: u64,
+    active_work: Option<InFlightWork>,
     pending_reveal: Option<PendingReveal>,
     spinner_index: usize,
     input_mode: InputMode,
@@ -1013,6 +1063,8 @@ impl InteractiveApp {
             queued_prompts: VecDeque::new(),
             busy: false,
             busy_phase: BusyPhase::Idle,
+            next_work_id: 0,
+            active_work: None,
             pending_reveal: None,
             spinner_index: 0,
             input_mode: InputMode::Normal,
@@ -1074,6 +1126,89 @@ impl InteractiveApp {
 
     fn reset_slash_suggestion_selection(&mut self) {
         self.slash_suggestion_index = 0;
+    }
+
+    fn next_work_id(&mut self) -> u64 {
+        let work_id = self.next_work_id;
+        self.next_work_id = self.next_work_id.wrapping_add(1);
+        work_id
+    }
+
+    fn set_active_work(&mut self, kind: InFlightWorkKind, work_id: u64, handle: JoinHandle<()>) {
+        if let Some(work) = self.active_work.take() {
+            work.handle.abort();
+        }
+        self.active_work = Some(InFlightWork {
+            id: work_id,
+            kind,
+            handle,
+        });
+    }
+
+    fn clear_active_work_if_current(&mut self, work_id: Option<u64>) {
+        let Some(work_id) = work_id else {
+            return;
+        };
+        if let Some(active) = &self.active_work
+            && active.id == work_id
+        {
+            self.active_work = None;
+        }
+    }
+
+    fn is_current_work_id(&self, work_id: Option<u64>) -> bool {
+        match work_id {
+            Some(work_id) => self
+                .active_work
+                .as_ref()
+                .is_some_and(|active| active.id == work_id),
+            None => true,
+        }
+    }
+
+    fn clear_in_flight_turn_state(&mut self) {
+        self.active_turn_timing = None;
+        self.pending_turn_total_timing = None;
+        self.pending_reveal = None;
+        self.last_event = None;
+        self.emitted_in_flight = false;
+        self.remove_in_flight_row();
+        self.search_progress_row = None;
+        self.planner_progress_row = None;
+        self.gathering_harness_row = None;
+        self.last_hunting_sample = None;
+        self.last_hunting_history_sample = None;
+        self.last_hunting_history_at = None;
+    }
+
+    fn abort_active_work(&mut self) -> bool {
+        let Some(work) = self.active_work.take() else {
+            return false;
+        };
+
+        work.handle.abort();
+        self.busy = false;
+        self.busy_phase = BusyPhase::Idle;
+        let kind = match work.kind {
+            InFlightWorkKind::Prompt => "prompt",
+            InFlightWorkKind::RuntimeUpdate => "runtime update",
+        };
+        self.runtime_update_started_at = None;
+        self.clear_in_flight_turn_state();
+        self.pending_transcript_sync = false;
+        self.push_event(
+            "Work cancelled",
+            format!("Current {kind} in-flight work cancelled."),
+        );
+        true
+    }
+
+    fn clear_queued_prompts(&mut self) -> bool {
+        if self.queued_prompts.is_empty() {
+            return false;
+        }
+        self.queued_prompts.clear();
+        true
     }
 
     fn dynamic_model_slash_suggestions(&self, query: &str) -> Option<Vec<SlashSuggestion>> {
@@ -1890,7 +2025,14 @@ impl InteractiveApp {
 
     fn handle_message(&mut self, message: UiMessage) {
         match message {
-            UiMessage::TurnEvent { event, occurred_at } => {
+            UiMessage::TurnEvent {
+                event,
+                occurred_at,
+                work_id,
+            } => {
+                if !self.is_current_work_id(work_id) {
+                    return;
+                }
                 self.remove_in_flight_row();
                 let key = event.event_type_key();
                 let is_first_step = self
@@ -1964,7 +2106,12 @@ impl InteractiveApp {
             UiMessage::TurnFinished {
                 result,
                 occurred_at,
+                work_id,
             } => {
+                if !self.is_current_work_id(work_id) {
+                    return;
+                }
+                self.clear_active_work_if_current(work_id);
                 self.remove_in_flight_row();
                 self.search_progress_row = None;
                 self.gathering_harness_row = None;
@@ -2007,7 +2154,12 @@ impl InteractiveApp {
             UiMessage::RuntimeUpdateFinished {
                 result,
                 occurred_at,
+                work_id,
             } => {
+                if !self.is_current_work_id(work_id) {
+                    return;
+                }
+                self.clear_active_work_if_current(work_id);
                 let started_at = self.runtime_update_started_at.take();
                 self.pending_turn_total_timing = None;
                 match result {
@@ -3186,8 +3338,8 @@ fn terminal_uses_light_background() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BusyPhase, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal, QueuedPrompt,
-        RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
+        BusyPhase, InFlightWorkKind, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal,
+        QueuedPrompt, RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
         TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
         format_duration_compact, format_turn_event_row, inline_multiline_text,
         inline_viewport_height_for_terminal, render_row_lines, runtime_lane_summary,
@@ -3491,6 +3643,7 @@ mod tests {
                     )),
                 },
                 occurred_at,
+                work_id: None,
             }
         };
         let governor_event = |count: usize, fresh: usize, segments: usize, occurred_at: Instant| {
@@ -3513,6 +3666,7 @@ mod tests {
                     },
                 },
                 occurred_at,
+                work_id: None,
             }
         };
 
@@ -3667,6 +3821,7 @@ mod tests {
         app.handle_message(super::UiMessage::TurnFinished {
             result: Ok("hi there".to_string()),
             occurred_at: Instant::now(),
+            work_id: None,
         });
         app.sync_transcript(&transcript(&[(
             ConversationTranscriptSpeaker::Assistant,
@@ -3749,6 +3904,7 @@ mod tests {
         app.handle_message(super::UiMessage::TurnFinished {
             result: Ok("done".to_string()),
             occurred_at: Instant::now(),
+            work_id: None,
         });
         app.sync_transcript(&transcript(&[(
             ConversationTranscriptSpeaker::Assistant,
@@ -3797,6 +3953,7 @@ mod tests {
         app.handle_message(super::UiMessage::TurnFinished {
             result: Ok("hi there".to_string()),
             occurred_at: Instant::now(),
+            work_id: None,
         });
         app.sync_transcript(&transcript(&[
             (ConversationTranscriptSpeaker::User, "hello"),
@@ -4126,6 +4283,7 @@ mod tests {
                 preference_save_error: None,
             }),
             occurred_at: started_at + Duration::from_secs(2),
+            work_id: None,
         });
 
         assert!(!app.busy);
@@ -4493,6 +4651,48 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn escape_cancels_active_work_and_queued_prompts() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "first".to_string();
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("first".to_string()))
+        );
+
+        let work_id = app.next_work_id();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        app.set_active_work(InFlightWorkKind::Prompt, work_id, handle);
+
+        app.input = "second".to_string();
+        app.submit_prompt();
+        assert_eq!(app.queued_prompts.len(), 1);
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert!(!app.busy);
+        assert_eq!(app.busy_phase, BusyPhase::Idle);
+        assert!(app.queued_prompts.is_empty());
+        assert!(app.rows.iter().any(|row| row.header == "• Work cancelled"));
+    }
+
     #[test]
     fn slash_command_popup_area_stays_within_offset_frame() {
         let palette = detect_palette();
@@ -4646,10 +4846,12 @@ mod tests {
                 summary: "direct".to_string(),
             },
             occurred_at: start + Duration::from_millis(120),
+            work_id: None,
         });
         app.handle_message(super::UiMessage::TurnFinished {
             result: Ok("done".to_string()),
             occurred_at: start + Duration::from_millis(350),
+            work_id: None,
         });
         app.sync_transcript(&transcript(&[(
             ConversationTranscriptSpeaker::Assistant,
@@ -4884,6 +5086,7 @@ mod tests {
                 detail: Some("indexing 4/10 files".to_string()),
             },
             occurred_at: first_at,
+            work_id: None,
         });
         let rows_after_progress = app.rows.len();
 
@@ -4913,6 +5116,7 @@ mod tests {
                 detail: Some("indexing 5/10 files".to_string()),
             },
             occurred_at: Instant::now(),
+            work_id: None,
         });
         assert_eq!(
             app.rows
@@ -5005,6 +5209,7 @@ mod tests {
                 summary: "direct".to_string(),
             },
             occurred_at: Instant::now(),
+            work_id: None,
         });
         assert!(!app.emitted_in_flight);
         assert!(app.last_event.is_some());
