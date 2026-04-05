@@ -30,10 +30,16 @@ const OPENAI_MODELS: &[&str] = &[
     "gpt-4.1",
     "gpt-4o",
     "gpt-4o-mini",
+    "gpt-5.3-chat-latest",
+    "gpt-5.3-codex",
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
     "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5.4-pro",
+    "gpt-5-codex",
 ];
 const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
@@ -226,10 +232,16 @@ mod tests {
                 "gpt-4.1",
                 "gpt-4o",
                 "gpt-4o-mini",
+                "gpt-5.3-chat-latest",
+                "gpt-5.3-codex",
                 "gpt-5",
                 "gpt-5-mini",
                 "gpt-5-nano",
                 "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.4-nano",
+                "gpt-5.4-pro",
+                "gpt-5-codex",
             ]
         );
     }
