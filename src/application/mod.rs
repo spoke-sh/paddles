@@ -4415,7 +4415,6 @@ fn has_file_targeting_step(loop_state: &PlannerLoopState) -> bool {
             step.action,
             PlannerAction::Workspace {
                 action: WorkspaceAction::Read { .. }
-                    | WorkspaceAction::ListFiles { .. }
                     | WorkspaceAction::Diff { .. }
                     | WorkspaceAction::WriteFile { .. }
                     | WorkspaceAction::ReplaceInFile { .. }
@@ -4667,7 +4666,8 @@ fn format_action_bias_review_note(
         format!("Proposed action under review: {}", decision.action.summary()),
         "This turn is edit-oriented. Action produces information.".to_string(),
         "Workspace editor pressure: active.".to_string(),
-        "If there is a plausible target file, prefer read/diff/edit over another broad search or generic inspect.".to_string(),
+        "If there is a plausible target file, prefer read/diff/edit over another broad search, `list_files`, inspect, or generic gather." .to_string(),
+        "Avoid repeating list/search/inspect in the same turn when an exact file is already likely.".to_string(),
         "If the requested change is local and mechanical (padding, copy, one selector, one condition, or a small UI tweak), move into exact-diff state space now.".to_string(),
         "Hand the turn to the workspace editor. Use `replace_in_file` when you can name the exact old and new text. Use `apply_patch` when the change spans a few nearby lines.".to_string(),
     ];
@@ -4730,7 +4730,6 @@ fn decision_targets_file(action: &PlannerAction) -> bool {
         action,
         PlannerAction::Workspace {
             action: WorkspaceAction::Read { .. }
-                | WorkspaceAction::ListFiles { .. }
                 | WorkspaceAction::Diff { .. }
                 | WorkspaceAction::WriteFile { .. }
                 | WorkspaceAction::ReplaceInFile { .. }
@@ -7635,6 +7634,58 @@ mod tests {
             note.kind == super::SteeringReviewKind::Execution
                 && note.note.contains("Steering review [action-bias]")
                 && note.note.contains("src/application/mod.rs")
+        }));
+    }
+
+    #[test]
+    fn action_bias_rejects_repeated_list_files_in_edit_turn() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            steps: vec![PlannerStepRecord {
+                step_id: "planner-step-1".to_string(),
+                sequence: 1,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::ListFiles {
+                        pattern: Some("*openai*".to_string()),
+                    },
+                },
+                outcome: "broad file discovery".to_string(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "src/infrastructure/providers.rs".to_string(),
+                snippet: "provider model registry".to_string(),
+                rationale: "known edit candidate".to_string(),
+                rank: 1,
+            }],
+            ..Default::default()
+        };
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::ListFiles {
+                    pattern: Some("*openai*".to_string()),
+                },
+            },
+            rationale: "try another path match".to_string(),
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: None,
+        };
+
+        let notes = super::collect_steering_review_notes(
+            &test_planner_loop_context(InitialEditInstruction {
+                known_edit: true,
+                candidate_files: vec!["src/infrastructure/providers.rs".to_string()],
+            }),
+            &loop_state,
+            &decision,
+            Path::new("/workspace"),
+        );
+
+        assert!(notes.iter().any(|note| {
+            note.kind == super::SteeringReviewKind::Execution
+                && note.note.contains("Steering review [action-bias]")
+                && note.note.contains("Likely target files:")
+                && note.note.contains("src/infrastructure/providers.rs")
         }));
     }
 
