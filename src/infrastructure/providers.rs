@@ -25,7 +25,16 @@ pub enum ProviderAuthRequirement {
     RequiredApiKey,
 }
 
-const OPENAI_MODELS: &[&str] = &["gpt-4o", "gpt-4o-mini"];
+const OPENAI_MODELS: &[&str] = &[
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-5.4",
+];
 const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
 const GOOGLE_MODELS: &[&str] = &["gemini-2.5-flash"];
@@ -205,6 +214,23 @@ mod tests {
         assert_eq!(
             ModelProvider::Inception.auth_requirement(),
             ProviderAuthRequirement::RequiredApiKey
+        );
+    }
+
+    #[test]
+    fn openai_provider_exposes_additional_model_ids() {
+        assert_eq!(
+            ModelProvider::Openai.known_model_ids(),
+            [
+                "gpt-4.1-mini",
+                "gpt-4.1",
+                "gpt-4o",
+                "gpt-4o-mini",
+                "gpt-5",
+                "gpt-5-mini",
+                "gpt-5-nano",
+                "gpt-5.4",
+            ]
         );
     }
 
