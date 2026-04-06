@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+const PRE_COMMIT_HOOK_CONTRACT_PATH: &str = "support/hooks/pre-commit";
+
 fn repo_file(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
 }
@@ -11,6 +13,14 @@ fn read_repo_file(path: &str) -> String {
     fs::read_to_string(repo_file(path)).unwrap_or_else(|error| {
         panic!("failed to read repo file `{path}`: {error}");
     })
+}
+
+fn try_read_repo_file(path: &str) -> Option<String> {
+    fs::read_to_string(repo_file(path)).ok()
+}
+
+fn normalize_line_endings(contents: &str) -> String {
+    contents.replace("\r\n", "\n")
 }
 
 #[test]
@@ -75,7 +85,7 @@ fn just_test_runs_frontend_workspace_test_checks() {
 
 #[test]
 fn pre_commit_governor_runs_repo_quality_and_test_entrypoints() {
-    let hook = read_repo_file(".git/hooks/pre-commit");
+    let hook = read_repo_file(PRE_COMMIT_HOOK_CONTRACT_PATH);
 
     assert!(
         hook.contains("just quality || exit 1"),
@@ -89,6 +99,14 @@ fn pre_commit_governor_runs_repo_quality_and_test_entrypoints() {
         hook.contains("keel health || exit 1"),
         "pre-commit should still run keel health after quality and test checks",
     );
+
+    if let Some(installed_hook) = try_read_repo_file(".git/hooks/pre-commit") {
+        assert_eq!(
+            normalize_line_endings(&installed_hook),
+            normalize_line_endings(&hook),
+            "installed pre-commit hook should match the repo hook contract; run `keel hooks install`",
+        );
+    }
 }
 
 #[test]

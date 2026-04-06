@@ -1,0 +1,15 @@
+#!/bin/sh
+# keel pacemaker protocol — run quality checks, tests, and keel health.
+# Installed by `keel hooks install`. Do not edit manually.
+
+# Run quality checks
+echo "Running quality checks..."
+just quality || exit 1
+
+# Run tests
+echo "Running tests..."
+just test || exit 1
+
+# Run keel health checks
+echo "Running keel health..."
+keel health || exit 1
