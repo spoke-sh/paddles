@@ -316,6 +316,10 @@ fn frontend_playwright_artifacts_are_gitignored() {
         gitignore.contains("/apps/docs/test-results/"),
         "frontend workspace should ignore docs Playwright test output",
     );
+    assert!(
+        gitignore.contains("/result"),
+        "repo should ignore the root nix build result symlink so local verification builds do not create tracked churn",
+    );
 }
 
 #[test]

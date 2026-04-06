@@ -322,18 +322,7 @@ fn load_primary_shell_html_from(dist_dir: &FsPath) -> std::io::Result<String> {
 }
 
 fn primary_shell_fallback_html() -> &'static str {
-    r#"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Paddles</title>
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
-</html>
-"#
+    include_str!("index.html")
 }
 
 fn load_primary_shell_html() -> String {
@@ -1735,14 +1724,15 @@ mod tests {
     }
 
     #[test]
-    fn primary_shell_loader_falls_back_to_minimal_primary_shell_when_dist_is_missing() {
+    fn primary_shell_loader_falls_back_to_embedded_primary_shell_when_dist_is_missing() {
         let workspace = tempfile::tempdir().expect("workspace");
 
         let html = super::load_primary_shell_html_from(workspace.path())
             .unwrap_or_else(|_| super::primary_shell_fallback_html().to_string());
 
-        assert!(html.contains("<div id=\"root\"></div>"));
-        assert!(!html.contains("id=\"prompt\""));
+        assert_eq!(html, include_str!("index.html"));
+        assert!(html.contains("id=\"prompt\""));
+        assert!(html.contains("let transcriptEventSource = null;"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
