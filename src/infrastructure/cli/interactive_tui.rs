@@ -34,6 +34,7 @@ pub struct TuiContext {
     pub credential_store: Arc<CredentialStore>,
     pub runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
     pub runtime_lanes: RuntimeLaneConfig,
+    pub web_server_port: u16,
     pub verbose: u8,
 }
 
@@ -156,6 +157,7 @@ pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiCont
     if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
         app.load_transcript(&transcript);
     }
+    app.rows.push(web_server_ready_row(tui_ctx.web_server_port));
 
     loop {
         drain_messages(&mut app, &mut rx);
@@ -876,6 +878,17 @@ fn transcript_row_from_runtime_event(presentation: RuntimeEventPresentation) -> 
     };
 
     TranscriptRow::new(TranscriptRowKind::Event, presentation.title, content)
+}
+
+fn web_server_ready_row(port: u16) -> TranscriptRow {
+    TranscriptRow::new(
+        TranscriptRowKind::CommandNotice,
+        "• Web UI ready",
+        format!(
+            "HTTP server listening on {}.",
+            crate::infrastructure::web::local_web_ui_url(port)
+        ),
+    )
 }
 
 struct InteractiveApp {
@@ -3343,7 +3356,7 @@ mod tests {
         TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
         format_duration_compact, format_turn_event_row, inline_multiline_text,
         inline_viewport_height_for_terminal, render_row_lines, runtime_lane_summary,
-        select_interactive_frontend,
+        select_interactive_frontend, web_server_ready_row,
     };
     use crate::application::{ConversationSession, RuntimeLaneConfig};
     use crate::domain::model::{
@@ -3991,6 +4004,15 @@ mod tests {
 
         let placeholder = app.input_placeholder();
         assert_eq!(placeholder, "Type a prompt...");
+    }
+
+    #[test]
+    fn web_server_ready_row_reports_local_ui_port() {
+        let row = web_server_ready_row(41234);
+
+        assert_eq!(row.kind, TranscriptRowKind::CommandNotice);
+        assert_eq!(row.header, "• Web UI ready");
+        assert!(row.content.contains("http://127.0.0.1:41234"));
     }
 
     #[test]

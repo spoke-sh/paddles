@@ -256,6 +256,10 @@ pub fn router(
     (app, observer)
 }
 
+pub fn local_web_ui_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
 /// Broadcasts all events to the SSE channel regardless of session.
 /// Used as a global observer on MechSuitService so CLI turns are visible.
 struct GlobalBroadcastSink {

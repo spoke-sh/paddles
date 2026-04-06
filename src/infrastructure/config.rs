@@ -216,6 +216,24 @@ pub fn normalize_gatherer_provider_alias(provider: &str) -> String {
     provider.to_string()
 }
 
+/// Resolve the requested web server port before binding.
+///
+/// CLI flags win over everything. When no authored config file is present, the
+/// default startup behavior is to request an ephemeral port from the OS.
+pub fn resolve_web_server_port(
+    cli_port: Option<u16>,
+    config_port: u16,
+    authored_config_path: Option<&Path>,
+) -> u16 {
+    cli_port.unwrap_or_else(|| {
+        if authored_config_path.is_some() {
+            config_port
+        } else {
+            0
+        }
+    })
+}
+
 fn authored_config_search_paths(workspace_root: &Path) -> Vec<PathBuf> {
     let mut paths = vec![workspace_root.join(CONFIG_FILE_NAME)];
     if let Some(user_config) = user_config_path() {
@@ -270,6 +288,17 @@ mod tests {
         assert_eq!(config.port, 3000);
         assert_eq!(config.weights, 0.5);
         assert_eq!(config.biases, 0.0);
+    }
+
+    #[test]
+    fn startup_port_requests_ephemeral_binding_without_authored_config() {
+        let requested = resolve_web_server_port(
+            None,
+            PaddlesConfig::default().port,
+            Option::<&std::path::Path>::None,
+        );
+
+        assert_eq!(requested, 0);
     }
 
     #[test]
