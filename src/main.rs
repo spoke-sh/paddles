@@ -260,7 +260,7 @@ async fn main() -> Result<()> {
     // Load layered config: system -> user -> workspace -> runtime lane state.
     let config =
         PaddlesConfig::load_with_runtime_preferences(&root_path, runtime_preferences.as_ref());
-    let authored_config_path = PaddlesConfig::find_config_path(&root_path);
+    let authored_port_configured = PaddlesConfig::authored_port_is_configured(&root_path);
 
     // Merge: CLI flags override config values
     let mut model = cli.model.unwrap_or(config.model);
@@ -268,8 +268,7 @@ async fn main() -> Result<()> {
     let weights = cli.weights.unwrap_or(config.weights);
     let biases = cli.biases.unwrap_or(config.biases);
     let reality_mode = cli.reality_mode || config.reality_mode;
-    let requested_port =
-        resolve_web_server_port(cli.port, config.port, authored_config_path.as_deref());
+    let requested_port = resolve_web_server_port(cli.port, config.port, authored_port_configured);
     let verbose = if cli.verbose > 0 {
         cli.verbose
     } else {
@@ -505,9 +504,12 @@ async fn main() -> Result<()> {
         paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
     service.register_event_observer(web_observer);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{requested_port}")).await?;
-    let web_server_port = listener.local_addr()?.port();
+    let web_server_addr = listener.local_addr()?;
     if verbose >= 3 {
-        println!("[BOOT] HTTP API server listening on port {web_server_port}.");
+        println!(
+            "[BOOT] HTTP API server listening on {}.",
+            paddles::infrastructure::web::web_server_url(web_server_addr)
+        );
     }
     tokio::spawn(async move {
         if let Err(err) = axum::serve(listener, web_router).await {
@@ -525,7 +527,7 @@ async fn main() -> Result<()> {
                     credential_store: Arc::clone(&credential_store),
                     runtime_preference_store: Arc::clone(&runtime_preference_store),
                     runtime_lanes: runtime_lanes.clone(),
-                    web_server_port,
+                    web_server_addr,
                     verbose,
                 };
                 run_interactive_tui(service, tui_ctx).await?

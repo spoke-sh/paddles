@@ -104,6 +104,18 @@ impl PaddlesConfig {
             .find(|p| p.exists())
     }
 
+    /// Returns whether any authored config layer explicitly sets `port`.
+    pub fn authored_port_is_configured(workspace_root: &Path) -> bool {
+        let user_config = user_config_path();
+        let system_config = PathBuf::from(SYSTEM_CONFIG_PATH);
+        let workspace_config = workspace_root.join(CONFIG_FILE_NAME);
+        authored_port_is_configured_in_explicit_paths(
+            Some(workspace_config.as_path()),
+            user_config.as_deref(),
+            Some(system_config.as_path()),
+        )
+    }
+
     fn load_from_explicit_paths(
         workspace_config: Option<&Path>,
         user_config: Option<&Path>,
@@ -218,20 +230,33 @@ pub fn normalize_gatherer_provider_alias(provider: &str) -> String {
 
 /// Resolve the requested web server port before binding.
 ///
-/// CLI flags win over everything. When no authored config file is present, the
-/// default startup behavior is to request an ephemeral port from the OS.
+/// CLI flags win over everything. When no authored config layer explicitly sets
+/// `port`, the default startup behavior is to request an ephemeral port from
+/// the OS.
 pub fn resolve_web_server_port(
     cli_port: Option<u16>,
     config_port: u16,
-    authored_config_path: Option<&Path>,
+    authored_port_configured: bool,
 ) -> u16 {
-    cli_port.unwrap_or_else(|| {
-        if authored_config_path.is_some() {
+    cli_port.unwrap_or({
+        if authored_port_configured {
             config_port
         } else {
             0
         }
     })
+}
+
+fn authored_port_is_configured_in_explicit_paths(
+    workspace_config: Option<&Path>,
+    user_config: Option<&Path>,
+    system_config: Option<&Path>,
+) -> bool {
+    [system_config, user_config, workspace_config]
+        .into_iter()
+        .flatten()
+        .filter_map(parse_config_overlay)
+        .any(|overlay| overlay.port.is_some())
 }
 
 fn authored_config_search_paths(workspace_root: &Path) -> Vec<PathBuf> {
@@ -292,10 +317,28 @@ mod tests {
 
     #[test]
     fn startup_port_requests_ephemeral_binding_without_authored_config() {
+        let requested = resolve_web_server_port(None, PaddlesConfig::default().port, false);
+
+        assert_eq!(requested, 0);
+    }
+
+    #[test]
+    fn startup_port_requests_ephemeral_binding_when_authored_config_omits_port() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace-paddles.toml");
+        fs::write(
+            &workspace,
+            r#"
+provider = "moonshot"
+model = "kimi-k2.5"
+"#,
+        )
+        .expect("write workspace config");
+
         let requested = resolve_web_server_port(
             None,
             PaddlesConfig::default().port,
-            Option::<&std::path::Path>::None,
+            authored_port_is_configured_in_explicit_paths(Some(workspace.as_path()), None, None),
         );
 
         assert_eq!(requested, 0);

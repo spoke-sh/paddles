@@ -231,9 +231,10 @@ authored `paddles.toml` files. Runtime lane state is applied after authored
 config for the planner/synthesizer lane fields, so the last `/model` selection
 is restored even when a project-local `./paddles.toml` also sets `provider` or
 `model`. Other settings such as `port`, verbosity, gatherer configuration, and
-CLI flags keep their normal precedence. If no authored config file exists and
-you do not pass `--port`, Paddles asks the OS for an ephemeral HTTP port at
-startup and reports the resolved local web UI URL in the intro transcript.
+CLI flags keep their normal precedence. If no authored config layer explicitly
+sets `port` and you do not pass `--port`, Paddles asks the OS for an ephemeral
+HTTP port at startup and reports the resolved HTTP bind address in the intro
+transcript.
 
 Local `sift` retrieval artifacts are machine-managed too. Paddles stores the
 search cache under `~/.cache/paddles/sift/workspaces/<workspace-key>` instead

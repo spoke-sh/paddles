@@ -16,6 +16,7 @@ use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -256,8 +257,8 @@ pub fn router(
     (app, observer)
 }
 
-pub fn local_web_ui_url(port: u16) -> String {
-    format!("http://127.0.0.1:{port}")
+pub fn web_server_url(addr: SocketAddr) -> String {
+    format!("http://{addr}")
 }
 
 /// Broadcasts all events to the SSE channel regardless of session.
