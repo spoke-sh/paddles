@@ -1889,20 +1889,15 @@ impl InteractiveApp {
     }
 
     fn should_show_event(&self, event: &TurnEvent, pace: Pace, is_first_step: bool) -> bool {
-        if !event.should_emit_to_projection_stream() {
-            return false;
-        }
-
         if is_first_step {
             return true;
         }
-        let base = event.min_verbosity();
-        let promotion = match pace {
+        let promoted_verbose = self.verbose.saturating_add(match pace {
             Pace::Slow => 2,
             Pace::Normal => 1,
             Pace::Fast => 0,
-        };
-        base.saturating_sub(promotion) <= self.verbose
+        });
+        event.is_visible_at_verbosity(promoted_verbose)
     }
 
     fn replace_or_push_tracked_row(

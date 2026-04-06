@@ -247,6 +247,18 @@ pub fn resolve_web_server_port(
     })
 }
 
+/// Resolve the effective runtime verbosity from CLI and authored config.
+///
+/// CLI flags win over persisted config. When the CLI does not set `-v`, the
+/// layered config value applies to every interactive surface.
+pub fn resolve_runtime_verbosity(cli_verbose: u8, config_verbose: u8) -> u8 {
+    if cli_verbose > 0 {
+        cli_verbose
+    } else {
+        config_verbose
+    }
+}
+
 fn authored_port_is_configured_in_explicit_paths(
     workspace_config: Option<&Path>,
     user_config: Option<&Path>,
@@ -342,6 +354,18 @@ model = "kimi-k2.5"
         );
 
         assert_eq!(requested, 0);
+    }
+
+    #[test]
+    fn runtime_verbosity_prefers_cli_over_config() {
+        assert_eq!(resolve_runtime_verbosity(1, 3), 1);
+        assert_eq!(resolve_runtime_verbosity(3, 1), 3);
+    }
+
+    #[test]
+    fn runtime_verbosity_uses_config_when_cli_is_unset() {
+        assert_eq!(resolve_runtime_verbosity(0, 2), 2);
+        assert_eq!(resolve_runtime_verbosity(0, 0), 0);
     }
 
     #[test]

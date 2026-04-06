@@ -295,6 +295,10 @@ impl TurnEvent {
             _ => true,
         }
     }
+
+    pub fn is_visible_at_verbosity(&self, verbose: u8) -> bool {
+        self.should_emit_to_projection_stream() && self.min_verbosity() <= verbose
+    }
 }
 
 pub trait TurnEventSink: Send + Sync {
@@ -418,5 +422,22 @@ mod tests {
         };
 
         assert!(event.should_emit_to_projection_stream());
+    }
+
+    #[test]
+    fn event_visibility_tracks_projection_stream_floor_and_verbosity() {
+        let high_detail = TurnEvent::IntentClassified {
+            intent: TurnIntent::Casual,
+        };
+        let low_detail = TurnEvent::ToolCalled {
+            call_id: "call-1".to_string(),
+            tool_name: "shell".to_string(),
+            invocation: "pwd".to_string(),
+        };
+
+        assert!(!high_detail.is_visible_at_verbosity(0));
+        assert!(!high_detail.is_visible_at_verbosity(1));
+        assert!(high_detail.is_visible_at_verbosity(2));
+        assert!(low_detail.is_visible_at_verbosity(0));
     }
 }

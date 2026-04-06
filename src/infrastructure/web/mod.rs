@@ -111,18 +111,19 @@ struct ManifoldUpdateEventResponse {
 struct BroadcastEventSink {
     session_id: String,
     task_id: TaskTraceId,
+    verbose: u8,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
 
-fn should_forward_projection_event(event: &TurnEvent) -> bool {
-    event.should_emit_to_projection_stream()
+fn should_forward_projection_event(event: &TurnEvent, verbose: u8) -> bool {
+    event.is_visible_at_verbosity(verbose)
 }
 
 impl TurnEventSink for BroadcastEventSink {
     fn emit(&self, event: TurnEvent) {
         let _ = self.event_tx.send((self.session_id.clone(), event.clone()));
-        if should_forward_projection_event(&event) {
+        if should_forward_projection_event(&event, self.verbose) {
             let _ = self
                 .projection_tx
                 .send(ConversationProjectionStreamEvent::TurnEvent {
@@ -177,9 +178,11 @@ pub fn router(
     let (projection_tx, _) = broadcast::channel::<ConversationProjectionStreamEvent>(512);
     let shared_session = service.shared_conversation_session();
     let shared_task_id = shared_session.task_id();
+    let verbose = service.verbose();
     let observer: Arc<dyn TurnEventSink> = Arc::new(GlobalBroadcastSink {
         session_id: shared_task_id.as_str().to_string(),
         task_id: shared_task_id,
+        verbose,
         event_tx: event_tx.clone(),
         projection_tx: projection_tx.clone(),
     });
@@ -267,6 +270,7 @@ pub fn web_server_url(addr: SocketAddr) -> String {
 struct GlobalBroadcastSink {
     session_id: String,
     task_id: TaskTraceId,
+    verbose: u8,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
@@ -274,7 +278,7 @@ struct GlobalBroadcastSink {
 impl TurnEventSink for GlobalBroadcastSink {
     fn emit(&self, event: TurnEvent) {
         let _ = self.event_tx.send((self.session_id.clone(), event.clone()));
-        if should_forward_projection_event(&event) {
+        if should_forward_projection_event(&event, self.verbose) {
             let _ = self
                 .projection_tx
                 .send(ConversationProjectionStreamEvent::TurnEvent {
@@ -449,6 +453,7 @@ async fn submit_turn(
     let sink: Arc<dyn TurnEventSink> = Arc::new(BroadcastEventSink {
         session_id: id,
         task_id,
+        verbose: state.service.verbose(),
         event_tx: state.event_tx.clone(),
         projection_tx: state.projection_tx.clone(),
     });
@@ -1436,6 +1441,7 @@ mod tests {
         let sink = super::BroadcastEventSink {
             session_id: task_id.as_str().to_string(),
             task_id: task_id.clone(),
+            verbose: 0,
             event_tx,
             projection_tx,
         };
@@ -1464,6 +1470,30 @@ mod tests {
         assert_eq!(received_projection_event, event);
         assert_eq!(presentation.badge, "tool");
         assert_eq!(presentation.title, "• Ran shell");
+    }
+
+    #[test]
+    fn broadcast_event_sink_filters_projection_rows_by_resolved_verbosity() {
+        let task_id = parse_task_id("task-000001").expect("task");
+        let (event_tx, mut event_rx) = broadcast::channel(8);
+        let (projection_tx, mut projection_rx) = broadcast::channel(8);
+        let sink = super::BroadcastEventSink {
+            session_id: task_id.as_str().to_string(),
+            task_id,
+            verbose: 0,
+            event_tx,
+            projection_tx,
+        };
+
+        let event = crate::domain::model::TurnEvent::IntentClassified {
+            intent: crate::domain::model::TurnIntent::Casual,
+        };
+
+        sink.emit(event.clone());
+
+        let (_, received_event) = event_rx.try_recv().expect("event payload");
+        assert_eq!(received_event, event);
+        assert!(projection_rx.try_recv().is_err());
     }
 
     #[test]

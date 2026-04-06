@@ -1652,6 +1652,10 @@ impl MechSuitService {
         self.verbose.store(level, Ordering::Relaxed);
     }
 
+    pub fn verbose(&self) -> u8 {
+        self.verbose.load(Ordering::Relaxed)
+    }
+
     pub fn set_conversation_history_store(&self, store: Arc<ConversationHistoryStore>) {
         *self
             .conversation_history_store

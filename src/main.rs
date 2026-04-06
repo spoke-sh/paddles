@@ -25,7 +25,7 @@ use paddles::infrastructure::cli::interactive_tui::{
 };
 use paddles::infrastructure::config::{
     PaddlesConfig, normalize_gatherer_provider_alias, normalize_provider_model_alias,
-    resolve_web_server_port,
+    resolve_runtime_verbosity, resolve_web_server_port,
 };
 use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
@@ -269,11 +269,7 @@ async fn main() -> Result<()> {
     let biases = cli.biases.unwrap_or(config.biases);
     let reality_mode = cli.reality_mode || config.reality_mode;
     let requested_port = resolve_web_server_port(cli.port, config.port, authored_port_configured);
-    let verbose = if cli.verbose > 0 {
-        cli.verbose
-    } else {
-        config.verbose
-    };
+    let verbose = resolve_runtime_verbosity(cli.verbose, config.verbose);
     let hf_token = cli.hf_token.or(config.hf_token);
     let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
     let mut planner_model = cli.planner_model.or(config.planner_model);
@@ -445,11 +441,7 @@ async fn main() -> Result<()> {
         trace_recorder.clone(),
     ));
     service.set_conversation_history_store(conversation_history_store);
-    let runtime_verbose = match frontend {
-        InteractiveFrontend::Tui => 0,
-        InteractiveFrontend::PlainLines => verbose,
-    };
-    service.set_verbose(runtime_verbose);
+    service.set_verbose(verbose);
 
     // Boot sequence
     if verbose >= 3 {

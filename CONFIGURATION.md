@@ -234,7 +234,9 @@ is restored even when a project-local `./paddles.toml` also sets `provider` or
 CLI flags keep their normal precedence. If no authored config layer explicitly
 sets `port` and you do not pass `--port`, Paddles asks the OS for an ephemeral
 HTTP port at startup and reports the resolved HTTP bind address in the intro
-transcript.
+transcript. Verbosity follows the same precedence order too: CLI `-v`, `-vv`,
+or `-vvv` wins over authored `paddles.toml`, and the resolved level applies to
+both the TUI transcript stream and the web UI event stream.
 
 Local `sift` retrieval artifacts are machine-managed too. Paddles stores the
 search cache under `~/.cache/paddles/sift/workspaces/<workspace-key>` instead
