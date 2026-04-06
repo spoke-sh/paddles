@@ -191,6 +191,7 @@ export interface ConversationProjectionUpdate {
 export interface ConversationBootstrapResponse {
   session_id: string;
   projection: ConversationProjectionSnapshot;
+  prompt_history: string[];
 }
 
 export interface RuntimeEventPresentation {

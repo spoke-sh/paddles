@@ -29,6 +29,7 @@ interface RuntimeStoreValue {
   error: string | null;
   events: RuntimeEventRow[];
   projection: ConversationProjectionSnapshot | null;
+  promptHistory: string[];
   sending: boolean;
   sessionId: string | null;
   sendTurn: (prompt: string) => Promise<void>;
@@ -53,6 +54,7 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<RuntimeEventRow[]>([]);
   const [projection, setProjection] = useState<ConversationProjectionSnapshot | null>(null);
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const projectionSourceRef = useRef<EventSource | null>(null);
@@ -112,6 +114,7 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
         }
         setSessionId(bootstrap.session_id);
         setProjection(bootstrap.projection);
+        setPromptHistory(bootstrap.prompt_history.filter((prompt) => prompt.trim().length > 0));
         setConnected(true);
         mountProjectionStream(bootstrap.session_id);
       } catch (bootstrapError) {
@@ -142,6 +145,7 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
       return;
     }
 
+    setPromptHistory((current) => [...current, text]);
     setSending(true);
     setError(null);
     try {
@@ -169,11 +173,12 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
       error,
       events,
       projection,
+      promptHistory,
       sending,
       sessionId,
       sendTurn,
     }),
-    [connected, error, events, projection, sending, sessionId]
+    [connected, error, events, projection, promptHistory, sending, sessionId]
   );
 
   return (

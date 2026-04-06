@@ -140,8 +140,11 @@ function comparisonSnippet(
 function RuntimeShellLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeView = activeViewForPath(pathname);
-  const { connected, error, events, projection, sending, sendTurn } = useRuntimeStore();
+  const { connected, error, events, projection, promptHistory, sending, sendTurn } =
+    useRuntimeStore();
   const [prompt, setPrompt] = useState('');
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const [historyDraft, setHistoryDraft] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -158,8 +161,55 @@ function RuntimeShellLayout() {
     if (!text) {
       return;
     }
+    setHistoryCursor(null);
+    setHistoryDraft('');
     setPrompt('');
     await sendTurn(text);
+  }
+
+  function historyBack() {
+    if (promptHistory.length === 0) {
+      return;
+    }
+    if (historyCursor === null) {
+      setHistoryDraft(prompt);
+      const nextCursor = promptHistory.length - 1;
+      setHistoryCursor(nextCursor);
+      setPrompt(promptHistory[nextCursor]);
+      return;
+    }
+    if (historyCursor === 0) {
+      return;
+    }
+    const nextCursor = historyCursor - 1;
+    setHistoryCursor(nextCursor);
+    setPrompt(promptHistory[nextCursor]);
+  }
+
+  function historyForward() {
+    if (historyCursor === null) {
+      return;
+    }
+    if (historyCursor + 1 < promptHistory.length) {
+      const nextCursor = historyCursor + 1;
+      setHistoryCursor(nextCursor);
+      setPrompt(promptHistory[nextCursor]);
+      return;
+    }
+    setHistoryCursor(null);
+    setPrompt(historyDraft);
+  }
+
+  function onPromptKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      historyBack();
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      historyForward();
+    }
   }
 
   return (
@@ -216,11 +266,13 @@ function RuntimeShellLayout() {
             ) : null}
           </div>
         </div>
-        <form className="chat-input" onSubmit={onSubmit}>
+        <form autoComplete="off" className="chat-input" onSubmit={onSubmit}>
           <input
             autoFocus
+            autoComplete="off"
             id="prompt"
             onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={onPromptKeyDown}
             placeholder="Ask paddles..."
             type="text"
             value={prompt}

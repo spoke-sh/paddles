@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RuntimeApp } from './runtime-app';
@@ -215,6 +215,8 @@ const bootstrapProjection: ConversationProjectionSnapshot = {
   },
 };
 
+const bootstrapPromptHistory = ['first prompt', 'second prompt'];
+
 beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -227,6 +229,7 @@ beforeEach(() => {
           JSON.stringify({
             session_id: 'task-123',
             projection: bootstrapProjection,
+            prompt_history: bootstrapPromptHistory,
           }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         );
@@ -365,6 +368,28 @@ describe('RuntimeApp', () => {
     renderAtPath('/');
 
     expect(await screen.findByText('grounded answer')).toBeInTheDocument();
+  });
+
+  it('disables native autocomplete and recalls bootstrapped prompt history with arrow keys', async () => {
+    renderAtPath('/');
+
+    await screen.findByText('Mock provider completed the turn after local inspection.');
+
+    const input = screen.getByPlaceholderText('Ask paddles...');
+    expect(input).toHaveAttribute('autocomplete', 'off');
+
+    fireEvent.change(input, { target: { value: 'draft prompt' } });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('second prompt');
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveValue('first prompt');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveValue('second prompt');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveValue('draft prompt');
   });
 
   it('renders the primary transit route through the client router', async () => {

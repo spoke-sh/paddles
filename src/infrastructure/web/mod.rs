@@ -63,6 +63,7 @@ struct SessionResponse {
 struct ConversationBootstrapResponse {
     session_id: String,
     projection: ConversationProjectionSnapshot,
+    prompt_history: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -425,10 +426,12 @@ async fn shared_conversation_bootstrap(
         .service
         .replay_conversation_projection(&task_id)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    let prompt_history = state.service.prompt_history().unwrap_or_default();
 
     Ok(Json(ConversationBootstrapResponse {
         session_id: task_id.as_str().to_string(),
         projection,
+        prompt_history,
     }))
 }
 
@@ -762,6 +765,7 @@ mod tests {
         ApiFormat, HttpPlannerAdapter, HttpProviderAdapter,
     };
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::conversation_history::ConversationHistoryStore;
     use crate::infrastructure::providers::ModelProvider;
     use crate::infrastructure::rendering::RenderCapability;
     use anyhow::{Result, anyhow};
@@ -1827,6 +1831,16 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let history_store = Arc::new(ConversationHistoryStore::with_path(
+            workspace.path().join("state/conversation-history.toml"),
+        ));
+        history_store
+            .record_prompt("first prompt")
+            .expect("record prompt history");
+        history_store
+            .record_prompt("second prompt")
+            .expect("record prompt history");
+        service.set_conversation_history_store(Arc::clone(&history_store));
         let state = Arc::new(AppState {
             service: Arc::clone(&service),
             trace_recorder: recorder,
@@ -1842,6 +1856,7 @@ mod tests {
         let Json(ConversationBootstrapResponse {
             session_id,
             projection,
+            prompt_history,
         }) = super::shared_conversation_bootstrap(State(state))
             .await
             .expect("shared bootstrap");
@@ -1852,6 +1867,10 @@ mod tests {
         assert_eq!(projection.forensics.turns.len(), 0);
         assert_eq!(projection.manifold.turns.len(), 0);
         assert!(projection.trace_graph.nodes.is_empty());
+        assert_eq!(
+            prompt_history,
+            vec!["first prompt".to_string(), "second prompt".to_string()]
+        );
     }
 
     #[test]
