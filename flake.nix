@@ -74,36 +74,40 @@
         };
 
         devShells.default = pkgs.mkShell {
-                    buildInputs = [
-                      rust
-                      pkgs.nodejs_20
-                      pkgs.chromium
-                      pkgs.just
-                      pkgs.cargo-nextest
-                      pkgs.cargo-llvm-cov
-                                  pkgs.pkg-config
-                                              pkgs.openssl
-                                              pkgs.zlib
-                                              pkgs.zstd
-                                              keelPkg
-                                                        siftPkg
-                    ]
-           ++ pkgs.lib.optionals isLinux [
-            pkgs.cudatoolkit
-            pkgs.mold
-          ];
+          buildInputs =
+            [
+              rust
+              pkgs.nodejs_20
+              pkgs.just
+              pkgs.cargo-nextest
+              pkgs.cargo-llvm-cov
+              pkgs.pkg-config
+              pkgs.openssl
+              pkgs.zlib
+              pkgs.zstd
+              keelPkg
+              siftPkg
+            ]
+            ++ pkgs.lib.optionals isLinux [
+              pkgs.chromium
+              pkgs.cudatoolkit
+              pkgs.mold
+            ];
 
-                              shellHook = ''
-                                # Shared target directory across shell sessions for faster rebuilds.
-                                export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
-                                export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.lib.getExe pkgs.chromium}"
-                                export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-                              ''
-
-           + pkgs.lib.optionalString isDarwin ''
+          shellHook = ''
+            # Shared target directory across shell sessions for faster rebuilds.
+            export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/paddles"
+          ''
+          + pkgs.lib.optionalString isLinux ''
+            export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.lib.getExe pkgs.chromium}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+          ''
+          + pkgs.lib.optionalString isDarwin ''
+            # Let Playwright manage its own browser download on macOS.
             # Nix can set TMPDIR to a shell-specific path on macOS; use a stable path.
             export TMPDIR=/var/tmp
-          '' + pkgs.lib.optionalString isLinux ''
+          ''
+          + pkgs.lib.optionalString isLinux ''
             # Expose the CUDA toolkit for Candle CUDA builds and runtime loading.
             export CUDA_PATH="${pkgs.cudatoolkit}"
             export CUDA_ROOT="${pkgs.cudatoolkit}"

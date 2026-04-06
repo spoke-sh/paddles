@@ -334,6 +334,10 @@ Enter the dev shell:
 nix develop
 ```
 
+On Linux, the dev shell provides `chromium` for Playwright-driven browser tests.
+On macOS, nixpkgs does not ship that package, so Playwright uses its own managed
+browser download after `npm ci`.
+
 Build and test:
 
 ```bash

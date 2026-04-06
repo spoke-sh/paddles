@@ -174,13 +174,35 @@ fn frontend_apps_exist_under_apps_directory() {
 #[test]
 fn dev_shell_exposes_node_for_frontend_workspace_checks() {
     let flake = read_repo_file("flake.nix");
+    let dev_shell = flake
+        .split("devShells.default = pkgs.mkShell {")
+        .nth(1)
+        .expect("flake.nix should define the default dev shell");
+    let linux_browser_inputs = dev_shell
+        .split("++ pkgs.lib.optionals isLinux [")
+        .nth(1)
+        .and_then(|section| section.split("];").next())
+        .expect("flake.nix should guard Linux-only dev shell inputs");
+
     assert!(
         flake.contains("pkgs.nodejs"),
         "dev shell should include nodejs so frontend workspace checks run in nix develop",
     );
     assert!(
-        flake.contains("pkgs.chromium"),
-        "dev shell should include chromium so browser e2e checks run in nix develop",
+        linux_browser_inputs.contains("pkgs.chromium"),
+        "dev shell should provide nixpkgs chromium only on Linux where the package is supported",
+    );
+    assert!(
+        flake.contains("export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="),
+        "linux shells should point Playwright at the nix-provided Chromium executable",
+    );
+    assert!(
+        flake.contains("export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"),
+        "linux shells should skip Playwright browser downloads when nix provides Chromium",
+    );
+    assert!(
+        flake.contains("Let Playwright manage its own browser download on macOS."),
+        "darwin shells should fall back to Playwright-managed browsers instead of nixpkgs chromium",
     );
 }
 
