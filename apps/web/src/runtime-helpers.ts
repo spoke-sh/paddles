@@ -670,7 +670,14 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
       text: projectionEvent.presentation.text,
     };
     if (type === 'tool_output') {
-      return { ...row, output: projectionEvent.presentation.detail };
+      return {
+        ...row,
+        output: projectionEvent.presentation.detail,
+        streamKey:
+          typeof event.call_id === 'string' && typeof event.stream === 'string'
+            ? `tool-stream:${event.call_id}:${event.stream}`
+            : undefined,
+      };
     }
     return diff ? { ...row, diff } : row;
   }
@@ -701,6 +708,10 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
       badgeClass: 'tool-terminal',
       text: `${String(event.tool_name || 'tool')} ${String(event.stream || 'output')}`,
       output: String(event.output || ''),
+      streamKey:
+        typeof event.call_id === 'string' && typeof event.stream === 'string'
+          ? `tool-stream:${event.call_id}:${event.stream}`
+          : undefined,
     };
   }
   if (type === 'workspace_edit_applied') {

@@ -177,11 +177,25 @@ body {
 }
 .event-badge.planner { background: rgba(45, 144, 200, 0.18); color: #255f86; }
 .event-badge.tool { background: rgba(240, 138, 36, 0.22); color: #9e561d; }
+.event-badge.tool-terminal { background: rgba(87, 104, 122, 0.18); color: #314150; }
 .event-badge.tool-diff { background: rgba(23, 149, 108, 0.22); color: #166751; }
 .event-badge.gatherer { background: rgba(223, 178, 63, 0.2); color: #82620f; }
 .event-badge.route { background: rgba(45, 144, 200, 0.18); color: #255f86; }
 .event-badge.synthesis { background: rgba(23, 149, 108, 0.16); color: #166751; }
 .event-badge.fallback { background: rgba(214, 95, 74, 0.18); color: #9a4536; }
+.event-output {
+  display: block;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(56, 69, 82, 0.08);
+  color: #233547;
+  font-family: "SFMono-Regular", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.event-output-line { display: block; }
 .diff-lines { display: block; margin-top: 4px; padding-left: 12px; }
 .diff-line { white-space: pre; display: block; }
 .diff-line.add { color: #3fb950; }
@@ -1946,6 +1960,7 @@ let tracePanState = null;
 let tracePanX = 0;
 let tracePanY = 0;
 let traceReframePending = false;
+const toolOutputStreams = new Map();
 
 const MUTATION_TOOLS = new Set(["diff", "apply_patch"]);
 const TRACE_TILE_MIN = 128;
@@ -3023,6 +3038,7 @@ function connectSSE() {
   if (transcriptEventSource) transcriptEventSource.close();
   if (forensicEventSource) forensicEventSource.close();
   if (manifoldEventSource) manifoldEventSource.close();
+  toolOutputStreams.clear();
 
   eventSource = new EventSource('/events');
   eventSource.addEventListener('turn_event', (e) => {
@@ -3199,6 +3215,32 @@ function formatDiffForEvent(label, diff) {
   return escapeHtml(label) + '<br><span class="diff-lines">' + lines + '</span>';
 }
 
+function toolOutputStreamKey(ev) {
+  if (!ev || typeof ev.call_id !== 'string' || typeof ev.stream !== 'string') {
+    return null;
+  }
+  return 'tool-stream:' + ev.call_id + ':' + ev.stream;
+}
+
+function forgetToolOutputStreams(callId) {
+  if (!callId) {
+    return;
+  }
+  for (const key of Array.from(toolOutputStreams.keys())) {
+    if (key.startsWith('tool-stream:' + callId + ':')) {
+      toolOutputStreams.delete(key);
+    }
+  }
+}
+
+function formatToolOutputEvent(label, output) {
+  const lines = String(output || '')
+    .split('\n')
+    .map((line) => '<span class="event-output-line">' + (line ? escapeHtml(line) : '&#160;') + '</span>')
+    .join('');
+  return escapeHtml(label) + '<span class="event-output">' + lines + '</span>';
+}
+
 function handleEvent(ev) {
   const t = ev.type;
   if (t === 'intent_classified') {
@@ -3209,11 +3251,26 @@ function handleEvent(ev) {
     addEventRow('planner', 'planner', 'Step ' + ev.sequence + ': ' + ev.action);
   } else if (t === 'tool_called') {
     addEventRow('tool', 'tool', ev.tool_name + ': ' + truncate(ev.invocation, 60));
+  } else if (t === 'tool_output') {
+    const label = (ev.tool_name || 'tool') + ' ' + (ev.stream || 'output');
+    const key = toolOutputStreamKey(ev);
+    const existingOutput = key ? (toolOutputStreams.get(key) || '') : '';
+    const output = existingOutput + String(ev.output || '');
+    if (key) {
+      toolOutputStreams.set(key, output);
+    }
+    addEventRow(
+      'term',
+      'tool-terminal',
+      label,
+      formatToolOutputEvent(label, output),
+      key ? { key } : {}
+    );
   } else if (t === 'workspace_edit_applied') {
     const diff = ev.edit && typeof ev.edit.diff === 'string' ? ev.edit.diff : '';
     if (diff) {
       addEventRow(
-        'tool',
+          'tool',
         'tool-diff',
         ev.tool_name + ' applied',
         formatDiffForEvent(ev.tool_name + ' applied', diff)
@@ -3222,6 +3279,7 @@ function handleEvent(ev) {
       addEventRow('tool', 'tool', ev.tool_name + ' applied');
     }
   } else if (t === 'tool_finished') {
+    forgetToolOutputStreams(ev.call_id);
     if (isMutationTool(ev.tool_name)) {
       const diff = extractMutationDiff(ev.tool_name, ev.summary);
       if (diff) {

@@ -356,6 +356,33 @@ describe('RuntimeApp', () => {
     expect(document.querySelector('.event-badge.tool-diff')).toBeInTheDocument();
   });
 
+  it('accumulates tool output into one live stream row per call and stream', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+
+    const [stream] = FakeEventSource.instances;
+    stream.dispatch('turn_event', {
+      type: 'tool_output',
+      call_id: 'tool-1',
+      tool_name: 'shell',
+      stream: 'stdout',
+      output: 'alpha\n',
+    });
+    stream.dispatch('turn_event', {
+      type: 'tool_output',
+      call_id: 'tool-1',
+      tool_name: 'shell',
+      stream: 'stdout',
+      output: 'beta',
+    });
+
+    expect(await screen.findByText('shell stdout')).toBeInTheDocument();
+    expect(await screen.findByText('alpha')).toBeInTheDocument();
+    expect(await screen.findByText('beta')).toBeInTheDocument();
+    expect(document.querySelectorAll('.event-badge.tool-terminal')).toHaveLength(1);
+  });
+
   it('renders assistant transcript blocks instead of flattening them to plain strings', async () => {
     renderAtPath('/');
 

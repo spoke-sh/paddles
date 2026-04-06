@@ -23,6 +23,7 @@ interface RuntimeEventRow {
   text: string;
   diff?: string;
   output?: string;
+  streamKey?: string;
 }
 
 interface RuntimeStoreValue {
@@ -86,13 +87,41 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
         const payload = JSON.parse((message as MessageEvent<string>).data) as
           | ProjectionTurnEvent
           | TurnEvent;
-        const row = eventRow(payload);
-        if (!row) {
+        const nextRow = eventRow(payload);
+        if (!nextRow) {
           return;
         }
-        setEvents((current) =>
-          [...current, { id: `${Date.now()}-${current.length}`, ...row }].slice(-64)
-        );
+        const row: Omit<RuntimeEventRow, 'id'> = {
+          badge: nextRow.badge,
+          badgeClass: nextRow.badgeClass,
+          text: nextRow.text,
+          diff: 'diff' in nextRow ? nextRow.diff : undefined,
+          output: 'output' in nextRow ? nextRow.output : undefined,
+          streamKey: 'streamKey' in nextRow ? nextRow.streamKey : undefined,
+        };
+        setEvents((current) => {
+          if (row.streamKey) {
+            const existingIndex = current.findIndex(
+              (item) => item.streamKey === row.streamKey
+            );
+            if (existingIndex >= 0) {
+              const next = [...current];
+              const existing = next[existingIndex];
+              next[existingIndex] = {
+                ...existing,
+                badge: row.badge,
+                badgeClass: row.badgeClass,
+                text: row.text,
+                output: `${existing.output || ''}${row.output || ''}`,
+              };
+              return next;
+            }
+          }
+          return [
+            ...current,
+            { id: row.streamKey || `${Date.now()}-${current.length}`, ...row },
+          ].slice(-64);
+        });
       });
       projectionSource.onerror = () => {
         setConnected(false);

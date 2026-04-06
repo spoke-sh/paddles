@@ -21,7 +21,7 @@ use ratatui::prelude::{Color, Line, Modifier, Span, Style, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use std::cmp;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -827,6 +827,25 @@ fn busy_label(busy_phase: BusyPhase, last_event: Option<&TurnEvent>) -> String {
 
 fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
     match last_event {
+        TurnEvent::ToolCalled {
+            tool_name,
+            invocation,
+            ..
+        } => TranscriptRow::new(
+            TranscriptRowKind::InFlightEvent,
+            format!("• {tool_name}..."),
+            collapse_event_details(invocation, EVENT_DETAIL_LINE_LIMIT),
+        ),
+        TurnEvent::ToolOutput {
+            tool_name,
+            stream,
+            output,
+            ..
+        } => TranscriptRow::new(
+            TranscriptRowKind::InFlightEvent,
+            format!("• {tool_name} {stream}..."),
+            collapse_event_details(output, EVENT_DETAIL_LINE_LIMIT),
+        ),
         TurnEvent::GathererSearchProgress {
             phase,
             strategy,
@@ -863,12 +882,39 @@ fn format_in_flight_row(last_event: &TurnEvent) -> TranscriptRow {
                 )
             }
         }
+        TurnEvent::HarnessState { snapshot }
+            if snapshot.chamber == crate::domain::model::HarnessChamber::Tooling =>
+        {
+            format_tooling_in_flight_row(snapshot.detail.as_deref())
+        }
         event => TranscriptRow::new(
             TranscriptRowKind::InFlightEvent,
             format!("• {}...", in_flight_label(event)),
             "",
         ),
     }
+}
+
+fn format_tooling_in_flight_row(detail: Option<&str>) -> TranscriptRow {
+    let Some(detail) = detail else {
+        return TranscriptRow::new(
+            TranscriptRowKind::InFlightEvent,
+            "• Running tool...".to_string(),
+            "".to_string(),
+        );
+    };
+    if let Some((label, body)) = detail.split_once(": ") {
+        return TranscriptRow::new(
+            TranscriptRowKind::InFlightEvent,
+            format!("• {label}..."),
+            collapse_event_details(body, EVENT_DETAIL_LINE_LIMIT),
+        );
+    }
+    TranscriptRow::new(
+        TranscriptRowKind::InFlightEvent,
+        "• Running tool...".to_string(),
+        collapse_event_details(detail, EVENT_DETAIL_LINE_LIMIT),
+    )
 }
 
 fn transcript_row_from_runtime_event(presentation: RuntimeEventPresentation) -> TranscriptRow {
@@ -920,6 +966,7 @@ struct InteractiveApp {
     search_progress_row: Option<usize>,
     gathering_harness_row: Option<usize>,
     planner_progress_row: Option<usize>,
+    tool_output_rows: BTreeMap<(String, String), usize>,
     last_hunting_sample: Option<HuntingTelemetrySample>,
     last_hunting_history_sample: Option<HuntingTelemetrySample>,
     last_hunting_history_at: Option<Instant>,
@@ -1094,6 +1141,7 @@ impl InteractiveApp {
             search_progress_row: None,
             gathering_harness_row: None,
             planner_progress_row: None,
+            tool_output_rows: BTreeMap::new(),
             last_hunting_sample: None,
             last_hunting_history_sample: None,
             last_hunting_history_at: None,
@@ -1946,6 +1994,17 @@ impl InteractiveApp {
                 }
             }
         }
+        let mut stale_streams = Vec::new();
+        for (stream_key, stream_index) in &mut self.tool_output_rows {
+            if *stream_index == index {
+                stale_streams.push(stream_key.clone());
+            } else if *stream_index > index {
+                *stream_index -= 1;
+            }
+        }
+        for stream_key in stale_streams {
+            self.tool_output_rows.remove(&stream_key);
+        }
     }
 
     fn insert_hunting_history_row(&mut self, row: TranscriptRow) {
@@ -1974,12 +2033,43 @@ impl InteractiveApp {
                 *index += 1;
             }
         }
+        for stream_index in self.tool_output_rows.values_mut() {
+            if *stream_index >= insert_at {
+                *stream_index += 1;
+            }
+        }
 
         if let Some(pending) = self.pending_reveal.as_mut()
             && pending.row_index >= insert_at
         {
             pending.row_index += 1;
         }
+    }
+
+    fn append_tool_output_row(
+        &mut self,
+        call_id: &str,
+        stream: &str,
+        output: &str,
+        mut row: TranscriptRow,
+    ) {
+        let key = (call_id.to_string(), stream.to_string());
+        row.content = output.to_string();
+        if let Some(index) = self.tool_output_rows.get(&key).copied()
+            && index < self.rows.len()
+        {
+            row.content = format!("{}{}", self.rows[index].content, output);
+            self.rows[index] = row;
+            return;
+        }
+
+        self.tool_output_rows.insert(key, self.rows.len());
+        self.rows.push(row);
+    }
+
+    fn forget_tool_output_rows_for_call(&mut self, call_id: &str) {
+        self.tool_output_rows
+            .retain(|(active_call_id, _), _| active_call_id != call_id);
     }
 
     fn maybe_record_hunting_history(
@@ -2095,6 +2185,19 @@ impl InteractiveApp {
                             &mut self.gathering_harness_row,
                             row,
                         );
+                    } else if let TurnEvent::ToolOutput {
+                        call_id,
+                        stream,
+                        output,
+                        ..
+                    } = &event
+                    {
+                        self.search_progress_row = None;
+                        self.gathering_harness_row = None;
+                        self.last_hunting_sample = None;
+                        self.last_hunting_history_sample = None;
+                        self.last_hunting_history_at = None;
+                        self.append_tool_output_row(call_id, stream, output, row);
                     } else {
                         self.search_progress_row = None;
                         self.gathering_harness_row = None;
@@ -2105,6 +2208,9 @@ impl InteractiveApp {
                     }
                 } else if let Some(timing) = self.active_turn_timing.as_mut() {
                     timing.mark_step(occurred_at, pace);
+                }
+                if let TurnEvent::ToolFinished { call_id, .. } = &event {
+                    self.forget_tool_output_rows_for_call(call_id);
                 }
             }
             UiMessage::TranscriptUpdated { update } => {
@@ -2125,6 +2231,7 @@ impl InteractiveApp {
                 self.search_progress_row = None;
                 self.gathering_harness_row = None;
                 self.planner_progress_row = None;
+                self.tool_output_rows.clear();
                 self.last_hunting_sample = None;
                 self.last_hunting_history_sample = None;
                 self.last_hunting_history_at = None;
@@ -5195,6 +5302,50 @@ mod tests {
     }
 
     #[test]
+    fn tool_output_events_reuse_single_stream_row_and_append_chunks() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::ToolOutput {
+                call_id: "tool-1".to_string(),
+                tool_name: "shell".to_string(),
+                stream: "stdout".to_string(),
+                output: "alpha\n".to_string(),
+            },
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+        let rows_after_first_chunk = app.rows.len();
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::ToolOutput {
+                call_id: "tool-1".to_string(),
+                tool_name: "shell".to_string(),
+                stream: "stdout".to_string(),
+                output: "beta".to_string(),
+            },
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+
+        assert_eq!(app.rows.len(), rows_after_first_chunk);
+        let row = app.rows.last().expect("tool output row");
+        assert_eq!(row.header, "• shell stdout");
+        assert_eq!(row.content, "alpha\nbeta");
+    }
+
+    #[test]
     fn in_flight_row_not_emitted_for_quick_events() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -5220,6 +5371,39 @@ mod tests {
         app.tick();
         assert_eq!(app.rows.len(), rows_before);
         assert!(!app.emitted_in_flight);
+    }
+
+    #[test]
+    fn in_flight_row_shows_tool_stream_detail_after_silence() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+        app.last_event = Some((
+            TurnEvent::ToolOutput {
+                call_id: "tool-1".to_string(),
+                tool_name: "shell".to_string(),
+                stream: "stdout".to_string(),
+                output: "alpha\nbeta".to_string(),
+            },
+            Instant::now() - Duration::from_secs(3),
+        ));
+
+        app.tick();
+
+        let row = app.rows.last().expect("in-flight row");
+        assert_eq!(row.kind, TranscriptRowKind::InFlightEvent);
+        assert_eq!(row.header, "• shell stdout...");
+        assert_eq!(row.content, "alpha\nbeta");
     }
 
     #[test]

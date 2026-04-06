@@ -1735,6 +1735,15 @@ mod tests {
         assert!(html.contains("let transcriptEventSource = null;"));
     }
 
+    #[test]
+    fn embedded_primary_shell_accumulates_tool_output_stream_rows() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("t === 'tool_output'"));
+        assert!(html.contains("tool-stream:"));
+        assert!(html.contains("event-output"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn session_routes_project_live_shared_session_turns_from_mock_provider() {
         let workspace = tempfile::tempdir().expect("workspace");
