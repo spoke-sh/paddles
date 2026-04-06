@@ -1,8 +1,8 @@
 use crate::domain::model::ForensicArtifactCapture;
 use crate::domain::model::{
-    CompactionDecision, CompactionPlan, CompactionRequest, ThreadDecision, ThreadDecisionId,
-    ThreadDecisionKind, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
-    TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
+    CompactionDecision, CompactionPlan, CompactionRequest, NullTurnEventSink, ThreadDecision,
+    ThreadDecisionId, ThreadDecisionKind, TraceArtifactId, TraceModelExchangeCategory,
+    TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
@@ -17,6 +17,7 @@ use crate::infrastructure::rendering::{
     ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
 };
+use crate::infrastructure::terminal::run_background_terminal_command;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -1040,20 +1041,22 @@ Rules:
                 })
             }
             WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command } => {
-                let output = std::process::Command::new("sh")
-                    .arg("-lc")
-                    .arg(command)
-                    .current_dir(&self.workspace_root)
-                    .output()?;
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let name = if matches!(action, WorkspaceAction::Inspect { .. }) {
+                let tool_name = if matches!(action, WorkspaceAction::Inspect { .. }) {
                     "inspect"
                 } else {
                     "shell"
                 };
+                let output = run_background_terminal_command(
+                    &self.workspace_root,
+                    command,
+                    tool_name,
+                    "http-provider-workspace-action",
+                    &NullTurnEventSink,
+                )?;
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
                 Ok(WorkspaceActionResult {
-                    name: name.to_string(),
+                    name: tool_name.to_string(),
                     summary: if stderr.trim().is_empty() {
                         truncate(&stdout, 4000)
                     } else {

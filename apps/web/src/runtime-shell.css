@@ -241,12 +241,29 @@ body {
 }
 .event-badge.planner { background: rgba(45, 144, 200, 0.18); color: #255f86; }
 .event-badge.tool { background: rgba(240, 138, 36, 0.22); color: #9e561d; }
+.event-badge.tool-terminal { background: rgba(84, 102, 118, 0.22); color: #30414d; }
 .event-badge.tool-diff { background: rgba(23, 149, 108, 0.22); color: #166751; }
 .event-badge.gatherer { background: rgba(223, 178, 63, 0.2); color: #82620f; }
 .event-badge.governor { background: rgba(111, 131, 146, 0.22); color: #42515d; }
 .event-badge.route { background: rgba(45, 144, 200, 0.18); color: #255f86; }
 .event-badge.synthesis { background: rgba(23, 149, 108, 0.16); color: #166751; }
 .event-badge.fallback { background: rgba(214, 95, 74, 0.18); color: #9a4536; }
+.event-output {
+  display: block;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(241, 246, 249, 0.78);
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: #23313b;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(109, 124, 137, 0.08);
+}
+.event-output-line { display: block; }
 .diff-lines { display: block; margin-top: 4px; padding-left: 12px; }
 .diff-line { white-space: pre; display: block; }
 .diff-line.add { color: #3fb950; }

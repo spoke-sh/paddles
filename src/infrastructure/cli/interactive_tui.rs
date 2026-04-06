@@ -3535,6 +3535,23 @@ mod tests {
     }
 
     #[test]
+    fn terminal_output_events_render_as_terminal_rows() {
+        let row = format_turn_event_row(
+            TurnEvent::ToolOutput {
+                call_id: "tool-1".to_string(),
+                tool_name: "shell".to_string(),
+                stream: "stdout".to_string(),
+                output: "alpha\nbeta".to_string(),
+            },
+            0,
+        );
+
+        assert_eq!(row.kind, TranscriptRowKind::Event);
+        assert_eq!(row.header, "• shell stdout");
+        assert_eq!(row.content, "alpha\nbeta");
+    }
+
+    #[test]
     fn applied_edit_events_render_diff_lines_in_the_tui_transcript() {
         let palette = detect_palette();
         let row = format_turn_event_row(

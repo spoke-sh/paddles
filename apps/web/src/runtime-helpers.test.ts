@@ -26,6 +26,31 @@ describe('eventRow', () => {
     });
   });
 
+  it('preserves terminal output rows from the rust-authored runtime presentation', () => {
+    const row = eventRow({
+      event: {
+        type: 'tool_output',
+        tool_name: 'shell',
+        stream: 'stdout',
+        output: 'alpha\nbeta',
+      },
+      presentation: {
+        badge: 'term',
+        badge_class: 'tool-terminal',
+        title: '• shell stdout',
+        detail: 'alpha\nbeta',
+        text: 'shell stdout',
+      },
+    });
+
+    expect(row).toEqual({
+      badge: 'term',
+      badgeClass: 'tool-terminal',
+      text: 'shell stdout',
+      output: 'alpha\nbeta',
+    });
+  });
+
   it('surfaces gatherer progress detail instead of collapsing to a generic searching label', () => {
     const row = eventRow({
       type: 'gatherer_search_progress',

@@ -159,6 +159,17 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             HarnessSnapshot::active(HarnessChamber::Tooling)
                 .with_detail(format!("{tool_name}: {invocation}")),
         ),
+        TurnEvent::ToolOutput {
+            tool_name,
+            stream,
+            output,
+            ..
+        } => Some(
+            HarnessSnapshot::active(HarnessChamber::Tooling).with_detail(format!(
+                "{tool_name} {stream}: {}",
+                output.lines().next().unwrap_or_default()
+            )),
+        ),
         TurnEvent::ToolFinished {
             tool_name, summary, ..
         } => Some(

@@ -8,6 +8,7 @@ pub mod rendering;
 pub mod runtime_preferences;
 pub mod sift_cache;
 pub mod step_timing;
+pub(crate) mod terminal;
 pub mod web;
 
 #[cfg(test)]

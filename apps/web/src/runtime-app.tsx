@@ -246,6 +246,15 @@ function RuntimeShellLayout() {
                 <span className={`event-badge ${item.badgeClass}`}>{item.badge}</span>
                 <span>
                   <span>{item.text}</span>
+                  {item.output ? (
+                    <span className="event-output">
+                      {item.output.split('\n').map((line, index) => (
+                        <span className="event-output-line" key={`${item.id}-output-${index}`}>
+                          {line || '\u00a0'}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
                   {item.diff ? (
                     <span className="diff-lines">
                       {item.diff.split('\n').map((line, index) => (

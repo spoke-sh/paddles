@@ -152,6 +152,12 @@ pub enum TurnEvent {
         tool_name: String,
         invocation: String,
     },
+    ToolOutput {
+        call_id: String,
+        tool_name: String,
+        stream: String,
+        output: String,
+    },
     ToolFinished {
         call_id: String,
         tool_name: String,
@@ -198,6 +204,7 @@ impl TurnEvent {
             Self::RefinementApplied { .. } => "refinement_applied",
             Self::ContextAssembly { .. } => "context_assembly",
             Self::ToolCalled { .. } => "tool_called",
+            Self::ToolOutput { .. } => "tool_output",
             Self::ToolFinished { .. } => "tool_finished",
             Self::WorkspaceEditApplied { .. } => "workspace_edit_applied",
             Self::Fallback { .. } => "fallback",
@@ -213,6 +220,7 @@ impl TurnEvent {
             Self::PlannerStepProgress { .. }
             | Self::GathererSearchProgress { .. }
             | Self::ToolCalled { .. }
+            | Self::ToolOutput { .. }
             | Self::ToolFinished { .. }
             | Self::WorkspaceEditApplied { .. }
             | Self::Fallback { .. }
@@ -262,7 +270,7 @@ impl TurnEvent {
             Self::GathererSearchProgress { .. } | Self::GathererSummary { .. } => "Hunting",
             Self::ContextAssembly { .. } | Self::ContextStrain { .. } => "Thinking",
             Self::RefinementApplied { .. } => "Applying refinement",
-            Self::ToolCalled { .. } => "Running tool",
+            Self::ToolCalled { .. } | Self::ToolOutput { .. } => "Running tool",
             Self::ToolFinished { .. } | Self::WorkspaceEditApplied { .. } => "Thinking",
             Self::ThreadCandidateCaptured { .. }
             | Self::ThreadDecisionApplied { .. }

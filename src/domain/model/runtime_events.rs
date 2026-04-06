@@ -286,6 +286,18 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             detail: invocation.clone(),
             text: format!("{tool_name}: {invocation}"),
         },
+        TurnEvent::ToolOutput {
+            tool_name,
+            stream,
+            output,
+            ..
+        } => RuntimeEventPresentation {
+            badge: "term".to_string(),
+            badge_class: "tool-terminal".to_string(),
+            title: format!("• {tool_name} {stream}"),
+            detail: output.clone(),
+            text: format!("{tool_name} {stream}"),
+        },
         TurnEvent::ToolFinished {
             tool_name, summary, ..
         } => RuntimeEventPresentation {
@@ -544,6 +556,27 @@ mod tests {
                 title: "• Ran shell".to_string(),
                 detail: "git status --short".to_string(),
                 text: "shell: git status --short".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn projects_terminal_output_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::ToolOutput {
+            call_id: "tool-1".to_string(),
+            tool_name: "shell".to_string(),
+            stream: "stdout".to_string(),
+            output: "alpha\nbeta".to_string(),
+        });
+
+        assert_eq!(
+            presentation,
+            RuntimeEventPresentation {
+                badge: "term".to_string(),
+                badge_class: "tool-terminal".to_string(),
+                title: "• shell stdout".to_string(),
+                detail: "alpha\nbeta".to_string(),
+                text: "shell stdout".to_string(),
             }
         );
     }

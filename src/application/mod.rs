@@ -3,6 +3,7 @@ use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::providers::ModelProvider;
+use crate::infrastructure::terminal::run_background_terminal_command;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
 use crate::domain::model::{
@@ -1501,6 +1502,15 @@ fn render_turn_event(event: &TurnEvent) -> String {
             };
             format!("{title}\n  └ {}", trim_event_detail(invocation, 3))
         }
+        TurnEvent::ToolOutput {
+            tool_name,
+            stream,
+            output,
+            ..
+        } => format!(
+            "• {tool_name} {stream}\n  └ {}",
+            trim_event_detail(output, 6)
+        ),
         TurnEvent::ToolFinished {
             tool_name, summary, ..
         } => format!(
@@ -2780,7 +2790,12 @@ impl MechSuitService {
                                 tool_name: "inspect".to_string(),
                                 invocation: command.clone(),
                             });
-                            match run_planner_inspect_command(&self.workspace_root, command) {
+                            match run_planner_inspect_command(
+                                &self.workspace_root,
+                                command,
+                                &call_id,
+                                trace.as_ref(),
+                            ) {
                                 Ok(output) => {
                                     trace.emit(TurnEvent::ToolFinished {
                                         call_id,
@@ -2811,9 +2826,64 @@ impl MechSuitService {
                             }
                         }
                     }
+                    WorkspaceAction::Shell { command } => {
+                        let call_id = format!("planner-tool-{sequence}");
+                        trace.emit(TurnEvent::ToolCalled {
+                            call_id: call_id.clone(),
+                            tool_name: "shell".to_string(),
+                            invocation: command.clone(),
+                        });
+                        match run_planner_shell_command(
+                            &self.workspace_root,
+                            command,
+                            &call_id,
+                            trace.as_ref(),
+                        ) {
+                            Ok(result) => {
+                                trace.emit(TurnEvent::ToolFinished {
+                                    call_id,
+                                    tool_name: "shell".to_string(),
+                                    summary: result.clone(),
+                                });
+                                append_evidence_item(
+                                    &mut loop_state.evidence_items,
+                                    EvidenceItem {
+                                        source: format!("command: {command}"),
+                                        snippet: trim_for_planner(&result, 1_200),
+                                        rationale: decision.rationale.clone(),
+                                        rank: 0,
+                                    },
+                                    budget.max_evidence_items,
+                                );
+                                used_workspace_resources = true;
+                                result
+                            }
+                            Err(err) => {
+                                let summary = format!("Tool `shell` failed: {err:#}");
+                                trace.emit(TurnEvent::ToolFinished {
+                                    call_id,
+                                    tool_name: "shell".to_string(),
+                                    summary: summary.clone(),
+                                });
+                                append_evidence_item(
+                                    &mut loop_state.evidence_items,
+                                    EvidenceItem {
+                                        source: format!("command: {command}"),
+                                        snippet: trim_for_planner(&summary, 1_200),
+                                        rationale: decision.rationale.clone(),
+                                        rank: 0,
+                                    },
+                                    budget.max_evidence_items,
+                                );
+                                used_workspace_resources = true;
+                                stop_reason
+                                    .get_or_insert_with(|| "workspace-action-failed".to_string());
+                                summary
+                            }
+                        }
+                    }
                     WorkspaceAction::Read { .. }
                     | WorkspaceAction::ListFiles { .. }
-                    | WorkspaceAction::Shell { .. }
                     | WorkspaceAction::Diff { .. }
                     | WorkspaceAction::WriteFile { .. }
                     | WorkspaceAction::ReplaceInFile { .. }
@@ -5114,13 +5184,15 @@ fn append_evidence_item(target: &mut Vec<EvidenceItem>, item: EvidenceItem, limi
     }
 }
 
-fn run_planner_inspect_command(workspace_root: &Path, command: &str) -> Result<String> {
+fn run_planner_inspect_command(
+    workspace_root: &Path,
+    command: &str,
+    call_id: &str,
+    event_sink: &dyn TurnEventSink,
+) -> Result<String> {
     validate_inspect_command(command)?;
-    let output = std::process::Command::new("sh")
-        .arg("-lc")
-        .arg(command)
-        .current_dir(workspace_root)
-        .output()?;
+    let output =
+        run_background_terminal_command(workspace_root, command, "inspect", call_id, event_sink)?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let rendered = if stderr.trim().is_empty() {
@@ -5130,6 +5202,21 @@ fn run_planner_inspect_command(workspace_root: &Path, command: &str) -> Result<S
     };
 
     Ok(trim_for_planner(&rendered, 1_200))
+}
+
+fn run_planner_shell_command(
+    workspace_root: &Path,
+    command: &str,
+    call_id: &str,
+    event_sink: &dyn TurnEventSink,
+) -> Result<String> {
+    let output =
+        run_background_terminal_command(workspace_root, command, "shell", call_id, event_sink)?;
+    let summary = format_command_output_summary(command, &output);
+    if !output.status.success() {
+        anyhow::bail!("{summary}");
+    }
+    Ok(summary)
 }
 
 fn validate_inspect_command(command: &str) -> Result<()> {
@@ -5155,6 +5242,31 @@ fn trim_for_planner(input: &str, limit: usize) -> String {
 
     let kept = input.chars().take(limit).collect::<String>();
     format!("{}...[truncated]", kept.trim_end())
+}
+
+fn format_command_output_summary(command: &str, output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let rendered = if stderr.trim().is_empty() {
+        stdout
+    } else if stdout.trim().is_empty() {
+        stderr
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+    let status = output
+        .status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| output.status.to_string());
+
+    trim_for_planner(
+        &format!(
+            "Shell command: {command}\nExit status: {status}\n{}",
+            rendered.trim()
+        ),
+        1_200,
+    )
 }
 
 fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
@@ -8279,6 +8391,110 @@ mod tests {
             TurnEvent::ToolFinished { tool_name, summary, .. }
                 if tool_name == "inspect" && summary.contains("# Workspace")
         )));
+    }
+
+    #[test]
+    fn shell_actions_stream_terminal_output_before_completion() {
+        let workspace = tempfile::tempdir().expect("workspace");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Shell {
+                        command: "printf 'alpha\\n'; printf 'warning\\n' >&2".to_string(),
+                    },
+                },
+                "stream the terminal output before stopping",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "inspection was enough".to_string(),
+                },
+                rationale: "stop after the inspect".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("run the shell command", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        let events = sink.recorded();
+        let stdout_index = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    TurnEvent::ToolOutput {
+                        tool_name,
+                        stream,
+                        output,
+                        ..
+                    } if tool_name == "shell"
+                        && stream == "stdout"
+                        && output.contains("alpha")
+                )
+            })
+            .expect("stdout terminal output");
+        let stderr_index = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    TurnEvent::ToolOutput {
+                        tool_name,
+                        stream,
+                        output,
+                        ..
+                    } if tool_name == "shell"
+                        && stream == "stderr"
+                        && output.contains("warning")
+                )
+            })
+            .expect("stderr terminal output");
+        let finished_index = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    TurnEvent::ToolFinished { tool_name, .. } if tool_name == "shell"
+                )
+            })
+            .expect("shell completion");
+
+        assert!(stdout_index < finished_index);
+        assert!(stderr_index < finished_index);
     }
 
     #[test]

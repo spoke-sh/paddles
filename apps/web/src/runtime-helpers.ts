@@ -661,17 +661,20 @@ export function primitivePhase(
 export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
   const projectionEvent = payload as Partial<ProjectionTurnEvent>;
   const diff = eventDiff(payload);
+  const event = ('event' in payload ? payload.event : payload) as TurnEvent;
+  const type = String(event.type || '');
   if (projectionEvent.presentation) {
     const row = {
       badge: projectionEvent.presentation.badge,
       badgeClass: projectionEvent.presentation.badge_class,
       text: projectionEvent.presentation.text,
     };
+    if (type === 'tool_output') {
+      return { ...row, output: projectionEvent.presentation.detail };
+    }
     return diff ? { ...row, diff } : row;
   }
 
-  const event = ('event' in payload ? payload.event : payload) as TurnEvent;
-  const type = String(event.type || '');
   if (type === 'intent_classified') {
     return { badge: 'route', badgeClass: 'route', text: `Intent: ${String(event.intent || '')}` };
   }
@@ -690,6 +693,14 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
       badge: 'tool',
       badgeClass: 'tool',
       text: `${String(event.tool_name || 'tool')}: ${truncate(String(event.invocation || ''), 60)}`,
+    };
+  }
+  if (type === 'tool_output') {
+    return {
+      badge: 'term',
+      badgeClass: 'tool-terminal',
+      text: `${String(event.tool_name || 'tool')} ${String(event.stream || 'output')}`,
+      output: String(event.output || ''),
     };
   }
   if (type === 'workspace_edit_applied') {

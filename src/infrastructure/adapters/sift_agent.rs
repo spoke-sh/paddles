@@ -23,6 +23,7 @@ use crate::infrastructure::rendering::{
 use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
+use crate::infrastructure::terminal::run_background_terminal_command;
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -43,7 +44,6 @@ use sift::{
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -2171,12 +2171,14 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::Shell { command } => {
-                let output = Command::new("sh")
-                    .arg("-lc")
-                    .arg(command)
-                    .current_dir(&self.workspace_root)
-                    .output()
-                    .with_context(|| format!("failed to execute shell command `{command}`"))?;
+                let output = run_background_terminal_command(
+                    &self.workspace_root,
+                    command,
+                    "shell",
+                    call_id,
+                    event_sink,
+                )
+                .with_context(|| format!("failed to execute shell command `{command}`"))?;
                 let summary = format_command_summary("Shell command", command, &output);
                 if !output.status.success() {
                     bail!("{summary}");
@@ -6987,6 +6989,65 @@ mod tests {
 
         assert!(err.to_string().contains("Exit status"));
         assert!(err.to_string().contains("7"));
+    }
+
+    #[test]
+    fn shell_tool_emits_terminal_output_events() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(Vec::new())),
+        );
+        let sink = RecordingForensicSink::default();
+
+        let result = adapter
+            .execute_tool(
+                &ToolCall::Shell {
+                    command: "printf 'alpha\\n'; printf 'warning\\n' >&2".to_string(),
+                },
+                "tool-1",
+                &adapter.combined_local_context(&[]),
+                &[],
+                &sink,
+            )
+            .expect("shell tool should succeed");
+
+        assert!(result.summary.contains("Shell command"));
+        assert!(
+            sink.events
+                .lock()
+                .expect("events lock")
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    TurnEvent::ToolOutput {
+                        tool_name,
+                        stream,
+                        output,
+                        ..
+                    } if tool_name == "shell"
+                        && stream == "stdout"
+                        && output.contains("alpha")
+                ))
+        );
+        assert!(
+            sink.events
+                .lock()
+                .expect("events lock")
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    TurnEvent::ToolOutput {
+                        tool_name,
+                        stream,
+                        output,
+                        ..
+                    } if tool_name == "shell"
+                        && stream == "stderr"
+                        && output.contains("warning")
+                ))
+        );
     }
 
     #[test]

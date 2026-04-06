@@ -194,7 +194,7 @@ for:
 - planner action selection
 - gatherer capability and gathered evidence
 - planner summaries and stop reasons
-- tool calls and results
+- tool calls, live background terminal stdout/stderr, and final results
 - fallback reasons
 - synthesis readiness
 
