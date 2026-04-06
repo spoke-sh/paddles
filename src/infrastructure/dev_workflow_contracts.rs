@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -203,6 +204,77 @@ fn dev_shell_exposes_node_for_frontend_workspace_checks() {
     assert!(
         flake.contains("Let Playwright manage its own browser download on macOS."),
         "darwin shells should fall back to Playwright-managed browsers instead of nixpkgs chromium",
+    );
+}
+
+#[test]
+fn nix_cargo_lock_vendoring_normalizes_duplicate_name_version_entries() {
+    let cargo_lock = read_repo_file("Cargo.lock");
+    let flake = read_repo_file("flake.nix");
+    let lock: toml::Value = toml::from_str(&cargo_lock).expect("Cargo.lock should parse");
+    let packages = lock["package"]
+        .as_array()
+        .expect("Cargo.lock package list should be an array");
+    let mut packages_by_identity: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+
+    for package in packages {
+        let package = package
+            .as_table()
+            .expect("Cargo.lock package entries should be tables");
+        let name = package["name"]
+            .as_str()
+            .expect("Cargo.lock package name should be a string")
+            .to_owned();
+        let version = package["version"]
+            .as_str()
+            .expect("Cargo.lock package version should be a string")
+            .to_owned();
+        let source = package
+            .get("source")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("path")
+            .to_owned();
+
+        packages_by_identity
+            .entry((name, version))
+            .or_default()
+            .push(source);
+    }
+
+    let duplicates: Vec<String> = packages_by_identity
+        .into_iter()
+        .filter(|(_, sources)| sources.len() > 1)
+        .map(|((name, version), sources)| format!("{name} {version}: {}", sources.join(", ")))
+        .collect();
+
+    if duplicates.is_empty() {
+        return;
+    }
+
+    assert!(
+        flake.contains("normalizedCargoLock ="),
+        "flake should define a normalized Cargo.lock for nix vendoring when duplicate name/version entries exist:\n{}",
+        duplicates.join("\n"),
+    );
+    assert!(
+        flake.contains("lockFileContents = normalizedCargoLock;"),
+        "flake should feed the normalized Cargo.lock contents into buildRustPackage when duplicate name/version entries exist:\n{}",
+        duplicates.join("\n"),
+    );
+    assert!(
+        flake.contains("cp ${normalizedCargoLockFile} \"''${cargoRoot:+$cargoRoot/}Cargo.lock\""),
+        "flake should rewrite Cargo.lock in the build tree so nixpkgs sees the same normalized lockfile during cargoSetupPostPatchHook:\n{}",
+        duplicates.join("\n"),
+    );
+    assert!(
+        flake.contains("substituteInPlace \"$cargoDepsCopy/sift-0.2.0/Cargo.toml\""),
+        "flake should patch the vendored sift manifest so its metamorph dependency matches the normalized lockfile during offline builds:\n{}",
+        duplicates.join("\n"),
+    );
+    assert!(
+        flake.contains("metamorph 0.1.0"),
+        "flake normalization should handle the duplicated metamorph entry that breaks nix vendoring:\n{}",
+        duplicates.join("\n"),
     );
 }
 

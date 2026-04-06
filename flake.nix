@@ -38,13 +38,42 @@
 
         cargoToml = (builtins.fromTOML (builtins.readFile ./Cargo.toml));
         version = cargoToml.package.version;
+        oldMetamorphDependencyRef = "metamorph 0.1.0 (git+https://github.com/rupurt/metamorph?rev=00ac826973d378ce7670b1057bfd467f6cf8de29)";
+        newMetamorphDependencyRef = "metamorph 0.1.0 (git+https://github.com/rupurt/metamorph?rev=509b6718aa07333f2c763b618cdcf4a5d43d27cc)";
+        oldMetamorphReplacementEntry = builtins.concatStringsSep "\n" [
+          "[[package]]"
+          "name = \"metamorph\""
+          "version = \"0.1.0\""
+          "source = \"git+https://github.com/rupurt/metamorph?rev=00ac826973d378ce7670b1057bfd467f6cf8de29#00ac826973d378ce7670b1057bfd467f6cf8de29\""
+          "replace = \"${newMetamorphDependencyRef}\""
+          ""
+          ""
+        ];
+        # nixpkgs vendors git crates by name/version, so normalize the lockfile
+        # before importCargoLock collapses both metamorph revisions to one path.
+        normalizedCargoLock = builtins.replaceStrings
+          [
+            oldMetamorphReplacementEntry
+            oldMetamorphDependencyRef
+          ]
+          [
+            ""
+            newMetamorphDependencyRef
+          ]
+          (builtins.readFile ./Cargo.lock);
+        normalizedCargoLockFile = pkgs.writeText "Cargo.lock" normalizedCargoLock;
 
         paddlesPkg = pkgs.rustPlatform.buildRustPackage {
           pname = "paddles";
           inherit version;
           src = ./.;
+          postPatch = ''
+            cp ${normalizedCargoLockFile} "''${cargoRoot:+$cargoRoot/}Cargo.lock"
+            substituteInPlace "$cargoDepsCopy/sift-0.2.0/Cargo.toml" \
+              --replace-fail 'rev = "00ac826973d378ce7670b1057bfd467f6cf8de29"' 'rev = "509b6718aa07333f2c763b618cdcf4a5d43d27cc"'
+          '';
           cargoLock = {
-            lockFile = ./Cargo.lock;
+            lockFileContents = normalizedCargoLock;
             allowBuiltinFetchGit = true;
             outputHashes = {
               "candle-core-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
