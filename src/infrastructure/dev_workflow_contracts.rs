@@ -297,6 +297,32 @@ fn nix_cargo_lock_vendoring_normalizes_duplicate_name_version_entries() {
 }
 
 #[test]
+fn nix_package_build_uses_repo_rust_toolchain() {
+    let flake = read_repo_file("flake.nix");
+
+    assert!(
+        flake.contains("rustPlatform = pkgs.makeRustPlatform"),
+        "flake should derive a Rust platform from the repo toolchain so package builds do not drift onto nixpkgs' default cargo/rustc:\n{}",
+        flake,
+    );
+    assert!(
+        flake.contains("cargo = rust;"),
+        "flake should wire the shared cargo package from the repo toolchain into the package rustPlatform:\n{}",
+        flake,
+    );
+    assert!(
+        flake.contains("rustc = rust;"),
+        "flake should wire the shared rustc package from the repo toolchain into the package rustPlatform:\n{}",
+        flake,
+    );
+    assert!(
+        flake.contains("rustPlatform.buildRustPackage"),
+        "flake should build the package through the shared rustPlatform instead of pkgs.rustPlatform:\n{}",
+        flake,
+    );
+}
+
+#[test]
 fn root_workspace_lockfile_exists_for_clean_ci_installs() {
     assert!(
         repo_file("package-lock.json").exists(),

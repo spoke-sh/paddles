@@ -30,6 +30,12 @@
         rust = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" "llvm-tools" ];
         };
+        # Keep package builds on the same overlaid toolchain as the repo/dev shell.
+        # Edition 2024 dependencies can outpace nixpkgs' default rustPlatform cargo.
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rust;
+          rustc = rust;
+        };
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
 
@@ -63,7 +69,7 @@
           (builtins.readFile ./Cargo.lock);
         normalizedCargoLockFile = pkgs.writeText "Cargo.lock" normalizedCargoLock;
 
-        paddlesPkg = pkgs.rustPlatform.buildRustPackage {
+        paddlesPkg = rustPlatform.buildRustPackage {
           pname = "paddles";
           inherit version;
           src = ./.;
