@@ -2401,6 +2401,7 @@ fn build_turn_prompt(turn: &TurnPrompt<'_>) -> String {
         "You are Paddles, a local-first coding assistant operating inside the workspace `{}`.\n\
 Use the provided workspace evidence first. If you have enough information, answer directly.\n\
 Final answers should stay concise and focus on the requested result.\n\
+When the user asks for a safe, reasonable repository change, your job is to make the workspace edit with a tool instead of stopping at diagnosis or advice once local evidence is sufficient.\n\
 Routing guidance: {}\n\
 Persistent operator memory:\n\
 {}\n\
@@ -2945,6 +2946,7 @@ fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
 Choose the NEXT bounded action for this turn after reading the interpretation context.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
+Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -3030,6 +3032,7 @@ fn build_initial_action_retry_prompt(request: &PlannerRequest) -> String {
         "Your last top-level routing reply was empty or invalid.\n\
 Return ONLY one valid JSON initial action.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
+Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -3101,6 +3104,7 @@ Make one final constrained routing decision.\n\
 If no workspace action is clearly justified by the interpretation context, return stop.\n\
 Return ONLY one valid JSON object.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
+Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -3173,6 +3177,7 @@ fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
         "You are the recursive planner lane for Paddles.\n\
 Choose the NEXT bounded workspace resource action for this turn.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
+Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
 \n\
 Allowed actions:\n\
 	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
@@ -6130,6 +6135,8 @@ mod tests {
         assert!(prompt.contains("exact-diff state space"));
         assert!(prompt.contains("replace_in_file"));
         assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("safe, reasonable repository change"));
+        assert!(prompt.contains("make the workspace edit in this turn"));
     }
 
     #[test]
@@ -6181,6 +6188,8 @@ mod tests {
         assert!(prompt.contains("replace_in_file"));
         assert!(prompt.contains("apply_patch"));
         assert!(prompt.contains("Steering review [action-bias]"));
+        assert!(prompt.contains("safe, reasonable repository change"));
+        assert!(prompt.contains("make the workspace edit in this turn"));
     }
 
     #[test]

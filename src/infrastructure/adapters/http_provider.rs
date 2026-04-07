@@ -760,6 +760,11 @@ impl HttpProviderAdapter {
             "You are Paddles, a recursive in-context planning harness. \
              You provide concise, accurate technical assistance.\n\n",
         );
+        system.push_str(
+            "Core mission: when the user asks for a safe, reasonable repository change, \
+             Paddles should make the workspace edit in this turn. Do not stop at diagnosis, \
+             plans, or prose once local evidence is sufficient to act.\n\n",
+        );
         if !interpretation.is_empty() {
             system.push_str("## Interpretation Context\n");
             system.push_str(&interpretation.render());
@@ -2019,6 +2024,7 @@ fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
 fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "User prompt: {}\n\n{}\nSelect your first action.\n\
+If the user asks for a safe, reasonable repository change, the purpose of this coding assistant is to make the workspace edit in this turn rather than stop at diagnosis or advice.\n\
 If the user is asking to debug a repository failure like CI, build, test, workflow, or lint breakage, do not answer directly before at least one local workspace action unless the interpretation context already contains the exact failure evidence.\n\
 When the user is asking for a code or file change, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -2034,6 +2040,7 @@ fn build_http_initial_action_retry_prompt(request: &PlannerRequest, format: ApiF
         "Your last planner reply was empty or invalid.\n\
 {}\n\
 {}\n\
+If the user asks for a safe, reasonable repository change, the purpose of this coding assistant is to make the workspace edit in this turn rather than stop at diagnosis or advice.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
 If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -2056,6 +2063,7 @@ fn build_http_initial_action_redecision_prompt(
 Make one final constrained routing decision.\n\
 {}\n\
 Do not ask the user for logs or repository state that the harness can inspect locally.\n\
+If the user asks for a safe, reasonable repository change, the purpose of this coding assistant is to make the workspace edit in this turn rather than stop at diagnosis or advice.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
 If the user is asking for a code or file change, include `edit` and `candidate_files` in the JSON envelope.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -2086,6 +2094,7 @@ fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat)
     user.push_str(&format!(
         "\nSelect your next action.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
+If the user asks for a safe, reasonable repository change, the purpose of this coding assistant is to make the workspace edit in this turn rather than stop at diagnosis or advice.\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the loop-state notes contain a steering review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
@@ -2101,6 +2110,7 @@ fn build_http_planner_retry_prompt(request: &PlannerRequest, format: ApiFormat) 
 {}\n\
 Current loop state:\n\
 {}\n\
+If the user asks for a safe, reasonable repository change, the purpose of this coding assistant is to make the workspace edit in this turn rather than stop at diagnosis or advice.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
 \n\
@@ -2123,6 +2133,7 @@ fn build_http_planner_redecision_prompt(
 Current loop state:\n\
 {}\n\
 Make one final constrained next-action decision.\n\
+If the user asks for a safe, reasonable repository change, the purpose of this coding assistant is to make the workspace edit in this turn rather than stop at diagnosis or advice.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
 \n\
@@ -3609,6 +3620,8 @@ mod tests {
         assert!(prompt.contains("Do not emit partial, truncated, or streaming JSON"));
         assert!(prompt.contains("Paddles executes your selected action locally"));
         assert!(prompt.contains("working hypotheses until local evidence confirms them"));
+        assert!(prompt.contains("safe, reasonable repository change"));
+        assert!(prompt.contains("make the workspace edit in this turn"));
         assert!(prompt.contains("select_planner_action"));
         assert!(prompt.contains("Do not ask the user for logs"));
     }
@@ -3663,6 +3676,8 @@ mod tests {
         assert!(prompt.contains("exact-diff state space"));
         assert!(prompt.contains("replace_in_file"));
         assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("safe, reasonable repository change"));
+        assert!(prompt.contains("make the workspace edit in this turn"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
