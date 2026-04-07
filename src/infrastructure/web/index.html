@@ -149,6 +149,14 @@ body {
   font-style: italic;
   background: rgba(255,255,255,0.3);
 }
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.msg-paragraph {
+  white-space: pre-wrap;
+}
 
 .events-group { align-self: flex-start; width: 100%; }
 .event-row {
@@ -3238,7 +3246,13 @@ function connectSSE() {
 function addMessage(cls, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + cls;
-  el.textContent = text;
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  const paragraph = document.createElement('div');
+  paragraph.className = 'msg-paragraph';
+  paragraph.textContent = text;
+  body.appendChild(paragraph);
+  el.appendChild(body);
   const messages = document.getElementById('messages');
   const group = messages.querySelector('.events-group');
   if (group) {

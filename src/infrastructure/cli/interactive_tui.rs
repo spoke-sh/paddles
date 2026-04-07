@@ -2033,7 +2033,7 @@ impl InteractiveApp {
                     self.rows.push(TranscriptRow::new(
                         TranscriptRowKind::User,
                         "User",
-                        inline_multiline_text(&entry.content),
+                        entry.content.clone(),
                     ));
                 }
                 ConversationTranscriptSpeaker::Assistant => {
@@ -5702,7 +5702,7 @@ mod tests {
 
         let last_row = app.rows.last().expect("user row exists");
         assert_eq!(last_row.kind, TranscriptRowKind::User);
-        assert_eq!(last_row.content, "line one ⏎ line two ⏎ line three");
+        assert_eq!(last_row.content, "line one\nline two\nline three");
     }
 
     #[test]

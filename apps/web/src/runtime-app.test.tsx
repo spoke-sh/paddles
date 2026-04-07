@@ -397,6 +397,64 @@ describe('RuntimeApp', () => {
     expect(await screen.findByText('grounded answer')).toBeInTheDocument();
   });
 
+  it('preserves newlines in user transcript entries', async () => {
+    const multilineProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      transcript: {
+        ...bootstrapProjection.transcript,
+        entries: [
+          {
+            record_id: 'record-multiline-user',
+            turn_id: 'task-123.turn-0002',
+            speaker: 'user',
+            content: 'line one\nline two\nline three',
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/session/shared/bootstrap')) {
+          return new Response(
+            JSON.stringify({
+              session_id: 'task-123',
+              projection: multilineProjection,
+              prompt_history: bootstrapPromptHistory,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          );
+        }
+        if (url.endsWith('/sessions/task-123/projection')) {
+          return new Response(JSON.stringify(multilineProjection), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/sessions/task-123/turns')) {
+          return new Response(JSON.stringify({ response: 'ok' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    renderAtPath('/');
+
+    const message = await screen.findByText(
+      (_content, element) =>
+        !!element &&
+        element.classList.contains('msg-paragraph') &&
+        element.textContent === 'line one\nline two\nline three'
+    );
+    expect(message.closest('.msg')).toHaveClass('msg', 'user');
+    expect(message.textContent).toBe('line one\nline two\nline three');
+  });
+
   it('disables native autocomplete and recalls bootstrapped prompt history with arrow keys', async () => {
     renderAtPath('/');
 

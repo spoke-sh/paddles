@@ -330,7 +330,7 @@ function RuntimeShellLayout() {
               {entry.speaker === 'assistant' && entry.render ? (
                 <AssistantMessage render={entry.render} />
               ) : (
-                entry.content
+                <PlainMessage content={entry.content} />
               )}
             </div>
           ))}
@@ -486,6 +486,14 @@ function AssistantMessage({ render }: { render: RenderDocument }) {
             return null;
         }
       })}
+    </div>
+  );
+}
+
+function PlainMessage({ content }: { content: string }) {
+  return (
+    <div className="msg-body">
+      <div className="msg-paragraph">{content}</div>
     </div>
   );
 }
