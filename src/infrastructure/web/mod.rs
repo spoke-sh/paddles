@@ -1640,11 +1640,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn primary_runtime_routes_serve_the_primary_frontend_shell() {
+    async fn primary_runtime_routes_serve_the_resolved_primary_frontend_shell() {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
         let (app, _observer) = super::router(service, recorder);
+        let expected_shell = super::load_primary_shell_html();
 
         for route in ["/", "/manifold", "/transit"] {
             let response = app
@@ -1663,12 +1664,8 @@ mod tests {
             let html = String::from_utf8(body.to_vec()).expect("utf8 html");
 
             assert!(
-                html.contains("<div id=\"root\"></div>"),
-                "route {route} should serve the primary React shell"
-            );
-            assert!(
-                !html.contains("id=\"prompt\""),
-                "route {route} should not fall back to the embedded runtime shell"
+                html == expected_shell,
+                "route {route} should serve the resolved primary frontend shell"
             );
             assert!(
                 !html.contains("/legacy"),
