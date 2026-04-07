@@ -1706,7 +1706,7 @@ struct PlannerEnvelope {
 }
 
 fn planner_action_json_schema() -> Value {
-    json!({
+    let mut schema = json!({
         "type": "object",
         "additionalProperties": false,
         "properties": {
@@ -1825,7 +1825,84 @@ fn planner_action_json_schema() -> Value {
             }
         },
         "required": ["action", "rationale"]
-    })
+    });
+
+    for property in [
+        "answer",
+        "reason",
+        "query",
+        "mode",
+        "strategy",
+        "intent",
+        "pattern",
+        "path",
+        "command",
+        "content",
+        "old",
+        "new",
+        "replace_all",
+        "patch",
+        "branches",
+        "edit",
+        "candidate_files",
+        "grounding",
+    ] {
+        make_openai_schema_property_nullable(&mut schema, property);
+    }
+    make_openai_object_schema_require_all_properties(&mut schema);
+
+    schema
+}
+
+fn make_openai_schema_property_nullable(schema: &mut Value, property_name: &str) {
+    let Some(property) = schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .and_then(|properties| properties.get_mut(property_name))
+    else {
+        return;
+    };
+
+    let Some(object) = property.as_object_mut() else {
+        return;
+    };
+
+    if let Some(property_type) = object.get_mut("type") {
+        match property_type {
+            Value::String(existing) => {
+                let existing = existing.clone();
+                *property_type = json!([existing, "null"]);
+            }
+            Value::Array(existing) => {
+                if !existing.iter().any(|value| value.as_str() == Some("null")) {
+                    existing.push(Value::String("null".to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(enum_values) = object.get_mut("enum").and_then(Value::as_array_mut)
+        && !enum_values.iter().any(Value::is_null)
+    {
+        enum_values.push(Value::Null);
+    }
+}
+
+fn make_openai_object_schema_require_all_properties(schema: &mut Value) {
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+
+    let required = properties
+        .keys()
+        .cloned()
+        .map(Value::String)
+        .collect::<Vec<_>>();
+
+    if let Some(object) = schema.as_object_mut() {
+        object.insert("required".to_string(), Value::Array(required));
+    }
 }
 
 fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
@@ -3642,13 +3719,40 @@ mod tests {
     #[test]
     fn planner_action_schema_avoids_conditional_keywords_for_openai_tool_compatibility() {
         let schema = super::planner_action_json_schema();
+        let property_keys = schema["properties"]
+            .as_object()
+            .expect("planner schema properties")
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let required_keys = schema["required"]
+            .as_array()
+            .expect("planner schema required")
+            .iter()
+            .filter_map(|value| value.as_str().map(ToString::to_string))
+            .collect::<std::collections::BTreeSet<_>>();
 
         assert!(schema["allOf"].is_null());
-        assert_eq!(schema["required"][0].as_str(), Some("action"));
-        assert_eq!(schema["required"][1].as_str(), Some("rationale"));
+        assert_eq!(required_keys, property_keys);
         assert_eq!(
-            schema["properties"]["command"]["type"].as_str(),
+            schema["properties"]["command"]["type"][0].as_str(),
             Some("string")
+        );
+        assert_eq!(
+            schema["properties"]["command"]["type"][1].as_str(),
+            Some("null")
+        );
+        assert_eq!(
+            schema["properties"]["answer"]["type"][0].as_str(),
+            Some("string")
+        );
+        assert_eq!(
+            schema["properties"]["answer"]["type"][1].as_str(),
+            Some("null")
+        );
+        assert_eq!(
+            schema["properties"]["mode"]["enum"][2],
+            serde_json::Value::Null
         );
         assert_eq!(
             schema["properties"]["grounding"]["required"][0].as_str(),

@@ -172,13 +172,13 @@ struct RenderBlockEnvelope {
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]
-    items: Vec<String>,
+    items: Option<Vec<String>>,
     #[serde(default)]
     language: Option<String>,
     #[serde(default)]
     code: Option<String>,
     #[serde(default)]
-    sources: Vec<String>,
+    sources: Option<Vec<String>>,
 }
 
 impl RenderBlockEnvelope {
@@ -203,6 +203,7 @@ impl RenderBlockEnvelope {
             "bullet_list" => {
                 let items = self
                     .items
+                    .unwrap_or_default()
                     .into_iter()
                     .map(|item| item.trim().to_string())
                     .filter(|item| !item.is_empty())
@@ -227,6 +228,7 @@ impl RenderBlockEnvelope {
             "citations" => {
                 let sources = self
                     .sources
+                    .unwrap_or_default()
                     .into_iter()
                     .map(|source| source.trim().to_string())
                     .filter(|source| !source.is_empty())

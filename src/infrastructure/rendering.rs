@@ -101,7 +101,7 @@ pub fn assistant_response_json_schema(require_citations: bool) -> Value {
     } else {
         "Optional when no repository/file sources were used in the answer."
     };
-    json!({
+    let mut schema = json!({
         "type": "object",
         "additionalProperties": false,
         "properties": {
@@ -155,7 +155,69 @@ pub fn assistant_response_json_schema(require_citations: bool) -> Value {
             }
         },
         "required": ["render_types", "blocks"]
-    })
+    });
+
+    let Some(block_item) = schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .and_then(|properties| properties.get_mut("blocks"))
+        .and_then(Value::as_object_mut)
+        .and_then(|blocks| blocks.get_mut("items"))
+    else {
+        return schema;
+    };
+
+    for property in ["text", "items", "language", "code", "sources"] {
+        make_openai_schema_property_nullable(block_item, property);
+    }
+    make_openai_object_schema_require_all_properties(block_item);
+
+    schema
+}
+
+fn make_openai_schema_property_nullable(schema: &mut Value, property_name: &str) {
+    let Some(property) = schema
+        .get_mut("properties")
+        .and_then(Value::as_object_mut)
+        .and_then(|properties| properties.get_mut(property_name))
+    else {
+        return;
+    };
+
+    let Some(object) = property.as_object_mut() else {
+        return;
+    };
+
+    if let Some(property_type) = object.get_mut("type") {
+        match property_type {
+            Value::String(existing) => {
+                let existing = existing.clone();
+                *property_type = json!([existing, "null"]);
+            }
+            Value::Array(existing) => {
+                if !existing.iter().any(|value| value.as_str() == Some("null")) {
+                    existing.push(Value::String("null".to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn make_openai_object_schema_require_all_properties(schema: &mut Value) {
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+
+    let required = properties
+        .keys()
+        .cloned()
+        .map(Value::String)
+        .collect::<Vec<_>>();
+
+    if let Some(object) = schema.as_object_mut() {
+        object.insert("required".to_string(), Value::Array(required));
+    }
 }
 
 pub fn normalize_assistant_response(response: &str) -> String {
@@ -523,13 +585,61 @@ mod tests {
     #[test]
     fn assistant_response_schema_avoids_conditional_keywords_for_openai_compatibility() {
         let schema = assistant_response_json_schema(true);
+        let block_properties = schema["properties"]["blocks"]["items"]["properties"]
+            .as_object()
+            .expect("render block schema properties")
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let block_required = schema["properties"]["blocks"]["items"]["required"]
+            .as_array()
+            .expect("render block schema required")
+            .iter()
+            .filter_map(|value| value.as_str().map(ToString::to_string))
+            .collect::<std::collections::BTreeSet<_>>();
+
         assert_eq!(schema["type"].as_str(), Some("object"));
         assert_eq!(schema["required"][0].as_str(), Some("render_types"));
         assert_eq!(schema["required"][1].as_str(), Some("blocks"));
         assert!(schema["properties"]["blocks"]["items"]["allOf"].is_null());
+        assert_eq!(block_required, block_properties);
         assert_eq!(
-            schema["properties"]["blocks"]["items"]["required"][0].as_str(),
-            Some("type")
+            schema["properties"]["blocks"]["items"]["properties"]["text"]["type"][0].as_str(),
+            Some("string")
         );
+        assert_eq!(
+            schema["properties"]["blocks"]["items"]["properties"]["text"]["type"][1].as_str(),
+            Some("null")
+        );
+    }
+
+    #[test]
+    fn assistant_response_parser_accepts_nullable_irrelevant_block_fields() {
+        let response = r#"{
+  "render_types": ["heading", "paragraph"],
+  "blocks": [
+    {
+      "type": "heading",
+      "text": "Overview",
+      "items": null,
+      "language": null,
+      "code": null,
+      "sources": null
+    },
+    {
+      "type": "paragraph",
+      "text": "Still works.",
+      "items": null,
+      "language": null,
+      "code": null,
+      "sources": null
+    }
+  ]
+}"#;
+
+        let document = crate::domain::model::RenderDocument::parse_assistant_response(response)
+            .expect("nullable fields should still parse");
+
+        assert_eq!(document.to_plain_text(), "**Overview**\n\nStill works.");
     }
 }
