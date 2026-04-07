@@ -1,5 +1,6 @@
 use crate::domain::model::AppliedEdit;
 use crate::domain::ports::{WorkspaceActionResult, WorkspaceEditor};
+use crate::infrastructure::workspace_paths::is_authored_workspace_file;
 use anyhow::{Context, Result, anyhow, bail};
 use std::fs;
 use std::io::Write;
@@ -115,6 +116,14 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
     }
 
     fn apply_patch(&self, patch: &str) -> Result<WorkspaceActionResult> {
+        let patch_paths = extract_diff_paths(patch);
+        if patch_paths.is_empty() {
+            bail!("patch does not target an authored workspace file");
+        }
+        for path in &patch_paths {
+            ensure_authored_workspace_path(path)?;
+        }
+
         let mut child = Command::new("git")
             .arg("apply")
             .arg("--whitespace=nowarn")
@@ -325,6 +334,7 @@ fn resolve_workspace_path(
     if !resolved.starts_with(&canonical_root) {
         bail!("path escapes workspace root: {requested}");
     }
+    ensure_authored_workspace_path(&relative_path(&canonical_root, &resolved).replace('\\', "/"))?;
     if !allow_missing && !resolved.exists() {
         bail!("path does not exist: {}", resolved.display());
     }
@@ -373,6 +383,13 @@ fn normalize_relative_path(workspace_root: &Path, requested: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+fn ensure_authored_workspace_path(requested: &str) -> Result<()> {
+    if !is_authored_workspace_file(requested) {
+        bail!("path is outside the authored workspace boundary: {requested}");
+    }
+    Ok(())
 }
 
 fn relative_path(workspace_root: &Path, path: &Path) -> String {
@@ -427,5 +444,46 @@ mod tests {
         assert!(apply_edit.diff.contains("+done"));
         assert_eq!(apply_edit.insertions, 1);
         assert_eq!(apply_edit.deletions, 1);
+    }
+
+    #[test]
+    fn workspace_editor_rejects_non_authored_paths() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(
+            workspace
+                .path()
+                .join("apps/docs/node_modules/playwright-core/lib"),
+        )
+        .expect("create vendored dir");
+        fs::write(
+            workspace
+                .path()
+                .join("apps/docs/node_modules/playwright-core/lib/compare.js"),
+            "before\n",
+        )
+        .expect("seed vendored file");
+        let editor = LocalWorkspaceEditor::new(workspace.path());
+
+        let write_error = editor
+            .write_file(
+                "apps/docs/node_modules/playwright-core/lib/new-file.js",
+                "export const value = 1;\n",
+            )
+            .expect_err("write_file should reject vendored paths");
+        assert!(
+            write_error
+                .to_string()
+                .contains("outside the authored workspace boundary")
+        );
+
+        let patch = "diff --git a/apps/docs/node_modules/playwright-core/lib/compare.js b/apps/docs/node_modules/playwright-core/lib/compare.js\n--- a/apps/docs/node_modules/playwright-core/lib/compare.js\n+++ b/apps/docs/node_modules/playwright-core/lib/compare.js\n@@ -1 +1 @@\n-before\n+after\n";
+        let patch_error = editor
+            .apply_patch(patch)
+            .expect_err("apply_patch should reject vendored paths");
+        assert!(
+            patch_error
+                .to_string()
+                .contains("outside the authored workspace boundary")
+        );
     }
 }

@@ -4,6 +4,9 @@ use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::terminal::run_background_terminal_command;
+use crate::infrastructure::workspace_paths::{
+    is_authored_workspace_directory, is_authored_workspace_file,
+};
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
 use crate::domain::model::{
@@ -5103,7 +5106,7 @@ fn visit_known_edit_candidates(
         }
 
         if metadata.is_dir() {
-            if matches!(name.as_str(), ".git" | "target" | ".direnv") {
+            if !is_authored_workspace_directory(&name) {
                 continue;
             }
             visit_known_edit_candidates(
@@ -5234,14 +5237,7 @@ fn normalize_action_bias_source(source: &str, workspace_root: &Path) -> Option<S
 }
 
 fn is_plausible_workspace_file(path: &str) -> bool {
-    if path.is_empty() || path.ends_with('/') {
-        return false;
-    }
-
-    Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some()
+    is_authored_workspace_file(path)
 }
 
 fn evidence_rank_bonus(rank: usize) -> i32 {
@@ -8076,6 +8072,39 @@ mod tests {
     }
 
     #[test]
+    fn action_bias_targets_ignore_non_authored_workspace_paths() {
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            evidence_items: vec![
+                EvidenceItem {
+                    source:
+                        "apps/docs/node_modules/playwright-core/lib/server/utils/image_tools/compare.js"
+                            .to_string(),
+                    snippet: "vendored compare implementation".to_string(),
+                    rationale: "dependency".to_string(),
+                    rank: 1,
+                },
+                EvidenceItem {
+                    source: "apps/web/dist/assets/index.js".to_string(),
+                    snippet: "compiled bundle".to_string(),
+                    rationale: "generated asset".to_string(),
+                    rank: 2,
+                },
+                EvidenceItem {
+                    source: "apps/web/src/runtime-app.tsx".to_string(),
+                    snippet: "authored runtime app".to_string(),
+                    rationale: "real edit target".to_string(),
+                    rank: 3,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let ranked = super::likely_action_bias_targets(&loop_state, Path::new("/workspace"), 3);
+
+        assert_eq!(ranked, vec!["apps/web/src/runtime-app.tsx".to_string()]);
+    }
+
+    #[test]
     fn action_bias_redirects_non_file_actions_before_any_search_step() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             evidence_items: vec![EvidenceItem {
@@ -8482,6 +8511,43 @@ mod tests {
             executed_actions.first(),
             Some(WorkspaceAction::Read { path }) if path == "src/application/mod.rs"
         ));
+    }
+
+    #[test]
+    fn known_edit_bootstrap_discards_node_modules_hints_and_prefers_authored_files() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(
+            workspace
+                .path()
+                .join("apps/docs/node_modules/playwright-core/lib/server/utils/image_tools"),
+        )
+        .expect("create vendored compare dir");
+        fs::create_dir_all(workspace.path().join("src/image_tools"))
+            .expect("create authored compare dir");
+        fs::write(
+            workspace.path().join(
+                "apps/docs/node_modules/playwright-core/lib/server/utils/image_tools/compare.js",
+            ),
+            "export function compare() { return 'vendored'; }\n",
+        )
+        .expect("write vendored compare");
+        fs::write(
+            workspace.path().join("src/image_tools/compare.rs"),
+            "pub fn compare() {}\n",
+        )
+        .expect("write authored compare");
+
+        let candidates = super::known_edit_bootstrap_candidates(
+            workspace.path(),
+            &[
+                "apps/docs/node_modules/playwright-core/lib/server/utils/image_tools/compare.js"
+                    .to_string(),
+            ],
+            "Fix the compare image tool behavior",
+            3,
+        );
+
+        assert_eq!(candidates, vec!["src/image_tools/compare.rs".to_string()]);
     }
 
     #[test]

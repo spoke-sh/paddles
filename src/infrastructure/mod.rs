@@ -10,6 +10,7 @@ pub mod sift_cache;
 pub mod step_timing;
 pub(crate) mod terminal;
 pub mod web;
+pub(crate) mod workspace_paths;
 
 #[cfg(test)]
 mod dev_workflow_contracts;

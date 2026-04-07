@@ -7053,6 +7053,7 @@ mod tests {
     #[test]
     fn apply_patch_returns_error_on_failure() {
         let workspace = tempfile::tempdir().expect("temp workspace");
+        fs::write(workspace.path().join("notes.txt"), "before\n").expect("seed file");
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
@@ -7062,7 +7063,8 @@ mod tests {
         let err = adapter
             .execute_tool(
                 &ToolCall::ApplyPatch {
-                    patch: "not a patch".to_string(),
+                    patch: "diff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-missing\n+after\n"
+                        .to_string(),
                 },
                 "tool-1",
                 &adapter.combined_local_context(&[]),
