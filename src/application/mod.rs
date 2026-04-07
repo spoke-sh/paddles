@@ -2821,10 +2821,12 @@ impl MechSuitService {
                                 trace.as_ref(),
                             ) {
                                 Ok(output) => {
+                                    let summary =
+                                        planner_terminal_tool_success_summary("inspect", &output);
                                     trace.emit(TurnEvent::ToolFinished {
                                         call_id,
                                         tool_name: "inspect".to_string(),
-                                        summary: output.clone(),
+                                        summary,
                                     });
                                     append_evidence_item(
                                         &mut loop_state.evidence_items,
@@ -2864,10 +2866,12 @@ impl MechSuitService {
                             trace.as_ref(),
                         ) {
                             Ok(result) => {
+                                let summary =
+                                    planner_terminal_tool_success_summary("shell", &result);
                                 trace.emit(TurnEvent::ToolFinished {
                                     call_id,
                                     tool_name: "shell".to_string(),
-                                    summary: result.clone(),
+                                    summary,
                                 });
                                 append_evidence_item(
                                     &mut loop_state.evidence_items,
@@ -5461,6 +5465,18 @@ fn format_command_output_summary(command: &str, output: &std::process::Output) -
         ),
         1_200,
     )
+}
+
+fn planner_terminal_tool_success_summary(tool_name: &str, output: &str) -> String {
+    let had_output = !output.trim().is_empty();
+    match (tool_name, had_output) {
+        ("inspect", true) => "inspection completed".to_string(),
+        ("inspect", false) => "inspection completed with no output".to_string(),
+        ("shell", true) => "command completed".to_string(),
+        ("shell", false) => "command completed with no output".to_string(),
+        (_, true) => "tool completed".to_string(),
+        (_, false) => "tool completed with no output".to_string(),
+    }
 }
 
 fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
@@ -8734,8 +8750,19 @@ mod tests {
         )));
         assert!(events.iter().any(|event| matches!(
             event,
+            TurnEvent::ToolOutput {
+                tool_name,
+                stream,
+                output,
+                ..
+            } if tool_name == "inspect"
+                && stream == "stdout"
+                && output.contains("# Workspace")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
             TurnEvent::ToolFinished { tool_name, summary, .. }
-                if tool_name == "inspect" && summary.contains("# Workspace")
+                if tool_name == "inspect" && summary == "inspection completed"
         )));
     }
 
@@ -8838,9 +8865,19 @@ mod tests {
                 )
             })
             .expect("shell completion");
+        let finished_summary = events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolFinished {
+                    tool_name, summary, ..
+                } if tool_name == "shell" => Some(summary.as_str()),
+                _ => None,
+            })
+            .expect("shell completion summary");
 
         assert!(stdout_index < finished_index);
         assert!(stderr_index < finished_index);
+        assert_eq!(finished_summary, "command completed");
     }
 
     #[test]

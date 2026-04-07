@@ -2296,6 +2296,7 @@ impl InteractiveApp {
         if self.busy
             && !self.emitted_in_flight
             && let Some((ref event, last_at)) = self.last_event
+            && self.should_emit_in_flight_row(event)
         {
             let silence = Instant::now().duration_since(last_at);
             if silence >= IN_FLIGHT_SILENCE_THRESHOLD {
@@ -2318,6 +2319,17 @@ impl InteractiveApp {
                 self.busy = false;
                 self.busy_phase = BusyPhase::Idle;
             }
+        }
+    }
+
+    fn should_emit_in_flight_row(&self, event: &TurnEvent) -> bool {
+        match event {
+            TurnEvent::ToolOutput {
+                call_id, stream, ..
+            } => !self
+                .tool_output_rows
+                .contains_key(&(call_id.clone(), stream.clone())),
+            _ => true,
         }
     }
 
@@ -5324,6 +5336,46 @@ mod tests {
         let row = app.rows.last().expect("tool output row");
         assert_eq!(row.header, "• shell stdout");
         assert_eq!(row.content, "alpha\nbeta");
+    }
+
+    #[test]
+    fn tool_output_rows_do_not_spawn_shadow_in_flight_rows_after_silence() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::ToolOutput {
+                call_id: "tool-1".to_string(),
+                tool_name: "shell".to_string(),
+                stream: "stdout".to_string(),
+                output: "alpha\n".to_string(),
+            },
+            occurred_at: Instant::now() - Duration::from_secs(3),
+            work_id: None,
+        });
+        let rows_after_output = app.rows.len();
+
+        app.tick();
+
+        assert_eq!(app.rows.len(), rows_after_output);
+        assert_eq!(
+            app.rows
+                .iter()
+                .filter(|row| row.kind == TranscriptRowKind::InFlightEvent)
+                .count(),
+            0,
+            "tool output should remain the only visible row for that stream"
+        );
     }
 
     #[test]
