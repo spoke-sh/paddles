@@ -7,7 +7,7 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     sift = {
-      url = "github:rupurt/sift?rev=52daf4ffc054a8162c208d936b9b7689de85ea36";
+      url = "github:rupurt/sift?rev=003932b6e57c8fc1e81950b1066afe4feec66c0d";
       inputs.keel.follows = "keel";
     };
 
@@ -87,7 +87,7 @@
               "candle-transformers-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-kernels-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
               "candle-ug-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
-              "sift-0.2.0" = "sha256-DkwrZueWJ63nbhBaZ9forBKRfgf+6kL3UJhNG8P47wE=";
+              "sift-0.2.0" = "sha256-mlOVOWZFB0vrWlCy/ntlj3LRcn8HiojN4Wv+K9hnQ5U=";
               "transit-core-0.1.0" = "sha256-4VvRHAf+ABRDe1q5giH/VtsJo66JJjsCKbmP/7RlXN0=";
             };
           };

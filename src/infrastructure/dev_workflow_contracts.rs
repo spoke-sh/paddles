@@ -323,6 +323,23 @@ fn nix_package_build_uses_repo_rust_toolchain() {
 }
 
 #[test]
+fn nix_package_tracks_locked_sift_revision_for_vendoring() {
+    let cargo_lock = read_repo_file("Cargo.lock");
+    let flake = read_repo_file("flake.nix");
+    let needle = "git+https://github.com/rupurt/sift?rev=";
+    let revision_start = cargo_lock
+        .find(needle)
+        .map(|index| index + needle.len())
+        .expect("Cargo.lock should pin the sift git dependency by revision");
+    let revision = &cargo_lock[revision_start..revision_start + 40];
+
+    assert!(
+        flake.contains(&format!("github:rupurt/sift?rev={revision}")),
+        "flake should pin the sift input to the same revision Cargo.lock vendors for offline nix builds:\nCargo.lock rev: {revision}\n{flake}",
+    );
+}
+
+#[test]
 fn root_workspace_lockfile_exists_for_clean_ci_installs() {
     assert!(
         repo_file("package-lock.json").exists(),
