@@ -58,7 +58,7 @@ Model selection is an architectural decision that shapes every turn.
 ### Evidence and Gathering
 - **Evidence-First Gatherers**: Context-gathering adapters return typed evidence bundles and capability state for downstream synthesis.
 - **Graph Retrieval Strengthens The Gatherer Path**: Richer graph/branching retrieval enhances the generic gatherer boundary and typed evidence contract, keeping the harness general-purpose.
-- **Planner Metadata Stays Observable**: Planner strategy, stop reason, and retained-evidence summaries remain visible in verbose output and evidence digests.
+- **Planner Metadata Stays Observable**: Planner strategy, stop reason, and retained-evidence summaries remain visible once the operator asks for verbose output and in evidence digests.
 - **Graph Lineage Stays Typed**: Branch ids, frontier ids, node ids, edge kinds, and graph stop state live in `paddles`-owned structured metadata, ready for embedded recorders and replay.
 
 ### Model Integration
@@ -78,7 +78,7 @@ Model selection is an architectural decision that shapes every turn.
 - **Storage Neutral Domain Contract**: `paddles` uses embedded `transit-core` as its first durable recorder backend, with transit types staying behind the domain boundary.
 - **Artifact Envelopes For Large Payloads**: Large prompts, tool outputs, model outputs, and graph traces use artifact envelopes with stable logical ids and inline metadata, supporting future external storage.
 - **Recorder Failures Degrade Safely**: Recorder unavailability degrades to noop recording with explicit notification — turn execution stays healthy.
-- **Turn Events Stay Visible**: The interactive REPL renders a default action stream for classification, route selection, gatherer work, tool calls, fallbacks, and synthesis.
+- **Turn Events Stay Visible**: The interactive REPL renders a shared-verbosity action stream. Level `0` keeps the default operational view legible, higher levels add info/debug/trace metadata, and low-value direct-response bookkeeping stays out of the default stream.
 - **Thread Events Stay Visible**: The default transcript shows steering capture, thread decisions, active-thread changes, and merge-back outcomes.
 - **TTY and Plain CLI Serve Different Needs**: Interactive sessions use the dedicated transcript UI; `--prompt` and non-TTY flows remain plain output paths for scripting and pipes.
 

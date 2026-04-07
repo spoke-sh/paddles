@@ -228,7 +228,8 @@ The recursive harness runs as a bounded local-first runtime:
 - **Guidance-aware fallbacks** — fallback selection draws on command hints and decision procedures from foundational docs, and halts recursion when a procedure step has already resolved the request
 - **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the planner until evidence is sufficient or budgets are met
 - **Separate synthesis** — a distinct synthesizer lane produces the final grounded answer from the accumulated evidence bundle
-- **Full-stream visibility** — a default TUI/event stream shows interpretation, planner actions, retrieval, fallbacks, and synthesis as they happen
+- **Full-stream visibility** — a default TUI/event stream shows interpretation, first planner actions, retrieval, fallbacks, and grounded synthesis as they happen, while low-value direct-response bookkeeping stays behind higher verbosity
+- **Shared verbosity contract** — one resolved `0/1/2/3` verbosity level governs both the TUI transcript and the web event stream: `0` is the default operational view, `1` adds info-tier planner metadata, `2` adds debug-tier routing/capability detail, and `3` enables trace diagnostics
 - **Steering-signal control** — context strain and budget boundary remain controller-owned, while premise challenge and action bias now trigger recursive planner review passes over the current sources instead of hard-coded redirects
 - **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary with noop, in-memory, and embedded `transit-core` adapters
 - **Artifact envelopes** — prompts, tool I/O, evidence bundles, planner traces, and responses sit behind logical refs, ready for external storage when needed

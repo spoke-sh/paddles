@@ -49,7 +49,20 @@ Three properties compound to raise effective model performance:
 
 Every step of this process is surfaced through the TUI transcript or plain CLI output: interpretation assembly, planner action selection, gatherer work, tool calls, context strain, fallback decisions, and synthesis.
 
-When a step takes longer than two seconds with no new event, the TUI inserts a contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..." — so the operator always sees forward motion.
+Paddles uses one shared verbosity contract across the TUI and web UI event
+stream:
+
+- `0` is the default operational view. It keeps the main action stream visible
+  while suppressing low-value direct-response bookkeeping.
+- `1` adds info-tier planner and synthesis metadata.
+- `2` adds debug-tier routing, capability, and richer interpretation detail.
+- `3` adds trace diagnostics and the most verbose transport logging.
+
+When a step takes longer than two seconds with no new event, the TUI inserts a
+contextual in-flight indicator — "Planning...", "Synthesizing...", "Searching..."
+— so the operator always sees forward motion. Those in-flight rows help long
+turns stay legible without forcing the default verbosity to show every routing
+and synthesis bookkeeping event.
 
 ## Where Steering Signals Intervene
 

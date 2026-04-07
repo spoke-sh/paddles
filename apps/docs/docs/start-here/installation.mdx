@@ -39,6 +39,17 @@ paddles --help
 
 You should see the CLI help with options for `--model`, `--planner-model`, `--prompt`, `--cuda`, and `--verbose`.
 
+`--verbose` is cumulative:
+
+- no flag => level `0`, the default operational stream
+- `-v` => level `1`, adds info-tier planner and synthesis metadata
+- `-vv` => level `2`, adds debug-tier routing and capability detail
+- `-vvv` => level `3`, enables trace diagnostics
+
+You can also set `verbose = 0`, `1`, `2`, or `3` in `paddles.toml`. CLI flags
+override config, and the resolved level applies equally to the TUI transcript
+and the web event stream.
+
 ## What To Read Next
 
 - [First Turn](./first-turn.mdx) — run your first interactive session

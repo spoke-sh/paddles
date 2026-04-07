@@ -207,15 +207,40 @@ for:
 
 - interpretation context assembly
 - model-selected first action
-- resulting route classification
-- route selection
 - automatic plan updates when planned turns need explicit execution containment
 - planner action selection
 - gatherer capability and gathered evidence
 - planner summaries and stop reasons
 - tool calls, live background terminal stdout/stderr, and final results
 - fallback reasons
-- synthesis readiness
+- grounded or insufficient-evidence synthesis
+
+Lower-verbosity sessions intentionally keep direct-response bookkeeping terse.
+For casual turns, the first planner step remains visible, but route
+classification, route-selection bookkeeping, and "synthesized direct answer"
+status rows stay behind higher verbosity tiers.
+
+### Verbosity Levels
+
+Paddles resolves one shared runtime verbosity level and applies it to both the
+TUI transcript stream and the web UI event stream.
+
+- `0` (`default`) keeps the stream operational: interpretation, first planner
+  action, plan updates, tool/gatherer work, fallbacks, grounded synthesis, and
+  insufficient-evidence outcomes remain visible. Direct-response bookkeeping is
+  intentionally suppressed at this level.
+- `1` (`-v`) adds the next layer of control metadata: direct-answer synthesis
+  status, planner summaries and stop reasons, context strain/refinement
+  summaries, and other info-tier turn events.
+- `2` (`-vv`) adds debug-tier routing detail: route classification and route
+  selection rows, provider capability checks, richer interpretation rendering,
+  and adapter debug summaries such as HTTP request/response envelopes.
+- `3` (`-vvv`) enables trace-tier diagnostics: boot sequencing, full prompt
+  payload tracing, and the most verbose local/remote model transport logs.
+
+In the TUI, slow steps can promote some event rows into view to keep long turns
+legible, but low-value direct-response bookkeeping still stays quiet unless the
+resolved verbosity explicitly allows it.
 
 Repository-question answers also include source/file citations by default.
 When a turn carries edit pressure, grounding pressure, or multi-step follow-up
@@ -267,7 +292,8 @@ web shell embedded in the Rust binary so the web UI still renders when no local
 frontend dist tree exists beside the executable. Verbosity follows the same
 precedence order too: CLI `-v`, `-vv`, or `-vvv` wins over authored
 `paddles.toml`, and the resolved level applies to both the TUI transcript
-stream and the web UI event stream.
+stream and the web UI event stream. When neither the CLI nor authored config
+sets verbosity, Paddles uses level `0`.
 
 Local `sift` retrieval artifacts are machine-managed too. Paddles stores the
 search cache under `~/.cache/paddles/sift/workspaces/<workspace-key>` instead

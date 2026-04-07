@@ -362,7 +362,7 @@ The target architecture is implemented across these modules:
 | **Context Resolution** | [src/domain/ports/context_resolution.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/context_resolution.rs) | ContextResolver port for cross-tier locator resolution |
 | **Transit Resolver** | [src/infrastructure/adapters/transit_resolver.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/transit_resolver.rs) | TransitContextResolver — inline, transit, filesystem dispatch |
 | **Conversation Crate** | [crates/paddles-conversation/src/lib.rs](/home/alex/workspace/spoke-sh/paddles/crates/paddles-conversation/src/lib.rs) | ContextTier, ContextLocator, ArtifactEnvelope, conversation primitives |
-| **Transcript TUI** | [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs) | Codex-style action stream with in-flight silence indicators |
+| **Transcript TUI** | [src/infrastructure/cli/interactive_tui.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/cli/interactive_tui.rs) | Codex-style action stream with shared `0/1/2/3` verbosity tiers and in-flight silence indicators |
 
 ### How The Pieces Fit Together
 

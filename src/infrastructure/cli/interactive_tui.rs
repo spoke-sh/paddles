@@ -2100,11 +2100,15 @@ impl InteractiveApp {
         if is_first_step {
             return true;
         }
-        let promoted_verbose = self.verbose.saturating_add(match pace {
-            Pace::Slow => 2,
-            Pace::Normal => 1,
-            Pace::Fast => 0,
-        });
+        let promoted_verbose = if event.allows_pace_promotion() {
+            self.verbose.saturating_add(match pace {
+                Pace::Slow => 2,
+                Pace::Normal => 1,
+                Pace::Fast => 0,
+            })
+        } else {
+            self.verbose
+        };
         event.is_visible_at_verbosity(promoted_verbose)
     }
 
@@ -3648,7 +3652,7 @@ mod tests {
     use crate::domain::model::{
         ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
         ConversationTranscriptUpdate, RenderBlock, RenderDocument, TaskTraceId, TraceRecordId,
-        TurnEvent, TurnTraceId,
+        TurnEvent, TurnIntent, TurnTraceId,
     };
     use crate::infrastructure::credentials::ProviderAvailability;
     use crate::infrastructure::providers::ModelProvider;
@@ -5678,6 +5682,56 @@ mod tests {
         });
         assert!(!app.emitted_in_flight);
         assert!(app.last_event.is_some());
+    }
+
+    #[test]
+    fn direct_response_bookkeeping_does_not_promote_into_default_streams() {
+        let palette = detect_palette();
+        let app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+
+        assert!(!app.should_show_event(
+            &TurnEvent::IntentClassified {
+                intent: TurnIntent::DirectResponse,
+            },
+            Pace::Slow,
+            false,
+        ));
+        assert!(
+            !app.should_show_event(
+                &TurnEvent::RouteSelected {
+                    summary: "model selected a direct response; controller will render it directly"
+                        .to_string(),
+                },
+                Pace::Slow,
+                false,
+            )
+        );
+        assert!(!app.should_show_event(
+            &TurnEvent::SynthesisReady {
+                grounded: false,
+                citations: Vec::new(),
+                insufficient_evidence: false,
+            },
+            Pace::Slow,
+            false,
+        ));
+        assert!(app.should_show_event(
+            &TurnEvent::SynthesisReady {
+                grounded: true,
+                citations: vec!["src/application/mod.rs".to_string()],
+                insufficient_evidence: false,
+            },
+            Pace::Slow,
+            false,
+        ));
     }
 
     #[test]

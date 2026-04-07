@@ -252,7 +252,13 @@ impl TurnEvent {
             | Self::ToolFinished { .. }
             | Self::WorkspaceEditApplied { .. }
             | Self::Fallback { .. }
-            | Self::SynthesisReady { .. } => 0,
+            | Self::SynthesisReady { grounded: true, .. }
+            | Self::SynthesisReady {
+                insufficient_evidence: true,
+                ..
+            } => 0,
+
+            Self::SynthesisReady { .. } => 1,
 
             Self::PlannerActionSelected { .. }
             | Self::GathererSummary { .. }
@@ -272,6 +278,15 @@ impl TurnEvent {
             | Self::GathererCapability { .. }
             | Self::ThreadCandidateCaptured { .. } => 2,
         }
+    }
+
+    pub fn allows_pace_promotion(&self) -> bool {
+        !matches!(
+            self,
+            Self::IntentClassified { .. }
+                | Self::RouteSelected { .. }
+                | Self::SynthesisReady { .. }
+        )
     }
 
     pub fn in_flight_label(&self) -> &'static str {
@@ -477,5 +492,24 @@ mod tests {
         assert!(!high_detail.is_visible_at_verbosity(1));
         assert!(high_detail.is_visible_at_verbosity(2));
         assert!(low_detail.is_visible_at_verbosity(0));
+    }
+
+    #[test]
+    fn direct_answer_synthesis_waits_for_info_verbosity() {
+        let direct_answer = TurnEvent::SynthesisReady {
+            grounded: false,
+            citations: Vec::new(),
+            insufficient_evidence: false,
+        };
+        let grounded_answer = TurnEvent::SynthesisReady {
+            grounded: true,
+            citations: vec!["src/main.rs".to_string()],
+            insufficient_evidence: false,
+        };
+
+        assert!(!direct_answer.is_visible_at_verbosity(0));
+        assert!(direct_answer.is_visible_at_verbosity(1));
+        assert!(grounded_answer.is_visible_at_verbosity(0));
+        assert!(!direct_answer.allows_pace_promotion());
     }
 }

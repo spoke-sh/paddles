@@ -60,6 +60,35 @@ Each line is a real event from the harness — not decorative output. The planne
 
 The muted "Planning..." row appeared because the planner step took more than two seconds. These in-flight indicators show what the harness is doing during long operations.
 
+## Tune Verbosity
+
+The default interactive stream runs at verbosity level `0`. That view keeps the
+operator-facing steps visible while suppressing low-value bookkeeping for casual
+direct responses.
+
+For example, a greeting at the default level stays short:
+
+```text
+User
+  └ Howdy
+
+• Planner step 1: answer directly · 3.2s (+3.1s)
+  └ Rationale: The user offered a casual greeting with no repository task or request for evidence, so a brief direct reply is appropriate.
+
+Paddles · 3.2s total (+6ms)
+  └ Howdy
+```
+
+Raise verbosity when you want more internals:
+
+- `-v` adds info-tier synthesis and planner summary rows.
+- `-vv` adds debug-tier routing and capability detail.
+- `-vvv` adds trace diagnostics such as boot and prompt-payload logging.
+
+You can also set `verbose = 0`, `1`, `2`, or `3` in `paddles.toml`. CLI flags
+override config, and the same resolved level drives both the TUI transcript and
+the web UI event stream.
+
 ## Use A Heavier Planner
 
 You can route the planner and synthesizer to different models:
