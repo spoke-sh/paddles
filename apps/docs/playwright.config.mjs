@@ -7,6 +7,7 @@ import { defineConfig } from '@playwright/test';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const docsPort = 4176;
 
 function chromiumExecutablePath() {
   if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
@@ -24,7 +25,7 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   use: {
-    baseURL: 'http://127.0.0.1:4175',
+    baseURL: `http://127.0.0.1:${docsPort}`,
     headless: true,
     launchOptions: {
       executablePath: chromiumExecutablePath(),
@@ -32,9 +33,9 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'npm run serve -- --host 127.0.0.1 --port 4175',
+    command: `npm run serve -- --host 127.0.0.1 --port ${docsPort}`,
     cwd: __dirname,
-    url: 'http://127.0.0.1:4175',
+    url: `http://127.0.0.1:${docsPort}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
