@@ -12,7 +12,10 @@ use crate::infrastructure::runtime_preferences::{
 use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
 use anyhow::Result;
 use crossterm::cursor;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size as terminal_size};
 use ratatui::backend::Backend;
@@ -47,6 +50,36 @@ const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 9;
 /// Max prose width for assistant responses (accounts for the 4-char body indent).
 const MAX_PROSE_WIDTH: usize = 96;
 const MULTILINE_INLINE_SEPARATOR: &str = " ⏎ ";
+const PASTE_PREVIEW_LIMIT: usize = 48;
+
+fn normalize_pasted_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+fn pasted_line_count(text: &str) -> usize {
+    let normalized = normalize_pasted_text(text);
+    let trimmed = normalized.trim_end_matches('\n');
+    if trimmed.is_empty() {
+        return 0;
+    }
+    trimmed.split('\n').count()
+}
+
+fn should_compress_pasted_text(text: &str) -> bool {
+    pasted_line_count(text) > 1
+}
+
+fn pasted_preview(text: &str) -> String {
+    let normalized = normalize_pasted_text(text);
+    let trimmed = normalized.trim_end();
+    let preview_source = trimmed
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .or_else(|| trimmed.lines().next())
+        .unwrap_or("");
+    trim_for_display(preview_source, PASTE_PREVIEW_LIMIT)
+}
 
 struct SlashCommandSpec {
     insert_text: &'static str,
@@ -59,6 +92,16 @@ struct SlashSuggestion {
     insert_text: String,
     usage: String,
     description: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ComposerPart {
+    Text(String),
+    Paste {
+        text: String,
+        lines: usize,
+        preview: String,
+    },
 }
 
 const SLASH_COMMANDS: &[SlashCommandSpec] = &[
@@ -235,6 +278,7 @@ pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiCont
                         break;
                     }
                 }
+                Event::Paste(data) => handle_paste_event(&mut app, &data),
                 Event::Resize(_, _) => {}
                 _ => {}
             }
@@ -250,11 +294,31 @@ fn drain_messages(app: &mut InteractiveApp, rx: &mut UnboundedReceiver<UiMessage
     }
 }
 
+fn handle_paste_event(app: &mut InteractiveApp, text: &str) {
+    let normalized = normalize_pasted_text(text);
+    if app.is_masked_input() || !should_compress_pasted_text(&normalized) {
+        app.insert_text_at_cursor(&normalized);
+        return;
+    }
+
+    app.history_cursor = None;
+    app.reset_slash_suggestion_selection();
+    app.push_input_as_text_part();
+    app.composer_parts.push(ComposerPart::Paste {
+        text: normalized.clone(),
+        lines: pasted_line_count(&normalized),
+        preview: pasted_preview(&normalized),
+    });
+    app.input.clear();
+    app.cursor_pos = 0;
+}
+
 fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
-        if app.input.is_empty() {
+        if app.input.is_empty() && !app.has_composer_parts() {
             return true;
         }
+        app.composer_parts.clear();
         app.input.clear();
         app.cursor_pos = 0;
         return false;
@@ -292,6 +356,10 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Backspace => {
+            if app.input.is_empty() && app.has_composer_parts() {
+                app.pop_composer_part();
+                return false;
+            }
             if app.cursor_pos > 0 {
                 let byte_pos = app
                     .input
@@ -312,6 +380,10 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Delete => {
+            if app.input.is_empty() && app.has_composer_parts() {
+                app.pop_composer_part();
+                return false;
+            }
             let char_count = app.input.chars().count();
             if app.cursor_pos < char_count {
                 let byte_pos = app
@@ -421,15 +493,15 @@ struct TerminalSession;
 impl TerminalSession {
     fn enter() -> Result<Self> {
         enable_raw_mode()?;
-        execute!(io::stdout(), cursor::Hide)?;
+        execute!(io::stdout(), cursor::Hide, EnableBracketedPaste)?;
         Ok(Self)
     }
 }
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
+        let _ = execute!(io::stdout(), DisableBracketedPaste, cursor::Show);
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), cursor::Show);
         let _ = writeln!(io::stdout());
     }
 }
@@ -941,6 +1013,7 @@ struct InteractiveApp {
     provider_availability: Vec<ProviderAvailability>,
     rows: Vec<TranscriptRow>,
     input: String,
+    composer_parts: Vec<ComposerPart>,
     queued_prompts: VecDeque<QueuedPrompt>,
     busy: bool,
     busy_phase: BusyPhase,
@@ -1116,6 +1189,7 @@ impl InteractiveApp {
                 ready_message,
             )],
             input: String::new(),
+            composer_parts: Vec::new(),
             queued_prompts: VecDeque::new(),
             busy: false,
             busy_phase: BusyPhase::Idle,
@@ -1315,7 +1389,11 @@ impl InteractiveApp {
     }
 
     fn slash_command_suggestions(&self) -> Vec<SlashSuggestion> {
-        if self.is_masked_input() || self.input.contains('\n') || !self.input.starts_with('/') {
+        if self.is_masked_input()
+            || self.has_composer_parts()
+            || self.input.contains('\n')
+            || !self.input.starts_with('/')
+        {
             return Vec::new();
         }
         let query = self.input.to_ascii_lowercase();
@@ -1385,6 +1463,9 @@ impl InteractiveApp {
     }
 
     fn history_back(&mut self) {
+        if self.has_composer_parts() {
+            return;
+        }
         if self.prompt_history.is_empty() {
             return;
         }
@@ -1402,6 +1483,9 @@ impl InteractiveApp {
     }
 
     fn history_forward(&mut self) {
+        if self.has_composer_parts() {
+            return;
+        }
         let Some(cursor) = self.history_cursor else {
             return;
         };
@@ -1422,6 +1506,123 @@ impl InteractiveApp {
             .collect();
         self.history_cursor = None;
         self.history_draft.clear();
+    }
+
+    fn has_composer_parts(&self) -> bool {
+        !self.composer_parts.is_empty()
+    }
+
+    fn composer_prompt_text(&self) -> String {
+        let mut prompt = String::new();
+        for part in &self.composer_parts {
+            match part {
+                ComposerPart::Text(text) => prompt.push_str(text),
+                ComposerPart::Paste { text, .. } => prompt.push_str(text),
+            }
+        }
+        prompt.push_str(&self.input);
+        prompt
+    }
+
+    fn insert_text_at_cursor(&mut self, text: &str) {
+        let byte_pos = self
+            .input
+            .char_indices()
+            .nth(self.cursor_pos)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input.len());
+        self.input.insert_str(byte_pos, text);
+        self.cursor_pos += text.chars().count();
+        self.history_cursor = None;
+        self.reset_slash_suggestion_selection();
+    }
+
+    fn push_input_as_text_part(&mut self) {
+        if self.input.is_empty() {
+            return;
+        }
+        let input = std::mem::take(&mut self.input);
+        self.composer_parts.push(ComposerPart::Text(input));
+        self.cursor_pos = 0;
+    }
+
+    fn pop_composer_part(&mut self) {
+        let Some(part) = self.composer_parts.pop() else {
+            return;
+        };
+        match part {
+            ComposerPart::Text(text) => {
+                self.input = text;
+                self.cursor_pos = self.input.chars().count();
+            }
+            ComposerPart::Paste { .. } => {
+                self.input.clear();
+                self.cursor_pos = 0;
+            }
+        }
+        self.history_cursor = None;
+        self.reset_slash_suggestion_selection();
+    }
+
+    fn composer_part_summary(part: &ComposerPart) -> Option<String> {
+        match part {
+            ComposerPart::Text(_) => None,
+            ComposerPart::Paste { lines, preview, .. } => {
+                let mut summary = format!("[{lines} lines pasted]");
+                if !preview.is_empty() {
+                    summary.push(' ');
+                    summary.push_str(preview);
+                }
+                Some(summary)
+            }
+        }
+    }
+
+    fn composer_prefix_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for part in &self.composer_parts {
+            match part {
+                ComposerPart::Text(text) => {
+                    for line in text.split('\n') {
+                        lines.push(Line::from(Span::styled(
+                            line.to_string(),
+                            self.palette.input_text,
+                        )));
+                    }
+                }
+                ComposerPart::Paste {
+                    lines: line_count,
+                    preview,
+                    ..
+                } => {
+                    let mut spans = vec![Span::styled(
+                        format!("[{line_count} lines pasted]"),
+                        self.palette.input_hint.add_modifier(Modifier::BOLD),
+                    )];
+                    if !preview.is_empty() {
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(preview.clone(), self.palette.input_text));
+                    }
+                    lines.push(Line::from(spans));
+                }
+            }
+        }
+        lines
+    }
+
+    fn composer_prefix_height(&self, width: usize) -> usize {
+        self.composer_parts
+            .iter()
+            .map(|part| match part {
+                ComposerPart::Text(text) => text
+                    .split('\n')
+                    .map(|line| wrapped_line_count(line, width).max(1))
+                    .sum::<usize>(),
+                ComposerPart::Paste { .. } => Self::composer_part_summary(part)
+                    .map(|summary| wrapped_line_count(&summary, width).max(1))
+                    .unwrap_or(0),
+            })
+            .sum()
     }
 
     fn cancel_latest_queued_steering_prompt(&mut self) -> bool {
@@ -1504,7 +1705,7 @@ impl InteractiveApp {
     }
 
     fn submit_prompt(&mut self) {
-        let raw = self.input.trim().to_string();
+        let raw = self.composer_prompt_text().trim().to_string();
         if raw.is_empty() {
             return;
         }
@@ -1512,6 +1713,7 @@ impl InteractiveApp {
         self.prompt_history.push(raw.clone());
         self.history_cursor = None;
         self.history_draft.clear();
+        self.composer_parts.clear();
         self.input.clear();
         self.cursor_pos = 0;
         self.reset_slash_suggestion_selection();
@@ -2453,6 +2655,18 @@ impl InteractiveApp {
     }
 
     fn input_render_lines(&self) -> Vec<Line<'static>> {
+        if self.has_composer_parts() {
+            let mut lines = self.composer_prefix_lines();
+            if self.input.is_empty() {
+                lines.push(Line::from(Span::raw("")));
+            } else {
+                lines.extend(self.input.split('\n').map(|line| {
+                    Line::from(Span::styled(line.to_string(), self.palette.input_text))
+                }));
+            }
+            return lines;
+        }
+
         let is_masked = self.is_masked_input();
         if !is_masked
             && !self.input.is_empty()
@@ -2584,10 +2798,8 @@ impl InteractiveApp {
 
     fn cursor_position(&self, area: Rect) -> (u16, u16) {
         let inner_width = area.width.saturating_sub(2).max(1) as usize;
-        // Take only the text up to the cursor position.
+        let mut row = self.composer_prefix_height(inner_width) as u16;
         let text_to_cursor: String = self.input.chars().take(self.cursor_pos).collect();
-
-        let mut row = 0u16;
         let mut col = 0usize;
         for (i, line) in text_to_cursor.split('\n').enumerate() {
             if i > 0 {
@@ -2605,14 +2817,15 @@ impl InteractiveApp {
 
     fn input_area_height(&self, width: u16) -> u16 {
         let inner_width = width.saturating_sub(2).max(1) as usize;
-        let content_lines = if self.input.is_empty() {
-            1
-        } else {
-            self.input
-                .split('\n')
-                .map(|line| wrapped_line_count(line, inner_width).max(1))
-                .sum()
-        };
+        let content_lines = self.composer_prefix_height(inner_width)
+            + if self.input.is_empty() {
+                1
+            } else {
+                self.input
+                    .split('\n')
+                    .map(|line| wrapped_line_count(line, inner_width).max(1))
+                    .sum()
+            };
         (content_lines as u16) + 2 // content + top/bottom border
     }
 
@@ -3424,9 +3637,9 @@ fn terminal_uses_light_background() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        BusyPhase, InFlightWorkKind, InputMode, InteractiveApp, InteractiveFrontend, PendingReveal,
-        QueuedPrompt, RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
-        TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
+        BusyPhase, ComposerPart, InFlightWorkKind, InputMode, InteractiveApp, InteractiveFrontend,
+        PendingReveal, QueuedPrompt, RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind,
+        TranscriptTiming, TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
         format_duration_compact, format_turn_event_row, inline_multiline_text,
         inline_viewport_height_for_terminal, render_row_lines, runtime_lane_summary,
         select_interactive_frontend, web_server_ready_row,
@@ -5522,5 +5735,95 @@ mod tests {
     #[test]
     fn inline_multiline_text_preserves_single_lines() {
         assert_eq!(inline_multiline_text("single line"), "single line");
+    }
+
+    #[test]
+    fn app_compresses_multiline_paste_into_a_prompt_chip_and_submits_raw_text() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        super::handle_paste_event(&mut app, "alpha\nbeta\ngamma");
+
+        assert!(app.input.is_empty());
+        assert_eq!(
+            app.composer_parts,
+            vec![ComposerPart::Paste {
+                text: "alpha\nbeta\ngamma".to_string(),
+                lines: 3,
+                preview: "alpha".to_string(),
+            }]
+        );
+        let rendered = app
+            .input_render_lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|line| line.contains("3 lines pasted")));
+
+        app.submit_prompt();
+
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("alpha\nbeta\ngamma".to_string()))
+        );
+    }
+
+    #[test]
+    fn backspace_removes_a_compressed_multiline_paste_when_the_prompt_is_empty() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        super::handle_paste_event(&mut app, "alpha\nbeta\ngamma");
+        super::handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
+
+        assert!(app.composer_parts.is_empty());
+        assert!(app.input.is_empty());
+        let rendered = app
+            .input_render_lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec!["Type a prompt...".to_string()]);
+    }
+
+    #[test]
+    fn single_line_paste_stays_literal_in_the_tui_prompt() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "hello".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        super::handle_paste_event(&mut app, " world");
+
+        assert_eq!(app.input, "hello world");
+        assert!(app.composer_parts.is_empty());
     }
 }
