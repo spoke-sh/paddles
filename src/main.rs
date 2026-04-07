@@ -124,12 +124,21 @@ fn provider_api_format(provider: ModelProvider) -> Option<ApiFormat> {
     }
 }
 
+fn ensure_remote_provider_transport_support(provider: ModelProvider, model_id: &str) -> Result<()> {
+    if let Some(message) = provider.paddles_http_transport_error(model_id) {
+        bail!("{message}");
+    }
+    Ok(())
+}
+
 fn resolve_remote_provider_config(
     provider: ModelProvider,
     model_id: &str,
     credential_store: &CredentialStore,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<(ApiFormat, String, String, RenderCapability)> {
+    ensure_remote_provider_transport_support(provider, model_id)?;
+
     let resolved_api_key = credential_store.resolve_provider_api_key(provider);
     if provider.auth_requirement()
         == paddles::infrastructure::providers::ProviderAuthRequirement::RequiredApiKey
@@ -563,4 +572,25 @@ async fn run_plain_interactive_loop(service: Arc<MechSuitService>) -> Result<()>
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_remote_provider_transport_support;
+    use paddles::infrastructure::providers::ModelProvider;
+
+    #[test]
+    fn remote_provider_transport_rejects_openai_responses_only_models() {
+        let error = ensure_remote_provider_transport_support(ModelProvider::Openai, "gpt-5.4-pro")
+            .expect_err("responses-only OpenAI model should be rejected");
+
+        assert!(error.to_string().contains("Responses API only"));
+        assert!(error.to_string().contains("openai:gpt-5.4"));
+    }
+
+    #[test]
+    fn remote_provider_transport_allows_supported_openai_chat_models() {
+        ensure_remote_provider_transport_support(ModelProvider::Openai, "gpt-5.4")
+            .expect("supported OpenAI chat model should remain allowed");
+    }
 }

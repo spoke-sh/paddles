@@ -150,29 +150,7 @@ pub fn assistant_response_json_schema(require_citations: bool) -> Value {
                             "items": { "type": "string" }
                         }
                     },
-                    "required": ["type"],
-                    "allOf": [
-                        {
-                            "if": { "properties": { "type": { "const": "heading" } }, "required": ["type"] },
-                            "then": { "required": ["text"] }
-                        },
-                        {
-                            "if": { "properties": { "type": { "const": "paragraph" } }, "required": ["type"] },
-                            "then": { "required": ["text"] }
-                        },
-                        {
-                            "if": { "properties": { "type": { "const": "bullet_list" } }, "required": ["type"] },
-                            "then": { "required": ["items"] }
-                        },
-                        {
-                            "if": { "properties": { "type": { "const": "code_block" } }, "required": ["type"] },
-                            "then": { "required": ["code"] }
-                        },
-                        {
-                            "if": { "properties": { "type": { "const": "citations" } }, "required": ["type"] },
-                            "then": { "required": ["sources"] }
-                        }
-                    ]
+                    "required": ["type"]
                 }
             }
         },
@@ -543,30 +521,15 @@ mod tests {
     }
 
     #[test]
-    fn assistant_response_schema_requires_blocks_and_render_types() {
+    fn assistant_response_schema_avoids_conditional_keywords_for_openai_compatibility() {
         let schema = assistant_response_json_schema(true);
         assert_eq!(schema["type"].as_str(), Some("object"));
         assert_eq!(schema["required"][0].as_str(), Some("render_types"));
         assert_eq!(schema["required"][1].as_str(), Some("blocks"));
+        assert!(schema["properties"]["blocks"]["items"]["allOf"].is_null());
         assert_eq!(
-            schema["properties"]["blocks"]["items"]["allOf"][0]["then"]["required"][0].as_str(),
-            Some("text")
-        );
-        assert_eq!(
-            schema["properties"]["blocks"]["items"]["allOf"][1]["then"]["required"][0].as_str(),
-            Some("text")
-        );
-        assert_eq!(
-            schema["properties"]["blocks"]["items"]["allOf"][2]["then"]["required"][0].as_str(),
-            Some("items")
-        );
-        assert_eq!(
-            schema["properties"]["blocks"]["items"]["allOf"][3]["then"]["required"][0].as_str(),
-            Some("code")
-        );
-        assert_eq!(
-            schema["properties"]["blocks"]["items"]["allOf"][4]["then"]["required"][0].as_str(),
-            Some("sources")
+            schema["properties"]["blocks"]["items"]["required"][0].as_str(),
+            Some("type")
         );
     }
 }

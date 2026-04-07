@@ -1824,61 +1824,7 @@ fn planner_action_json_schema() -> Value {
                 "required": ["domain"]
             }
         },
-        "required": ["action", "rationale"],
-        "allOf": [
-            {
-                "if": { "properties": { "action": { "const": "answer" } }, "required": ["action"] },
-                "then": { "required": ["answer"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "search" } }, "required": ["action"] },
-                "then": { "required": ["query"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "list_files" } }, "required": ["action"] },
-                "then": { "required": ["pattern"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "read" } }, "required": ["action"] },
-                "then": { "required": ["path"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "diff" } }, "required": ["action"] },
-                "then": {}
-            },
-            {
-                "if": { "properties": { "action": { "const": "inspect" } }, "required": ["action"] },
-                "then": { "required": ["command"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "shell" } }, "required": ["action"] },
-                "then": { "required": ["command"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "write_file" } }, "required": ["action"] },
-                "then": { "required": ["path", "content"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "replace_in_file" } }, "required": ["action"] },
-                "then": { "required": ["path", "old", "new"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "apply_patch" } }, "required": ["action"] },
-                "then": { "required": ["patch"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "refine" } }, "required": ["action"] },
-                "then": { "required": ["query"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "branch" } }, "required": ["action"] },
-                "then": { "required": ["branches"] }
-            },
-            {
-                "if": { "properties": { "action": { "const": "stop" } }, "required": ["action"] },
-                "then": { "required": ["reason"] }
-            }
-        ]
+        "required": ["action", "rationale"]
     })
 }
 
@@ -3691,6 +3637,19 @@ mod tests {
             Some("select_planner_action")
         );
         assert!(requests[0].body.get("response_format").is_none());
+    }
+
+    #[test]
+    fn planner_action_schema_avoids_conditional_keywords_for_openai_tool_compatibility() {
+        let schema = super::planner_action_json_schema();
+
+        assert!(schema["allOf"].is_null());
+        assert_eq!(schema["required"][0].as_str(), Some("action"));
+        assert_eq!(schema["required"][1].as_str(), Some("rationale"));
+        assert_eq!(
+            schema["properties"]["command"]["type"].as_str(),
+            Some("string")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

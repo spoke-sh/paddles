@@ -252,6 +252,11 @@ to select the next bounded workspace action. The provider chooses the action
 through the planner tool, and Paddles executes that action locally in the
 workspace harness.
 
+For OpenAI specifically, the current remote transport stays on Chat Completions
+with structured JSON/tool calls. Responses-only OpenAI models such as
+`gpt-5.4-pro`, `gpt-5-pro`, and `gpt-5.2-pro` are rejected up front; use
+`gpt-5.4`, `gpt-5.4-mini`, or `gpt-4o` instead.
+
 For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
 

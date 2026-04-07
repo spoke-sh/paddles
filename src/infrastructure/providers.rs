@@ -31,14 +31,11 @@ const OPENAI_MODELS: &[&str] = &[
     "gpt-4o",
     "gpt-4o-mini",
     "gpt-5.4",
-    "gpt-5.4-pro",
     "gpt-5.4-mini",
     "gpt-5.4-nano",
     "gpt-5.3-chat-latest",
     "gpt-5.3-codex",
-    "gpt-5-pro",
     "gpt-5.2",
-    "gpt-5.2-pro",
     "gpt-5.2-chat-latest",
     "gpt-5.2-codex",
     "gpt-5.1",
@@ -52,6 +49,7 @@ const OPENAI_MODELS: &[&str] = &[
     "gpt-5-chat-latest",
     "gpt-5-codex",
 ];
+const OPENAI_RESPONSES_ONLY_MODELS: &[&str] = &["gpt-5.4-pro", "gpt-5-pro", "gpt-5.2-pro"];
 const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
 const GOOGLE_MODELS: &[&str] = &["gemini-2.5-flash"];
@@ -174,6 +172,24 @@ impl ModelProvider {
         self.supports_freeform_model_id() || self.known_model_ids().contains(&model)
     }
 
+    pub fn supports_paddles_http_transport(self, model: &str) -> bool {
+        !matches!(self, Self::Openai) || !OPENAI_RESPONSES_ONLY_MODELS.contains(&model)
+    }
+
+    pub fn paddles_http_transport_error(self, model: &str) -> Option<String> {
+        if self.supports_paddles_http_transport(model) {
+            return None;
+        }
+
+        match self {
+            Self::Openai => Some(format!(
+                "Model `{}` is Responses API only and is not supported by Paddles' current OpenAI transport. Paddles currently uses Chat Completions with structured JSON/tool calls. Choose `openai:gpt-5.4`, `openai:gpt-5.4-mini`, or `openai:gpt-4o` instead.",
+                self.qualified_model_label(model)
+            )),
+            _ => None,
+        }
+    }
+
     pub fn qualified_model_label(self, model: &str) -> String {
         format!("{}:{}", self.name(), self.normalize_model_alias(model))
     }
@@ -244,14 +260,11 @@ mod tests {
                 "gpt-4o",
                 "gpt-4o-mini",
                 "gpt-5.4",
-                "gpt-5.4-pro",
                 "gpt-5.4-mini",
                 "gpt-5.4-nano",
                 "gpt-5.3-chat-latest",
                 "gpt-5.3-codex",
-                "gpt-5-pro",
                 "gpt-5.2",
-                "gpt-5.2-pro",
                 "gpt-5.2-chat-latest",
                 "gpt-5.2-codex",
                 "gpt-5.1",
@@ -266,6 +279,26 @@ mod tests {
                 "gpt-5-codex",
             ]
         );
+    }
+
+    #[test]
+    fn openai_transport_rejects_responses_only_pro_models() {
+        assert!(!ModelProvider::Openai.supports_paddles_http_transport("gpt-5.4-pro"));
+        assert!(!ModelProvider::Openai.supports_paddles_http_transport("gpt-5-pro"));
+        assert!(!ModelProvider::Openai.supports_paddles_http_transport("gpt-5.2-pro"));
+        assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5.4"));
+        assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-4o"));
+    }
+
+    #[test]
+    fn openai_transport_error_mentions_supported_replacements() {
+        let error = ModelProvider::Openai
+            .paddles_http_transport_error("gpt-5.4-pro")
+            .expect("unsupported model should return an error");
+
+        assert!(error.contains("Responses API only"));
+        assert!(error.contains("openai:gpt-5.4"));
+        assert!(error.contains("openai:gpt-4o"));
     }
 
     #[test]
