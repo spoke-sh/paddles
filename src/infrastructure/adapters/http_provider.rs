@@ -1821,7 +1821,7 @@ fn planner_action_json_schema() -> Value {
                         "description": "Short planner rationale for why grounding is required."
                     }
                 },
-                "required": ["domain"]
+                "required": ["domain", "reason"]
             }
         },
         "required": ["action", "rationale"]
@@ -3649,6 +3649,14 @@ mod tests {
         assert_eq!(
             schema["properties"]["command"]["type"].as_str(),
             Some("string")
+        );
+        assert_eq!(
+            schema["properties"]["grounding"]["required"][0].as_str(),
+            Some("domain")
+        );
+        assert_eq!(
+            schema["properties"]["grounding"]["required"][1].as_str(),
+            Some("reason")
         );
     }
 
