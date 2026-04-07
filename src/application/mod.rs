@@ -4274,10 +4274,10 @@ async fn build_planner_prior_context(
 fn planner_budget_for_turn(initial_edit: &InitialEditInstruction) -> PlannerBudget {
     if initial_edit.known_edit {
         PlannerBudget {
-            max_steps: 6,
-            max_reads: 2,
-            max_inspects: 1,
-            max_searches: 1,
+            max_steps: 10,
+            max_reads: 4,
+            max_inspects: 3,
+            max_searches: 2,
             ..PlannerBudget::default()
         }
     } else {
@@ -8579,6 +8579,19 @@ mod tests {
     }
 
     #[test]
+    fn known_edit_planner_budget_preserves_workspace_editor_headroom() {
+        let budget = super::planner_budget_for_turn(&InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+        });
+
+        assert_eq!(budget.max_steps, 10);
+        assert_eq!(budget.max_reads, 4);
+        assert_eq!(budget.max_inspects, 3);
+        assert_eq!(budget.max_searches, 2);
+    }
+
+    #[test]
     fn known_edit_bootstrap_uses_vector_evidence_to_pick_the_best_candidate() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("src")).expect("create src");
@@ -9506,6 +9519,185 @@ mod tests {
                 .lock()
                 .expect("executed actions lock")
                 .last(),
+            Some(WorkspaceAction::ReplaceInFile { path, new, .. })
+                if path == "apps/web/src/runtime-shell.css" && new == "padding: 8px;"
+        ));
+    }
+
+    #[test]
+    fn known_edit_turns_can_spend_multiple_candidate_reads_before_applying_a_patch() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create web src");
+        let css_path = workspace.path().join("apps/web/src/runtime-shell.css");
+        fs::write(&css_path, ".runtime-shell-host {\n  padding: 0;\n}\n").expect("write css");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-app.tsx"),
+            "export function RuntimeApp() { return null; }\n",
+        )
+        .expect("write runtime app");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-store.tsx"),
+            "export function useRuntimeStore() { return null; }\n",
+        )
+        .expect("write runtime store");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer =
+            "Added 8px padding to `.runtime-shell-host` after checking the related runtime files."
+                .to_string();
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "the file is probably obvious, so answer directly".to_string(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec![
+                        "apps/web/src/runtime-shell.css".to_string(),
+                        "apps/web/src/runtime-app.tsx".to_string(),
+                        "apps/web/src/runtime-store.tsx".to_string(),
+                    ],
+                },
+                grounding: None,
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "apps/web/src/runtime-app.tsx".to_string(),
+                        },
+                    },
+                    rationale: "read the app shell before editing".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "apps/web/src/runtime-app.tsx".to_string(),
+                        },
+                    },
+                    rationale: "the action-bias review still allows reading the app shell"
+                        .to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "apps/web/src/runtime-store.tsx".to_string(),
+                        },
+                    },
+                    rationale: "read the runtime store before patching".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "apps/web/src/runtime-store.tsx".to_string(),
+                        },
+                    },
+                    rationale: "the action-bias review still allows reading the runtime store"
+                        .to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::ReplaceInFile {
+                            path: "apps/web/src/runtime-shell.css".to_string(),
+                            old: "padding: 0;".to_string(),
+                            new: "padding: 8px;".to_string(),
+                            replace_all: false,
+                        },
+                    },
+                    rationale: "apply the requested padding change".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt(
+                    "The runtime shell needs 8px padding. Check the neighboring runtime files before you patch it.",
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        let executed_actions = synthesizer
+            .executed_actions
+            .lock()
+            .expect("executed actions lock");
+        let read_count = executed_actions
+            .iter()
+            .filter(|action| matches!(action, WorkspaceAction::Read { .. }))
+            .count();
+        assert!(
+            read_count >= 3,
+            "edit turn should retain enough headroom to read multiple candidate files before patching"
+        );
+        assert!(executed_actions.iter().any(|action| matches!(
+            action,
+            WorkspaceAction::Read { path } if path == "apps/web/src/runtime-app.tsx"
+        )));
+        assert!(executed_actions.iter().any(|action| matches!(
+            action,
+            WorkspaceAction::Read { path } if path == "apps/web/src/runtime-store.tsx"
+        )));
+        assert!(matches!(
+            executed_actions.last(),
             Some(WorkspaceAction::ReplaceInFile { path, new, .. })
                 if path == "apps/web/src/runtime-shell.css" && new == "padding: 8px;"
         ));

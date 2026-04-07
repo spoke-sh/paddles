@@ -245,6 +245,8 @@ This steering signal is observational. It tells the operator and the trace that 
 
 Action bias exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it re-enters the planner with an action-bias review note so the model can judge whether to read, diff, or edit that likely file now.
 
+Known-edit turns also reserve a modest amount of extra read, inspect, and search headroom before the workspace-editor boundary fires, so the planner can inspect a few candidate files without exhausting the turn before any patch is applied.
+
 This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
 
 ### Premise Challenge
