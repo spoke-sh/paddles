@@ -49,11 +49,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1775170076,
-        "narHash": "sha256-Va9glWrcR9hXN9yD9lLSfcs+yo1B86brpJNCU4slSF4=",
+        "lastModified": 1775588115,
+        "narHash": "sha256-xQF6TitOWsxhmmGo6nR6a01+N6yAnKXK4k1OczpDSXc=",
         "owner": "spoke-sh",
         "repo": "keel",
-        "rev": "e8f3e02350ee942c1d44ed1d8fdba657b03a5272",
+        "rev": "8c3e5a259861e7c241ba6569c4ceb2ed37f016df",
         "type": "github"
       },
       "original": {
