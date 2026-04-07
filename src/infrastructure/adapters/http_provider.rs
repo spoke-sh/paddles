@@ -31,6 +31,7 @@ const MAX_CITATIONS: usize = 4;
 const MAX_RETRIES: u32 = 3;
 const RETRY_BASE_DELAY_MS: u64 = 2000;
 const OPENAI_PLANNER_TOOL_NAME: &str = "select_planner_action";
+const OPENAI_MAX_COMPLETION_TOKENS: u32 = 4096;
 
 #[derive(Clone)]
 struct ExchangeCapture<'a> {
@@ -360,7 +361,7 @@ impl HttpProviderAdapter {
                 { "role": "system", "content": system },
                 { "role": "user", "content": user },
             ],
-            "max_tokens": 4096,
+            "max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS,
         });
 
         let assembled_context_id = capture
@@ -410,7 +411,7 @@ impl HttpProviderAdapter {
                 { "role": "system", "content": system },
                 { "role": "user", "content": user },
             ],
-            "max_tokens": 4096,
+            "max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -466,7 +467,7 @@ impl HttpProviderAdapter {
                 { "role": "system", "content": system },
                 { "role": "user", "content": user },
             ],
-            "max_tokens": 4096,
+            "max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS,
             "tools": [{
                 "type": "function",
                 "function": {
@@ -3032,6 +3033,11 @@ mod tests {
             requests[0].body["tool_choice"]["function"]["name"].as_str(),
             Some(super::OPENAI_PLANNER_TOOL_NAME)
         );
+        assert_eq!(
+            requests[0].body["max_completion_tokens"].as_i64(),
+            Some(4096)
+        );
+        assert!(requests[0].body.get("max_tokens").is_none());
         assert!(
             requests[0].body["messages"][1]["content"]
                 .as_str()
@@ -3056,6 +3062,11 @@ mod tests {
             requests[1].body["response_format"]["json_schema"]["strict"].as_bool(),
             Some(true)
         );
+        assert_eq!(
+            requests[1].body["max_completion_tokens"].as_i64(),
+            Some(4096)
+        );
+        assert!(requests[1].body.get("max_tokens").is_none());
         assert!(
             requests[1].body["messages"][1]["content"]
                 .as_str()
@@ -3713,7 +3724,46 @@ mod tests {
             requests[0].body["tool_choice"]["function"]["name"].as_str(),
             Some("select_planner_action")
         );
+        assert_eq!(
+            requests[0].body["max_completion_tokens"].as_i64(),
+            Some(4096)
+        );
+        assert!(requests[0].body.get("max_tokens").is_none());
         assert!(requests[0].body.get("response_format").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_prompt_envelope_requests_use_max_completion_tokens() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: provider_response(ApiFormat::OpenAi, "Mocked plain response."),
+        }])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "openai",
+            "gpt-5.4",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::PromptEnvelope,
+        );
+
+        let (response, _) = adapter
+            .send_async("System prompt", "User prompt", None)
+            .await
+            .expect("plain response");
+
+        assert_eq!(response, "Mocked plain response.");
+
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].body["max_completion_tokens"].as_i64(),
+            Some(4096)
+        );
+        assert!(requests[0].body.get("max_tokens").is_none());
     }
 
     #[test]
