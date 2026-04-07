@@ -1,4 +1,4 @@
-use crate::domain::ports::{RetrievalMode, RetrievalStrategy};
+use crate::domain::ports::{RetrievalMode, RetrievalStrategy, RetrieverOption};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -176,6 +176,8 @@ pub enum WorkspaceAction {
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
         #[serde(default)]
+        retrievers: Vec<RetrieverOption>,
+        #[serde(default)]
         intent: Option<String>,
     },
     ListFiles {
@@ -232,8 +234,14 @@ impl WorkspaceAction {
                 query,
                 mode,
                 strategy,
+                retrievers,
                 ..
-            } => format!("search `{query}` [{} / {}]", mode.label(), strategy.label()),
+            } => format!(
+                "search `{query}` [{} / {}{}]",
+                mode.label(),
+                strategy.label(),
+                format_retriever_suffix(retrievers)
+            ),
             Self::ListFiles { pattern } => match pattern {
                 Some(pattern) if !pattern.trim().is_empty() => {
                     format!("list files matching `{pattern}`")
@@ -279,5 +287,20 @@ impl WorkspaceAction {
             Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
             Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
         }
+    }
+}
+
+fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {
+    if retrievers.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; retrievers={}",
+            retrievers
+                .iter()
+                .map(RetrieverOption::label)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
     }
 }

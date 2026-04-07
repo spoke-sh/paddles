@@ -7,13 +7,13 @@ This document is the source of truth for how search works in `paddles`.
 `paddles` owns recursive planning.
 
 - It decides when to `search`, `refine`, `branch`, or `stop`.
-- It chooses the retrieval mode and strategy for each bounded search action.
+- It chooses the retrieval mode, strategy, and optional retriever overrides for each bounded search action.
 - It decides how gathered evidence is used in later planner and synthesizer turns.
 
 `sift` owns retrieval execution.
 
 - It indexes the workspace.
-- It executes fast `bm25` or `vector` retrieval against local artifacts.
+- It executes fast `bm25`, `vector`, and structural fuzzy retrieval plans against local artifacts.
 - It ranks results and produces snippets/evidence payloads.
 - It emits low-level progress during direct retrieval stages.
 
@@ -25,6 +25,8 @@ The direct `sift` retrieval backend currently provides:
 
 - local workspace indexing
 - `bm25` and vector search execution
+- structural fuzzy path lookup through `retrievers=["path-fuzzy"]`
+- structural fuzzy definition/snippet lookup through `retrievers=["path-fuzzy","segment-fuzzy"]`
 - ranked hits with snippets
 - stage-level progress during initialization, indexing, embedding, retrieval, and ranking
 - evidence bundles returned to the planner/synthesizer boundary with typed metadata
@@ -43,6 +45,20 @@ The search boundary is intentionally narrow:
 
 Those constraints are deliberate. They keep planning visible and controller-owned inside `paddles`.
 
+## Planner Contract
+
+Planner `search` and `refine` actions still use a coarse `strategy`:
+
+- `bm25` for lexical lookup
+- `vector` for semantic lookup
+
+They may now also carry an optional `retrievers` array to ask `sift` for structural fuzzy help:
+
+- `["path-fuzzy"]` maps to the upstream `path-hybrid` preset
+- `["path-fuzzy", "segment-fuzzy"]` maps to the upstream `page-index-hybrid` preset
+
+Paddles treats those as planner-selected retrieval hints, not as a second autonomous search policy.
+
 ## Provider Selection
 
 Use `--gatherer-provider sift-direct` to select the direct retrieval backend.
@@ -58,7 +74,7 @@ Other gatherer choices:
 
 When a planner search step runs, the operator should expect:
 
-1. `paddles` to show the planner-selected query, retrieval mode, and strategy.
+1. `paddles` to show the planner-selected query, retrieval mode, strategy, and any explicit retriever overrides.
 2. The gatherer to show direct retrieval stages rather than hidden autonomous planner states.
 3. Evidence to come back as search results, not as a second planner trace that makes new decisions on its own.
 

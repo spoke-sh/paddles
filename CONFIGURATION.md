@@ -132,7 +132,7 @@ lane selection rather than single-model-only routing:
 - The **shared lane selection** is the default provider/model pair for both planner and synthesizer lanes.
 - The **synthesizer lane** is the default response path and must always be configured.
 - The **planner lane** owns first bounded action selection for the primary mech-suit path: `answer` / concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`) / `refine` / `branch` / `stop`.
-- The **gatherer backend** services planner search/refine actions when workspace retrieval is needed.
+- The **gatherer backend** services planner search/refine actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the planner.
 - If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
 `paddles.toml` can define those model selections explicitly:
@@ -188,6 +188,7 @@ That backend stays local-first and services bounded planner search.
 - `paddles` remains the only recursive planner in the runtime path.
 - Direct retrieval progress is surfaced as concrete execution stages instead of autonomous planner states.
 - The provider returns evidence bundles and retrieval metadata consumed by the planner and synthesizer lanes.
+- Planner `search` and `refine` actions may now add `retrievers=["path-fuzzy"]` or `retrievers=["path-fuzzy","segment-fuzzy"]` when `sift` should bias toward structural fuzzy lookup.
 See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
 Current local model guidance on an 8 GB CUDA card:

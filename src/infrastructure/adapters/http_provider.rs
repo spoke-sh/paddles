@@ -8,7 +8,7 @@ use crate::domain::ports::{
     EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
     InitialEditInstruction, InterpretationContext, InterpretationRequest, PlannerAction,
     PlannerCapability, PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
-    SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction,
+    RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction,
     WorkspaceActionResult, WorkspaceEditor,
 };
 use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
@@ -796,7 +796,7 @@ impl HttpProviderAdapter {
 You must respond with a single JSON object selecting your next action. Available actions:
 
 {{"action":"answer","answer":"...","edit":"no","candidate_files":[],"rationale":"..."}}
-{{"action":"search","query":"...","mode":"linear|graph","strategy":"bm25|vector","intent":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"search","query":"...","mode":"linear|graph","strategy":"bm25|vector","retrievers":["path-fuzzy","segment-fuzzy"],"intent":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"list_files","pattern":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"read","path":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"inspect","command":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
@@ -805,7 +805,7 @@ You must respond with a single JSON object selecting your next action. Available
 {{"action":"write_file","path":"relative/path","content":"full file contents","edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"replace_in_file","path":"relative/path","old":"exact old text","new":"replacement text","replace_all":false,"edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"apply_patch","patch":"unified diff text","edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"refine","query":"...","mode":"linear|graph","strategy":"bm25|vector","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
+{{"action":"refine","query":"...","mode":"linear|graph","strategy":"bm25|vector","retrievers":["path-fuzzy","segment-fuzzy"],"edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"branch","branches":["...","..."],"edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
 {{"action":"stop","reason":"...","edit":"no","candidate_files":[],"rationale":"..."}}
 
@@ -818,6 +818,7 @@ Rules:
 - `answer` requires `answer` and `rationale`.
 - `answer` is the user-facing reply text; `rationale` explains why this control action is correct.
 - `search` requires `query`; include `strategy` when you know whether to use `bm25` or `vector`.
+- `retrievers` is optional; supported values are `path-fuzzy` and `segment-fuzzy`.
 - `list_files` requires `pattern`.
 - `read` requires `path`.
 - `inspect` and `shell` require `command`.
@@ -839,6 +840,8 @@ Rules:
 - Choose "answer" or "stop" as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.
 - When the user requests a code change, choose the nearest supported workspace action that advances the edit, usually `read`, `inspect`, or `shell`.
 - When the user requests a concrete code change, prefer `write_file`, `replace_in_file`, or `apply_patch` over describing the edit in prose.
+- Add `retrievers=["path-fuzzy"]` when the query names a likely file, path, selector, or symbol and structural path similarity should steer retrieval.
+- Add `retrievers=["path-fuzzy","segment-fuzzy"]` when you need definition-oriented fuzzy lookup for a code shape, component, or structural snippet.
 - If `edit` is `yes` and one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.
 - If the loop-state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.
 - Respond ONLY with the JSON object, no prose.
@@ -902,6 +905,7 @@ Rules:
                     query: envelope.query.unwrap_or_default(),
                     mode: envelope.mode.unwrap_or(RetrievalMode::Graph),
                     strategy: envelope.strategy.unwrap_or_default(),
+                    retrievers: envelope.retrievers.unwrap_or_default(),
                     intent: envelope.intent,
                 },
             },
@@ -953,6 +957,7 @@ Rules:
                 query: envelope.query.unwrap_or_default(),
                 mode: envelope.mode.unwrap_or(RetrievalMode::Graph),
                 strategy: envelope.strategy.unwrap_or_default(),
+                retrievers: envelope.retrievers.unwrap_or_default(),
                 rationale: (!rationale.is_empty()).then_some(rationale.clone()),
             },
             "branch" => PlannerAction::Branch {
@@ -993,11 +998,13 @@ Rules:
                     query,
                     mode,
                     strategy,
+                    retrievers,
                     rationale,
                 } => InitialAction::Refine {
                     query,
                     mode,
                     strategy,
+                    retrievers,
                     rationale,
                 },
                 PlannerAction::Branch {
@@ -1699,6 +1706,8 @@ struct PlannerEnvelope {
     #[serde(default)]
     strategy: Option<RetrievalStrategy>,
     #[serde(default)]
+    retrievers: Option<Vec<RetrieverOption>>,
+    #[serde(default)]
     edit: Option<String>,
     #[serde(default)]
     candidate_files: Option<Vec<String>>,
@@ -1755,6 +1764,14 @@ fn planner_action_json_schema() -> Value {
                 "type": "string",
                 "enum": ["bm25", "vector"],
                 "description": "Optional retrieval strategy when `action` is `search`."
+            },
+            "retrievers": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["path-fuzzy", "segment-fuzzy"]
+                },
+                "description": "Optional structural fuzzy retriever overrides when `action` is `search` or `refine`."
             },
             "intent": {
                 "type": "string",
@@ -1834,6 +1851,7 @@ fn planner_action_json_schema() -> Value {
         "query",
         "mode",
         "strategy",
+        "retrievers",
         "intent",
         "pattern",
         "path",
@@ -2554,8 +2572,8 @@ mod tests {
         EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
         InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
         PlannerBudget, PlannerLoopState, PlannerRequest, RecursivePlanner,
-        RecursivePlannerDecision, SynthesisHandoff, SynthesizerEngine, TraceRecorder,
-        WorkspaceAction,
+        RecursivePlannerDecision, RetrieverOption, SynthesisHandoff, SynthesizerEngine,
+        TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -3525,6 +3543,44 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("initial action reply must include top-level `edit`")
+        );
+    }
+
+    #[test]
+    fn parse_initial_action_preserves_structural_retriever_overrides() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "openai",
+            "gpt-5.4",
+            "test-key",
+            "https://api.openai.com/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_initial_action_decision(
+                r#"{"action":"search","query":"runtime shell host","mode":"linear","strategy":"bm25","retrievers":["path-fuzzy","segment-fuzzy"],"edit":"yes","candidate_files":["apps/web/src/runtime-app.tsx"],"rationale":"use structural fuzzy lookup for the likely UI target"}"#,
+            )
+            .expect("initial action");
+
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: "runtime shell host".to_string(),
+                    mode: crate::domain::ports::RetrievalMode::Linear,
+                    strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                    retrievers: vec![RetrieverOption::PathFuzzy, RetrieverOption::SegmentFuzzy,],
+                    intent: None,
+                },
+            }
+        );
+        assert!(decision.edit.known_edit);
+        assert_eq!(
+            decision.edit.candidate_files,
+            vec!["apps/web/src/runtime-app.tsx".to_string()]
         );
     }
 

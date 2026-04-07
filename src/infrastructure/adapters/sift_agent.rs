@@ -13,7 +13,7 @@ use crate::domain::ports::{
     InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
     OperatorMemoryDocument, PlannerAction, PlannerLoopState, PlannerRequest,
-    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
+    RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
     ThreadDecisionRequest, WorkspaceAction, WorkspaceEditor,
 };
 use crate::infrastructure::rendering::{
@@ -162,6 +162,8 @@ enum PlannerActionEnvelope {
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
         #[serde(default)]
+        retrievers: Vec<RetrieverOption>,
+        #[serde(default)]
         intent: Option<String>,
         rationale: String,
     },
@@ -208,6 +210,8 @@ enum PlannerActionEnvelope {
         query: String,
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
+        #[serde(default)]
+        retrievers: Vec<RetrieverOption>,
         #[serde(default)]
         rationale: Option<String>,
     },
@@ -261,6 +265,8 @@ enum InitialActionVariantEnvelope {
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
         #[serde(default)]
+        retrievers: Vec<RetrieverOption>,
+        #[serde(default)]
         intent: Option<String>,
         rationale: String,
     },
@@ -307,6 +313,8 @@ enum InitialActionVariantEnvelope {
         query: String,
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
+        #[serde(default)]
+        retrievers: Vec<RetrieverOption>,
         #[serde(default)]
         rationale: Option<String>,
     },
@@ -2853,7 +2861,7 @@ Precedence Rules:\n\
 - Assess coverage confidence: \"high\" if all aspects of the user prompt are covered by rules/procedures, \"low\" if major gaps exist.\n\
 \n\
 Workspace action schema:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\"}}\n\
@@ -2940,7 +2948,7 @@ Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
@@ -2949,7 +2957,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
@@ -2960,8 +2968,11 @@ Rules:\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 - `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
-- Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
-- Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
+	- Choose retrieval mode and strategy explicitly whenever you select search or refine.\n\
+	- Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would outperform plain lexical or vector search.\n\
+	- Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
+	- Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
+	- Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 - Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 - If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -3022,7 +3033,7 @@ Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
@@ -3031,7 +3042,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
@@ -3039,7 +3050,10 @@ Do not answer the user directly.\n\
 For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
 `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
-Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
+	Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
+	Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
+	Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -3090,7 +3104,7 @@ Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
@@ -3099,7 +3113,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 \n\
@@ -3109,7 +3123,10 @@ Invalid reply to correct:\n\
 `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
 `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
-Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
+	Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
+	Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
+	Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -3158,7 +3175,7 @@ Choose the NEXT bounded workspace resource action for this turn.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -3167,14 +3184,17 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
 \n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
-- Choose retrieval mode and strategy explicitly when you search or refine.\n\
-- Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
+	- Choose retrieval mode and strategy explicitly when you search or refine.\n\
+	- Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would outperform plain lexical or vector search.\n\
+	- Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
+	- Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
+	- Use only fast retrieval strategies: `bm25` for keyword-heavy lookup or `vector` for semantic retrieval. Never request `hybrid`.\n\
 - When the user requests a specific code or UI change, you are in execution mode. Use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 - Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 - If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -3243,7 +3263,7 @@ fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
 Return ONLY one valid JSON planner action.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -3252,13 +3272,16 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
 \n\
 Do not answer the user directly.\n\
 If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
-Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
+	Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
+	Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
+	Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -3312,7 +3335,7 @@ If the loop state already contains enough evidence, return stop.\n\
 Return ONLY one valid JSON planner action.\n\
 \n\
 Allowed actions:\n\
-- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
@@ -3321,14 +3344,17 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"rationale\":\"...\"}}\n\
+	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
 \n\
-Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
+	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
+	Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
+	Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
+	Use only fast retrieval strategies: `bm25` or `vector`. Never request `hybrid`.\n\
 When the user requests a specific code or UI change, use at most one bounded search only if needed to identify the file, then move to list_files/read/apply_patch instead of continuing research.\n\
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
@@ -4389,6 +4415,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             query,
             mode,
             strategy,
+            retrievers,
             intent,
             rationale,
         } => InitialActionDecision {
@@ -4397,6 +4424,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                     query: required_planner_field("query", query)?,
                     mode,
                     strategy,
+                    retrievers,
                     intent: intent.and_then(|value| {
                         let trimmed = value.trim();
                         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -4520,6 +4548,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             query,
             mode,
             strategy,
+            retrievers,
             rationale,
         } => {
             let rationale_text = rationale
@@ -4532,6 +4561,7 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
                     query: required_planner_field("query", query)?,
                     mode,
                     strategy,
+                    retrievers,
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
@@ -4644,6 +4674,7 @@ fn planner_action_from_envelope(
             query,
             mode,
             strategy,
+            retrievers,
             intent,
             rationale,
         } => RecursivePlannerDecision {
@@ -4652,6 +4683,7 @@ fn planner_action_from_envelope(
                     query: required_planner_field("query", query)?,
                     mode,
                     strategy,
+                    retrievers,
                     intent: intent.and_then(|value| {
                         let trimmed = value.trim();
                         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -4775,6 +4807,7 @@ fn planner_action_from_envelope(
             query,
             mode,
             strategy,
+            retrievers,
             rationale,
         } => {
             let rationale_text = rationale
@@ -4787,6 +4820,7 @@ fn planner_action_from_envelope(
                     query: required_planner_field("query", query)?,
                     mode,
                     strategy,
+                    retrievers,
                     rationale: rationale_text.clone(),
                 },
                 rationale: rationale_text.unwrap_or_else(|| "refine the investigation".to_string()),
@@ -5286,8 +5320,8 @@ mod tests {
         InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint,
         OperatorMemoryDocument, PlannerAction, PlannerDecision, PlannerLoopState, PlannerRequest,
         PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-        RefinementPolicy, RetainedEvidence, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
-        WorkspaceAction,
+        RefinementPolicy, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
+        SynthesisHandoff, WorkspaceAction,
     };
     use crate::infrastructure::adapters::sift_agent::{
         DEFAULT_QWEN_MAX_LENGTH, QwenModelFamily, infer_qwen_family, infer_qwen_runtime_max_length,
@@ -6326,6 +6360,7 @@ mod tests {
                     query: ".runtime-shell-host".to_string(),
                     mode: RetrievalMode::Linear,
                     strategy: RetrievalStrategy::Lexical,
+                    retrievers: Vec::new(),
                     intent: None,
                 }
             }
@@ -6334,6 +6369,42 @@ mod tests {
         assert_eq!(
             decision.edit.candidate_files,
             vec!["apps/web/src/runtime-shell.css".to_string()]
+        );
+    }
+
+    #[test]
+    fn initial_action_can_request_structural_fuzzy_retrievers() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(vec![
+                r#"{"action":"search","query":"runtime shell host","mode":"linear","strategy":"bm25","retrievers":["path-fuzzy","segment-fuzzy"],"edit":"yes","candidate_files":["apps/web/src/runtime-app.tsx"],"rationale":"use structural fuzzy lookup for the likely UI target"}"#.to_string(),
+            ])),
+        );
+
+        let request = PlannerRequest::new(
+            "Find the runtime shell host implementation",
+            workspace.path(),
+            InterpretationContext::default(),
+            crate::domain::ports::PlannerBudget::default(),
+        );
+
+        let decision = adapter
+            .select_initial_action(&request, &NullTurnEventSink)
+            .expect("initial action");
+
+        assert_eq!(
+            decision.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: "runtime shell host".to_string(),
+                    mode: RetrievalMode::Linear,
+                    strategy: RetrievalStrategy::Lexical,
+                    retrievers: vec![RetrieverOption::PathFuzzy, RetrieverOption::SegmentFuzzy,],
+                    intent: None,
+                }
+            }
         );
     }
 
@@ -6448,6 +6519,7 @@ mod tests {
                         query: "What's the next step on the keel board?".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: RetrievalStrategy::Lexical,
+                        retrievers: Vec::new(),
                         intent: Some("initial planner fallback".to_string()),
                     },
                 },

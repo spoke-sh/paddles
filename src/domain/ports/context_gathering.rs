@@ -90,6 +90,7 @@ impl Default for EvidenceBudget {
 pub struct PlannerConfig {
     pub mode: RetrievalMode,
     pub retrieval_strategy: RetrievalStrategy,
+    pub retrievers: Vec<RetrieverOption>,
     pub planner_strategy: PlannerStrategyKind,
     pub profile: Option<String>,
     pub step_limit: usize,
@@ -101,6 +102,7 @@ impl Default for PlannerConfig {
         Self {
             mode: RetrievalMode::default(),
             retrieval_strategy: RetrievalStrategy::default(),
+            retrievers: Vec::new(),
             planner_strategy: PlannerStrategyKind::Heuristic,
             profile: None,
             step_limit: 3,
@@ -117,6 +119,11 @@ impl PlannerConfig {
 
     pub fn with_retrieval_strategy(mut self, strategy: RetrievalStrategy) -> Self {
         self.retrieval_strategy = strategy;
+        self
+    }
+
+    pub fn with_retrievers(mut self, retrievers: Vec<RetrieverOption>) -> Self {
+        self.retrievers = retrievers;
         self
     }
 
@@ -174,6 +181,22 @@ impl RetrievalStrategy {
         match self {
             Self::Lexical => "bm25",
             Self::Vector => "vector",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RetrieverOption {
+    PathFuzzy,
+    SegmentFuzzy,
+}
+
+impl RetrieverOption {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::PathFuzzy => "path-fuzzy",
+            Self::SegmentFuzzy => "segment-fuzzy",
         }
     }
 }
@@ -427,6 +450,7 @@ mod tests {
         ContextGatherRequest, ContextGatherResult, EvidenceBudget, EvidenceBundle, EvidenceItem,
         GathererCapability, PlannerConfig, PlannerDecision, PlannerStrategyKind,
         PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+        RetrieverOption,
     };
     use std::path::PathBuf;
 
@@ -450,6 +474,20 @@ mod tests {
         assert_eq!(config.mode, RetrievalMode::Graph);
         assert_eq!(config.planner_strategy, PlannerStrategyKind::Heuristic);
         assert_eq!(config.retrieval_strategy, RetrievalStrategy::Lexical);
+        assert!(config.retrievers.is_empty());
+    }
+
+    #[test]
+    fn planner_config_can_capture_structural_retriever_overrides() {
+        let config = PlannerConfig::default().with_retrievers(vec![
+            RetrieverOption::PathFuzzy,
+            RetrieverOption::SegmentFuzzy,
+        ]);
+
+        assert_eq!(
+            config.retrievers,
+            vec![RetrieverOption::PathFuzzy, RetrieverOption::SegmentFuzzy]
+        );
     }
 
     #[test]

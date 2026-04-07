@@ -198,8 +198,14 @@ impl ContextGatherer for SiftDirectGathererAdapter {
     }
 
     fn capability_for_planning(&self, planning: &PlannerConfig) -> GathererCapability {
-        self.warmup
-            .capability_for_strategy(planning.retrieval_strategy)
+        let plan =
+            SiftRequestFactory::search_plan_for(planning.retrieval_strategy, &planning.retrievers);
+        let strategy = if plan.retrievers.contains(&sift::RetrieverPolicy::Vector) {
+            RetrievalStrategy::Vector
+        } else {
+            RetrievalStrategy::Lexical
+        };
+        self.warmup.capability_for_strategy(strategy)
     }
 
     fn set_event_sink(&self, sink: Option<Arc<dyn TurnEventSink>>) {

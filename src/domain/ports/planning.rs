@@ -1,5 +1,5 @@
 use super::context_gathering::{
-    EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy,
+    EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy, RetrieverOption,
 };
 use super::context_resolution::ContextResolver;
 pub use crate::domain::model::{
@@ -328,6 +328,7 @@ pub enum InitialAction {
         query: String,
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
+        retrievers: Vec<RetrieverOption>,
         rationale: Option<String>,
     },
     Branch {
@@ -358,11 +359,13 @@ impl InitialAction {
                 query,
                 mode,
                 strategy,
+                retrievers,
                 ..
             } => format!(
-                "refine toward `{query}` [{} / {}]",
+                "refine toward `{query}` [{} / {}{}]",
                 mode.label(),
-                strategy.label()
+                strategy.label(),
+                format_retriever_suffix(retrievers)
             ),
             Self::Branch { branches, .. } => format!("branch into {}", branches.join(" | ")),
             Self::Stop { reason } => format!("stop ({reason})"),
@@ -379,11 +382,13 @@ impl InitialAction {
                 query,
                 mode,
                 strategy,
+                retrievers,
                 rationale,
             } => Some(PlannerAction::Refine {
                 query: query.clone(),
                 mode: *mode,
                 strategy: *strategy,
+                retrievers: retrievers.clone(),
                 rationale: rationale.clone(),
             }),
             Self::Branch {
@@ -425,6 +430,7 @@ pub enum PlannerAction {
         query: String,
         mode: RetrievalMode,
         strategy: RetrievalStrategy,
+        retrievers: Vec<RetrieverOption>,
         rationale: Option<String>,
     },
     Branch {
@@ -453,11 +459,13 @@ impl PlannerAction {
                 query,
                 mode,
                 strategy,
+                retrievers,
                 ..
             } => format!(
-                "refine toward `{query}` [{} / {}]",
+                "refine toward `{query}` [{} / {}{}]",
                 mode.label(),
-                strategy.label()
+                strategy.label(),
+                format_retriever_suffix(retrievers)
             ),
             Self::Branch { branches, .. } => {
                 format!("branch into {}", branches.join(" | "))
@@ -497,6 +505,21 @@ pub struct PlannerDecision {
     pub answer: Option<String>,
     pub edit: InitialEditInstruction,
     pub grounding: Option<GroundingRequirement>,
+}
+
+fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {
+    if retrievers.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; retrievers={}",
+            retrievers
+                .iter()
+                .map(RetrieverOption::label)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
 }
 
 #[cfg(test)]
@@ -576,6 +599,7 @@ mod tests {
                 query: "memory reload".to_string(),
                 mode: RetrievalMode::Linear,
                 strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
                 intent: None,
             },
         };

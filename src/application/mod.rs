@@ -34,8 +34,8 @@ use crate::domain::ports::{
     ModelRegistry, NoopTraceRecorder, OperatorMemory, PlannerAction, PlannerBudget,
     PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord,
     PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner,
-    RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, SynthesisHandoff,
-    SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+    RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
+    SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -251,6 +251,7 @@ struct PlannerGatherSpec {
     intent_reason: String,
     mode: RetrievalMode,
     strategy: RetrievalStrategy,
+    retrievers: Vec<RetrieverOption>,
     max_evidence_items: usize,
     success_summary_override: Option<String>,
     no_bundle_message: &'static str,
@@ -1892,6 +1893,7 @@ impl MechSuitService {
             intent_reason,
             mode,
             strategy,
+            retrievers,
             max_evidence_items,
             success_summary_override,
             no_bundle_message,
@@ -1905,6 +1907,7 @@ impl MechSuitService {
         let planning = PlannerConfig::default()
             .with_mode(mode)
             .with_retrieval_strategy(strategy)
+            .with_retrievers(retrievers)
             .with_step_limit(1);
         let capability = gatherer.capability_for_planning(&planning);
 
@@ -2775,6 +2778,7 @@ impl MechSuitService {
                         query,
                         mode,
                         strategy,
+                        retrievers,
                         intent,
                     } => {
                         if search_steps(&loop_state) >= budget.max_searches {
@@ -2793,6 +2797,7 @@ impl MechSuitService {
                                         .unwrap_or_else(|| "planner-search".to_string()),
                                     mode: *mode,
                                     strategy: *strategy,
+                                    retrievers: retrievers.clone(),
                                     max_evidence_items: budget.max_evidence_items,
                                     success_summary_override: None,
                                     no_bundle_message: "planner search returned no evidence bundle",
@@ -2995,6 +3000,7 @@ impl MechSuitService {
                     query,
                     mode,
                     strategy,
+                    retrievers,
                     ..
                 } => {
                     if search_steps(&loop_state) >= budget.max_searches {
@@ -3011,6 +3017,7 @@ impl MechSuitService {
                                 intent_reason: "planner-refine".to_string(),
                                 mode: *mode,
                                 strategy: *strategy,
+                                retrievers: retrievers.clone(),
                                 max_evidence_items: budget.max_evidence_items,
                                 success_summary_override: Some(format!(
                                     "refined search toward `{query}`"
@@ -5742,7 +5749,8 @@ mod tests {
         PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState, PlannerRequest,
         PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
         RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-        SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+        RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -7905,6 +7913,7 @@ mod tests {
                         query: "what should the recursive gatherer inspect".to_string(),
                         mode: RetrievalMode::Graph,
                         strategy: crate::domain::ports::RetrievalStrategy::Vector,
+                        retrievers: Vec::new(),
                         intent: Some("repo-question".to_string()),
                     },
                 },
@@ -8289,6 +8298,7 @@ mod tests {
                         query: "planner loop edit target".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                        retrievers: Vec::new(),
                         intent: Some("implementation search".to_string()),
                     },
                 },
@@ -8307,6 +8317,7 @@ mod tests {
                             query: "keep searching broadly".to_string(),
                             mode: RetrievalMode::Linear,
                             strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                            retrievers: Vec::new(),
                             intent: Some("implementation search".to_string()),
                         },
                     },
@@ -8691,6 +8702,7 @@ mod tests {
                         query: "find the edit target".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: crate::domain::ports::RetrievalStrategy::Lexical,
+                        retrievers: Vec::new(),
                         intent: Some("implementation search".to_string()),
                     },
                 },
@@ -10734,6 +10746,7 @@ mod tests {
                         intent_reason: "planner-search".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: RetrievalStrategy::Vector,
+                        retrievers: Vec::new(),
                         max_evidence_items: 8,
                         success_summary_override: None,
                         no_bundle_message: "planner search returned no evidence bundle",
@@ -10816,6 +10829,7 @@ mod tests {
                         intent_reason: "planner-search".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: RetrievalStrategy::Lexical,
+                        retrievers: vec![RetrieverOption::PathFuzzy],
                         max_evidence_items: 8,
                         success_summary_override: None,
                         no_bundle_message: "planner search returned no evidence bundle",
@@ -10840,6 +10854,10 @@ mod tests {
                         intent_reason: "planner-refine".to_string(),
                         mode: RetrievalMode::Graph,
                         strategy: RetrievalStrategy::Vector,
+                        retrievers: vec![
+                            RetrieverOption::PathFuzzy,
+                            RetrieverOption::SegmentFuzzy,
+                        ],
                         max_evidence_items: 8,
                         success_summary_override: Some(
                             "refined search toward `runtime shell host`".to_string(),
@@ -10867,11 +10885,19 @@ mod tests {
             recorded_requests[0].planning.retrieval_strategy,
             RetrievalStrategy::Lexical
         );
+        assert_eq!(
+            recorded_requests[0].planning.retrievers,
+            vec![RetrieverOption::PathFuzzy]
+        );
         assert_eq!(recorded_requests[1].intent_reason, "planner-refine");
         assert_eq!(recorded_requests[1].planning.mode, RetrievalMode::Graph);
         assert_eq!(
             recorded_requests[1].planning.retrieval_strategy,
             RetrievalStrategy::Vector
+        );
+        assert_eq!(
+            recorded_requests[1].planning.retrievers,
+            vec![RetrieverOption::PathFuzzy, RetrieverOption::SegmentFuzzy]
         );
     }
 

@@ -3770,7 +3770,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "sift"
 version = "0.2.0"
-source = "git+https://github.com/rupurt/sift?rev=52daf4ffc054a8162c208d936b9b7689de85ea36#52daf4ffc054a8162c208d936b9b7689de85ea36"
+source = "git+https://github.com/rupurt/sift?rev=003932b6e57c8fc1e81950b1066afe4feec66c0d#003932b6e57c8fc1e81950b1066afe4feec66c0d"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3792,6 +3792,7 @@ dependencies = [
  "rust_tokenizers",
  "serde",
  "serde_json",
+ "strsim",
  "sysinfo",
  "tokenizers",
  "toml 1.0.6+spec-1.1.0",

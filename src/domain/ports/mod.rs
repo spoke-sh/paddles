@@ -14,7 +14,7 @@ pub use context_gathering::{
     EvidenceItem, GathererCapability, PlannerConfig, PlannerDecision, PlannerGraphBranch,
     PlannerGraphBranchStatus, PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode,
     PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+    PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
 };
 pub use context_resolution::ContextResolver;
 pub use operator_memory::OperatorMemory;
