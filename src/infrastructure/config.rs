@@ -19,6 +19,8 @@ pub struct PaddlesConfig {
     pub provider: String,
     pub provider_url: Option<String>,
     pub model: String,
+    pub synthesizer_provider: Option<String>,
+    pub synthesizer_model: Option<String>,
     pub planner_model: Option<String>,
     pub planner_provider: Option<String>,
     pub gatherer_model: Option<String>,
@@ -35,10 +37,20 @@ pub struct PaddlesConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
+struct ModelLaneOverlay {
+    provider: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 struct PaddlesConfigOverlay {
     provider: Option<String>,
     provider_url: Option<String>,
     model: Option<String>,
+    shared: Option<ModelLaneOverlay>,
+    synthesizer: Option<ModelLaneOverlay>,
+    planner: Option<ModelLaneOverlay>,
     planner_model: Option<String>,
     planner_provider: Option<String>,
     gatherer_model: Option<String>,
@@ -59,6 +71,8 @@ impl Default for PaddlesConfig {
             provider: "sift".to_string(),
             provider_url: None,
             model: "qwen-1.5b".to_string(),
+            synthesizer_provider: None,
+            synthesizer_model: None,
             planner_model: None,
             planner_provider: None,
             gatherer_model: None,
@@ -149,11 +163,35 @@ impl PaddlesConfig {
         if let Some(model) = overlay.model.filter(|value| !value.trim().is_empty()) {
             self.model = model;
         }
+        if let Some(shared) = overlay.shared {
+            if let Some(provider) = shared.provider.filter(|value| !value.trim().is_empty()) {
+                self.provider = provider;
+            }
+            if let Some(model) = shared.model.filter(|value| !value.trim().is_empty()) {
+                self.model = model;
+            }
+        }
+        if let Some(synthesizer) = overlay.synthesizer {
+            if let Some(provider) = synthesizer.provider {
+                self.synthesizer_provider = normalize_optional_string(provider);
+            }
+            if let Some(model) = synthesizer.model {
+                self.synthesizer_model = normalize_optional_string(model);
+            }
+        }
         if let Some(planner_model) = overlay.planner_model {
             self.planner_model = normalize_optional_string(planner_model);
         }
         if let Some(planner_provider) = overlay.planner_provider {
             self.planner_provider = normalize_optional_string(planner_provider);
+        }
+        if let Some(planner) = overlay.planner {
+            if let Some(provider) = planner.provider {
+                self.planner_provider = normalize_optional_string(provider);
+            }
+            if let Some(model) = planner.model {
+                self.planner_model = normalize_optional_string(model);
+            }
         }
         if let Some(gatherer_model) = overlay.gatherer_model {
             self.gatherer_model = normalize_optional_string(gatherer_model);
@@ -205,14 +243,10 @@ impl PaddlesConfig {
         {
             self.model = model.clone();
         }
-        self.planner_provider = preferences
-            .planner_provider
-            .as_ref()
-            .and_then(|value| normalize_optional_string(value.clone()));
-        self.planner_model = preferences
-            .planner_model
-            .as_ref()
-            .and_then(|value| normalize_optional_string(value.clone()));
+        self.synthesizer_provider = None;
+        self.synthesizer_model = None;
+        self.planner_provider = None;
+        self.planner_model = None;
     }
 }
 
@@ -392,6 +426,38 @@ port = 8080
     }
 
     #[test]
+    fn load_parses_lane_sections_with_shared_fallback_structure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("paddles.toml"),
+            r#"
+[shared]
+provider = "moonshot"
+model = "kimi-k2.5"
+
+[synthesizer]
+model = "gpt-4o-mini"
+
+[planner]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+"#,
+        )
+        .expect("write config");
+
+        let config = PaddlesConfig::load(dir.path());
+        assert_eq!(config.provider, "moonshot");
+        assert_eq!(config.model, "kimi-k2.5");
+        assert_eq!(config.synthesizer_provider, None);
+        assert_eq!(config.synthesizer_model.as_deref(), Some("gpt-4o-mini"));
+        assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            config.planner_model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
+    }
+
+    #[test]
     fn load_layers_runtime_preferences_after_authored_config() {
         let dir = tempfile::tempdir().expect("tempdir");
         let system = dir.path().join("etc-paddles.toml");
@@ -438,11 +504,10 @@ port = 9090
 
         assert_eq!(config.provider, "inception");
         assert_eq!(config.model, "mercury-2");
-        assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
-        assert_eq!(
-            config.planner_model.as_deref(),
-            Some("claude-sonnet-4-20250514")
-        );
+        assert!(config.synthesizer_provider.is_none());
+        assert!(config.synthesizer_model.is_none());
+        assert!(config.planner_provider.is_none());
+        assert!(config.planner_model.is_none());
         assert_eq!(config.port, 9090);
     }
 
@@ -484,8 +549,17 @@ model = "gpt-4o"
         fs::write(
             &workspace,
             r#"
+[shared]
 provider = "sift"
 model = "qwen-1.5b"
+
+[synthesizer]
+provider = "moonshot"
+model = "kimi-k2.5"
+
+[planner]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
 "#,
         )
         .expect("write workspace config");
@@ -506,11 +580,10 @@ model = "qwen-1.5b"
 
         assert_eq!(config.provider, "inception");
         assert_eq!(config.model, "mercury-2");
-        assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
-        assert_eq!(
-            config.planner_model.as_deref(),
-            Some("claude-sonnet-4-20250514")
-        );
+        assert!(config.synthesizer_provider.is_none());
+        assert!(config.synthesizer_model.is_none());
+        assert!(config.planner_provider.is_none());
+        assert!(config.planner_model.is_none());
     }
 
     #[test]
@@ -549,7 +622,7 @@ model = "qwen-1.5b"
         let readme = repo_doc("README.md");
         assert!(readme.contains("Inception"));
         assert!(readme.contains("/login inception"));
-        assert!(readme.contains("/model synthesizer inception mercury-2"));
+        assert!(readme.contains("/model inception mercury-2"));
         assert!(readme.contains("mercury-2"));
         assert!(readme.contains("runtime-lanes.toml"));
     }

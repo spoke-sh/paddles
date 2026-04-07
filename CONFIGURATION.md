@@ -126,15 +126,32 @@ weight = 1.5
 
 ## Runtime Lane Selection
 
-`paddles` now treats runtime configuration as planner/synth/gatherer lane
-selection rather than single-model-only routing:
+`paddles` now treats runtime configuration as shared/planner/synth/gatherer
+lane selection rather than single-model-only routing:
 
+- The **shared lane selection** is the default provider/model pair for both planner and synthesizer lanes.
 - The **synthesizer lane** is the default response path and must always be configured.
 - The **planner lane** owns first bounded action selection for the primary mech-suit path: `answer` / concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`) / `refine` / `branch` / `stop`.
 - The **gatherer backend** services planner search/refine actions when workspace retrieval is needed.
 - If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
-Today the lane wiring is exposed through CLI/runtime configuration:
+`paddles.toml` can define those model selections explicitly:
+
+```toml
+[shared]
+provider = "openai"
+model = "gpt-4o"
+
+[synthesizer]
+model = "gpt-4o-mini"
+
+[planner]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+```
+
+When `[synthesizer]` or `[planner]` is omitted, that lane falls back to
+`[shared]`. CLI flags still win over everything:
 
 ```bash
 paddles --model qwen-1.5b --planner-model qwen3.5-2b --gatherer-provider sift-direct
@@ -231,16 +248,16 @@ does not use API-key login.
 
 Successful `/model` changes are written to the machine-managed runtime lane
 state file at `~/.local/state/paddles/runtime-lanes.toml`. That file preserves
-the last selected planner/synthesizer lanes across restarts without mutating
+the last selected shared runtime model across restarts without mutating
 authored `paddles.toml` files. Runtime lane state is applied after authored
-config for the planner/synthesizer lane fields, so the last `/model` selection
-is restored even when a project-local `./paddles.toml` also sets `provider` or
-`model`. When older runtime lane state still points at OpenAI Responses-only
+config for the model lane fields, so the last `/model` selection is restored
+even when a project-local `./paddles.toml` also sets shared/planner/synthesizer
+models. When older runtime lane state still points at OpenAI Responses-only
 `*-pro` variants such as `gpt-5.4-pro`, Paddles rewrites that machine-managed
-state onto the corresponding chat-completions model during startup so the next
-boot uses the supported OpenAI transport automatically. Other settings such as
-`port`, verbosity, gatherer configuration, and CLI flags keep their normal
-precedence. If no authored config layer explicitly
+state onto the corresponding chat-completions model during startup, and any
+older machine-managed planner split is dropped so `/model` remains a single
+shared-lane override. Other settings such as `port`, verbosity, gatherer
+configuration, and CLI flags keep their normal precedence. If no authored config layer explicitly
 sets `port` and you do not pass `--port`, Paddles asks the OS for an ephemeral
 HTTP port at startup and reports the resolved HTTP bind address in the intro
 transcript. The primary web routes prefer the built `apps/web/dist` runtime
@@ -270,8 +287,7 @@ For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
 `kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
 
 For Inception, the supported core model path is `mercury-2`. Authenticate with
-`/login inception`, then select it with `/model synthesizer inception mercury-2`
-or `/model planner inception mercury-2`. That chat-completions compatibility
+`/login inception`, then select it with `/model inception mercury-2`. That chat-completions compatibility
 path is usable today without provider-native streaming/diffusion views.
 Workspace edits still execute locally through the shared workspace editor
 boundary, even when the planner lane is Inception-backed.

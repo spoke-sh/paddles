@@ -271,8 +271,24 @@ async fn main() -> Result<()> {
         PaddlesConfig::load_with_runtime_preferences(&root_path, runtime_preferences.as_ref());
     let authored_port_configured = PaddlesConfig::authored_port_is_configured(&root_path);
 
-    // Merge: CLI flags override config values
-    let mut model = cli.model.unwrap_or(config.model);
+    // Merge: CLI flags override config values.
+    let shared_provider = cli
+        .provider
+        .unwrap_or_else(|| resolve_provider_from_name(&config.provider, "provider"));
+    let mut shared_model = cli.model.clone().unwrap_or_else(|| config.model.clone());
+    let provider = cli.provider.unwrap_or_else(|| {
+        config
+            .synthesizer_provider
+            .as_deref()
+            .map(|provider| resolve_provider_from_name(provider, "synthesizer.provider"))
+            .unwrap_or(shared_provider)
+    });
+    let mut model = cli.model.clone().unwrap_or_else(|| {
+        config
+            .synthesizer_model
+            .clone()
+            .unwrap_or_else(|| config.model.clone())
+    });
     let credits = cli.credits.unwrap_or(config.credits);
     let weights = cli.weights.unwrap_or(config.weights);
     let biases = cli.biases.unwrap_or(config.biases);
@@ -281,21 +297,26 @@ async fn main() -> Result<()> {
     let verbose = resolve_runtime_verbosity(cli.verbose, config.verbose);
     let hf_token = cli.hf_token.or(config.hf_token);
     let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
-    let mut planner_model = cli.planner_model.or(config.planner_model);
-    let planner_provider = cli.planner_provider.or_else(|| {
+    let explicit_planner_provider = cli.planner_provider.or_else(|| {
         config
             .planner_provider
             .as_deref()
             .map(|provider| resolve_provider_from_name(provider, "planner_provider"))
     });
+    let mut planner_model = cli.planner_model.or(config.planner_model);
     let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
     let provider_url = cli.provider_url.or(config.provider_url);
 
-    let provider = cli
-        .provider
-        .unwrap_or_else(|| resolve_provider_from_name(&config.provider, "provider"));
-
     let provider_name = provider.name();
+    let normalized_shared_model =
+        normalize_provider_model_alias(shared_provider.name(), &shared_model);
+    if normalized_shared_model != shared_model {
+        eprintln!(
+            "[WARN] Shared model `{shared_model}` is no longer valid for provider `{}`; using `{normalized_shared_model}` instead.",
+            shared_provider.name()
+        );
+        shared_model = normalized_shared_model;
+    }
     let normalized_model = normalize_provider_model_alias(provider_name, &model);
     if normalized_model != model {
         eprintln!(
@@ -303,18 +324,21 @@ async fn main() -> Result<()> {
         );
         model = normalized_model;
     }
-    let normalized_planner_provider = planner_provider.unwrap_or(provider);
-    planner_model = planner_model.map(|planner| {
-        let normalized =
-            normalize_provider_model_alias(normalized_planner_provider.name(), &planner);
-        if normalized != planner {
-            eprintln!(
-                "[WARN] Planner model `{planner}` is no longer valid for provider `{}`; using `{normalized}` instead.",
-                normalized_planner_provider.name()
-            );
-        }
-        normalized
-    });
+    let normalized_planner_provider = explicit_planner_provider.unwrap_or(shared_provider);
+    let effective_planner_model = planner_model.take().unwrap_or_else(|| shared_model.clone());
+    let normalized_planner_model = normalize_provider_model_alias(
+        normalized_planner_provider.name(),
+        &effective_planner_model,
+    );
+    if normalized_planner_model != effective_planner_model {
+        eprintln!(
+            "[WARN] Planner model `{effective_planner_model}` is no longer valid for provider `{}`; using `{normalized_planner_model}` instead.",
+            normalized_planner_provider.name()
+        );
+    }
+    let planner_provider =
+        (normalized_planner_provider != provider).then_some(normalized_planner_provider);
+    let planner_model = (normalized_planner_model != model).then_some(normalized_planner_model);
 
     let normalized_gatherer_provider = normalize_gatherer_provider_alias(&config.gatherer_provider);
     let gatherer_provider = match cli.gatherer_provider {

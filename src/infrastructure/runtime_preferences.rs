@@ -21,22 +21,12 @@ impl RuntimeLanePreferences {
     pub fn from_runtime_lanes(runtime_lanes: &RuntimeLaneConfig) -> Self {
         let synthesizer_provider = runtime_lanes.synthesizer_provider();
         let synthesizer_model = runtime_lanes.synthesizer_model_id();
-        let planner_provider = runtime_lanes.planner_provider_override();
-        let effective_planner_model = runtime_lanes
-            .planner_model_id()
-            .unwrap_or(synthesizer_model);
 
         Self {
             provider: Some(synthesizer_provider.name().to_string()),
             model: Some(synthesizer_model.to_string()),
-            planner_provider: planner_provider.map(|provider| provider.name().to_string()),
-            planner_model: if planner_provider.is_some()
-                || effective_planner_model != synthesizer_model
-            {
-                Some(effective_planner_model.to_string())
-            } else {
-                None
-            },
+            planner_provider: None,
+            planner_model: None,
         }
     }
 
@@ -55,6 +45,13 @@ impl RuntimeLanePreferences {
         }
 
         if normalize_machine_managed_model_alias(&self.planner_provider, &mut self.planner_model) {
+            changed = true;
+        }
+
+        if self.planner_provider.take().is_some() {
+            changed = true;
+        }
+        if self.planner_model.take().is_some() {
             changed = true;
         }
 
@@ -197,11 +194,8 @@ mod tests {
 
         assert_eq!(preferences.provider.as_deref(), Some("openai"));
         assert_eq!(preferences.model.as_deref(), Some("gpt-4o"));
-        assert_eq!(preferences.planner_provider.as_deref(), Some("anthropic"));
-        assert_eq!(
-            preferences.planner_model.as_deref(),
-            Some("claude-sonnet-4-20250514")
-        );
+        assert!(preferences.planner_provider.is_none());
+        assert!(preferences.planner_model.is_none());
     }
 
     #[test]
@@ -225,8 +219,8 @@ mod tests {
         let preferences = RuntimeLanePreferences {
             provider: Some("inception".to_string()),
             model: Some("mercury-2".to_string()),
-            planner_provider: Some("openai".to_string()),
-            planner_model: Some("gpt-4o".to_string()),
+            planner_provider: None,
+            planner_model: None,
         };
 
         store.save(&preferences).expect("save runtime preferences");
@@ -262,11 +256,11 @@ planner_model = "gpt-5.2-pro"
 
         assert_eq!(loaded.provider.as_deref(), Some("openai"));
         assert_eq!(loaded.model.as_deref(), Some("gpt-5.4"));
-        assert_eq!(loaded.planner_provider.as_deref(), Some("openai"));
-        assert_eq!(loaded.planner_model.as_deref(), Some("gpt-5.2"));
+        assert!(loaded.planner_provider.is_none());
+        assert!(loaded.planner_model.is_none());
         assert_eq!(
             std::fs::read_to_string(&path).expect("read normalized runtime preferences"),
-            "provider = \"openai\"\nmodel = \"gpt-5.4\"\nplanner_provider = \"openai\"\nplanner_model = \"gpt-5.2\"\n"
+            "provider = \"openai\"\nmodel = \"gpt-5.4\"\n"
         );
     }
 

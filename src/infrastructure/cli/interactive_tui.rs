@@ -73,14 +73,9 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         description: "show the model catalog and auth state",
     },
     SlashCommandSpec {
-        insert_text: "/model planner ",
-        usage: "/model planner <provider> <model>",
-        description: "switch the planner lane",
-    },
-    SlashCommandSpec {
-        insert_text: "/model synthesizer ",
-        usage: "/model synthesizer <provider> <model>",
-        description: "switch the synthesizer lane",
+        insert_text: "/model ",
+        usage: "/model <provider> <model>",
+        description: "switch the shared runtime model",
     },
 ];
 
@@ -1093,14 +1088,14 @@ impl InteractiveApp {
                 "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
                  Type `/login {provider}` to set or replace its API key.\n\
-                 Type `/model` to inspect or switch planner and synthesizer lanes.\n\
+                 Type `/model` to inspect lanes or switch the shared runtime model.\n\
                  Slash commands open a popup; Tab accepts the active completion.",
             ),
             None => format!(
                 "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
                  Type `/login <provider>` for any remote provider.\n\
-                 Type `/model` to inspect or switch planner and synthesizer lanes.\n\
+                 Type `/model` to inspect lanes or switch the shared runtime model.\n\
                  Slash commands open a popup; Tab accepts the active completion.",
             ),
         };
@@ -1274,16 +1269,10 @@ impl InteractiveApp {
     }
 
     fn dynamic_model_slash_suggestions(&self, query: &str) -> Option<Vec<SlashSuggestion>> {
-        const PLANNER_PREFIX: &str = "/model planner ";
-        const SYNTH_PREFIX: &str = "/model synthesizer ";
+        const MODEL_PREFIX: &str = "/model ";
 
-        let (prefix, remainder) = if let Some(remainder) = query.strip_prefix(PLANNER_PREFIX) {
-            (PLANNER_PREFIX, remainder)
-        } else if let Some(remainder) = query.strip_prefix(SYNTH_PREFIX) {
-            (SYNTH_PREFIX, remainder)
-        } else {
-            return None;
-        };
+        let remainder = query.strip_prefix(MODEL_PREFIX)?;
+        let prefix = MODEL_PREFIX;
 
         if let Some((provider_name, model_query)) = remainder.split_once(' ') {
             let provider = ModelProvider::from_name(provider_name)?;
@@ -1300,7 +1289,7 @@ impl InteractiveApp {
                         insert_text: format!("{prefix}{provider_name} {model_id}"),
                         usage: format!("{prefix}{provider_name} {model_id}"),
                         description: format!(
-                            "select the {} model for this lane",
+                            "select {} for both runtime lanes",
                             provider.qualified_model_label(model_id)
                         ),
                     })
@@ -1316,7 +1305,10 @@ impl InteractiveApp {
                 .map(|provider| SlashSuggestion {
                     insert_text: format!("{prefix}{} ", provider.name()),
                     usage: format!("{prefix}{} ", provider.name()),
-                    description: format!("choose {} for this lane", provider.display_name()),
+                    description: format!(
+                        "choose {} for the shared runtime selection",
+                        provider.display_name()
+                    ),
                 })
                 .collect(),
         )
@@ -1650,17 +1642,16 @@ impl InteractiveApp {
             self.push_event("Model catalog", self.render_model_catalog());
             return;
         }
-        if parts.len() < 4 {
+        if parts.len() < 3 {
             self.push_error(
                 "Model command invalid",
-                "Use `/model`, `/model synthesizer <provider> <model>`, or `/model planner <provider> <model>`.",
+                "Use `/model` or `/model <provider> <model>`.",
             );
             return;
         }
 
-        let lane = parts[1].to_ascii_lowercase();
-        let provider_name = parts[2].to_ascii_lowercase();
-        let model_id = parts[3..].join(" ");
+        let provider_name = parts[1].to_ascii_lowercase();
+        let model_id = parts[2..].join(" ");
         let provider = match ModelProvider::from_name(&provider_name) {
             Some(provider) => provider,
             None => {
@@ -1711,50 +1702,18 @@ impl InteractiveApp {
             return;
         }
 
-        let runtime_lanes = match lane.as_str() {
-            "planner" => {
-                let runtime_lanes = self
-                    .runtime_lanes
-                    .clone()
-                    .with_planner_provider(Some(provider))
-                    .with_planner_model_id(Some(normalized_model.clone()));
-                self.pending_runtime_update = Some(PendingRuntimeUpdate {
-                    persisted_preferences: RuntimeLanePreferences::from_runtime_lanes(
-                        &runtime_lanes,
-                    ),
-                    runtime_lanes,
-                    summary: format!(
-                        "Planner lane now targets `{}`.",
-                        provider.qualified_model_label(&normalized_model)
-                    ),
-                });
-                return;
-            }
-            "synth" | "synthesizer" => RuntimeLaneConfig::new(
-                normalized_model.clone(),
-                self.runtime_lanes.gatherer_model_id().map(str::to_string),
-            )
-            .with_synthesizer_provider(provider)
-            .with_planner_model_id(self.runtime_lanes.planner_model_id().map(str::to_string))
-            .with_planner_provider(self.runtime_lanes.planner_provider_override())
-            .with_gatherer_provider(self.runtime_lanes.gatherer_provider())
-            .with_context1_harness_ready(self.runtime_lanes.context1_harness_ready()),
-            _ => {
-                self.push_error(
-                    "Model command invalid",
-                    format!(
-                        "Unknown lane `{}`. Use `planner` or `synthesizer`.",
-                        parts[1]
-                    ),
-                );
-                return;
-            }
-        };
+        let runtime_lanes = RuntimeLaneConfig::new(
+            normalized_model.clone(),
+            self.runtime_lanes.gatherer_model_id().map(str::to_string),
+        )
+        .with_synthesizer_provider(provider)
+        .with_gatherer_provider(self.runtime_lanes.gatherer_provider())
+        .with_context1_harness_ready(self.runtime_lanes.context1_harness_ready());
         self.pending_runtime_update = Some(PendingRuntimeUpdate {
             persisted_preferences: RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes),
             runtime_lanes,
             summary: format!(
-                "Synthesizer lane now targets `{}`.",
+                "Runtime lanes now target `{}`.",
                 provider.qualified_model_label(&normalized_model)
             ),
         });
@@ -1803,14 +1762,13 @@ impl InteractiveApp {
         if let Some(path) = &self.runtime_preference_path {
             lines.push(format!("Runtime lane state: {}", path.display()));
             lines.push(
-                "Workspace `paddles.toml` overrides this machine-managed state when both are present."
+                "Machine-managed runtime state overrides authored model-lane config until you clear it."
                     .to_string(),
             );
             lines.push(String::new());
         }
         lines.push(
-            "Use `/model synthesizer <provider> <model>` or `/model planner <provider> <model>`."
-                .to_string(),
+            "Use `/model <provider> <model>` to switch the shared runtime model.".to_string(),
         );
         lines.join("\n")
     }
@@ -4353,7 +4311,7 @@ mod tests {
                 provider_availability(ModelProvider::Openai, true, "using local credential store"),
             ],
         );
-        app.input = "/model synthesizer openai gpt-4o".to_string();
+        app.input = "/model openai gpt-4o".to_string();
 
         app.submit_prompt();
 
@@ -4365,6 +4323,8 @@ mod tests {
             ModelProvider::Openai
         );
         assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
+        assert!(update.runtime_lanes.planner_provider_override().is_none());
+        assert!(update.runtime_lanes.planner_model_id().is_none());
         assert_eq!(
             update.persisted_preferences.provider.as_deref(),
             Some("openai")
@@ -4397,7 +4357,7 @@ mod tests {
                 provider_availability(ModelProvider::Openai, true, "using local credential store"),
             ],
         );
-        app.input = "/model synthesizer openai gpt-4o".to_string();
+        app.input = "/model openai gpt-4o".to_string();
         app.submit_prompt();
 
         let started_at = Instant::now();
@@ -4449,7 +4409,7 @@ mod tests {
                         "using local credential store",
                     ),
                 ],
-                summary: "Synthesizer lane now targets `openai:gpt-4o`.".to_string(),
+                summary: "Runtime lanes now target `openai:gpt-4o`.".to_string(),
                 preference_path: PathBuf::from("/tmp/runtime-lanes.toml"),
                 preference_save_error: None,
             }),
@@ -4496,7 +4456,7 @@ mod tests {
         app.busy = true;
         app.busy_phase = BusyPhase::Reconfiguring;
 
-        app.input = "/model synthesizer openai gpt-4o".to_string();
+        app.input = "/model openai gpt-4o".to_string();
         app.submit_prompt();
 
         assert!(
@@ -4527,7 +4487,7 @@ mod tests {
                 provider_availability(ModelProvider::Anthropic, false, "login required"),
             ],
         );
-        app.input = "/model planner anthropic claude-sonnet-4-20250514".to_string();
+        app.input = "/model anthropic claude-sonnet-4-20250514".to_string();
 
         app.submit_prompt();
 
@@ -4572,7 +4532,10 @@ mod tests {
         let row = app.rows.last().expect("catalog row");
         assert!(row.content.contains("Runtime lane state"));
         assert!(row.content.contains("runtime-lanes.toml"));
-        assert!(row.content.contains("Workspace `paddles.toml` overrides"));
+        assert!(
+            row.content
+                .contains("Machine-managed runtime state overrides")
+        );
     }
 
     #[test]
@@ -4600,15 +4563,7 @@ mod tests {
 
         assert!(rendered.contains("Commands"));
         assert!(rendered.contains("/model"));
-        assert!(rendered.contains("/model planner"));
-        assert_eq!(
-            suggestions,
-            vec![
-                "/model",
-                "/model planner <provider> <model>",
-                "/model synthesizer <provider> <model>",
-            ]
-        );
+        assert_eq!(suggestions, vec!["/model", "/model <provider> <model>"]);
     }
 
     #[test]
@@ -4651,7 +4606,7 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model planner inc".to_string();
+        app.input = "/model inc".to_string();
         app.cursor_pos = app.input.chars().count();
 
         let buffer = render_buffer(&app, 120, 18);
@@ -4663,8 +4618,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(rendered.contains("Commands"));
-        assert!(rendered.contains("/model planner inception "));
-        assert_eq!(suggestions, vec!["/model planner inception "]);
+        assert!(rendered.contains("/model inception "));
+        assert_eq!(suggestions, vec!["/model inception "]);
     }
 
     #[test]
@@ -4679,7 +4634,7 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model synthesizer inception m".to_string();
+        app.input = "/model inception m".to_string();
         app.cursor_pos = app.input.chars().count();
 
         let buffer = render_buffer(&app, 120, 18);
@@ -4691,8 +4646,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(rendered.contains("Commands"));
-        assert!(rendered.contains("/model synthesizer inception mercury-2"));
-        assert_eq!(suggestions, vec!["/model synthesizer inception mercury-2"]);
+        assert!(rendered.contains("/model inception mercury-2"));
+        assert_eq!(suggestions, vec!["/model inception mercury-2"]);
     }
 
     #[test]
@@ -4725,7 +4680,7 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model planner ollama ".to_string();
+        app.input = "/model ollama ".to_string();
         app.cursor_pos = app.input.chars().count();
 
         assert!(app.slash_command_suggestions().is_empty());
@@ -4921,11 +4876,11 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model p".to_string();
+        app.input = "/model i".to_string();
         app.cursor_pos = app.input.chars().count();
 
         assert!(app.accept_selected_slash_completion());
-        assert_eq!(app.input, "/model planner ");
+        assert_eq!(app.input, "/model inception ");
     }
 
     #[test]
@@ -4960,12 +4915,12 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model planner inc".to_string();
+        app.input = "/model inc".to_string();
         app.cursor_pos = app.input.chars().count();
 
         assert!(app.accept_selected_slash_completion());
-        assert_eq!(app.input, "/model planner inception ");
-        assert_eq!(app.cursor_pos, "/model planner inception ".chars().count());
+        assert_eq!(app.input, "/model inception ");
+        assert_eq!(app.cursor_pos, "/model inception ".chars().count());
     }
 
     #[test]
@@ -4980,15 +4935,12 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model synthesizer inception mer".to_string();
+        app.input = "/model inception mer".to_string();
         app.cursor_pos = app.input.chars().count();
 
         assert!(app.accept_selected_slash_completion());
-        assert_eq!(app.input, "/model synthesizer inception mercury-2");
-        assert_eq!(
-            app.cursor_pos,
-            "/model synthesizer inception mercury-2".chars().count()
-        );
+        assert_eq!(app.input, "/model inception mercury-2");
+        assert_eq!(app.cursor_pos, "/model inception mercury-2".chars().count());
     }
 
     #[test]
