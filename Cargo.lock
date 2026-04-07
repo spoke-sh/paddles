@@ -2927,6 +2927,7 @@ dependencies = [
  "crossterm 0.29.0",
  "directories",
  "hf-hub 0.4.3",
+ "ignore",
  "paddles-conversation",
  "ratatui",
  "reqwest",

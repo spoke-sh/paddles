@@ -19,6 +19,13 @@ This document is the source of truth for how search works in `paddles`.
 
 `sift` is not a second planner in the active runtime path. `paddles` does not delegate recursive search strategy back into the gatherer.
 
+Paddles also owns the authored-workspace boundary around retrieval results.
+When the workspace has a root `.gitignore`, that file is treated as the primary
+boundary for planner-visible files, gatherer evidence, and local `list_files`
+results. If no root `.gitignore` is present, Paddles falls back to a small
+generated/vendored denylist so obviously non-authored paths stay out of the
+search loop.
+
 ## Capabilities
 
 The direct `sift` retrieval backend currently provides:
@@ -38,6 +45,7 @@ The default direct provider name is `sift-direct`.
 The search boundary is intentionally narrow:
 
 - Search only retrieves from the local workspace and attached local context sources.
+- Search results are post-filtered against the authored-workspace boundary before they reach the planner or synthesizer.
 - Search does not perform its own recursive planning or branch exploration.
 - Search does not decide whether another query should run next.
 - Search does not mutate workspace files.

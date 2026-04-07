@@ -24,6 +24,7 @@ use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
 use crate::infrastructure::terminal::run_background_terminal_command;
+use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -4041,7 +4042,7 @@ fn format_planner_loop_state_digest(request: &PlannerRequest) -> String {
         }
     }
 
-    let likely_targets = planner_likely_target_files(&request.loop_state);
+    let likely_targets = planner_likely_target_files(&request.loop_state, &request.workspace_root);
     if !likely_targets.is_empty() {
         lines.push("Likely target files:".to_string());
         for path in likely_targets {
@@ -4080,11 +4081,17 @@ fn format_runtime_notes(runtime_notes: &[String]) -> String {
     }
 }
 
-fn planner_likely_target_files(loop_state: &PlannerLoopState) -> Vec<String> {
+fn planner_likely_target_files(
+    loop_state: &PlannerLoopState,
+    workspace_root: &Path,
+) -> Vec<String> {
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
     let mut ranked = loop_state
         .evidence_items
         .iter()
-        .filter_map(|item| planner_candidate_path(&item.source).map(|path| (path, item.rank)))
+        .filter_map(|item| {
+            planner_candidate_path(&item.source, &path_policy).map(|path| (path, item.rank))
+        })
         .collect::<Vec<_>>();
     ranked.sort_by(|(path_a, rank_a), (path_b, rank_b)| {
         planner_candidate_score(path_b, *rank_b)
@@ -4095,16 +4102,12 @@ fn planner_likely_target_files(loop_state: &PlannerLoopState) -> Vec<String> {
     ranked.into_iter().take(3).map(|(path, _)| path).collect()
 }
 
-fn planner_candidate_path(source: &str) -> Option<String> {
+fn planner_candidate_path(source: &str, path_policy: &WorkspacePathPolicy) -> Option<String> {
     if source.trim().is_empty() || source.starts_with("command: ") {
         return None;
     }
     let path = source.replace('\\', "/");
-    if Path::new(&path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some()
-    {
+    if path_policy.allows_relative_file(&path) {
         Some(path)
     } else {
         None
@@ -5194,8 +5197,15 @@ fn relative_path(workspace_root: &Path, path: &Path) -> String {
 }
 
 fn list_files(workspace_root: &Path, pattern: Option<&str>) -> Result<Vec<String>> {
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
     let mut files = Vec::new();
-    visit_files(workspace_root, workspace_root, pattern, &mut files)?;
+    visit_files(
+        workspace_root,
+        workspace_root,
+        &path_policy,
+        pattern,
+        &mut files,
+    )?;
     files.sort();
     if files.len() > MAX_LISTED_FILES {
         files.truncate(MAX_LISTED_FILES);
@@ -5206,6 +5216,7 @@ fn list_files(workspace_root: &Path, pattern: Option<&str>) -> Result<Vec<String
 fn visit_files(
     dir: &Path,
     workspace_root: &Path,
+    path_policy: &WorkspacePathPolicy,
     pattern: Option<&str>,
     files: &mut Vec<String>,
 ) -> Result<()> {
@@ -5216,8 +5227,6 @@ fn visit_files(
     for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
-        let file_name = entry.file_name();
-        let name = file_name.to_string_lossy();
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("failed to stat {}", path.display()))?;
 
@@ -5226,10 +5235,17 @@ fn visit_files(
         }
 
         if metadata.is_dir() {
-            if matches!(name.as_ref(), ".git" | "target" | ".direnv") {
+            let Some(relative_dir) = path
+                .strip_prefix(workspace_root)
+                .ok()
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            else {
+                continue;
+            };
+            if !path_policy.allows_relative_directory(&relative_dir) {
                 continue;
             }
-            visit_files(&path, workspace_root, pattern, files)?;
+            visit_files(&path, workspace_root, path_policy, pattern, files)?;
             continue;
         }
 
@@ -5238,7 +5254,9 @@ fn visit_files(
         }
 
         let rel = relative_path(workspace_root, &path);
-        if pattern.is_none_or(|needle| rel.contains(needle)) {
+        if path_policy.allows_relative_file(&rel)
+            && pattern.is_none_or(|needle| rel.contains(needle))
+        {
             files.push(rel);
         }
         if files.len() >= MAX_LISTED_FILES {
@@ -6758,6 +6776,54 @@ mod tests {
         assert!(result.summary.contains("main.rs"));
         assert!(!result.summary.contains("secret.txt"));
         assert!(!result.summary.contains("vault"));
+    }
+
+    #[test]
+    fn list_files_respects_repo_gitignore_patterns() {
+        let workspace = tempfile::tempdir().expect("temp workspace");
+        fs::create_dir_all(workspace.path().join("apps/docs/.docusaurus"))
+            .expect("create generated docs dir");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create authored app dir");
+        fs::write(
+            workspace.path().join(".gitignore"),
+            "/apps/docs/.docusaurus/\n",
+        )
+        .expect("write gitignore");
+        fs::write(
+            workspace
+                .path()
+                .join("apps/docs/.docusaurus/client-modules.js"),
+            "export default [];\n",
+        )
+        .expect("write generated docs module");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-app.tsx"),
+            "export function RuntimeApp() { return null; }\n",
+        )
+        .expect("write authored runtime app");
+
+        let adapter = SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(MockConversation::new(Vec::new())),
+        );
+
+        let result = adapter
+            .execute_tool(
+                &ToolCall::ListFiles { pattern: None },
+                "tool-1",
+                &adapter.combined_local_context(&[]),
+                &[],
+                &NullTurnEventSink,
+            )
+            .expect("list files");
+
+        assert!(result.summary.contains("apps/web/src/runtime-app.tsx"));
+        assert!(
+            !result
+                .summary
+                .contains("apps/docs/.docusaurus/client-modules.js")
+        );
     }
 
     #[test]

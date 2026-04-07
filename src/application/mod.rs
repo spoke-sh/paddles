@@ -4,9 +4,7 @@ use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::terminal::run_background_terminal_command;
-use crate::infrastructure::workspace_paths::{
-    is_authored_workspace_directory, is_authored_workspace_file,
-};
+use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
 use crate::domain::model::{
@@ -4563,9 +4561,10 @@ fn known_edit_bootstrap_candidates(
     limit: usize,
 ) -> Vec<String> {
     const MIN_EDIT_TARGET_SCORE: i32 = 60;
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
     let normalized_hints = hinted_paths
         .iter()
-        .filter_map(|path| normalize_known_edit_candidate(workspace_root, path))
+        .filter_map(|path| normalize_known_edit_candidate(workspace_root, &path_policy, path))
         .collect::<Vec<_>>();
     let tokens = known_edit_search_tokens(prompt, &normalized_hints);
     let mut scored = HashMap::<String, i32>::new();
@@ -4580,6 +4579,7 @@ fn known_edit_bootstrap_candidates(
     visit_known_edit_candidates(
         workspace_root,
         workspace_root,
+        &path_policy,
         &tokens,
         &normalized_hints,
         &mut scored,
@@ -4606,6 +4606,7 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
     recent_turns: &[String],
     candidates: &[String],
 ) -> Vec<String> {
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
     let planning = PlannerConfig::default()
         .with_mode(RetrievalMode::Linear)
         .with_retrieval_strategy(RetrievalStrategy::Vector)
@@ -4650,7 +4651,8 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
     }
 
     for item in &bundle.items {
-        let Some(path) = normalize_action_bias_source(&item.source, workspace_root) else {
+        let Some(path) = normalize_action_bias_source(&item.source, workspace_root, &path_policy)
+        else {
             continue;
         };
         if let Some(score) = scored.get_mut(&path) {
@@ -4660,7 +4662,9 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
 
     if let Some(trace) = &bundle.planner {
         for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
-            let Some(path) = normalize_action_bias_source(&artifact.source, workspace_root) else {
+            let Some(path) =
+                normalize_action_bias_source(&artifact.source, workspace_root, &path_policy)
+            else {
                 continue;
             };
             if let Some(score) = scored.get_mut(&path) {
@@ -4852,9 +4856,12 @@ fn normalize_candidate_files(
     candidates: &[String],
     limit: usize,
 ) -> Vec<String> {
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
     candidates
         .iter()
-        .filter_map(|candidate| normalize_known_edit_candidate(workspace_root, candidate))
+        .filter_map(|candidate| {
+            normalize_known_edit_candidate(workspace_root, &path_policy, candidate)
+        })
         .take(limit)
         .collect()
 }
@@ -5025,10 +5032,12 @@ fn likely_action_bias_targets(
     workspace_root: &Path,
     limit: usize,
 ) -> Vec<String> {
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
     let mut scored = HashMap::<String, i32>::new();
 
     for item in &loop_state.evidence_items {
-        let Some(path) = normalize_action_bias_source(&item.source, workspace_root) else {
+        let Some(path) = normalize_action_bias_source(&item.source, workspace_root, &path_policy)
+        else {
             continue;
         };
         let score = score_action_bias_path(&path) + evidence_rank_bonus(item.rank);
@@ -5046,7 +5055,9 @@ fn likely_action_bias_targets(
 
     if let Some(trace) = &loop_state.latest_gatherer_trace {
         for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
-            let Some(path) = normalize_action_bias_source(&artifact.source, workspace_root) else {
+            let Some(path) =
+                normalize_action_bias_source(&artifact.source, workspace_root, &path_policy)
+            else {
                 continue;
             };
             let score = score_action_bias_path(&path) + (40 - index as i32 * 5);
@@ -5074,8 +5085,12 @@ fn likely_action_bias_targets(
         .collect()
 }
 
-fn normalize_known_edit_candidate(workspace_root: &Path, path: &str) -> Option<String> {
-    let normalized = normalize_action_bias_source(path, workspace_root)?;
+fn normalize_known_edit_candidate(
+    workspace_root: &Path,
+    path_policy: &WorkspacePathPolicy,
+    path: &str,
+) -> Option<String> {
+    let normalized = normalize_action_bias_source(path, workspace_root, path_policy)?;
     workspace_root
         .join(&normalized)
         .is_file()
@@ -5085,6 +5100,7 @@ fn normalize_known_edit_candidate(workspace_root: &Path, path: &str) -> Option<S
 fn visit_known_edit_candidates(
     dir: &Path,
     workspace_root: &Path,
+    path_policy: &WorkspacePathPolicy,
     tokens: &[String],
     normalized_hints: &[String],
     scored: &mut HashMap<String, i32>,
@@ -5103,7 +5119,6 @@ fn visit_known_edit_candidates(
         }
 
         let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
         let Ok(metadata) = fs::symlink_metadata(&path) else {
             continue;
         };
@@ -5113,12 +5128,20 @@ fn visit_known_edit_candidates(
         }
 
         if metadata.is_dir() {
-            if !is_authored_workspace_directory(&name) {
+            let Some(relative_dir) = path
+                .strip_prefix(workspace_root)
+                .ok()
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            else {
+                continue;
+            };
+            if !path_policy.allows_relative_directory(&relative_dir) {
                 continue;
             }
             visit_known_edit_candidates(
                 &path,
                 workspace_root,
+                path_policy,
                 tokens,
                 normalized_hints,
                 scored,
@@ -5139,7 +5162,7 @@ fn visit_known_edit_candidates(
         let Some(rel) = rel else {
             continue;
         };
-        if !is_plausible_workspace_file(&rel) {
+        if !is_plausible_workspace_file(path_policy, &rel) {
             continue;
         }
 
@@ -5220,7 +5243,11 @@ fn known_edit_search_tokens(prompt: &str, hinted_paths: &[String]) -> Vec<String
     tokens
 }
 
-fn normalize_action_bias_source(source: &str, workspace_root: &Path) -> Option<String> {
+fn normalize_action_bias_source(
+    source: &str,
+    workspace_root: &Path,
+    path_policy: &WorkspacePathPolicy,
+) -> Option<String> {
     if source.trim().is_empty() || source.starts_with("command: ") {
         return None;
     }
@@ -5240,11 +5267,11 @@ fn normalize_action_bias_source(source: &str, workspace_root: &Path) -> Option<S
     }
 
     let path_text = relative.to_string_lossy().replace('\\', "/");
-    is_plausible_workspace_file(&path_text).then_some(path_text)
+    is_plausible_workspace_file(path_policy, &path_text).then_some(path_text)
 }
 
-fn is_plausible_workspace_file(path: &str) -> bool {
-    is_authored_workspace_file(path)
+fn is_plausible_workspace_file(path_policy: &WorkspacePathPolicy, path: &str) -> bool {
+    path_policy.allows_relative_file(path)
 }
 
 fn evidence_rank_bonus(rank: usize) -> i32 {
@@ -8114,6 +8141,37 @@ mod tests {
     }
 
     #[test]
+    fn action_bias_targets_ignore_gitignored_workspace_paths() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join(".gitignore"),
+            "/apps/docs/.docusaurus/\n",
+        )
+        .expect("write gitignore");
+        let loop_state = crate::domain::ports::PlannerLoopState {
+            evidence_items: vec![
+                EvidenceItem {
+                    source: "apps/docs/.docusaurus/client-modules.js".to_string(),
+                    snippet: "generated docs module".to_string(),
+                    rationale: "generated asset".to_string(),
+                    rank: 1,
+                },
+                EvidenceItem {
+                    source: "apps/web/src/runtime-app.tsx".to_string(),
+                    snippet: "authored runtime app".to_string(),
+                    rationale: "real edit target".to_string(),
+                    rank: 2,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let ranked = super::likely_action_bias_targets(&loop_state, workspace.path(), 3);
+
+        assert_eq!(ranked, vec!["apps/web/src/runtime-app.tsx".to_string()]);
+    }
+
+    #[test]
     fn action_bias_redirects_non_file_actions_before_any_search_step() {
         let loop_state = crate::domain::ports::PlannerLoopState {
             evidence_items: vec![EvidenceItem {
@@ -8559,6 +8617,40 @@ mod tests {
         );
 
         assert_eq!(candidates, vec!["src/image_tools/compare.rs".to_string()]);
+    }
+
+    #[test]
+    fn known_edit_bootstrap_discards_gitignored_generated_artifacts() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/docs/.docusaurus"))
+            .expect("create generated docs dir");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create authored app dir");
+        fs::write(
+            workspace.path().join(".gitignore"),
+            "/apps/docs/.docusaurus/\n",
+        )
+        .expect("write gitignore");
+        fs::write(
+            workspace
+                .path()
+                .join("apps/docs/.docusaurus/client-modules.js"),
+            "export default [];\n",
+        )
+        .expect("write generated docs module");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-app.tsx"),
+            "export function RuntimeApp() { return null; }\n",
+        )
+        .expect("write authored runtime app");
+
+        let candidates = super::known_edit_bootstrap_candidates(
+            workspace.path(),
+            &["apps/docs/.docusaurus/client-modules.js".to_string()],
+            "Fix the runtime app shell behavior",
+            3,
+        );
+
+        assert_eq!(candidates, vec!["apps/web/src/runtime-app.tsx".to_string()]);
     }
 
     #[test]

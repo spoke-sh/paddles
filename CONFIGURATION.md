@@ -328,7 +328,7 @@ raw.
 The supported Inception boundary is now:
 
 - Core chat compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
-- Local workspace editor: `write_file`, `replace_in_file`, `diff`, and `apply_patch` execute through one provider-agnostic local workspace editor boundary, but that boundary is limited to authored workspace files. Generated and vendored directories such as `node_modules`, `dist`, `result`, and `target` are excluded from planner targeting and rejected at execution time.
+- Local workspace editor: `write_file`, `replace_in_file`, `diff`, and `apply_patch` execute through one provider-agnostic local workspace editor boundary, but that boundary is limited to authored workspace files. When the workspace has a root `.gitignore`, Paddles uses it as the primary authored-file boundary for planner targeting, `list_files`, gatherer evidence filtering, and execution-time edit rejection. Only when no root `.gitignore` is present does Paddles fall back to a small generated/vendored directory denylist (`node_modules`, `dist`, `result`, `target`, `.docusaurus`, `.turbo`, `.sift`, `.direnv`, plus `.git`).
 - Optional native capabilities: provider-specific streaming/diffusion behavior remains a follow-on slice.
 - Operator expectation: Inception is usable today for planner or synthesizer lanes without changing local workspace edit semantics.
 

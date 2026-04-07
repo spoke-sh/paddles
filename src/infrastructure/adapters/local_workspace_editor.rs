@@ -1,6 +1,6 @@
 use crate::domain::model::AppliedEdit;
 use crate::domain::ports::{WorkspaceActionResult, WorkspaceEditor};
-use crate::infrastructure::workspace_paths::is_authored_workspace_file;
+use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
 use std::fs;
 use std::io::Write;
@@ -120,8 +120,9 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
         if patch_paths.is_empty() {
             bail!("patch does not target an authored workspace file");
         }
+        let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
         for path in &patch_paths {
-            ensure_authored_workspace_path(path)?;
+            ensure_authored_workspace_path(&path_policy, path)?;
         }
 
         let mut child = Command::new("git")
@@ -334,7 +335,11 @@ fn resolve_workspace_path(
     if !resolved.starts_with(&canonical_root) {
         bail!("path escapes workspace root: {requested}");
     }
-    ensure_authored_workspace_path(&relative_path(&canonical_root, &resolved).replace('\\', "/"))?;
+    let path_policy = WorkspacePathPolicy::new(&canonical_root);
+    ensure_authored_workspace_path(
+        &path_policy,
+        &relative_path(&canonical_root, &resolved).replace('\\', "/"),
+    )?;
     if !allow_missing && !resolved.exists() {
         bail!("path does not exist: {}", resolved.display());
     }
@@ -385,8 +390,11 @@ fn normalize_relative_path(workspace_root: &Path, requested: &Path) -> PathBuf {
     normalized
 }
 
-fn ensure_authored_workspace_path(requested: &str) -> Result<()> {
-    if !is_authored_workspace_file(requested) {
+fn ensure_authored_workspace_path(
+    path_policy: &WorkspacePathPolicy,
+    requested: &str,
+) -> Result<()> {
+    if !path_policy.allows_relative_file(requested) {
         bail!("path is outside the authored workspace boundary: {requested}");
     }
     Ok(())
@@ -480,6 +488,45 @@ mod tests {
         let patch_error = editor
             .apply_patch(patch)
             .expect_err("apply_patch should reject vendored paths");
+        assert!(
+            patch_error
+                .to_string()
+                .contains("outside the authored workspace boundary")
+        );
+    }
+
+    #[test]
+    fn workspace_editor_rejects_gitignored_paths() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/docs/.docusaurus"))
+            .expect("create generated docs dir");
+        fs::write(
+            workspace.path().join(".gitignore"),
+            "/apps/docs/.docusaurus/\n",
+        )
+        .expect("write gitignore");
+        fs::write(
+            workspace
+                .path()
+                .join("apps/docs/.docusaurus/client-modules.js"),
+            "before\n",
+        )
+        .expect("seed generated docs file");
+        let editor = LocalWorkspaceEditor::new(workspace.path());
+
+        let write_error = editor
+            .write_file("apps/docs/.docusaurus/new-file.js", "export default [];\n")
+            .expect_err("write_file should reject gitignored paths");
+        assert!(
+            write_error
+                .to_string()
+                .contains("outside the authored workspace boundary")
+        );
+
+        let patch = "diff --git a/apps/docs/.docusaurus/client-modules.js b/apps/docs/.docusaurus/client-modules.js\n--- a/apps/docs/.docusaurus/client-modules.js\n+++ b/apps/docs/.docusaurus/client-modules.js\n@@ -1 +1 @@\n-before\n+after\n";
+        let patch_error = editor
+            .apply_patch(patch)
+            .expect_err("apply_patch should reject gitignored paths");
         assert!(
             patch_error
                 .to_string()

@@ -9,6 +9,7 @@ use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
+use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use sift::{SearchInput, SearchOptions, SearchProgress, SearchResponse, Sift};
@@ -345,9 +346,16 @@ impl ContextGatherer for SiftDirectGathererAdapter {
             );
         }
 
+        let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
+        let ignored_hits = response
+            .hits
+            .iter()
+            .filter(|hit| !path_policy.allows_relative_file(&hit.path))
+            .count();
         let items = response
             .hits
             .iter()
+            .filter(|hit| path_policy.allows_relative_file(&hit.path))
             .take(request.budget.max_items)
             .enumerate()
             .map(|(index, hit)| EvidenceItem {
@@ -362,6 +370,14 @@ impl ContextGatherer for SiftDirectGathererAdapter {
             format!(
                 "Direct sift retrieval found no matching evidence for `{}` in the current workspace.",
                 request.user_query
+            )
+        } else if ignored_hits > 0 {
+            format!(
+                "Direct sift retrieval gathered {} evidence item(s) for `{}` using `{}` strategy after pruning {} ignored path(s).",
+                items.len(),
+                request.user_query,
+                request.planning.retrieval_strategy.label(),
+                ignored_hits,
             )
         } else {
             format!(

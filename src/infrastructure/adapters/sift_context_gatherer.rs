@@ -6,6 +6,7 @@ use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
+use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{ContextAssemblyResponse, Sift};
@@ -60,6 +61,7 @@ impl ContextGatherer for SiftContextGathererAdapter {
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
         let assembly = self.assemble_context(request)?;
+        let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
         if self.verbose.load(Ordering::Relaxed) >= 1 {
             println!(
                 "[LANE] Gatherer lane '{}' assembled {} hit(s) for retrieval-heavy prompt.",
@@ -68,10 +70,17 @@ impl ContextGatherer for SiftContextGathererAdapter {
             );
         }
 
+        let ignored_hits = assembly
+            .response
+            .hits
+            .iter()
+            .filter(|hit| !path_policy.allows_relative_file(&hit.path))
+            .count();
         let items = assembly
             .response
             .hits
             .iter()
+            .filter(|hit| path_policy.allows_relative_file(&hit.path))
             .take(request.budget.max_items)
             .enumerate()
             .map(|(index, hit)| EvidenceItem {
@@ -86,6 +95,14 @@ impl ContextGatherer for SiftContextGathererAdapter {
             format!(
                 "No matching evidence found for `{}` in the current workspace.",
                 request.user_query
+            )
+        } else if ignored_hits > 0 {
+            format!(
+                "Gathered {} ranked evidence item(s) for `{}` using the `{}` gatherer lane after pruning {} ignored path(s).",
+                items.len(),
+                request.user_query,
+                self.model_id,
+                ignored_hits,
             )
         } else {
             format!(

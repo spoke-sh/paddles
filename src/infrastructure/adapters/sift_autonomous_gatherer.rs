@@ -11,6 +11,7 @@ use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
+use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::Result;
 use async_trait::async_trait;
 use sift::{
@@ -225,8 +226,9 @@ impl ContextGatherer for SiftAutonomousGathererAdapter {
             );
         }
 
-        let (items, mut warnings) = collect_evidence_items(&response, request);
-        let planner = planner_metadata_from_response(&response);
+        let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
+        let (items, mut warnings) = collect_evidence_items(&response, request, &path_policy);
+        let planner = planner_metadata_from_response(&response, &path_policy);
         if matches!(planner.mode, RetrievalMode::Graph) && planner.graph_episode.is_none() {
             warnings.push(
                 "Graph-mode autonomous retrieval returned no graph episode state.".to_string(),
@@ -259,9 +261,15 @@ fn planner_strategy_label(strategy: &PlannerStrategyKind) -> &'static str {
 fn collect_evidence_items(
     response: &AutonomousSearchResponse,
     request: &ContextGatherRequest,
+    path_policy: &WorkspacePathPolicy,
 ) -> (Vec<EvidenceItem>, Vec<String>) {
+    let ignored_retained = preferred_retained_artifacts(response)
+        .iter()
+        .filter(|artifact| !path_policy.allows_relative_file(&artifact.path))
+        .count();
     let retained = preferred_retained_artifacts(response)
         .iter()
+        .filter(|artifact| path_policy.allows_relative_file(&artifact.path))
         .take(request.budget.max_items)
         .enumerate()
         .map(|(index, artifact)| EvidenceItem {
@@ -284,7 +292,15 @@ fn collect_evidence_items(
         })
         .collect::<Vec<_>>();
     if !retained.is_empty() {
-        return (retained, Vec::new());
+        let warnings = if ignored_retained > 0 {
+            vec![format!(
+                "Autonomous gatherer pruned {} ignored retained artifact(s) before returning evidence.",
+                ignored_retained
+            )]
+        } else {
+            Vec::new()
+        };
+        return (retained, warnings);
     }
 
     let Some(view) = response
@@ -303,9 +319,15 @@ fn collect_evidence_items(
     };
 
     let mut seen = HashSet::new();
+    let ignored_hits = view
+        .hits
+        .iter()
+        .filter(|hit| !path_policy.allows_relative_file(&hit.path))
+        .count();
     let items = view
         .hits
         .iter()
+        .filter(|hit| path_policy.allows_relative_file(&hit.path))
         .filter(|hit| seen.insert((hit.path.as_str(), hit.rank)))
         .take(request.budget.max_items)
         .enumerate()
@@ -319,11 +341,21 @@ fn collect_evidence_items(
 
     (
         items,
-        vec!["Autonomous gatherer fell back to last-turn hits because no retained artifacts were available.".to_string()],
+        vec![if ignored_hits > 0 {
+            format!(
+                "Autonomous gatherer fell back to last-turn hits because no retained artifacts were available, and pruned {} ignored hit(s).",
+                ignored_hits
+            )
+        } else {
+            "Autonomous gatherer fell back to last-turn hits because no retained artifacts were available.".to_string()
+        }],
     )
 }
 
-fn planner_metadata_from_response(response: &AutonomousSearchResponse) -> PlannerTraceMetadata {
+fn planner_metadata_from_response(
+    response: &AutonomousSearchResponse,
+    path_policy: &WorkspacePathPolicy,
+) -> PlannerTraceMetadata {
     PlannerTraceMetadata {
         mode: map_response_mode(response.mode),
         strategy: map_planner_strategy_kind(response.planner_strategy.kind),
@@ -361,8 +393,12 @@ fn planner_metadata_from_response(response: &AutonomousSearchResponse) -> Planne
                     .collect(),
             })
             .collect(),
-        retained_artifacts: retained_evidence_from_response(response),
-        graph_episode: response.state.graph_episode.as_ref().map(map_graph_episode),
+        retained_artifacts: retained_evidence_from_response(response, path_policy),
+        graph_episode: response
+            .state
+            .graph_episode
+            .as_ref()
+            .map(|episode| map_graph_episode(episode, path_policy)),
         trace_artifact_ref: None,
     }
 }
@@ -432,7 +468,10 @@ fn map_edge_kind(kind: AutonomousGraphEdgeKind) -> PlannerGraphEdgeKind {
     }
 }
 
-fn map_graph_episode(episode: &sift::AutonomousGraphEpisodeState) -> PlannerGraphEpisode {
+fn map_graph_episode(
+    episode: &sift::AutonomousGraphEpisodeState,
+    path_policy: &WorkspacePathPolicy,
+) -> PlannerGraphEpisode {
     PlannerGraphEpisode {
         root_node_id: episode.root_node_id.clone(),
         active_branch_id: episode.active_branch_id.clone(),
@@ -456,6 +495,7 @@ fn map_graph_episode(episode: &sift::AutonomousGraphEpisodeState) -> PlannerGrap
                 retained_artifacts: branch
                     .retained_artifacts
                     .iter()
+                    .filter(|artifact| path_policy.allows_relative_file(&artifact.path))
                     .map(|artifact| RetainedEvidence {
                         source: artifact.path.clone(),
                         snippet: artifact.snippet.clone(),
@@ -508,9 +548,13 @@ fn preferred_retained_artifacts(response: &AutonomousSearchResponse) -> &[sift::
     &response.state.retained_artifacts
 }
 
-fn retained_evidence_from_response(response: &AutonomousSearchResponse) -> Vec<RetainedEvidence> {
+fn retained_evidence_from_response(
+    response: &AutonomousSearchResponse,
+    path_policy: &WorkspacePathPolicy,
+) -> Vec<RetainedEvidence> {
     preferred_retained_artifacts(response)
         .iter()
+        .filter(|artifact| path_policy.allows_relative_file(&artifact.path))
         .map(|artifact| RetainedEvidence {
             source: artifact.path.clone(),
             snippet: artifact.snippet.clone(),
@@ -575,10 +619,36 @@ mod tests {
     use super::SiftAutonomousGathererAdapter;
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability,
-        PlannerGraphBranchStatus, PlannerGraphEdgeKind, PlannerStrategyKind, RetrievalMode,
+        PlannerGraphBranchStatus, PlannerGraphEdgeKind, PlannerStrategyKind, RetainedEvidence,
+        RetrievalMode,
     };
     use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
     use tempfile::tempdir;
+
+    fn retained_artifact(
+        artifact_id: &str,
+        path: &str,
+        snippet: &str,
+        rationale: &str,
+    ) -> sift::RetainedArtifact {
+        sift::RetainedArtifact::new(
+            artifact_id,
+            sift::ContextArtifactKind::File,
+            path,
+            sift::ArtifactProvenance {
+                adapter: sift::AcquisitionAdapterKind::FileSystem,
+                source: "test".to_string(),
+                synthetic: false,
+            },
+            sift::ArtifactFreshness {
+                observed_unix_secs: 1,
+                modified_unix_secs: Some(1),
+            },
+            sift::ArtifactBudget::from_text(snippet, 1),
+        )
+        .with_snippet(snippet)
+        .with_rationale(rationale)
+    }
 
     #[test]
     fn autonomous_gatherer_reports_available_capability() {
@@ -693,7 +763,10 @@ mod tests {
             },
         };
 
-        let planner = super::planner_metadata_from_response(&response);
+        let path_policy = crate::infrastructure::workspace_paths::WorkspacePathPolicy::new(
+            std::path::Path::new("/workspace"),
+        );
+        let planner = super::planner_metadata_from_response(&response, &path_policy);
 
         assert_eq!(planner.mode, RetrievalMode::Graph);
         assert_eq!(planner.session_id.as_deref(), Some("session-graph"));
@@ -716,6 +789,61 @@ mod tests {
         assert_eq!(graph.branches.len(), 1);
         assert_eq!(graph.branches[0].status, PlannerGraphBranchStatus::Active);
         assert_eq!(graph.nodes[0].turn_id.as_deref(), Some("turn-1"));
+    }
+
+    #[test]
+    fn planner_metadata_prunes_gitignored_retained_artifacts() {
+        let workspace = tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join(".gitignore"),
+            "/apps/docs/.docusaurus/\n",
+        )
+        .expect("write gitignore");
+        let path_policy =
+            crate::infrastructure::workspace_paths::WorkspacePathPolicy::new(workspace.path());
+
+        let response = sift::AutonomousSearchResponse {
+            root_task: "find runtime shell".to_string(),
+            mode: sift::AutonomousSearchMode::Linear,
+            planner_strategy: sift::AutonomousPlannerStrategy::heuristic(),
+            plan: sift::SearchPlan::default_lexical(),
+            state: sift::AutonomousPlannerState::new(2).with_retained_artifacts(vec![
+                retained_artifact(
+                    "artifact-generated",
+                    "apps/docs/.docusaurus/client-modules.js",
+                    "generated docs module",
+                    "generated",
+                ),
+                retained_artifact(
+                    "artifact-authored",
+                    "apps/web/src/runtime-app.tsx",
+                    "authored runtime app",
+                    "authored",
+                ),
+            ]),
+            turns: Vec::new(),
+            planner_trace: sift::AutonomousPlannerTrace::new(
+                sift::AutonomousPlannerStrategy::heuristic(),
+            ),
+            trace: sift::SearchTrace {
+                session_id: None,
+                turns: Vec::new(),
+                completed: false,
+                termination_reason: None,
+            },
+        };
+
+        let planner = super::planner_metadata_from_response(&response, &path_policy);
+
+        assert_eq!(
+            planner.retained_artifacts,
+            vec![RetainedEvidence {
+                source: "apps/web/src/runtime-app.tsx".to_string(),
+                snippet: Some("authored runtime app".to_string()),
+                rationale: Some("authored".to_string()),
+                locator: None,
+            }]
+        );
     }
 
     #[tokio::test]
