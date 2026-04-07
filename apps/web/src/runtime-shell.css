@@ -278,9 +278,16 @@ body {
   border-top: 1px solid rgba(122, 142, 157, 0.2);
   display: flex;
   gap: 12px;
+  align-items: center;
   background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0.46));
 }
-.chat-input input {
+.chat-composer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   background:
     linear-gradient(180deg, rgba(247,249,251,0.98), rgba(223, 231, 238, 0.96));
@@ -294,12 +301,57 @@ body {
     inset 2px 2px 5px rgba(255,255,255,0.9),
     inset -3px -3px 8px rgba(135, 151, 166, 0.24);
 }
-.chat-input input:focus {
+.chat-composer:focus-within {
   border-color: rgba(46, 125, 178, 0.54);
   box-shadow:
     inset 2px 2px 5px rgba(255,255,255,0.9),
     inset -3px -3px 8px rgba(181, 194, 205, 0.28),
     0 0 0 4px rgba(92, 169, 212, 0.2);
+}
+.chat-composer-field {
+  flex: 1 1 160px;
+  min-width: 120px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  padding: 2px 0;
+}
+.composer-inline-text {
+  color: var(--text);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+.composer-paste-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(73, 91, 104, 0.08), rgba(73, 91, 104, 0.16));
+  border: 1px solid rgba(97, 114, 129, 0.22);
+  color: #31424e;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(109, 124, 137, 0.08);
+}
+.composer-chip-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4f6472;
+  white-space: nowrap;
+}
+.composer-chip-preview {
+  min-width: 0;
+  max-width: min(40vw, 360px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
 }
 .chat-input button {
   background:

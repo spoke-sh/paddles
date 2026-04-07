@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RuntimeApp } from './runtime-app';
@@ -417,6 +417,57 @@ describe('RuntimeApp', () => {
 
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     expect(input).toHaveValue('draft prompt');
+  });
+
+  it('compresses multiline paste into a composer chip but submits the raw pasted text', async () => {
+    renderAtPath('/');
+
+    await screen.findByText('Mock provider completed the turn after local inspection.');
+
+    const input = screen.getByPlaceholderText('Ask paddles...');
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) => (type === 'text' ? 'alpha\nbeta\ngamma' : ''),
+      },
+    });
+
+    expect(await screen.findByText('3 lines pasted')).toBeInTheDocument();
+    expect(input).toHaveValue('');
+
+    fireEvent.change(input, { target: { value: ' please fix' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+
+    await waitFor(() => {
+      const turnCall = vi
+        .mocked(fetch)
+        .mock.calls.find(([url]) => String(url).endsWith('/sessions/task-123/turns'));
+      expect(turnCall).toBeDefined();
+      expect(
+        JSON.parse(String((turnCall?.[1] as RequestInit | undefined)?.body || '{}'))
+      ).toEqual({
+        prompt: 'alpha\nbeta\ngamma please fix',
+      });
+    });
+  });
+
+  it('removes a compressed multiline paste chip with backspace when the prompt is empty', async () => {
+    renderAtPath('/');
+
+    await screen.findByText('Mock provider completed the turn after local inspection.');
+
+    const input = screen.getByPlaceholderText('Ask paddles...');
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) => (type === 'text' ? 'alpha\nbeta\ngamma' : ''),
+      },
+    });
+
+    expect(await screen.findByText('3 lines pasted')).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: 'Backspace' });
+
+    expect(screen.queryByText('3 lines pasted')).not.toBeInTheDocument();
+    expect(input).toHaveValue('');
   });
 
   it('renders the primary transit route through the client router', async () => {

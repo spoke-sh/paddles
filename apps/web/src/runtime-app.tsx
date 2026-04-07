@@ -137,15 +137,68 @@ function comparisonSnippet(
   return truncate(body.replace(/\s+/g, ' ').trim(), 180);
 }
 
+type ComposerPart =
+  | { id: string; kind: 'text'; text: string }
+  | { id: string; kind: 'paste'; text: string; lines: number; preview: string };
+
+function normalizeComposerText(text: string) {
+  return text.replace(/\r\n/g, '\n');
+}
+
+function pastedLineCount(text: string) {
+  const normalized = normalizeComposerText(text).replace(/\n+$/, '');
+  if (!normalized) {
+    return 0;
+  }
+  return normalized.split('\n').length;
+}
+
+function shouldCompressPastedText(text: string) {
+  return pastedLineCount(text) > 1;
+}
+
 function RuntimeShellLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeView = activeViewForPath(pathname);
   const { connected, error, events, projection, promptHistory, sending, sendTurn } =
     useRuntimeStore();
   const [prompt, setPrompt] = useState('');
+  const [composerParts, setComposerParts] = useState<ComposerPart[]>([]);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [historyDraft, setHistoryDraft] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const composerPartId = useRef(0);
+
+  function nextComposerPartId() {
+    composerPartId.current += 1;
+    return `composer-part-${composerPartId.current}`;
+  }
+
+  function createTextPart(text: string): ComposerPart {
+    return {
+      id: nextComposerPartId(),
+      kind: 'text',
+      text,
+    };
+  }
+
+  function createPastePart(text: string): ComposerPart {
+    const normalized = normalizeComposerText(text);
+    const trimmed = normalized.trimEnd();
+    const lines = pastedLineCount(normalized);
+    const previewSource =
+      trimmed
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) || trimmed.split('\n')[0] || '';
+    return {
+      id: nextComposerPartId(),
+      kind: 'paste',
+      text: normalized,
+      lines,
+      preview: truncate(previewSource, 48),
+    };
+  }
 
   useEffect(() => {
     const container = messagesRef.current;
@@ -157,10 +210,11 @@ function RuntimeShellLayout() {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const text = prompt.trim();
-    if (!text) {
+    const text = [...composerParts.map((part) => part.text), prompt].join('');
+    if (!text.trim()) {
       return;
     }
+    setComposerParts([]);
     setHistoryCursor(null);
     setHistoryDraft('');
     setPrompt('');
@@ -168,6 +222,9 @@ function RuntimeShellLayout() {
   }
 
   function historyBack() {
+    if (composerParts.length > 0) {
+      return;
+    }
     if (promptHistory.length === 0) {
       return;
     }
@@ -187,6 +244,9 @@ function RuntimeShellLayout() {
   }
 
   function historyForward() {
+    if (composerParts.length > 0) {
+      return;
+    }
     if (historyCursor === null) {
       return;
     }
@@ -200,6 +260,18 @@ function RuntimeShellLayout() {
     setPrompt(historyDraft);
   }
 
+  function popComposerPart() {
+    if (composerParts.length === 0) {
+      return;
+    }
+    const next = [...composerParts];
+    const removed = next.pop();
+    setComposerParts(next);
+    if (removed?.kind === 'text') {
+      setPrompt(removed.text);
+    }
+  }
+
   function onPromptKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowUp') {
       event.preventDefault();
@@ -209,7 +281,33 @@ function RuntimeShellLayout() {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       historyForward();
+      return;
     }
+    if ((event.key === 'Backspace' || event.key === 'Delete') && prompt.length === 0) {
+      if (composerParts.length > 0) {
+        event.preventDefault();
+        popComposerPart();
+      }
+    }
+  }
+
+  function onPromptPaste(event: React.ClipboardEvent<HTMLInputElement>) {
+    const text = event.clipboardData.getData('text');
+    if (!shouldCompressPastedText(text)) {
+      return;
+    }
+    event.preventDefault();
+    setHistoryCursor(null);
+    setHistoryDraft('');
+    setComposerParts((current) => {
+      const next = [...current];
+      if (prompt.length > 0) {
+        next.push(createTextPart(prompt));
+      }
+      next.push(createPastePart(text));
+      return next;
+    });
+    setPrompt('');
   }
 
   return (
@@ -276,16 +374,39 @@ function RuntimeShellLayout() {
           </div>
         </div>
         <form autoComplete="off" className="chat-input" onSubmit={onSubmit}>
-          <input
-            autoFocus
-            autoComplete="off"
-            id="prompt"
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={onPromptKeyDown}
-            placeholder="Ask paddles..."
-            type="text"
-            value={prompt}
-          />
+          <div className="chat-composer">
+            {composerParts.map((part) =>
+              part.kind === 'text' ? (
+                <span className="composer-inline-text" key={part.id}>
+                  {part.text}
+                </span>
+              ) : (
+                <span
+                  className="composer-paste-chip"
+                  data-lines={part.lines}
+                  key={part.id}
+                  title={part.preview}
+                >
+                  <span className="composer-chip-label">{part.lines} lines pasted</span>
+                  {part.preview ? (
+                    <span className="composer-chip-preview">{part.preview}</span>
+                  ) : null}
+                </span>
+              )
+            )}
+            <input
+              autoFocus
+              autoComplete="off"
+              className="chat-composer-field"
+              id="prompt"
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={onPromptKeyDown}
+              onPaste={onPromptPaste}
+              placeholder={composerParts.length > 0 ? '' : 'Ask paddles...'}
+              type="text"
+              value={prompt}
+            />
+          </div>
           <button disabled={sending} id="send" type="submit">
             {sending ? 'Sending…' : 'Send'}
           </button>

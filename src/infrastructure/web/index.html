@@ -210,9 +210,16 @@ body {
   border-top: 1px solid rgba(122, 142, 157, 0.2);
   display: flex;
   gap: 12px;
+  align-items: center;
   background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0.46));
 }
-.chat-input input {
+.chat-composer {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   background:
     linear-gradient(180deg, rgba(247,249,251,0.98), rgba(223, 231, 238, 0.96));
@@ -226,12 +233,57 @@ body {
     inset 2px 2px 5px rgba(255,255,255,0.9),
     inset -3px -3px 8px rgba(135, 151, 166, 0.24);
 }
-.chat-input input:focus {
+.chat-composer:focus-within {
   border-color: rgba(46, 125, 178, 0.54);
   box-shadow:
     inset 2px 2px 5px rgba(255,255,255,0.9),
     inset -3px -3px 8px rgba(181, 194, 205, 0.28),
     0 0 0 4px rgba(92, 169, 212, 0.2);
+}
+.chat-composer-field {
+  flex: 1 1 160px;
+  min-width: 120px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  padding: 2px 0;
+}
+.composer-inline-text {
+  color: var(--text);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+.composer-paste-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(73, 91, 104, 0.08), rgba(73, 91, 104, 0.16));
+  border: 1px solid rgba(97, 114, 129, 0.22);
+  color: #31424e;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(109, 124, 137, 0.08);
+}
+.composer-chip-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4f6472;
+  white-space: nowrap;
+}
+.composer-chip-preview {
+  min-width: 0;
+  max-width: min(40vw, 360px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
 }
 .chat-input button {
   background:
@@ -1839,7 +1891,9 @@ body {
   <div class="chat-header">Paddles</div>
   <div class="chat-messages" id="messages"></div>
   <div class="chat-input">
-    <input type="text" id="prompt" placeholder="Ask paddles..." autofocus>
+    <div class="chat-composer" id="chat-composer">
+      <input class="chat-composer-field" type="text" id="prompt" placeholder="Ask paddles..." autofocus>
+    </div>
     <button id="send" onclick="sendTurn()">Send</button>
   </div>
 </div>
@@ -1944,6 +1998,8 @@ let selectedRecordId = null;
 let selectedSelectionMode = 'record';
 let selectedDetailMode = 'rendered';
 let selectedFocus = { kind: 'all', id: null };
+let composerParts = [];
+let composerPartId = 0;
 let activeTraceView = 'inspector';
 let graphDebounce = null;
 let forensicTailMode = true;
@@ -2127,6 +2183,96 @@ function truncate(s, n) {
   return text.length > n ? text.substring(0, n) + '...' : text;
 }
 
+function nextComposerPartId() {
+  composerPartId += 1;
+  return 'composer-part-' + composerPartId;
+}
+
+function normalizeComposerText(text) {
+  return String(text || '').replace(/\r\n/g, '\n');
+}
+
+function composerLineCount(text) {
+  const normalized = normalizeComposerText(text).replace(/\n+$/, '');
+  if (!normalized) return 0;
+  return normalized.split('\n').length;
+}
+
+function shouldCompressPromptPaste(text) {
+  return composerLineCount(text) > 1;
+}
+
+function createComposerTextPart(text) {
+  return {
+    id: nextComposerPartId(),
+    kind: 'text',
+    text
+  };
+}
+
+function createComposerPastePart(text) {
+  const normalized = normalizeComposerText(text);
+  const trimmed = normalized.trimEnd();
+  const previewSource = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) || trimmed.split('\n')[0] || '';
+  return {
+    id: nextComposerPartId(),
+    kind: 'paste',
+    text: normalized,
+    lines: composerLineCount(normalized),
+    preview: truncate(previewSource, 48)
+  };
+}
+
+function renderComposer() {
+  const host = document.getElementById('chat-composer');
+  const input = document.getElementById('prompt');
+  host.innerHTML = '';
+  composerParts.forEach((part) => {
+    const node = document.createElement('span');
+    node.dataset.composerKind = part.kind;
+    if (part.kind === 'text') {
+      node.className = 'composer-inline-text';
+      node.textContent = part.text;
+    } else {
+      node.className = 'composer-paste-chip';
+      node.dataset.lines = String(part.lines);
+
+      const label = document.createElement('span');
+      label.className = 'composer-chip-label';
+      label.textContent = part.lines + ' lines pasted';
+      node.appendChild(label);
+
+      if (part.preview) {
+        const preview = document.createElement('span');
+        preview.className = 'composer-chip-preview';
+        preview.textContent = part.preview;
+        node.appendChild(preview);
+      }
+    }
+    host.appendChild(node);
+  });
+  input.placeholder = composerParts.length ? '' : 'Ask paddles...';
+  host.appendChild(input);
+}
+
+function composerPromptText() {
+  const input = document.getElementById('prompt');
+  return composerParts.map((part) => part.text).join('') + input.value;
+}
+
+function popComposerPart() {
+  if (!composerParts.length) return;
+  const input = document.getElementById('prompt');
+  const removed = composerParts.pop();
+  if (removed && removed.kind === 'text') {
+    input.value = removed.text;
+  }
+  renderComposer();
+}
+
 async function ensureSession() {
   if (sessionId) return;
   const res = await fetch('/sessions', { method: 'POST' });
@@ -2135,12 +2281,30 @@ async function ensureSession() {
 }
 
 function wireStaticUi() {
-  document.getElementById('prompt').addEventListener('keydown', (e) => {
+  const prompt = document.getElementById('prompt');
+  prompt.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendTurn();
+      return;
+    }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && !prompt.value && composerParts.length) {
+      e.preventDefault();
+      popComposerPart();
     }
   });
+  prompt.addEventListener('paste', (e) => {
+    const text = e.clipboardData.getData('text');
+    if (!shouldCompressPromptPaste(text)) return;
+    e.preventDefault();
+    if (prompt.value) {
+      composerParts.push(createComposerTextPart(prompt.value));
+      prompt.value = '';
+    }
+    composerParts.push(createComposerPastePart(text));
+    renderComposer();
+  });
+  renderComposer();
 
   document.querySelectorAll('.trace-tab').forEach((button) => {
     button.addEventListener('click', () => {
@@ -4476,11 +4640,13 @@ async function refreshConversationTranscript({ reset = false, only_if_changed = 
 async function sendTurn() {
   const input = document.getElementById('prompt');
   const btn = document.getElementById('send');
-  const text = input.value.trim();
-  if (!text) return;
+  const text = composerPromptText();
+  if (!text.trim()) return;
   await ensureSession();
 
+  composerParts = [];
   input.value = '';
+  renderComposer();
   btn.disabled = true;
 
   try {
