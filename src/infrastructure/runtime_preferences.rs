@@ -1,4 +1,5 @@
 use crate::application::RuntimeLaneConfig;
+use crate::infrastructure::providers::ModelProvider;
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,20 @@ impl RuntimeLanePreferences {
             && self.planner_provider.is_none()
             && self.planner_model.is_none()
     }
+
+    fn normalize_machine_managed_aliases(&mut self) -> bool {
+        let mut changed = false;
+
+        if normalize_machine_managed_model_alias(&self.provider, &mut self.model) {
+            changed = true;
+        }
+
+        if normalize_machine_managed_model_alias(&self.planner_provider, &mut self.planner_model) {
+            changed = true;
+        }
+
+        changed
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,13 +94,19 @@ impl RuntimeLanePreferenceStore {
         let contents = fs::read_to_string(&self.path).with_context(|| {
             format!("read runtime lane preferences from {}", self.path.display())
         })?;
-        let preferences =
+        let mut preferences =
             toml::from_str::<RuntimeLanePreferences>(&contents).with_context(|| {
                 format!(
                     "parse runtime lane preferences from {}",
                     self.path.display()
                 )
             })?;
+
+        let preferences_were_normalized = preferences.normalize_machine_managed_aliases();
+
+        if preferences_were_normalized {
+            self.save(&preferences)?;
+        }
 
         if preferences.is_empty() {
             Ok(None)
@@ -129,6 +150,32 @@ pub fn default_runtime_lane_preference_path() -> PathBuf {
     }
 
     PathBuf::from(RUNTIME_LANE_PREFERENCES_FILE)
+}
+
+fn normalize_machine_managed_model_alias(
+    provider: &Option<String>,
+    model: &mut Option<String>,
+) -> bool {
+    let Some(model) = model.as_mut() else {
+        return false;
+    };
+
+    if !matches!(
+        provider.as_deref().and_then(ModelProvider::from_name),
+        Some(ModelProvider::Openai)
+    ) {
+        return false;
+    }
+
+    let normalized = match model.as_str() {
+        "gpt-5.4-pro" => "gpt-5.4",
+        "gpt-5-pro" => "gpt-5",
+        "gpt-5.2-pro" => "gpt-5.2",
+        _ => return false,
+    };
+
+    *model = normalized.to_string();
+    true
 }
 
 #[cfg(test)]
@@ -189,6 +236,38 @@ mod tests {
             .expect("stored preferences");
 
         assert_eq!(loaded, preferences);
+    }
+
+    #[test]
+    fn runtime_lane_preference_store_migrates_openai_responses_only_models_to_chat_models() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("state/runtime-lanes.toml");
+        let store = RuntimeLanePreferenceStore::with_path(&path);
+        std::fs::create_dir_all(path.parent().expect("runtime lane preference parent"))
+            .expect("create runtime lane preference parent");
+        std::fs::write(
+            &path,
+            r#"provider = "openai"
+model = "gpt-5.4-pro"
+planner_provider = "openai"
+planner_model = "gpt-5.2-pro"
+"#,
+        )
+        .expect("write stale runtime preferences");
+
+        let loaded = store
+            .load()
+            .expect("load runtime preferences")
+            .expect("stored preferences");
+
+        assert_eq!(loaded.provider.as_deref(), Some("openai"));
+        assert_eq!(loaded.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(loaded.planner_provider.as_deref(), Some("openai"));
+        assert_eq!(loaded.planner_model.as_deref(), Some("gpt-5.2"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read normalized runtime preferences"),
+            "provider = \"openai\"\nmodel = \"gpt-5.4\"\nplanner_provider = \"openai\"\nplanner_model = \"gpt-5.2\"\n"
+        );
     }
 
     #[test]

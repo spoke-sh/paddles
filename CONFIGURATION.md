@@ -230,8 +230,12 @@ the last selected planner/synthesizer lanes across restarts without mutating
 authored `paddles.toml` files. Runtime lane state is applied after authored
 config for the planner/synthesizer lane fields, so the last `/model` selection
 is restored even when a project-local `./paddles.toml` also sets `provider` or
-`model`. Other settings such as `port`, verbosity, gatherer configuration, and
-CLI flags keep their normal precedence. If no authored config layer explicitly
+`model`. When older runtime lane state still points at OpenAI Responses-only
+`*-pro` variants such as `gpt-5.4-pro`, Paddles rewrites that machine-managed
+state onto the corresponding chat-completions model during startup so the next
+boot uses the supported OpenAI transport automatically. Other settings such as
+`port`, verbosity, gatherer configuration, and CLI flags keep their normal
+precedence. If no authored config layer explicitly
 sets `port` and you do not pass `--port`, Paddles asks the OS for an ephemeral
 HTTP port at startup and reports the resolved HTTP bind address in the intro
 transcript. The primary web routes prefer the built `apps/web/dist` runtime
