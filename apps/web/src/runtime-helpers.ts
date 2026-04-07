@@ -679,6 +679,12 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
             : undefined,
       };
     }
+    if (type === 'plan_updated') {
+      return {
+        ...row,
+        output: projectionEvent.presentation.detail,
+      };
+    }
     return diff ? { ...row, diff } : row;
   }
 
@@ -700,6 +706,23 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
       badge: 'tool',
       badgeClass: 'tool',
       text: `${String(event.tool_name || 'tool')}: ${truncate(String(event.invocation || ''), 60)}`,
+    };
+  }
+  if (type === 'plan_updated') {
+    return {
+      badge: 'plan',
+      badgeClass: 'planner',
+      text: 'Updated Plan',
+      output: Array.isArray(event.items)
+        ? event.items
+            .map((item) => {
+              const status = item && typeof item === 'object' ? String(item.status || '') : '';
+              const label = item && typeof item === 'object' ? String(item.label || '') : '';
+              const marker = status === 'completed' ? '✓' : '□';
+              return `${marker} ${label}`.trimEnd();
+            })
+            .join('\n')
+        : '',
     };
   }
   if (type === 'tool_output') {

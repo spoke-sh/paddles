@@ -46,6 +46,19 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             HarnessSnapshot::active(HarnessChamber::Planning)
                 .with_detail(format!("step {sequence}: {action}")),
         ),
+        TurnEvent::PlanUpdated { items } => Some(
+            HarnessSnapshot::active(HarnessChamber::Planning).with_detail(format!(
+                "execution checklist: {}",
+                items
+                    .iter()
+                    .filter(|item| {
+                        item.status == crate::domain::model::PlanChecklistItemStatus::Pending
+                    })
+                    .map(|item| item.label.clone())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )),
+        ),
         TurnEvent::ThreadCandidateCaptured {
             candidate_id,
             active_thread,

@@ -1,4 +1,4 @@
-use super::{AppliedEdit, TurnEvent};
+use super::{AppliedEdit, PlanChecklistItem, TurnEvent};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -92,6 +92,13 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             title: format!("• Planner step {sequence}: {action}"),
             detail: format!("Rationale: {rationale}"),
             text: format!("Step {sequence}: {action}"),
+        },
+        TurnEvent::PlanUpdated { items } => RuntimeEventPresentation {
+            badge: "plan".to_string(),
+            badge_class: "planner".to_string(),
+            title: "• Updated Plan".to_string(),
+            detail: format_plan_checklist_detail(items),
+            text: "Updated Plan".to_string(),
         },
         TurnEvent::ThreadCandidateCaptured {
             candidate_id,
@@ -498,6 +505,18 @@ fn format_applied_edit_detail(edit: &AppliedEdit) -> String {
     }
 }
 
+fn format_plan_checklist_detail(items: &[PlanChecklistItem]) -> String {
+    if items.is_empty() {
+        return "No checklist items recorded.".to_string();
+    }
+
+    items
+        .iter()
+        .map(|item| format!("{} {}", item.status.marker(), item.label))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn format_applied_edit_text(tool_name: &str, edit: &AppliedEdit) -> String {
     let files = if edit.files.is_empty() {
         "unknown file".to_string()
@@ -558,6 +577,39 @@ mod tests {
                 text: "shell: git status --short".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn projects_plan_updates_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::PlanUpdated {
+            items: vec![
+                crate::domain::model::PlanChecklistItem {
+                    id: "inspect".to_string(),
+                    label: "Inspect `git status --short`".to_string(),
+                    status: crate::domain::model::PlanChecklistItemStatus::Pending,
+                },
+                crate::domain::model::PlanChecklistItem {
+                    id: "verify".to_string(),
+                    label: "Verify the change and summarize the outcome.".to_string(),
+                    status: crate::domain::model::PlanChecklistItemStatus::Completed,
+                },
+            ],
+        });
+
+        assert_eq!(presentation.badge, "plan");
+        assert_eq!(presentation.badge_class, "planner");
+        assert_eq!(presentation.title, "• Updated Plan");
+        assert!(
+            presentation
+                .detail
+                .contains("□ Inspect `git status --short`")
+        );
+        assert!(
+            presentation
+                .detail
+                .contains("✓ Verify the change and summarize the outcome.")
+        );
+        assert_eq!(presentation.text, "Updated Plan");
     }
 
     #[test]

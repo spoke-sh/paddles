@@ -71,7 +71,7 @@ pub use transcript::{
 };
 pub use turns::{
     AppliedEdit, ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink,
-    TurnEvent, TurnEventSink, TurnIntent,
+    PlanChecklistItem, PlanChecklistItemStatus, TurnEvent, TurnEventSink, TurnIntent,
 };
 
 /// Constitutional bounds for environmental calibration.

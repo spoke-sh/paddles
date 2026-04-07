@@ -3233,7 +3233,7 @@ function forgetToolOutputStreams(callId) {
   }
 }
 
-function formatToolOutputEvent(label, output) {
+function formatEventOutputBlock(label, output) {
   const lines = String(output || '')
     .split('\n')
     .map((line) => '<span class="event-output-line">' + (line ? escapeHtml(line) : '&#160;') + '</span>')
@@ -3263,9 +3263,20 @@ function handleEvent(ev) {
       'term',
       'tool-terminal',
       label,
-      formatToolOutputEvent(label, output),
+      formatEventOutputBlock(label, output),
       key ? { key } : {}
     );
+  } else if (t === 'plan_updated') {
+    const items = Array.isArray(ev.items) ? ev.items : [];
+    const output = items
+      .map((item) => {
+        const status = item && typeof item.status === 'string' ? item.status : '';
+        const label = item && typeof item.label === 'string' ? item.label : '';
+        const marker = status === 'completed' ? '✓' : '□';
+        return marker + ' ' + label;
+      })
+      .join('\n');
+    addEventRow('plan', 'planner', 'Updated Plan', formatEventOutputBlock('Updated Plan', output));
   } else if (t === 'workspace_edit_applied') {
     const diff = ev.edit && typeof ev.edit.diff === 'string' ? ev.edit.diff : '';
     if (diff) {

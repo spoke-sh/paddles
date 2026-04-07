@@ -51,6 +51,29 @@ describe('eventRow', () => {
     });
   });
 
+  it('preserves plan checklist rows from the rust-authored runtime presentation', () => {
+    const row = eventRow({
+      event: {
+        type: 'plan_updated',
+        items: [],
+      },
+      presentation: {
+        badge: 'plan',
+        badge_class: 'planner',
+        title: '• Updated Plan',
+        detail: '□ Inspect `git status --short`\n✓ Verify the change and summarize the outcome.',
+        text: 'Updated Plan',
+      },
+    });
+
+    expect(row).toEqual({
+      badge: 'plan',
+      badgeClass: 'planner',
+      text: 'Updated Plan',
+      output: '□ Inspect `git status --short`\n✓ Verify the change and summarize the outcome.',
+    });
+  });
+
   it('surfaces gatherer progress detail instead of collapsing to a generic searching label', () => {
     const row = eventRow({
       type: 'gatherer_search_progress',

@@ -3642,6 +3642,35 @@ mod tests {
     }
 
     #[test]
+    fn plan_updates_render_as_checklist_rows_in_the_tui_transcript() {
+        let row = format_turn_event_row(
+            TurnEvent::PlanUpdated {
+                items: vec![
+                    crate::domain::model::PlanChecklistItem {
+                        id: "inspect".to_string(),
+                        label: "Inspect `git status --short`".to_string(),
+                        status: crate::domain::model::PlanChecklistItemStatus::Pending,
+                    },
+                    crate::domain::model::PlanChecklistItem {
+                        id: "verify".to_string(),
+                        label: "Verify the change and summarize the outcome.".to_string(),
+                        status: crate::domain::model::PlanChecklistItemStatus::Completed,
+                    },
+                ],
+            },
+            0,
+        );
+
+        assert_eq!(row.kind, TranscriptRowKind::Event);
+        assert_eq!(row.header, "• Updated Plan");
+        assert!(row.content.contains("□ Inspect `git status --short`"));
+        assert!(
+            row.content
+                .contains("✓ Verify the change and summarize the outcome.")
+        );
+    }
+
+    #[test]
     fn terminal_output_events_render_as_terminal_rows() {
         let row = format_turn_event_row(
             TurnEvent::ToolOutput {

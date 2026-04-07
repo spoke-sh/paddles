@@ -54,6 +54,29 @@ pub struct AppliedEdit {
     pub deletions: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanChecklistItemStatus {
+    Pending,
+    Completed,
+}
+
+impl PlanChecklistItemStatus {
+    pub fn marker(self) -> &'static str {
+        match self {
+            Self::Pending => "□",
+            Self::Completed => "✓",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PlanChecklistItem {
+    pub id: String,
+    pub label: String,
+    pub status: PlanChecklistItemStatus,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
@@ -83,6 +106,9 @@ pub enum TurnEvent {
         sequence: usize,
         action: String,
         rationale: String,
+    },
+    PlanUpdated {
+        items: Vec<PlanChecklistItem>,
     },
     ThreadCandidateCaptured {
         candidate_id: String,
@@ -193,6 +219,7 @@ impl TurnEvent {
             Self::PlannerCapability { .. } => "planner_capability",
             Self::GathererCapability { .. } => "gatherer_capability",
             Self::PlannerActionSelected { .. } => "planner_action_selected",
+            Self::PlanUpdated { .. } => "plan_updated",
             Self::ThreadCandidateCaptured { .. } => "thread_candidate_captured",
             Self::ThreadDecisionApplied { .. } => "thread_decision_applied",
             Self::ThreadMerged { .. } => "thread_merged",
@@ -218,6 +245,7 @@ impl TurnEvent {
     pub fn min_verbosity(&self) -> u8 {
         match self {
             Self::PlannerStepProgress { .. }
+            | Self::PlanUpdated { .. }
             | Self::GathererSearchProgress { .. }
             | Self::ToolCalled { .. }
             | Self::ToolOutput { .. }
@@ -265,7 +293,9 @@ impl TurnEvent {
             Self::IntentClassified { .. } | Self::InterpretationContext { .. } => "Routing",
             Self::GuidanceGraphExpanded { .. } => "Interpreting",
             Self::RouteSelected { .. } => "Synthesizing",
-            Self::PlannerActionSelected { .. } | Self::PlannerStepProgress { .. } => "Planning",
+            Self::PlannerActionSelected { .. }
+            | Self::PlanUpdated { .. }
+            | Self::PlannerStepProgress { .. } => "Planning",
             Self::PlannerSummary { .. } => "Synthesizing",
             Self::GathererSearchProgress { .. } | Self::GathererSummary { .. } => "Hunting",
             Self::ContextAssembly { .. } | Self::ContextStrain { .. } => "Thinking",

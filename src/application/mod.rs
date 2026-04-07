@@ -13,14 +13,15 @@ use crate::domain::model::{
     ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
     ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
-    ResponseMode, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision,
-    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
-    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceLineage, TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef,
-    TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord,
-    TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
-    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
-    TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, StrainFactor, StrainLevel,
+    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge,
+    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
@@ -1387,6 +1388,17 @@ fn render_turn_event(event: &TurnEvent) -> String {
             trim_event_detail(action, 1),
             trim_event_detail(rationale, 2)
         ),
+        TurnEvent::PlanUpdated { items } => format!(
+            "• Updated Plan\n  └ {}",
+            trim_event_detail(
+                &items
+                    .iter()
+                    .map(|item| format!("{} {}", item.status.marker(), item.label))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                8
+            )
+        ),
         TurnEvent::ThreadCandidateCaptured {
             candidate_id,
             active_thread,
@@ -2341,12 +2353,17 @@ impl MechSuitService {
             }
         };
 
+        let execution_checklist = build_execution_checklist(prompt, &recent_turns, &execution_plan);
+
         trace.emit(TurnEvent::IntentClassified {
             intent: execution_plan.intent.clone(),
         });
         trace.emit(TurnEvent::RouteSelected {
             summary: execution_plan.route_summary.clone(),
         });
+        if let Some(checklist) = execution_checklist.as_ref() {
+            checklist.emit(trace.as_ref());
+        }
 
         let planner_outcome = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
@@ -2379,6 +2396,7 @@ impl MechSuitService {
                         grounding: execution_plan.grounding.clone(),
                     },
                     execution_plan.initial_planner_decision.clone(),
+                    execution_checklist,
                     Arc::clone(&trace),
                 )
                 .await?
@@ -2668,11 +2686,16 @@ impl MechSuitService {
         prompt: &str,
         context: PlannerLoopContext,
         initial_decision: Option<RecursivePlannerDecision>,
+        execution_checklist: Option<ExecutionChecklistState>,
         trace: Arc<StructuredTurnTrace>,
     ) -> Result<PlannerLoopOutcome> {
         let mut context = context;
+        let mut execution_checklist = execution_checklist;
         let budget = planner_budget_for_turn(&context.initial_edit);
         let mut loop_state = PlannerLoopState::default();
+        if let Some(checklist) = execution_checklist.as_ref() {
+            checklist.sync_loop_state_notes(&mut loop_state);
+        }
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
         let mut direct_answer = None;
@@ -2742,6 +2765,7 @@ impl MechSuitService {
             });
 
             let mut accepted_stop = false;
+            let mut completed_exact_edit = false;
             let outcome = match &decision.action {
                 PlannerAction::Workspace { action } => match action {
                     WorkspaceAction::Search {
@@ -2902,6 +2926,7 @@ impl MechSuitService {
                             });
                             match context.synthesizer_engine.execute_workspace_action(action) {
                                 Ok(result) => {
+                                    completed_exact_edit = decision_is_exact_edit(&decision.action);
                                     if let Some(frame) = instruction_frame.as_mut() {
                                         frame.note_successful_workspace_action(action);
                                     }
@@ -3050,6 +3075,27 @@ impl MechSuitService {
                 action: decision.action.clone(),
                 outcome: outcome.clone(),
             });
+
+            if let Some(checklist) = execution_checklist.as_mut() {
+                let mut changed = false;
+                if sequence == 1 {
+                    changed |= checklist.mark_completed("initial-action");
+                }
+                if completed_exact_edit {
+                    changed |= checklist.mark_completed("apply-edit");
+                }
+                if accepted_stop
+                    && !instruction_frame
+                        .as_ref()
+                        .is_some_and(|frame| frame.requires_applied_edit())
+                {
+                    changed |= checklist.mark_completed("finalize");
+                }
+                checklist.sync_loop_state_notes(&mut loop_state);
+                if changed {
+                    checklist.emit(trace.as_ref());
+                }
+            }
 
             let evidence_count_after = loop_state.evidence_items.len();
             if evidence_count_after > evidence_count_before {
@@ -3353,6 +3399,68 @@ struct PlannerLoopOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ExecutionChecklistPressure {
+    continuation: bool,
+    multi_phase: bool,
+    edit_goal: bool,
+    grounding_goal: bool,
+}
+
+impl ExecutionChecklistPressure {
+    fn is_active(self) -> bool {
+        self.continuation || self.multi_phase || self.edit_goal || self.grounding_goal
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExecutionChecklistState {
+    items: Vec<PlanChecklistItem>,
+}
+
+impl ExecutionChecklistState {
+    fn emit(&self, trace: &StructuredTurnTrace) {
+        trace.emit(TurnEvent::PlanUpdated {
+            items: self.items.clone(),
+        });
+    }
+
+    fn sync_loop_state_notes(&self, loop_state: &mut PlannerLoopState) {
+        const EXECUTION_CHECKLIST_NOTE_PREFIX: &str = "Execution checklist:";
+
+        loop_state
+            .notes
+            .retain(|note| !note.starts_with(EXECUTION_CHECKLIST_NOTE_PREFIX));
+
+        let pending = self
+            .items
+            .iter()
+            .filter(|item| item.status == PlanChecklistItemStatus::Pending)
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return;
+        }
+
+        let mut lines = vec![
+            "Execution checklist: advance the next unfinished item before opening new work."
+                .to_string(),
+        ];
+        lines.extend(pending.into_iter().map(|item| format!("- {}", item.label)));
+        loop_state.notes.push(lines.join("\n"));
+    }
+
+    fn mark_completed(&mut self, item_id: &str) -> bool {
+        let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) else {
+            return false;
+        };
+        if item.status == PlanChecklistItemStatus::Completed {
+            return false;
+        }
+        item.status = PlanChecklistItemStatus::Completed;
+        true
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct LocalHarnessCapabilities {
     git: bool,
     rg: bool,
@@ -3386,6 +3494,67 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
         initial_edit: InitialEditInstruction::default(),
         grounding: None,
     }
+}
+
+fn execution_checklist_pressure(
+    prompt: &str,
+    recent_turns: &[String],
+    execution_plan: &PromptExecutionPlan,
+) -> ExecutionChecklistPressure {
+    ExecutionChecklistPressure {
+        continuation: !recent_turns.is_empty(),
+        multi_phase: prompt_has_execution_chain(prompt),
+        edit_goal: execution_plan.initial_edit.known_edit,
+        grounding_goal: execution_plan.grounding.is_some(),
+    }
+}
+
+fn build_execution_checklist(
+    prompt: &str,
+    recent_turns: &[String],
+    execution_plan: &PromptExecutionPlan,
+) -> Option<ExecutionChecklistState> {
+    if execution_plan.path != PromptExecutionPath::PlannerThenSynthesize {
+        return None;
+    }
+
+    let pressure = execution_checklist_pressure(prompt, recent_turns, execution_plan);
+    if !pressure.is_active() {
+        return None;
+    }
+
+    let initial_decision = execution_plan.initial_planner_decision.as_ref()?;
+    let mut items = vec![PlanChecklistItem {
+        id: "initial-action".to_string(),
+        label: sentence_case(&initial_decision.action.summary()),
+        status: PlanChecklistItemStatus::Pending,
+    }];
+
+    if execution_plan.initial_edit.known_edit && !decision_is_exact_edit(&initial_decision.action) {
+        items.push(PlanChecklistItem {
+            id: "apply-edit".to_string(),
+            label: "Apply the requested repository change.".to_string(),
+            status: PlanChecklistItemStatus::Pending,
+        });
+    }
+
+    let finalize_label = if execution_plan.initial_edit.known_edit {
+        "Verify the change and summarize the outcome.".to_string()
+    } else if execution_plan.grounding.is_some() {
+        "Assemble the required evidence and summarize the answer.".to_string()
+    } else if pressure.continuation || pressure.multi_phase {
+        "Carry the remaining turn work to completion and summarize the result.".to_string()
+    } else {
+        "Verify the result and summarize the outcome.".to_string()
+    };
+
+    items.push(PlanChecklistItem {
+        id: "finalize".to_string(),
+        label: finalize_label,
+        status: PlanChecklistItemStatus::Pending,
+    });
+
+    Some(ExecutionChecklistState { items })
 }
 
 fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<InstructionFrame> {
@@ -3538,6 +3707,31 @@ fn prompt_requests_workspace_edit(prompt: &str) -> bool {
                 | "file"
         )
     })
+}
+
+fn prompt_has_execution_chain(prompt: &str) -> bool {
+    let lower = format!(" {} ", prompt.to_ascii_lowercase());
+    [
+        " then ",
+        " after ",
+        " before ",
+        " next ",
+        " finally ",
+        " also ",
+        " and ",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn sentence_case(input: &str) -> String {
+    let mut chars = input.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut rendered = first.to_uppercase().collect::<String>();
+    rendered.push_str(chars.as_str());
+    rendered
 }
 
 fn prompt_requires_repository_grounding(prompt: &str) -> bool {
@@ -7350,6 +7544,158 @@ mod tests {
             recorded
                 .iter()
                 .all(|update| update.task_id == session.task_id())
+        );
+    }
+
+    #[test]
+    fn process_prompt_emits_plan_updates_and_containment_notes_for_edit_turns() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nDrive edit turns to completion with explicit execution plans.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "git status --short".to_string(),
+                    },
+                },
+                rationale: "inspect the current workspace state before editing".to_string(),
+                answer: None,
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["src/lib.rs".to_string()],
+                },
+                grounding: None,
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::ApplyPatch {
+                            patch: "*** Begin Patch\n*** Add File: src/lib.rs\n+pub fn plan_mode() {}\n*** End Patch\n"
+                                .to_string(),
+                        },
+                    },
+                    rationale: "apply the requested repository change".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction {
+                        known_edit: true,
+                        candidate_files: vec!["src/lib.rs".to_string()],
+                    },
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "change applied and verified".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some("Patched the file and verified the result.".to_string()),
+                    edit: InitialEditInstruction {
+                        known_edit: true,
+                        candidate_files: vec!["src/lib.rs".to_string()],
+                    },
+                    grounding: None,
+                },
+            ],
+            recorded_requests.clone(),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(RecordingSynthesizer::default());
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Fix src/lib.rs and verify the result", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        let recorded = sink.recorded();
+        let plan_updates = recorded
+            .iter()
+            .filter_map(|event| match event {
+                TurnEvent::PlanUpdated { items } => Some(items.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            !plan_updates.is_empty(),
+            "edit-oriented planned turns should emit at least one plan update"
+        );
+        assert_eq!(
+            plan_updates[0]
+                .iter()
+                .map(|item| item.status)
+                .collect::<Vec<_>>(),
+            vec![
+                crate::domain::model::PlanChecklistItemStatus::Pending,
+                crate::domain::model::PlanChecklistItemStatus::Pending,
+                crate::domain::model::PlanChecklistItemStatus::Pending,
+            ]
+        );
+        assert!(
+            plan_updates[0][0].label.contains("git status --short"),
+            "first checklist item should reflect the initial planner action"
+        );
+        assert!(
+            plan_updates[0][1]
+                .label
+                .contains("Apply the requested repository change"),
+            "edit turns should keep an explicit apply-change checklist item"
+        );
+        assert_eq!(
+            plan_updates
+                .last()
+                .expect("final plan update")
+                .iter()
+                .map(|item| item.status)
+                .collect::<Vec<_>>(),
+            vec![
+                crate::domain::model::PlanChecklistItemStatus::Completed,
+                crate::domain::model::PlanChecklistItemStatus::Completed,
+                crate::domain::model::PlanChecklistItemStatus::Completed,
+            ]
+        );
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(
+            requests
+                .iter()
+                .skip(1)
+                .flat_map(|request| request.loop_state.notes.iter())
+                .any(|note| note.contains("Execution checklist")),
+            "follow-on planner requests should carry the containment checklist note"
         );
     }
 

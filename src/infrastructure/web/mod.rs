@@ -1741,6 +1741,15 @@ mod tests {
         assert!(html.contains("event-output"));
     }
 
+    #[test]
+    fn embedded_primary_shell_renders_plan_update_rows() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("t === 'plan_updated'"));
+        assert!(html.contains("Updated Plan"));
+        assert!(html.contains("event-output"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn session_routes_project_live_shared_session_turns_from_mock_provider() {
         let workspace = tempfile::tempdir().expect("workspace");

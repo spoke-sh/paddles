@@ -191,6 +191,7 @@ for:
 - model-selected first action
 - resulting route classification
 - route selection
+- automatic plan updates when planned turns need explicit execution containment
 - planner action selection
 - gatherer capability and gathered evidence
 - planner summaries and stop reasons
@@ -199,6 +200,10 @@ for:
 - synthesis readiness
 
 Repository-question answers also include source/file citations by default.
+When a turn carries edit pressure, grounding pressure, or multi-step follow-up
+pressure from recent conversation turns, Paddles now emits a Codex-style
+checklist in the stream and feeds the same unfinished items back into planner
+loop notes so the execution stays contained until the checklist is complete.
 
 ### Provider Credentials
 
