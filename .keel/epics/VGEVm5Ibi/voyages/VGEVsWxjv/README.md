@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGEVsWxjv
-status: planned
+status: in-progress
 epic: VGEVm5Ibi
 created_at: 2026-04-08T13:24:54
 # authored
 title: Split Route Surfaces Into Domain Modules
 index: 2
 updated_at: 2026-04-08T13:28:40
+started_at: 2026-04-08T13:51:54
 ---
 
 # Split Route Surfaces Into Domain Modules
@@ -26,11 +27,11 @@ updated_at: 2026-04-08T13:28:40
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Modularize The Manifold Route Surface](../../../../stories/VGEVvsMPy/README.md) | feat | backlog |
-| [Modularize The Inspector Route Surface](../../../../stories/VGEVvsfR8/README.md) | feat | backlog |
+| [Modularize The Inspector Route Surface](../../../../stories/VGEVvsfR8/README.md) | feat | done |
 | [Modularize The Transit Route Surface](../../../../stories/VGEVvt8SE/README.md) | feat | backlog |
 <!-- END GENERATED -->

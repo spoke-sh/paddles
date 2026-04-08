@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:52:03.480837356-07:00
+mode: manual
+---
+Split the inspector route into dedicated inspector modules: a selection hook, overview card surface, navigation rail, record list, detail pane, and a thin route assembler.

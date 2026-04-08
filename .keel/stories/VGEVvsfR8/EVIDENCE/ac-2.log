@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:52:03.524758826-07:00
+mode: manual
+---
+Preserved inspector selection, focus, and detail behavior under npm --workspace @paddles/web run test -- runtime-app.test.tsx, including the new route-level inspector regression, plus npm --workspace @paddles/web run lint and npm --workspace @paddles/web run build.
