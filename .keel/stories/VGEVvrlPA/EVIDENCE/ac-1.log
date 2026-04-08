@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:44:17.795932254-07:00
+mode: manual
+---
+Moved bootstrap, projection fetches, send-turn requests, and EventSource wiring behind dedicated store/client modules while preserving the RuntimeStoreProvider and useRuntimeStore consumer contract.

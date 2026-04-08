@@ -7,24 +7,16 @@ import {
   useState,
 } from 'react';
 
-import { eventRow } from './runtime-helpers';
 import type {
-  ConversationBootstrapResponse,
   ConversationProjectionSnapshot,
-  ConversationProjectionUpdate,
-  ProjectionTurnEvent,
-  TurnEvent,
 } from './runtime-types';
-
-interface RuntimeEventRow {
-  id: string;
-  badge: string;
-  badgeClass: string;
-  text: string;
-  diff?: string;
-  output?: string;
-  streamKey?: string;
-}
+import {
+  reduceRuntimeTurnEvent,
+  sanitizePromptHistory,
+  type RuntimeEventRow,
+} from './store/event-log';
+import { mountProjectionStream as openProjectionStream } from './store/projection-stream';
+import { fetchBootstrap, fetchProjection, postTurn } from './store/runtime-client';
 
 interface RuntimeStoreValue {
   connected: boolean;
@@ -38,18 +30,6 @@ interface RuntimeStoreValue {
 }
 
 const RuntimeStoreContext = createContext<RuntimeStoreValue | null>(null);
-
-function runtimeUrl(path: string) {
-  return new URL(path, window.location.origin).toString();
-}
-
-async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
-  const response = await fetch(input, init);
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-  return (await response.json()) as T;
-}
 
 export function RuntimeStoreProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false);
@@ -65,88 +45,43 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
     let closed = false;
 
     async function refreshProjection(nextSessionId: string) {
-      const snapshot = await fetchJson<ConversationProjectionSnapshot>(
-        runtimeUrl(`/sessions/${nextSessionId}/projection`)
-      );
+      const snapshot = await fetchProjection(nextSessionId);
       if (!closed) {
         setProjection(snapshot);
       }
     }
 
-    function mountProjectionStream(nextSessionId: string) {
-      const projectionSource = new EventSource(
-        runtimeUrl(`/sessions/${nextSessionId}/projection/events`)
-      );
-      projectionSource.addEventListener('projection_update', (message) => {
-        const update = JSON.parse(
-          (message as MessageEvent<string>).data
-        ) as ConversationProjectionUpdate;
-        setProjection(update.snapshot);
+    function connectProjectionStream(nextSessionId: string) {
+      const projectionSource = openProjectionStream(nextSessionId, {
+        onConnected: () => {
+          setConnected(true);
+          void refreshProjection(nextSessionId);
+        },
+        onDisconnected: () => {
+          setConnected(false);
+        },
+        onProjection: (snapshot) => {
+          setProjection(snapshot);
+        },
+        onTurnEvent: (payload) => {
+          setEvents((current) => reduceRuntimeTurnEvent(current, payload));
+        },
       });
-      projectionSource.addEventListener('turn_event', (message) => {
-        const payload = JSON.parse((message as MessageEvent<string>).data) as
-          | ProjectionTurnEvent
-          | TurnEvent;
-        const nextRow = eventRow(payload);
-        if (!nextRow) {
-          return;
-        }
-        const row: Omit<RuntimeEventRow, 'id'> = {
-          badge: nextRow.badge,
-          badgeClass: nextRow.badgeClass,
-          text: nextRow.text,
-          diff: 'diff' in nextRow ? nextRow.diff : undefined,
-          output: 'output' in nextRow ? nextRow.output : undefined,
-          streamKey: 'streamKey' in nextRow ? nextRow.streamKey : undefined,
-        };
-        setEvents((current) => {
-          if (row.streamKey) {
-            const existingIndex = current.findIndex(
-              (item) => item.streamKey === row.streamKey
-            );
-            if (existingIndex >= 0) {
-              const next = [...current];
-              const existing = next[existingIndex];
-              next[existingIndex] = {
-                ...existing,
-                badge: row.badge,
-                badgeClass: row.badgeClass,
-                text: row.text,
-                output: `${existing.output || ''}${row.output || ''}`,
-              };
-              return next;
-            }
-          }
-          return [
-            ...current,
-            { id: row.streamKey || `${Date.now()}-${current.length}`, ...row },
-          ].slice(-64);
-        });
-      });
-      projectionSource.onerror = () => {
-        setConnected(false);
-      };
-      projectionSource.onopen = () => {
-        setConnected(true);
-        void refreshProjection(nextSessionId);
-      };
       projectionSourceRef.current = projectionSource;
     }
 
     async function bootstrap() {
       try {
         setError(null);
-        const bootstrap = await fetchJson<ConversationBootstrapResponse>(
-          runtimeUrl('/session/shared/bootstrap')
-        );
+        const bootstrap = await fetchBootstrap();
         if (closed) {
           return;
         }
         setSessionId(bootstrap.session_id);
         setProjection(bootstrap.projection);
-        setPromptHistory(bootstrap.prompt_history.filter((prompt) => prompt.trim().length > 0));
+        setPromptHistory(sanitizePromptHistory(bootstrap.prompt_history));
         setConnected(true);
-        mountProjectionStream(bootstrap.session_id);
+        connectProjectionStream(bootstrap.session_id);
       } catch (bootstrapError) {
         if (closed) {
           return;
@@ -179,14 +114,8 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
     setSending(true);
     setError(null);
     try {
-      await fetchJson(runtimeUrl(`/sessions/${sessionId}/turns`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: text }),
-      });
-      const nextProjection = await fetchJson<ConversationProjectionSnapshot>(
-        runtimeUrl(`/sessions/${sessionId}/projection`)
-      );
+      await postTurn(sessionId, text);
+      const nextProjection = await fetchProjection(sessionId);
       setProjection(nextProjection);
     } catch (sendError) {
       setError(

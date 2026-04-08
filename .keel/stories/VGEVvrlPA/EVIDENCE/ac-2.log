@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:44:17.826517909-07:00
+mode: manual
+---
+Kept prompt-history sanitization and tool-stream accumulation covered after the split with npm --workspace @paddles/web run test -- store/event-log.test.ts, npm --workspace @paddles/web run test -- runtime-app.test.tsx, npm --workspace @paddles/web run lint, and npm --workspace @paddles/web run build.
