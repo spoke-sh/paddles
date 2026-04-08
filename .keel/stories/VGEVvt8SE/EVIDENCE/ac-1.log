@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:01:59.165780513-07:00
+mode: manual
+---
+Split the transit route into dedicated transit modules for toolbar state, board state, node rendering, and route composition so runtime-app no longer carries the transit implementation inline.

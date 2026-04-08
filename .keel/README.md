@@ -308,7 +308,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Extract Runtime Shell And Chat Boundaries](epics/VGEVm5Ibi/voyages/VGEVsWLk2/) | done |
-| [Split Route Surfaces Into Domain Modules](epics/VGEVm5Ibi/voyages/VGEVsWxjv/) | in-progress |
+| [Split Route Surfaces Into Domain Modules](epics/VGEVm5Ibi/voyages/VGEVsWxjv/) | done |
 | [Stabilize Styling Tests And Fallback Contracts](epics/VGEVm5Ibi/voyages/VGEVsXLkG/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)

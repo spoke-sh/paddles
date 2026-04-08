@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:01:59.209546819-07:00
+mode: manual
+---
+Preserved transit interactions under npm --workspace @paddles/web run test -- runtime-app.test.tsx, plus npm --workspace @paddles/web run lint and npm --workspace @paddles/web run build, covering router rendering and existing transit trace behavior after the split.
