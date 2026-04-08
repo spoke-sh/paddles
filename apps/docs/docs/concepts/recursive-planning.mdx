@@ -81,6 +81,25 @@ Two premise-challenge cases matter most:
 2. **Premise judgement**
    If the user says "CI is failing" but the gathered sources show only `success`, `cancelled`, or an unconfirmed `in_progress` run, repeating `gh run list --limit 20`, then `--limit 10`, then `--limit 5` is not intelligent work. The controller should stop and make synthesis judge those sources directly.
 
+## Deterministic Edit Target Resolution
+
+Edit-oriented turns now pass through a deterministic resolver before the loop
+keeps broad-searching or attempts a workspace mutation. The resolver
+self-discovers authored workspace paths, respects the repository `.gitignore`
+boundary when present, and produces one of three explicit outcomes:
+
+- **Resolved** — one authored path won the ranking and can move into
+  `read`, `diff`, or edit actions.
+- **Ambiguous** — multiple authored candidates remain viable, so the turn must
+  narrow further instead of guessing.
+- **Missing** — no safe authored target matched the hint, so the controller
+  fails closed and replans instead of mutating the wrong file.
+
+This is a convergence tool, not a full IDE intelligence layer. It does not
+depend on editor state and it does not promise complete semantic symbol
+resolution. Its purpose is narrower: keep edit-oriented turns inside safe,
+authored workspace paths and make misses explainable.
+
 ## Compaction Planning Today
 
 As the planner accumulates evidence across many steps, the working context can grow large. A compaction engine evaluates the planner's retained evidence and produces a structured compaction plan.

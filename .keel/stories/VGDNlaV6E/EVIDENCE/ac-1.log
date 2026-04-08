@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-04-08T09:54:55.432079161-07:00
+command: npm --workspace @paddles/docs run build
+---
+
+> @paddles/docs@0.0.0 build
+> docusaurus build
+
+
+ ------------------------------------------------------------------------------                                                                                                         Update available 3.9.2 → 3.10.0                                                                                                                 To upgrade Docusaurus packages with the latest version, run the                                       following command:                                        `npm i @docusaurus/core@latest @docusaurus/preset-classic@latest               @docusaurus/module-type-aliases@latest @docusaurus/tsconfig@latest                                  @docusaurus/types@latest`                                                                                                             ------------------------------------------------------------------------------ 
+
+[INFO] [en] Creating an optimized production build...
+[webpackbar] ℹ Compiling Client
+[webpackbar] ℹ Compiling Server
+[webpackbar] ✔ Server: Compiled successfully in 828.79ms
+[webpackbar] ✔ Client: Compiled successfully in 875.64ms
+[SUCCESS] Generated static files in "build".
+[INFO] Use `npm run serve` command to test your build locally.

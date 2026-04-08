@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VGDNh30T9
-status: in-progress
+status: done
 epic: VGDNcabks
 created_at: 2026-04-08T08:46:07
 # authored
@@ -22,16 +22,18 @@ started_at: 2026-04-08T09:19:37
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Use Deterministic Resolution Before Edit State Actions](../../../../stories/VGDNlZK5Z/README.md) | feat | done |
 | [Fail Closed On Ambiguous Or Missing Entity Targets](../../../../stories/VGDNlZu6I/README.md) | feat | done |
-| [Document And Visualize Deterministic Resolution Behavior](../../../../stories/VGDNlaV6E/README.md) | feat | backlog |
+| [Document And Visualize Deterministic Resolution Behavior](../../../../stories/VGDNlaV6E/README.md) | feat | done |
 <!-- END GENERATED -->

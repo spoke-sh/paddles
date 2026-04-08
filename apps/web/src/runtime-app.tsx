@@ -42,6 +42,10 @@ import {
   recordSummary,
   recordsForTurn,
   renderedRecordBody,
+  resolverOutcomeMeta,
+  resolverOutcomeNarrative,
+  resolverOutcomeTitle,
+  resolverSignalDetails,
   signalKindLabel,
   sourceColor,
   steeringGateClass,
@@ -1252,6 +1256,7 @@ function ManifoldRoute() {
     currentFrame?.gates.find((gate) => gate.gate === selectedSignal?.gate) ||
     currentFrame?.gates[0] ||
     null;
+  const selectedResolverOutcome = resolverSignalDetails(selectedSignal);
   const gateField = useMemo(() => buildGateField(currentTurn), [currentTurn]);
 
   useEffect(() => {
@@ -1644,6 +1649,46 @@ function ManifoldRoute() {
                             )} · ${steeringPhaseLabel(selectedSignal.phase)}`
                           : 'The readout follows the selected orbit in the field.'}
                       </div>
+                    </div>
+                    <div
+                      className={`manifold-readout-card is-${
+                        selectedSignal ? steeringGateClass(selectedSignal.gate) : 'containment'
+                      }`}
+                    >
+                      <div className="manifold-readout-card__eyebrow">
+                        <span>Resolver outcome</span>
+                        <span>
+                          {selectedResolverOutcome
+                            ? selectedResolverOutcome.status
+                            : 'No resolver signal'}
+                        </span>
+                      </div>
+                      <div className="manifold-readout-card__title">
+                        {selectedResolverOutcome
+                          ? resolverOutcomeTitle(selectedResolverOutcome)
+                          : 'Select an entity-resolution force point'}
+                      </div>
+                      <div className="manifold-readout-card__meta">
+                        {selectedResolverOutcome
+                          ? resolverOutcomeMeta(selectedResolverOutcome)
+                          : 'Resolved, ambiguous, and missing targets render here when present.'}
+                      </div>
+                      {selectedResolverOutcome ? (
+                        <div className="manifold-readout-card__detail">
+                          {selectedResolverOutcome.path ? (
+                            <div className="manifold-readout-card__path">
+                              {selectedResolverOutcome.path}
+                            </div>
+                          ) : null}
+                          <div>{resolverOutcomeNarrative(selectedResolverOutcome)}</div>
+                          {!selectedResolverOutcome.path &&
+                          selectedResolverOutcome.candidates.length ? (
+                            <div>
+                              Candidates: {selectedResolverOutcome.candidates.join(', ')}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="manifold-frame-ruler">

@@ -579,6 +579,206 @@ describe('RuntimeApp', () => {
     expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
   });
 
+  it('surfaces deterministic resolver outcomes in the manifold readout', async () => {
+    const resolverProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      forensics: {
+        ...bootstrapProjection.forensics,
+        turns: [
+          {
+            turn_id: 'task-123.turn-0001',
+            lifecycle: 'final',
+            records: [
+              {
+                lifecycle: 'final',
+                superseded_by_record_id: null,
+                record: {
+                  record_id: 'record-resolver',
+                  sequence: 3,
+                  lineage: {
+                    task_id: 'task-123',
+                    turn_id: 'task-123.turn-0001',
+                    branch_id: null,
+                    parent_record_id: 'record-2',
+                  },
+                  kind: {
+                    SignalSnapshot: {
+                      kind: 'action_bias',
+                      gate: 'convergence',
+                      phase: 'narrowing',
+                      summary: 'deterministic resolver resolved apps/web/src/runtime-shell.css',
+                      level: 'high',
+                      magnitude_percent: 79,
+                      applies_to: {
+                        id: 'planner-step:record-resolver',
+                        kind: 'planner_step',
+                        label: 'replace runtime shell padding',
+                      },
+                      contributions: [
+                        {
+                          source: 'candidate_file_evidence',
+                          share_percent: 60,
+                          rationale: 'Authored candidates converged on the runtime shell.',
+                        },
+                      ],
+                      artifact: {
+                        summary: 'entity resolution',
+                        inline_content: JSON.stringify({
+                          stage: 'entity-resolution',
+                          status: 'resolved',
+                          source: 'bootstrap',
+                          path: 'apps/web/src/runtime-shell.css',
+                          candidates: [
+                            'apps/web/src/runtime-shell.css',
+                            'apps/web/src/runtime-app.tsx',
+                          ],
+                          explanation: 'deterministic ranking selected a single authored target',
+                        }),
+                        mime_type: 'application/json',
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      manifold: {
+        ...bootstrapProjection.manifold,
+        turns: [
+          {
+            turn_id: 'task-123.turn-0001',
+            lifecycle: 'final',
+            frames: [
+              {
+                record_id: 'record-resolver',
+                sequence: 3,
+                lifecycle: 'final',
+                anchor: {
+                  id: 'planner-step:record-resolver',
+                  kind: 'planner_step',
+                  label: 'replace runtime shell padding',
+                },
+                active_signals: [
+                  {
+                    snapshot_record_id: 'record-resolver',
+                    lifecycle: 'final',
+                    kind: 'action_bias',
+                    gate: 'convergence',
+                    phase: 'narrowing',
+                    summary: 'deterministic resolver resolved apps/web/src/runtime-shell.css',
+                    level: 'high',
+                    magnitude_percent: 79,
+                    anchor: {
+                      id: 'planner-step:record-resolver',
+                      kind: 'planner_step',
+                      label: 'replace runtime shell padding',
+                    },
+                    contributions: [
+                      {
+                        source: 'candidate_file_evidence',
+                        share_percent: 60,
+                        rationale: 'Authored candidates converged on the runtime shell.',
+                      },
+                    ],
+                    artifact: {
+                      summary: 'entity resolution',
+                      inline_content: JSON.stringify({
+                        stage: 'entity-resolution',
+                        status: 'resolved',
+                        source: 'bootstrap',
+                        path: 'apps/web/src/runtime-shell.css',
+                        candidates: [
+                          'apps/web/src/runtime-shell.css',
+                          'apps/web/src/runtime-app.tsx',
+                        ],
+                        explanation: 'deterministic ranking selected a single authored target',
+                      }),
+                      mime_type: 'application/json',
+                    },
+                  },
+                ],
+                gates: [
+                  {
+                    gate: 'convergence',
+                    label: 'convergence gate',
+                    phase: 'narrowing',
+                    level: 'high',
+                    magnitude_percent: 79,
+                    anchor: {
+                      id: 'planner-step:record-resolver',
+                      kind: 'planner_step',
+                      label: 'replace runtime shell padding',
+                    },
+                    dominant_signal_kind: 'action_bias',
+                    signal_kinds: ['action_bias'],
+                    dominant_record_id: 'record-resolver',
+                  },
+                ],
+                primitives: [
+                  {
+                    primitive_id: 'gate:convergence',
+                    kind: 'valve',
+                    label: 'Convergence gate',
+                    basis: { kind: 'steering_gate', gate: 'convergence' },
+                    evidence_record_id: 'record-resolver',
+                    anchor: {
+                      id: 'planner-step:record-resolver',
+                      kind: 'planner_step',
+                      label: 'replace runtime shell padding',
+                    },
+                    level: 'high',
+                    magnitude_percent: 79,
+                  },
+                ],
+                conduits: [],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/session/shared/bootstrap')) {
+          return new Response(
+            JSON.stringify({
+              session_id: 'task-123',
+              projection: resolverProjection,
+              prompt_history: bootstrapPromptHistory,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          );
+        }
+        if (url.endsWith('/sessions/task-123/projection')) {
+          return new Response(JSON.stringify(resolverProjection), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/sessions/task-123/turns')) {
+          return new Response(JSON.stringify({ response: 'ok' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    renderAtPath('/manifold');
+
+    expect(await screen.findByText('Resolved target')).toBeInTheDocument();
+    expect(await screen.findByText('apps/web/src/runtime-shell.css')).toBeInTheDocument();
+    expect(
+      await screen.findByText('deterministic ranking selected a single authored target')
+    ).toBeInTheDocument();
+  });
+
   it('supports mouse pan tilt and zoom on the manifold camera', async () => {
     const outerWheel = vi.fn();
     window.history.pushState({}, '', '/manifold');

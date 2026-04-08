@@ -325,6 +325,16 @@ export function renderedRecordBody(recordProjection: ForensicRecordProjection) {
   const entry = kindEntry(recordProjection);
   const artifact = primaryArtifact(recordProjection);
   if (artifact) {
+    if (entry.key === 'SignalSnapshot') {
+      const resolver = resolverSignalDetailsFromArtifact(artifact);
+      if (resolver) {
+        const detailLines = [
+          resolver.path || resolverOutcomeMeta(resolver),
+          resolverOutcomeNarrative(resolver),
+        ].filter(Boolean);
+        return [resolverOutcomeTitle(resolver), '', ...detailLines].join('\n');
+      }
+    }
     const text = artifactText(artifact);
     if (!text) {
       return artifact.locator
@@ -661,6 +671,95 @@ export function manifoldAnchorLabel(anchor: { label?: string; kind?: string } | 
 
 export function manifoldSignalLabel(signal: ManifoldSignalState) {
   return signalKindLabel(signal.kind);
+}
+
+export interface ResolverSignalDetails {
+  status: 'resolved' | 'ambiguous' | 'missing';
+  source: string | null;
+  path: string | null;
+  candidates: string[];
+  attemptedHintCount: number | null;
+  explanation: string;
+}
+
+function resolverSignalDetailsFromArtifact(
+  artifact: ArtifactEnvelope | null | undefined
+): ResolverSignalDetails | null {
+  const text = artifact?.inline_content || '';
+  if (!text) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    if (parsed.stage !== 'entity-resolution') {
+      return null;
+    }
+    const status = String(parsed.status || '').toLowerCase();
+    if (status !== 'resolved' && status !== 'ambiguous' && status !== 'missing') {
+      return null;
+    }
+    return {
+      status,
+      source: typeof parsed.source === 'string' ? parsed.source : null,
+      path: typeof parsed.path === 'string' ? parsed.path : null,
+      candidates: Array.isArray(parsed.candidates)
+        ? parsed.candidates.filter((candidate): candidate is string => typeof candidate === 'string')
+        : [],
+      attemptedHintCount:
+        typeof parsed.attempted_hint_count === 'number' ? parsed.attempted_hint_count : null,
+      explanation: typeof parsed.explanation === 'string' ? parsed.explanation : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function resolverSignalDetails(
+  signal: Pick<ManifoldSignalState, 'artifact'> | null | undefined
+) {
+  return resolverSignalDetailsFromArtifact(signal?.artifact);
+}
+
+function resolverSourceLabel(source: string | null) {
+  return source ? titleCase(source.replace(/[-_]/g, ' ')) : 'Resolver signal';
+}
+
+export function resolverOutcomeTitle(details: ResolverSignalDetails) {
+  if (details.status === 'resolved') {
+    return 'Resolved target';
+  }
+  if (details.status === 'ambiguous') {
+    return 'Ambiguous target';
+  }
+  return 'Missing target';
+}
+
+export function resolverOutcomeMeta(details: ResolverSignalDetails) {
+  if (details.status === 'resolved') {
+    const alternatives = Math.max(0, details.candidates.length - 1);
+    return `${resolverSourceLabel(details.source)} · ${alternatives} alternative${
+      alternatives === 1 ? '' : 's'
+    }`;
+  }
+  if (details.status === 'ambiguous') {
+    return `${resolverSourceLabel(details.source)} · ${details.candidates.length} authored candidates`;
+  }
+  if (details.attemptedHintCount !== null) {
+    return `${resolverSourceLabel(details.source)} · ${details.attemptedHintCount} hint${
+      details.attemptedHintCount === 1 ? '' : 's'
+    } checked`;
+  }
+  return resolverSourceLabel(details.source);
+}
+
+export function resolverOutcomeNarrative(details: ResolverSignalDetails) {
+  if (details.path) {
+    return details.explanation || details.path;
+  }
+  if (details.candidates.length) {
+    return details.explanation || details.candidates.join(', ');
+  }
+  return details.explanation || 'Resolver metadata was recorded without a detailed explanation.';
 }
 
 function formatDuration(seconds: number) {

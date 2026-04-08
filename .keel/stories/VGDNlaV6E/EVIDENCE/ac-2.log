@@ -1,0 +1,17 @@
+---
+recorded_at: 2026-04-08T09:54:59.436756821-07:00
+command: npm --workspace @paddles/web run test -- runtime-app.test.tsx
+---
+
+> @paddles/web@0.0.0 test
+> vitest run runtime-app.test.tsx
+
+
+ RUN  v4.1.3 /home/alex/workspace/spoke-sh/paddles/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  09:54:57
+   Duration  1.74s (transform 273ms, setup 73ms, import 367ms, tests 618ms, environment 569ms)
+

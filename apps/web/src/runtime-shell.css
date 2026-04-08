@@ -1145,7 +1145,7 @@ body {
 }
 .manifold-readout {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 .manifold-readout-card {
@@ -1191,6 +1191,21 @@ body {
   font-size: 12px;
   line-height: 1.6;
   color: #566774;
+}
+.manifold-readout-card__detail {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #30424f;
+}
+.manifold-readout-card__path {
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f303a;
+  word-break: break-word;
 }
 .manifold-frame-ruler {
   display: grid;

@@ -296,12 +296,12 @@
 |--------|--------|
 | [Emit and Render Applied Edit Diffs](epics/VFnmIbFW2/voyages/VFnmfzD3E/) | done |
 
-### [Deterministic Workspace Entity Resolution](epics/VGDNcabks/) (active)
+### [Deterministic Workspace Entity Resolution](epics/VGDNcabks/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Build Deterministic Resolver Backbone](epics/VGDNcabks/voyages/VGDNgMbMW/) | done |
-| [Integrate Resolver Into Edit Convergence](epics/VGDNcabks/voyages/VGDNh30T9/) | in-progress |
+| [Integrate Resolver Into Edit Convergence](epics/VGDNcabks/voyages/VGDNh30T9/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

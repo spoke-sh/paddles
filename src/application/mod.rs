@@ -890,6 +890,24 @@ impl StructuredTurnTrace {
             }
         }
     }
+
+    fn record_entity_resolution_outcome(
+        &self,
+        outcome: &EntityResolutionOutcome,
+        source: &'static str,
+    ) {
+        let (kind, summary, level, magnitude_percent, contributions, details) =
+            entity_resolution_signal_record(outcome, source);
+        self.record_signal_snapshot(SignalSnapshotRecord {
+            kind,
+            summary,
+            level: level.to_string(),
+            magnitude_percent,
+            applies_to: Some(self.turn_node()),
+            contributions,
+            details,
+        });
+    }
 }
 
 impl TurnEventSink for StructuredTurnTrace {
@@ -973,17 +991,28 @@ impl TurnEventSink for StructuredTurnTrace {
                 };
                 let (level, magnitude_percent, contributions) =
                     fallback_signal_details(stage.as_str(), reason.as_str());
+                let (summary, details) = if stage == "entity-resolution" {
+                    (
+                        entity_resolution_fallback_summary(reason.as_str()),
+                        entity_resolution_fallback_details(reason.as_str()),
+                    )
+                } else {
+                    (
+                        format!("{stage} fallback"),
+                        serde_json::json!({
+                            "stage": stage,
+                            "reason": reason,
+                        }),
+                    )
+                };
                 self.record_signal_snapshot(SignalSnapshotRecord {
                     kind: signal_kind,
-                    summary: format!("{stage} fallback"),
+                    summary,
                     level: level.to_string(),
                     magnitude_percent,
                     applies_to: Some(self.turn_node()),
                     contributions,
-                    details: serde_json::json!({
-                        "stage": stage,
-                        "reason": reason,
-                    }),
+                    details,
                 });
             }
             TurnEvent::RefinementApplied {
@@ -1244,6 +1273,29 @@ fn fallback_signal_details(
         );
     }
 
+    if stage == "entity-resolution" {
+        return (
+            "high",
+            82,
+            vec![
+                TraceSignalContribution {
+                    source: "workspace_editor_boundary".to_string(),
+                    share_percent: 55,
+                    rationale:
+                        "Deterministic entity resolution blocked workspace mutation until the target state became safe."
+                            .to_string(),
+                },
+                TraceSignalContribution {
+                    source: "candidate_file_evidence".to_string(),
+                    share_percent: 45,
+                    rationale: format!(
+                        "The resolver outcome was surfaced explicitly: {reason}"
+                    ),
+                },
+            ],
+        );
+    }
+
     (
         "medium",
         56,
@@ -1261,6 +1313,146 @@ fn fallback_signal_details(
             },
         ],
     )
+}
+
+fn entity_resolution_status_from_reason(reason: &str) -> &'static str {
+    let normalized = reason.to_ascii_lowercase();
+    if normalized.contains("ambiguous") {
+        "ambiguous"
+    } else {
+        "missing"
+    }
+}
+
+fn entity_resolution_fallback_summary(reason: &str) -> String {
+    match entity_resolution_status_from_reason(reason) {
+        "ambiguous" => "deterministic resolver ambiguous".to_string(),
+        _ => "deterministic resolver missing".to_string(),
+    }
+}
+
+fn entity_resolution_fallback_details(reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "stage": "entity-resolution",
+        "status": entity_resolution_status_from_reason(reason),
+        "reason": reason,
+    })
+}
+
+fn entity_resolution_signal_record(
+    outcome: &EntityResolutionOutcome,
+    source: &'static str,
+) -> (
+    TraceSignalKind,
+    String,
+    &'static str,
+    u8,
+    Vec<TraceSignalContribution>,
+    serde_json::Value,
+) {
+    match outcome {
+        EntityResolutionOutcome::Resolved {
+            target,
+            alternatives,
+            explanation,
+        } => (
+            TraceSignalKind::ActionBias,
+            format!("deterministic resolver resolved {}", target.path),
+            "high",
+            79,
+            vec![
+                TraceSignalContribution {
+                    source: "candidate_file_evidence".to_string(),
+                    share_percent: 60,
+                    rationale: format!(
+                        "Deterministic ranking converged on `{}` before further workspace churn.",
+                        target.path
+                    ),
+                },
+                TraceSignalContribution {
+                    source: "controller_policy".to_string(),
+                    share_percent: 40,
+                    rationale:
+                        "Known-edit steering elevated the resolved authored target into the edit path."
+                            .to_string(),
+                },
+            ],
+            serde_json::json!({
+                "stage": "entity-resolution",
+                "status": "resolved",
+                "source": source,
+                "path": target.path,
+                "candidates": std::iter::once(target.path.clone())
+                    .chain(alternatives.iter().map(|candidate| candidate.path.clone()))
+                    .collect::<Vec<_>>(),
+                "explanation": explanation,
+            }),
+        ),
+        EntityResolutionOutcome::Ambiguous {
+            candidates,
+            explanation,
+        } => (
+            TraceSignalKind::Fallback,
+            "deterministic resolver ambiguous".to_string(),
+            "high",
+            82,
+            vec![
+                TraceSignalContribution {
+                    source: "workspace_editor_boundary".to_string(),
+                    share_percent: 55,
+                    rationale:
+                        "The controller held the edit boundary because multiple authored targets remained viable."
+                            .to_string(),
+                },
+                TraceSignalContribution {
+                    source: "candidate_file_evidence".to_string(),
+                    share_percent: 45,
+                    rationale:
+                        "The turn surfaced the tied authored candidates instead of guessing."
+                            .to_string(),
+                },
+            ],
+            serde_json::json!({
+                "stage": "entity-resolution",
+                "status": "ambiguous",
+                "source": source,
+                "candidates": candidates.iter().map(|candidate| candidate.path.clone()).collect::<Vec<_>>(),
+                "explanation": explanation,
+            }),
+        ),
+        EntityResolutionOutcome::Missing {
+            attempted_hints,
+            explanation,
+        } => (
+            TraceSignalKind::Fallback,
+            "deterministic resolver missing".to_string(),
+            "high",
+            78,
+            vec![
+                TraceSignalContribution {
+                    source: "workspace_editor_boundary".to_string(),
+                    share_percent: 50,
+                    rationale:
+                        "The controller refused to mutate the workspace without a safe authored target."
+                            .to_string(),
+                },
+                TraceSignalContribution {
+                    source: "controller_policy".to_string(),
+                    share_percent: 50,
+                    rationale:
+                        "Missing deterministic resolution stayed explicit so the turn could replan instead of hallucinating."
+                            .to_string(),
+                },
+            ],
+            serde_json::json!({
+                "stage": "entity-resolution",
+                "status": "missing",
+                "source": source,
+                "attempted_hint_count": attempted_hints.len(),
+                "explanation": explanation,
+            }),
+        ),
+    }
 }
 
 fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSignalContribution>) {
@@ -2314,6 +2506,7 @@ impl MechSuitService {
                         &recent_turns,
                         gatherer.as_ref(),
                         &decision,
+                        trace.as_ref(),
                     )
                     .await?
                 {
@@ -2509,6 +2702,7 @@ impl MechSuitService {
         recent_turns: &[String],
         gatherer: Option<&Arc<dyn ContextGatherer>>,
         decision: &InitialActionDecision,
+        trace: &StructuredTurnTrace,
     ) -> Result<Option<InitialActionDecision>> {
         if !decision.edit.known_edit {
             return Ok(None);
@@ -2533,6 +2727,9 @@ impl MechSuitService {
             decision.edit.resolution.as_ref(),
         )
         .await;
+        if let Some(outcome @ EntityResolutionOutcome::Resolved { .. }) = resolution.as_ref() {
+            trace.record_entity_resolution_outcome(outcome, "bootstrap");
+        }
         let seeded_candidates = resolution
             .as_ref()
             .map(|outcome| merge_resolution_candidate_paths(&candidates, outcome))
@@ -2986,12 +3183,19 @@ impl MechSuitService {
                     | WorkspaceAction::WriteFile { .. }
                     | WorkspaceAction::ReplaceInFile { .. }
                     | WorkspaceAction::ApplyPatch { .. } => {
+                        let previous_resolution = loop_state.target_resolution.clone();
                         maybe_promote_missing_resolution_for_mutation(
                             &self.workspace_root,
                             &context.initial_edit.candidate_files,
                             &mut loop_state,
                             action,
                         );
+                        if previous_resolution != loop_state.target_resolution
+                            && let Some(outcome @ EntityResolutionOutcome::Resolved { .. }) =
+                                loop_state.target_resolution.as_ref()
+                        {
+                            trace.record_entity_resolution_outcome(outcome, "exact-mutation-path");
+                        }
                         if let Some((reason, summary)) =
                             unresolved_target_mutation_boundary(action, &loop_state)
                         {
@@ -7749,6 +7953,10 @@ mod tests {
             stage: "planner-fallback".to_string(),
             reason: "planner response could not be parsed".to_string(),
         });
+        trace.emit(TurnEvent::Fallback {
+            stage: "entity-resolution".to_string(),
+            reason: "deterministic entity resolution remained ambiguous; safe workspace mutation is blocked until the target is narrowed. Candidates: src/application/mod.rs, src/domain/model/turns.rs. two authored files remained tied".to_string(),
+        });
         trace.emit(TurnEvent::RefinementApplied {
             reason: "Archived deeper artifacts".to_string(),
             before_summary: "12 retained artifacts".to_string(),
@@ -7804,6 +8012,22 @@ mod tests {
                     .any(|item| item.source == "provider_or_parser")
         }));
         assert!(signal_snapshots.iter().any(|snapshot| {
+            if snapshot.kind != TraceSignalKind::Fallback {
+                return false;
+            }
+            let payload = snapshot
+                .artifact
+                .inline_content
+                .as_deref()
+                .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok());
+            matches!(
+                payload,
+                Some(serde_json::Value::Object(ref details))
+                    if details.get("stage").and_then(serde_json::Value::as_str) == Some("entity-resolution")
+                        && details.get("status").and_then(serde_json::Value::as_str) == Some("ambiguous")
+            )
+        }));
+        assert!(signal_snapshots.iter().any(|snapshot| {
             snapshot.kind == TraceSignalKind::CompactionCue
                 && snapshot
                     .contributions
@@ -7827,6 +8051,7 @@ mod tests {
             vec![
                 TraceSignalKind::ContextStrain,
                 TraceSignalKind::ActionBias,
+                TraceSignalKind::Fallback,
                 TraceSignalKind::Fallback,
                 TraceSignalKind::CompactionCue,
                 TraceSignalKind::BudgetBoundary,
@@ -9622,6 +9847,17 @@ mod tests {
                 &[],
                 None,
                 &decision,
+                &StructuredTurnTrace::new(
+                    Arc::new(RecordingTurnEventSink::default()),
+                    Arc::new(InMemoryTraceRecorder::default()),
+                    Vec::new(),
+                    ConversationSession::new(
+                        TaskTraceId::new("task-bootstrap").expect("task trace id"),
+                    ),
+                    crate::domain::model::TurnTraceId::new("turn-bootstrap")
+                        .expect("turn trace id"),
+                    ConversationThreadRef::Mainline,
+                ),
             )
             .await
             .expect("bootstrap should succeed")

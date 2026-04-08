@@ -245,6 +245,14 @@ This steering signal is observational. It tells the operator and the trace that 
 
 Action bias exists to encode the principle that action produces information. On edit-oriented turns, repeated search, inspect, or refine actions are often lower value than reading the most plausible target file. When the controller has enough path evidence, it re-enters the planner with an action-bias review note so the model can judge whether to read, diff, or edit that likely file now.
 
+That path evidence is now grounded by a deterministic entity resolver before broad search or mutation continues. The resolver self-discovers authored workspace files from the repository tree and `.gitignore` boundary, then returns one of three explicit outcomes:
+
+- **Resolved** — one authored target won the ranking and can be promoted into read/diff/edit actions.
+- **Ambiguous** — multiple authored targets remain tied, so the controller keeps the turn in evidence-gathering mode and surfaces the candidates.
+- **Missing** — no safe authored target matched the hint, so the controller fails closed and replans instead of hallucinating a path.
+
+This resolver is intentionally narrower than full semantic code intelligence. Its job is deterministic authored-path convergence for edit-oriented turns, not IDE-fed state, background LSP indexing, or speculative symbol reasoning.
+
 Known-edit turns also reserve a modest amount of extra read, inspect, and search headroom before the workspace-editor boundary fires, so the planner can inspect a few candidate files without exhausting the turn before any patch is applied.
 
 If that first contained budget still runs out before an edit lands, the controller now performs one bounded replan. The replan preserves accumulated evidence, injects an explicit "do not restart" note into loop state, updates the shared checklist, and expands the known-edit step/read/inspect/search envelope for one more pass.
@@ -306,6 +314,8 @@ Raw signal kinds still exist in the recorder, but the manifold no longer asks th
 That makes the route easier to scan without weakening accountability to the recorder.
 
 That metaphor is only valid if it remains accountable to exact trace sources. Selecting a manifold state must reveal the exact underlying source record and provide a direct route back to the forensic inspector for raw/rendered payload inspection. The manifold is therefore an expressive overview, not a second source of truth.
+
+Resolver-backed states are part of that accountability contract. When a selected signal came from deterministic entity resolution, the manifold readout shows the resolver status (`resolved`, `ambiguous`, or `missing`), the chosen authored path or candidate set, and the explanation recorded by the controller. The operator can still route back to the exact source snapshot in the forensic inspector for raw payload inspection.
 
 This route also remains inside the local-first delivery contract. Frontend ownership is now split between `apps/docs` and the `apps/web` TanStack React runtime inside one Turborepo workspace. The Rust server serves that built runtime directly on the primary routes `/`, `/transit`, and `/manifold`. There is no iframe proxy layer and no secondary `/app` or `/legacy` route family, so the live session path, the browser E2E path, and the shipped frontend artifact stay under one owner.
 

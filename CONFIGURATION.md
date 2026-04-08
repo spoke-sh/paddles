@@ -252,6 +252,29 @@ before an applied edit lands. That replan keeps the current evidence, updates
 the checklist, and expands the per-turn read/inspect/search envelope instead of
 dropping straight to the blocked-edit reply.
 
+### Deterministic Edit Target Resolution
+
+Edit-oriented turns now run through a deterministic authored-path resolver
+before broad search churn or workspace mutation continues. The resolver
+self-discovers repository paths, respects the root `.gitignore` boundary when
+present, and treats generated/vendored trees as out of scope unless no authored
+boundary is available.
+
+Resolver outcomes are explicit:
+
+- `resolved` means one authored path won the ranking and can be promoted into
+  read/diff/edit actions.
+- `ambiguous` means multiple authored candidates remained tied, so the turn must
+  narrow further before mutating the workspace.
+- `missing` means no safe authored target matched the hint, so mutation fails
+  closed and the controller replans instead of guessing.
+
+Those outcomes are recorded into the trace and projected into the web
+manifold/forensic views, so operators can see why a target advanced, stalled,
+or was blocked. This feature is intentionally not a full semantic IDE/LSP
+system: it resolves authored workspace paths deterministically, but it does not
+depend on editor state or claim full symbol intelligence.
+
 ### Provider Credentials
 
 Remote HTTP providers resolve API credentials in this order:
