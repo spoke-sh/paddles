@@ -1,6 +1,4 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -61,6 +59,14 @@ import {
   traceNodeVisible,
   truncate,
 } from './runtime-helpers';
+import { ChatComposer } from './chat/composer';
+import {
+  ManifoldTurnSelectionProvider,
+  useManifoldTurnSelection,
+} from './chat/manifold-turn-selection-context';
+import { TranscriptPane } from './chat/transcript-pane';
+import { useChatComposer } from './chat/use-chat-composer';
+import { useStickyTailScroll } from './chat/use-sticky-tail-scroll';
 import { RuntimeStoreProvider, useRuntimeStore } from './runtime-store';
 import type {
   ConversationTraceGraphNode,
@@ -68,7 +74,6 @@ import type {
   ForensicTurnProjection,
   ManifoldFrame,
   ManifoldTurnProjection,
-  RenderDocument,
 } from './runtime-types';
 
 type FocusState = { kind: 'all' | 'model_call' | 'planner_step'; id: string | null };
@@ -81,37 +86,6 @@ function activeViewForPath(pathname: string) {
     return 'transit';
   }
   return 'inspector';
-}
-
-function responseModeLabel(mode: string | null | undefined) {
-  if (!mode) {
-    return null;
-  }
-  return mode.split('_').join(' ');
-}
-
-function diffLineClass(line: string) {
-  if (
-    line.startsWith('+++') ||
-    line.startsWith('---') ||
-    line.startsWith('diff ') ||
-    line.startsWith('index ')
-  ) {
-    return 'meta';
-  }
-  if (line.startsWith('+')) {
-    return 'add';
-  }
-  if (line.startsWith('-')) {
-    return 'remove';
-  }
-  if (line.startsWith('@@')) {
-    return 'hunk';
-  }
-  if (line.startsWith('\\')) {
-    return 'noop';
-  }
-  return 'context';
 }
 
 function previousArtifactBaseline(
@@ -145,39 +119,6 @@ function comparisonSnippet(
   return truncate(body.replace(/\s+/g, ' ').trim(), 180);
 }
 
-type ComposerPart =
-  | { id: string; kind: 'text'; text: string }
-  | { id: string; kind: 'paste'; text: string; lines: number; preview: string };
-
-const CHAT_TAIL_THRESHOLD_PX = 24;
-
-interface ManifoldTurnSelectionValue {
-  selectedTurnId: string | null;
-  setSelectedTurnId: (turnId: string | null) => void;
-}
-
-const ManifoldTurnSelectionContext = createContext<ManifoldTurnSelectionValue | null>(null);
-
-function chatViewportNearTail(container: HTMLElement) {
-  return container.scrollHeight - (container.scrollTop + container.clientHeight) <= CHAT_TAIL_THRESHOLD_PX;
-}
-
-function normalizeComposerText(text: string) {
-  return text.replace(/\r\n/g, '\n');
-}
-
-function pastedLineCount(text: string) {
-  const normalized = normalizeComposerText(text).replace(/\n+$/, '');
-  if (!normalized) {
-    return 0;
-  }
-  return normalized.split('\n').length;
-}
-
-function shouldCompressPastedText(text: string) {
-  return pastedLineCount(text) > 1;
-}
-
 function RuntimeShellLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const activeView = activeViewForPath(pathname);
@@ -189,55 +130,16 @@ function RuntimeShellLayout() {
     [manifoldTurns]
   );
   const [selectedManifoldTurnId, setSelectedManifoldTurnId] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState('');
-  const [composerParts, setComposerParts] = useState<ComposerPart[]>([]);
-  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
-  const [historyDraft, setHistoryDraft] = useState('');
-  const messagesRef = useRef<HTMLDivElement | null>(null);
-  const shouldStickMessagesToTailRef = useRef(true);
-  const composerPartId = useRef(0);
-
-  function nextComposerPartId() {
-    composerPartId.current += 1;
-    return `composer-part-${composerPartId.current}`;
-  }
-
-  function createTextPart(text: string): ComposerPart {
-    return {
-      id: nextComposerPartId(),
-      kind: 'text',
-      text,
-    };
-  }
-
-  function createPastePart(text: string): ComposerPart {
-    const normalized = normalizeComposerText(text);
-    const trimmed = normalized.trimEnd();
-    const lines = pastedLineCount(normalized);
-    const previewSource =
-      trimmed
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.length > 0) || trimmed.split('\n')[0] || '';
-    return {
-      id: nextComposerPartId(),
-      kind: 'paste',
-      text: normalized,
-      lines,
-      preview: truncate(previewSource, 48),
-    };
-  }
-
-  useEffect(() => {
-    const container = messagesRef.current;
-    if (!container) {
-      return;
-    }
-    if (!shouldStickMessagesToTailRef.current) {
-      return;
-    }
-    container.scrollTop = container.scrollHeight;
-  }, [events, projection?.transcript.entries.length]);
+  const transcriptEntryCount = projection?.transcript.entries.length || 0;
+  const { messagesRef, onMessagesScroll } = useStickyTailScroll({
+    eventCount: events.length,
+    transcriptEntryCount,
+  });
+  const { composerParts, onPromptKeyDown, onPromptPaste, onSubmit, prompt, setPrompt } =
+    useChatComposer({
+      promptHistory,
+      onSubmitPrompt: sendTurn,
+    });
 
   useEffect(() => {
     if (!manifoldTurns.length) {
@@ -252,10 +154,6 @@ function RuntimeShellLayout() {
     }
   }, [manifoldTurns, selectedManifoldTurnId]);
 
-  function onMessagesScroll(event: React.UIEvent<HTMLDivElement>) {
-    shouldStickMessagesToTailRef.current = chatViewportNearTail(event.currentTarget);
-  }
-
   function selectManifoldTurnFromTranscript(turnId: string) {
     if (!manifoldTurnIds.has(turnId)) {
       return;
@@ -263,339 +161,69 @@ function RuntimeShellLayout() {
     setSelectedManifoldTurnId(turnId);
   }
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = [...composerParts.map((part) => part.text), prompt].join('');
-    if (!text.trim()) {
-      return;
-    }
-    setComposerParts([]);
-    setHistoryCursor(null);
-    setHistoryDraft('');
-    setPrompt('');
-    await sendTurn(text);
-  }
-
-  function historyBack() {
-    if (composerParts.length > 0) {
-      return;
-    }
-    if (promptHistory.length === 0) {
-      return;
-    }
-    if (historyCursor === null) {
-      setHistoryDraft(prompt);
-      const nextCursor = promptHistory.length - 1;
-      setHistoryCursor(nextCursor);
-      setPrompt(promptHistory[nextCursor]);
-      return;
-    }
-    if (historyCursor === 0) {
-      return;
-    }
-    const nextCursor = historyCursor - 1;
-    setHistoryCursor(nextCursor);
-    setPrompt(promptHistory[nextCursor]);
-  }
-
-  function historyForward() {
-    if (composerParts.length > 0) {
-      return;
-    }
-    if (historyCursor === null) {
-      return;
-    }
-    if (historyCursor + 1 < promptHistory.length) {
-      const nextCursor = historyCursor + 1;
-      setHistoryCursor(nextCursor);
-      setPrompt(promptHistory[nextCursor]);
-      return;
-    }
-    setHistoryCursor(null);
-    setPrompt(historyDraft);
-  }
-
-  function popComposerPart() {
-    if (composerParts.length === 0) {
-      return;
-    }
-    const next = [...composerParts];
-    const removed = next.pop();
-    setComposerParts(next);
-    if (removed?.kind === 'text') {
-      setPrompt(removed.text);
-    }
-  }
-
-  function onPromptKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      historyBack();
-      return;
-    }
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      historyForward();
-      return;
-    }
-    if ((event.key === 'Backspace' || event.key === 'Delete') && prompt.length === 0) {
-      if (composerParts.length > 0) {
-        event.preventDefault();
-        popComposerPart();
-      }
-    }
-  }
-
-  function onPromptPaste(event: React.ClipboardEvent<HTMLInputElement>) {
-    const text = event.clipboardData.getData('text');
-    if (!shouldCompressPastedText(text)) {
-      return;
-    }
-    event.preventDefault();
-    setHistoryCursor(null);
-    setHistoryDraft('');
-    setComposerParts((current) => {
-      const next = [...current];
-      if (prompt.length > 0) {
-        next.push(createTextPart(prompt));
-      }
-      next.push(createPastePart(text));
-      return next;
-    });
-    setPrompt('');
-  }
-
   return (
-    <ManifoldTurnSelectionContext.Provider
+    <ManifoldTurnSelectionProvider
       value={{
         selectedTurnId: selectedManifoldTurnId,
         setSelectedTurnId: setSelectedManifoldTurnId,
       }}
     >
       <>
-      <div className="chat-panel">
-        <div className="chat-header">Paddles</div>
-        <div className="chat-messages" id="messages" onScroll={onMessagesScroll} ref={messagesRef}>
-          {projection?.transcript.entries.map((entry) => {
-            const isTurnSelectable =
-              activeView === 'manifold' && manifoldTurnIds.has(entry.turn_id);
-            const isTurnSelected =
-              isTurnSelectable && entry.turn_id === selectedManifoldTurnId;
-
-            return (
-              <div
-                aria-pressed={isTurnSelectable ? isTurnSelected : undefined}
-                className={`msg ${entry.speaker === 'assistant' ? 'assistant' : 'user'}${
-                  isTurnSelectable ? ' is-turn-selectable' : ''
-                }${isTurnSelected ? ' is-selected-turn' : ''}`}
-                data-message-turn-id={entry.turn_id}
-                key={entry.record_id}
-                onClick={
-                  isTurnSelectable
-                    ? () => selectManifoldTurnFromTranscript(entry.turn_id)
-                    : undefined
-                }
-                onKeyDown={
-                  isTurnSelectable
-                    ? (event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          selectManifoldTurnFromTranscript(entry.turn_id);
-                        }
-                      }
-                    : undefined
-                }
-                role={isTurnSelectable ? 'button' : undefined}
-                tabIndex={isTurnSelectable ? 0 : undefined}
-                title={
-                  isTurnSelectable ? 'Select this turn in the steering gate manifold' : undefined
-                }
-              >
-                {entry.speaker === 'assistant' && entry.response_mode ? (
-                  <div className="msg-meta">
-                    <span className={`msg-mode-badge is-${entry.response_mode}`}>
-                      {responseModeLabel(entry.response_mode)}
-                    </span>
-                  </div>
-                ) : null}
-                {entry.speaker === 'assistant' && entry.render ? (
-                  <AssistantMessage render={entry.render} />
-                ) : (
-                  <PlainMessage content={entry.content} />
-                )}
-              </div>
-            );
-          })}
-          {error ? <div className="msg system">Error: {error}</div> : null}
-          {!projection && !error ? (
-            <div className="msg system">Bootstrapping shared conversation projection...</div>
-          ) : null}
-          <div className="events-group">
-            {events.map((item) => (
-              <div className="event-row" data-event-text={item.text} key={item.id}>
-                <span className={`event-badge ${item.badgeClass}`}>{item.badge}</span>
-                <span>
-                  <span>{item.text}</span>
-                  {item.output ? (
-                    <span className="event-output">
-                      {item.output.split('\n').map((line, index) => (
-                        <span className="event-output-line" key={`${item.id}-output-${index}`}>
-                          {line || '\u00a0'}
-                        </span>
-                      ))}
-                    </span>
-                  ) : null}
-                  {item.diff ? (
-                    <span className="diff-lines">
-                      {item.diff.split('\n').map((line, index) => (
-                        <span className={`diff-line ${diffLineClass(line)}`} key={`${item.id}-${index}`}>
-                          {line}
-                        </span>
-                      ))}
-                    </span>
-                  ) : null}
-                </span>
-              </div>
-            ))}
-            {!connected && projection ? (
-              <div className="event-row" data-event-text="reconnecting live projection stream">
-                <span className="event-badge fallback">stream</span>
-                <span>Reconnecting live projection stream…</span>
-              </div>
-            ) : null}
-          </div>
+        <div className="chat-panel">
+          <div className="chat-header">Paddles</div>
+          <TranscriptPane
+            activeView={activeView}
+            connected={connected}
+            error={error}
+            events={events}
+            manifoldTurnIds={manifoldTurnIds}
+            messagesRef={messagesRef}
+            onMessagesScroll={onMessagesScroll}
+            onSelectManifoldTurn={selectManifoldTurnFromTranscript}
+            projection={projection}
+            selectedManifoldTurnId={selectedManifoldTurnId}
+          />
+          <ChatComposer
+            composerParts={composerParts}
+            onPromptChange={(event) => setPrompt(event.target.value)}
+            onPromptKeyDown={onPromptKeyDown}
+            onPromptPaste={onPromptPaste}
+            onSubmit={onSubmit}
+            prompt={prompt}
+            sending={sending}
+          />
         </div>
-        <form autoComplete="off" className="chat-input" onSubmit={onSubmit}>
-          <div className="chat-composer">
-            {composerParts.map((part) =>
-              part.kind === 'text' ? (
-                <span className="composer-inline-text" key={part.id}>
-                  {part.text}
-                </span>
-              ) : (
-                <span
-                  className="composer-paste-chip"
-                  data-lines={part.lines}
-                  key={part.id}
-                  title={part.preview}
-                >
-                  <span className="composer-chip-label">{part.lines} lines pasted</span>
-                  {part.preview ? (
-                    <span className="composer-chip-preview">{part.preview}</span>
-                  ) : null}
-                </span>
-              )
-            )}
-            <input
-              autoFocus
-              autoComplete="off"
-              className="chat-composer-field"
-              id="prompt"
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={onPromptKeyDown}
-              onPaste={onPromptPaste}
-              placeholder={composerParts.length > 0 ? '' : 'Ask paddles...'}
-              type="text"
-              value={prompt}
-            />
-          </div>
-          <button disabled={sending} id="send" type="submit">
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        </form>
-      </div>
 
-      <div className="trace-panel">
-        <div className="trace-header-wrap">
-          <div>
-            <div className="trace-header">Transit Trace</div>
-            <div className="trace-subhead" id="trace-subhead">
-              {TRACE_VIEW_LABELS[activeView]}
+        <div className="trace-panel">
+          <div className="trace-header-wrap">
+            <div>
+              <div className="trace-header">Transit Trace</div>
+              <div className="trace-subhead" id="trace-subhead">
+                {TRACE_VIEW_LABELS[activeView]}
+              </div>
+            </div>
+            <div className="trace-tabs">
+              <Link className={`trace-tab${activeView === 'inspector' ? ' is-active' : ''}`} to="/">
+                Inspector
+              </Link>
+              <Link
+                className={`trace-tab${activeView === 'manifold' ? ' is-active' : ''}`}
+                to="/manifold"
+              >
+                Manifold
+              </Link>
+              <Link
+                className={`trace-tab${activeView === 'transit' ? ' is-active' : ''}`}
+                to="/transit"
+              >
+                Transit
+              </Link>
             </div>
           </div>
-          <div className="trace-tabs">
-            <Link className={`trace-tab${activeView === 'inspector' ? ' is-active' : ''}`} to="/">
-              Inspector
-            </Link>
-            <Link
-              className={`trace-tab${activeView === 'manifold' ? ' is-active' : ''}`}
-              to="/manifold"
-            >
-              Manifold
-            </Link>
-            <Link
-              className={`trace-tab${activeView === 'transit' ? ' is-active' : ''}`}
-              to="/transit"
-            >
-              Transit
-            </Link>
-          </div>
+          <Outlet />
         </div>
-        <Outlet />
-      </div>
       </>
-    </ManifoldTurnSelectionContext.Provider>
-  );
-}
-
-function useManifoldTurnSelection() {
-  const value = useContext(ManifoldTurnSelectionContext);
-  if (!value) {
-    throw new Error('useManifoldTurnSelection must be used inside RuntimeShellLayout');
-  }
-  return value;
-}
-
-function AssistantMessage({ render }: { render: RenderDocument }) {
-  return (
-    <div className="msg-body">
-      {render.blocks.map((block, index) => {
-        switch (block.type) {
-          case 'heading':
-            return (
-              <div className="msg-heading" key={`heading-${index}`}>
-                {block.text}
-              </div>
-            );
-          case 'paragraph':
-            return (
-              <div className="msg-paragraph" key={`paragraph-${index}`}>
-                {block.text}
-              </div>
-            );
-          case 'bullet_list':
-            return (
-              <ul className="msg-bullet-list" key={`list-${index}`}>
-                {block.items.map((item, itemIndex) => (
-                  <li key={`item-${index}-${itemIndex}`}>{item}</li>
-                ))}
-              </ul>
-            );
-          case 'code_block':
-            return (
-              <pre className="msg-code-block" key={`code-${index}`}>
-                <code>{block.code}</code>
-              </pre>
-            );
-          case 'citations':
-            return (
-              <div className="msg-citations" key={`citations-${index}`}>
-                Sources: {block.sources.join(', ')}
-              </div>
-            );
-          default:
-            return null;
-        }
-      })}
-    </div>
-  );
-}
-
-function PlainMessage({ content }: { content: string }) {
-  return (
-    <div className="msg-body">
-      <div className="msg-paragraph">{content}</div>
-    </div>
+    </ManifoldTurnSelectionProvider>
   );
 }
 

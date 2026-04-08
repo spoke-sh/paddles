@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:40:07.270307655-07:00
+mode: manual
+---
+Preserved multiline paste compression, prompt history recall, sticky-tail scroll, and transcript-driven manifold selection under npm --workspace @paddles/web run test -- runtime-app.test.tsx, npm --workspace @paddles/web run lint, and npm --workspace @paddles/web run build.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:40:07.240024936-07:00
+mode: manual
+---
+Extracted transcript, message rendering, manifold selection context, sticky-tail scroll, and composer rendering into dedicated chat modules while keeping the runtime shell as the assembler.
