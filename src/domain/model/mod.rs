@@ -58,12 +58,13 @@ pub use runtime_events::{
 };
 pub use threading::ConversationReplayView;
 pub use traces::{
-    TraceBranch, TraceBranchStatus, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
-    TraceModelExchangePhase, TraceRecord, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
-    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    SteeringGateKind, SteeringGatePhase, TraceBranch, TraceBranchStatus, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
+    TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
+    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
+    TraceTurnStarted,
 };
 pub use transcript::{
     ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,

@@ -247,6 +247,10 @@ When a turn carries edit pressure, grounding pressure, or multi-step follow-up
 pressure from recent conversation turns, Paddles now emits a Codex-style
 checklist in the stream and feeds the same unfinished items back into planner
 loop notes so the execution stays contained until the checklist is complete.
+Known-edit turns also get one bounded replan when they hit planner budget
+before an applied edit lands. That replan keeps the current evidence, updates
+the checklist, and expands the per-turn read/inspect/search envelope instead of
+dropping straight to the blocked-edit reply.
 
 ### Provider Credentials
 

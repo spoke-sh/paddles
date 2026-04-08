@@ -246,6 +246,8 @@ mod tests {
                     },
                     kind: TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                         kind: crate::domain::model::TraceSignalKind::ActionBias,
+                        gate: None,
+                        phase: None,
                         summary: "bias".to_string(),
                         level: "high".to_string(),
                         magnitude_percent: 78,

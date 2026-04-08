@@ -39,13 +39,14 @@ test('externally injected turns flow live through chat, transit, manifold, and s
 
   await page.getByRole('link', { name: 'Manifold' }).click();
   await expect(page.locator('#manifold-canvas')).toBeVisible();
-  await expect(page.locator('.manifold-node').first()).toBeVisible();
+  await expect(page.locator('.manifold-force-point').first()).toBeVisible();
   await expect(page.locator('#manifold-stage-meta')).not.toContainText(
     'Awaiting replay-backed manifold frames'
   );
+  await expect(page.getByText('Temporal gate field')).toBeVisible();
 
   await page.reload();
-  await expect(page.locator('.manifold-node').first()).toBeVisible();
+  await expect(page.locator('.manifold-force-point').first()).toBeVisible();
 
   await page.getByRole('link', { name: 'Inspector' }).click();
   await expect(page.locator('.msg.assistant').last()).toContainText(

@@ -1,7 +1,8 @@
 use super::{
-    ArtifactEnvelope, ConversationForensicProjection, ForensicLifecycle, TaskTraceId,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceRecordId, TraceRecordKind, TraceReplay,
-    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TurnTraceId,
+    ArtifactEnvelope, ConversationForensicProjection, ForensicLifecycle, SteeringGateKind,
+    SteeringGatePhase, TaskTraceId, TraceLineageNodeKind, TraceLineageNodeRef, TraceRecordId,
+    TraceRecordKind, TraceReplay, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TurnTraceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -18,6 +19,7 @@ pub enum ManifoldPrimitiveKind {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ManifoldPrimitiveBasis {
     SignalFamily { signal_kind: TraceSignalKind },
+    SteeringGate { gate: SteeringGateKind },
     LineageAnchor { anchor: TraceLineageNodeRef },
 }
 
@@ -48,6 +50,8 @@ pub struct ManifoldSignalState {
     pub snapshot_record_id: TraceRecordId,
     pub lifecycle: ForensicLifecycle,
     pub kind: TraceSignalKind,
+    pub gate: SteeringGateKind,
+    pub phase: SteeringGatePhase,
     pub summary: String,
     pub level: String,
     pub magnitude_percent: u8,
@@ -57,12 +61,26 @@ pub struct ManifoldSignalState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifoldGateState {
+    pub gate: SteeringGateKind,
+    pub label: String,
+    pub phase: SteeringGatePhase,
+    pub level: String,
+    pub magnitude_percent: u8,
+    pub anchor: Option<TraceLineageNodeRef>,
+    pub dominant_signal_kind: TraceSignalKind,
+    pub signal_kinds: Vec<TraceSignalKind>,
+    pub dominant_record_id: Option<TraceRecordId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManifoldFrame {
     pub record_id: TraceRecordId,
     pub sequence: u64,
     pub lifecycle: ForensicLifecycle,
     pub anchor: Option<TraceLineageNodeRef>,
     pub active_signals: Vec<ManifoldSignalState>,
+    pub gates: Vec<ManifoldGateState>,
     pub primitives: Vec<ManifoldPrimitiveState>,
     pub conduits: Vec<ManifoldConduitState>,
 }
@@ -151,6 +169,8 @@ fn signal_state_from_snapshot(
         snapshot_record_id: record_id.clone(),
         lifecycle,
         kind: snapshot.kind,
+        gate: snapshot.resolved_gate(),
+        phase: snapshot.resolved_phase(),
         summary: snapshot.summary.clone(),
         level: snapshot.level.clone(),
         magnitude_percent: snapshot.magnitude_percent,
@@ -175,7 +195,8 @@ fn frame_from_active_states(
             state
         })
         .collect();
-    let (primitives, conduits) = topology_from_active_states(active_states);
+    let gates = gate_states_from_active_states(active_states);
+    let (primitives, conduits) = topology_from_active_states(active_states, &gates);
 
     ManifoldFrame {
         record_id: record_id.clone(),
@@ -183,6 +204,7 @@ fn frame_from_active_states(
         lifecycle,
         anchor,
         active_signals,
+        gates,
         primitives,
         conduits,
     }
@@ -190,28 +212,31 @@ fn frame_from_active_states(
 
 fn topology_from_active_states(
     active_states: &BTreeMap<String, ManifoldSignalState>,
+    gates: &[ManifoldGateState],
 ) -> (Vec<ManifoldPrimitiveState>, Vec<ManifoldConduitState>) {
     let mut primitives = BTreeMap::<String, ManifoldPrimitiveState>::new();
     let mut conduits = BTreeMap::<String, ManifoldConduitState>::new();
 
-    for state in active_states.values() {
-        let family_id = signal_family_primitive_id(state.kind);
-        let (family_kind, family_label) = signal_family_descriptor(state.kind);
+    for gate in gates {
+        let gate_id = steering_gate_primitive_id(gate.gate);
+        let (gate_kind, gate_label) = steering_gate_descriptor(gate.gate);
         insert_or_strengthen_primitive(
             &mut primitives,
             ManifoldPrimitiveState {
-                primitive_id: family_id.clone(),
-                kind: family_kind,
-                label: family_label.to_string(),
-                basis: ManifoldPrimitiveBasis::SignalFamily {
-                    signal_kind: state.kind,
-                },
-                evidence_record_id: Some(state.snapshot_record_id.clone()),
-                anchor: state.anchor.clone(),
-                level: state.level.clone(),
-                magnitude_percent: state.magnitude_percent,
+                primitive_id: gate_id,
+                kind: gate_kind,
+                label: gate_label.to_string(),
+                basis: ManifoldPrimitiveBasis::SteeringGate { gate: gate.gate },
+                evidence_record_id: gate.dominant_record_id.clone(),
+                anchor: gate.anchor.clone(),
+                level: gate.level.clone(),
+                magnitude_percent: gate.magnitude_percent,
             },
         );
+    }
+
+    for state in active_states.values() {
+        let gate_id = steering_gate_primitive_id(state.gate);
 
         if let Some(anchor) = &state.anchor {
             let anchor_id = lineage_anchor_primitive_id(anchor);
@@ -231,14 +256,18 @@ fn topology_from_active_states(
                 },
             );
 
-            let conduit_id = format!("conduit:{family_id}->{anchor_id}");
+            let conduit_id = format!("conduit:{gate_id}->{anchor_id}");
             conduits
                 .entry(conduit_id.clone())
                 .or_insert_with(|| ManifoldConduitState {
                     conduit_id,
-                    from_primitive_id: family_id.clone(),
+                    from_primitive_id: gate_id.clone(),
                     to_primitive_id: anchor_id,
-                    label: format!("{} feeds {}", family_label, lineage_anchor_label(anchor)),
+                    label: format!(
+                        "{} feeds {}",
+                        steering_gate_descriptor(state.gate).1,
+                        lineage_anchor_label(anchor)
+                    ),
                     basis: ManifoldPrimitiveBasis::LineageAnchor {
                         anchor: anchor.clone(),
                     },
@@ -251,6 +280,46 @@ fn topology_from_active_states(
         primitives.into_values().collect(),
         conduits.into_values().collect(),
     )
+}
+
+fn gate_states_from_active_states(
+    active_states: &BTreeMap<String, ManifoldSignalState>,
+) -> Vec<ManifoldGateState> {
+    let mut grouped = BTreeMap::<SteeringGateKind, Vec<&ManifoldSignalState>>::new();
+    for state in active_states.values() {
+        grouped.entry(state.gate).or_default().push(state);
+    }
+
+    grouped
+        .into_iter()
+        .map(|(gate, states)| {
+            let dominant = states
+                .iter()
+                .max_by_key(|state| {
+                    (
+                        state.magnitude_percent,
+                        steering_gate_phase_rank(state.phase),
+                        state.snapshot_record_id.as_str(),
+                    )
+                })
+                .expect("grouped gate states should not be empty");
+            let mut signal_kinds = states.iter().map(|state| state.kind).collect::<Vec<_>>();
+            signal_kinds.sort_by_key(|kind| kind.label());
+            signal_kinds.dedup();
+
+            ManifoldGateState {
+                gate,
+                label: format!("{} gate", gate.label()),
+                phase: dominant.phase,
+                level: dominant.level.clone(),
+                magnitude_percent: dominant.magnitude_percent,
+                anchor: dominant.anchor.clone(),
+                dominant_signal_kind: dominant.kind,
+                signal_kinds,
+                dominant_record_id: Some(dominant.snapshot_record_id.clone()),
+            }
+        })
+        .collect()
 }
 
 fn insert_or_strengthen_primitive(
@@ -268,21 +337,25 @@ fn insert_or_strengthen_primitive(
     }
 }
 
-fn signal_family_primitive_id(kind: TraceSignalKind) -> String {
-    format!("family:{}", kind.label())
+fn steering_gate_phase_rank(phase: SteeringGatePhase) -> u8 {
+    match phase {
+        SteeringGatePhase::Sensing => 1,
+        SteeringGatePhase::Narrowing => 2,
+        SteeringGatePhase::Compressing => 3,
+        SteeringGatePhase::Recovering => 4,
+        SteeringGatePhase::Boundary => 5,
+    }
 }
 
-fn signal_family_descriptor(kind: TraceSignalKind) -> (ManifoldPrimitiveKind, &'static str) {
-    match kind {
-        TraceSignalKind::ContextStrain => {
-            (ManifoldPrimitiveKind::Chamber, "Context strain chamber")
-        }
-        TraceSignalKind::CompactionCue => {
-            (ManifoldPrimitiveKind::Reservoir, "Compaction reservoir")
-        }
-        TraceSignalKind::ActionBias => (ManifoldPrimitiveKind::Valve, "Action bias valve"),
-        TraceSignalKind::Fallback => (ManifoldPrimitiveKind::Valve, "Fallback bypass valve"),
-        TraceSignalKind::BudgetBoundary => (ManifoldPrimitiveKind::Valve, "Budget boundary valve"),
+fn steering_gate_primitive_id(gate: SteeringGateKind) -> String {
+    format!("gate:{}", gate.label())
+}
+
+fn steering_gate_descriptor(gate: SteeringGateKind) -> (ManifoldPrimitiveKind, &'static str) {
+    match gate {
+        SteeringGateKind::Evidence => (ManifoldPrimitiveKind::Chamber, "Evidence gate"),
+        SteeringGateKind::Convergence => (ManifoldPrimitiveKind::Valve, "Convergence gate"),
+        SteeringGateKind::Containment => (ManifoldPrimitiveKind::Reservoir, "Containment gate"),
     }
 }
 
@@ -358,6 +431,8 @@ mod tests {
                     },
                     kind: TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                         kind: TraceSignalKind::ActionBias,
+                        gate: None,
+                        phase: None,
                         summary: "action bias".to_string(),
                         level: "high".to_string(),
                         magnitude_percent: 80,
@@ -417,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_maps_signal_families_and_lineage_anchors_into_stable_primitives() {
+    fn projection_maps_steering_gates_and_lineage_anchors_into_stable_primitives() {
         let task_id = TaskTraceId::new("task-2").expect("task");
         let turn_id = TurnTraceId::new("task-2.turn-0001").expect("turn");
         let signal_record_id =
@@ -436,6 +511,8 @@ mod tests {
                 },
                 kind: TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                     kind: TraceSignalKind::ActionBias,
+                    gate: None,
+                    phase: None,
                     summary: "action bias".to_string(),
                     level: "high".to_string(),
                     magnitude_percent: 80,
@@ -464,20 +541,21 @@ mod tests {
         let turn = projection.turn(&turn_id).expect("turn projection");
         let frame = &turn.frames[0];
 
-        assert!(
-            frame
-                .primitives
-                .iter()
-                .any(|primitive| primitive.primitive_id == "family:action_bias"
-                    && primitive.kind == ManifoldPrimitiveKind::Valve
-                    && primitive.evidence_record_id.as_ref() == Some(&signal_record_id))
-        );
+        assert!(frame.gates.iter().any(|gate| {
+            gate.gate == crate::domain::model::SteeringGateKind::Convergence
+                && gate.dominant_record_id.as_ref() == Some(&signal_record_id)
+        }));
+        assert!(frame.primitives.iter().any(|primitive| {
+            primitive.primitive_id == "gate:convergence"
+                && primitive.kind == ManifoldPrimitiveKind::Valve
+                && primitive.evidence_record_id.as_ref() == Some(&signal_record_id)
+        }));
         assert!(frame.primitives.iter().any(|primitive| matches!(
             primitive.basis,
             ManifoldPrimitiveBasis::LineageAnchor { .. }
         )));
         assert!(frame.conduits.iter().any(|conduit| {
-            conduit.from_primitive_id == "family:action_bias"
+            conduit.from_primitive_id == "gate:convergence"
                 && conduit.evidence_record_id.as_ref() == Some(&signal_record_id)
         }));
     }
@@ -502,6 +580,8 @@ mod tests {
                 },
                 kind: TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                     kind: TraceSignalKind::ContextStrain,
+                    gate: None,
+                    phase: None,
                     summary: "context strain".to_string(),
                     level: "medium".to_string(),
                     magnitude_percent: 61,

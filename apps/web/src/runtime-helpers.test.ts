@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { eventRow, sourceLabel } from './runtime-helpers';
+import { eventRow, manifoldPrimitiveBasisLabel, sourceLabel } from './runtime-helpers';
 
 describe('eventRow', () => {
   it('prefers the rust-authored runtime presentation when the projection stream provides it', () => {
@@ -131,6 +131,12 @@ describe('eventRow', () => {
 
   it('labels workspace editor boundaries in the manifold source view', () => {
     expect(sourceLabel('workspace_editor_boundary')).toBe('Workspace editor boundary');
+  });
+
+  it('labels steering gate bases in the manifold source view', () => {
+    expect(manifoldPrimitiveBasisLabel({ kind: 'steering_gate', gate: 'convergence' })).toBe(
+      'Convergence gate'
+    );
   });
 
   it('surfaces applied edits as diff rows instead of collapsing them to tool chatter', () => {

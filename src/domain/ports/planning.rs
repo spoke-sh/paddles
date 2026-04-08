@@ -147,6 +147,7 @@ pub struct PlannerBudget {
     pub max_reads: usize,
     pub max_inspects: usize,
     pub max_searches: usize,
+    pub max_replans: usize,
 }
 
 impl Default for PlannerBudget {
@@ -158,6 +159,7 @@ impl Default for PlannerBudget {
             max_reads: 6,
             max_inspects: 6,
             max_searches: 4,
+            max_replans: 0,
         }
     }
 }

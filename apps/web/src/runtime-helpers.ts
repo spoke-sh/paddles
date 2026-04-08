@@ -4,6 +4,7 @@ import type {
   ForensicRecordProjection,
   ForensicTurnProjection,
   ManifoldFrame,
+  ManifoldGateState,
   ManifoldPrimitiveBasis,
   ManifoldPrimitiveState,
   ManifoldSignalState,
@@ -105,8 +106,16 @@ export const FORCE_SOURCE_PALETTE = [
 
 export const TRACE_VIEW_LABELS: Record<string, string> = {
   inspector: 'Forensic Inspector',
-  manifold: 'Steering Signal Manifold',
+  manifold: 'Steering Gate Manifold',
   transit: 'Turn Steps',
+};
+
+export const STEERING_GATE_ORDER = ['evidence', 'convergence', 'containment'];
+
+export const STEERING_GATE_COLORS: Record<string, string> = {
+  evidence: '#2d90c8',
+  convergence: '#f08a24',
+  containment: '#17956c',
 };
 
 export const FORENSIC_KIND_LABELS: Record<string, string> = {
@@ -156,6 +165,25 @@ export function sourceColor(source: string) {
 
 export function signalKindLabel(kind: string | null | undefined) {
   return titleCase(kind || 'signal');
+}
+
+export function steeringGateLabel(gate: string | null | undefined) {
+  return `${titleCase(gate || 'containment')} gate`;
+}
+
+export function steeringGateClass(gate: string | null | undefined) {
+  return String(gate || 'containment')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-');
+}
+
+export function steeringPhaseLabel(phase: string | null | undefined) {
+  return titleCase(phase || 'steady');
+}
+
+export function manifoldGateLabel(gate: ManifoldGateState) {
+  return gate.label || steeringGateLabel(gate.gate);
 }
 
 export function truncate(value: string | null | undefined, length: number) {
@@ -610,6 +638,9 @@ export function manifoldPrimitiveKindLabel(kind: string) {
 export function manifoldPrimitiveBasisLabel(basis: ManifoldPrimitiveBasis) {
   if (basis.kind === 'signal_family' && basis.signal_kind) {
     return signalKindLabel(basis.signal_kind);
+  }
+  if (basis.kind === 'steering_gate' && basis.gate) {
+    return steeringGateLabel(basis.gate);
   }
   if (basis.kind === 'lineage_anchor' && basis.anchor) {
     return basis.anchor.label || titleCase(basis.anchor.kind);

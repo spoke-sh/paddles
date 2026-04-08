@@ -19,6 +19,8 @@ import {
   FORCE_LEVEL_COLORS,
   KIND_COLORS,
   MANIFOLD_PLAYBACK_STEP_MS,
+  STEERING_GATE_COLORS,
+  STEERING_GATE_ORDER,
   TRACE_DETAIL_LEVEL_LABELS,
   TRACE_VIEW_LABELS,
   TRACE_ZOOM_MAX,
@@ -31,14 +33,12 @@ import {
   lifecycleLabel,
   latestRecordForTurn,
   manifoldAnchorLabel,
+  manifoldGateLabel,
   manifoldLifecycleClass,
-  manifoldPrimitiveBasisLabel,
-  manifoldPrimitiveKindLabel,
   manifoldSignalLabel,
   modelCallsForTurn,
   plannerStepsForTurn,
   primaryArtifact,
-  primitivePhase,
   rawRecordBody,
   recordMeta,
   recordSummary,
@@ -46,6 +46,9 @@ import {
   renderedRecordBody,
   signalKindLabel,
   sourceColor,
+  steeringGateClass,
+  steeringGateLabel,
+  steeringPhaseLabel,
   strongestSignalSnapshot,
   traceDetailLevelForZoom,
   traceLayoutForZoom,
@@ -59,7 +62,8 @@ import type {
   ConversationTraceGraphNode,
   ForensicRecordProjection,
   ForensicTurnProjection,
-  ManifoldPrimitiveState,
+  ManifoldFrame,
+  ManifoldTurnProjection,
   RenderDocument,
 } from './runtime-types';
 
@@ -1088,6 +1092,107 @@ function InspectorRoute() {
   );
 }
 
+type ManifoldForcePoint = {
+  key: string;
+  gate: string;
+  laneIndex: number;
+  frameIndex: number;
+  sequence: number;
+  leftPercent: number;
+  topPercent: number;
+  magnitudePercent: number;
+  phase: string;
+  level: string;
+  dominantRecordId: string | null;
+  dominantSignalKind: string;
+  label: string;
+};
+
+type ManifoldForceLink = {
+  key: string;
+  gate: string;
+  leftPercent: number;
+  topPercent: number;
+  widthPercent: number;
+  magnitudePercent: number;
+};
+
+function laneIndexForGate(gate: string) {
+  const index = STEERING_GATE_ORDER.indexOf(gate);
+  return index >= 0 ? index : STEERING_GATE_ORDER.length - 1;
+}
+
+function buildGateField(turn: ManifoldTurnProjection | null): {
+  points: ManifoldForcePoint[];
+  links: ManifoldForceLink[];
+} {
+  if (!turn || !turn.frames.length) {
+    return { points: [], links: [] };
+  }
+
+  const points: ManifoldForcePoint[] = [];
+  const pointsByGate = new Map<string, ManifoldForcePoint[]>();
+  const lastFrameIndex = Math.max(1, turn.frames.length - 1);
+
+  turn.frames.forEach((frame, frameIndex) => {
+    frame.gates.forEach((gate) => {
+      const normalizedGate = gate.gate || 'containment';
+      const laneIndex = laneIndexForGate(normalizedGate);
+      const point: ManifoldForcePoint = {
+        key: `${frame.record_id}:${normalizedGate}`,
+        gate: normalizedGate,
+        laneIndex,
+        frameIndex,
+        sequence: frame.sequence,
+        leftPercent: 12 + (frameIndex / lastFrameIndex) * 76,
+        topPercent: 18 + laneIndex * 28,
+        magnitudePercent: gate.magnitude_percent || 0,
+        phase: gate.phase,
+        level: gate.level,
+        dominantRecordId: gate.dominant_record_id || null,
+        dominantSignalKind: gate.dominant_signal_kind,
+        label: manifoldGateLabel(gate),
+      };
+      points.push(point);
+      const gatePoints = pointsByGate.get(normalizedGate) || [];
+      gatePoints.push(point);
+      pointsByGate.set(normalizedGate, gatePoints);
+    });
+  });
+
+  const links: ManifoldForceLink[] = [];
+  for (const [gate, gatePoints] of pointsByGate.entries()) {
+    for (let index = 0; index < gatePoints.length - 1; index += 1) {
+      const current = gatePoints[index];
+      const next = gatePoints[index + 1];
+      links.push({
+        key: `${current.key}->${next.key}`,
+        gate,
+        leftPercent: current.leftPercent,
+        topPercent: current.topPercent,
+        widthPercent: Math.max(3, next.leftPercent - current.leftPercent),
+        magnitudePercent: Math.round((current.magnitudePercent + next.magnitudePercent) / 2),
+      });
+    }
+  }
+
+  return { points, links };
+}
+
+function frameForSelectedRecord(
+  turn: ManifoldTurnProjection | null,
+  recordId: string | null
+): ManifoldFrame | null {
+  if (!turn || !recordId) {
+    return null;
+  }
+  return (
+    turn.frames.find((frame) =>
+      frame.active_signals.some((signal) => signal.snapshot_record_id === recordId)
+    ) || null
+  );
+}
+
 function ManifoldRoute() {
   const { projection } = useRuntimeStore();
   const turns = projection?.manifold.turns || [];
@@ -1112,6 +1217,13 @@ function ManifoldRoute() {
     null;
   const currentLifecycle = currentFrame?.lifecycle || currentTurn?.lifecycle || 'provisional';
   const totalFrames = turns.reduce((sum, turn) => sum + turn.frames.length, 0);
+  const selectedSignalFrame = frameForSelectedRecord(currentTurn, selectedSourceRecordId) || currentFrame;
+  const selectedGate =
+    currentFrame?.gates.find((gate) => gate.dominant_record_id === selectedSourceRecordId) ||
+    currentFrame?.gates.find((gate) => gate.gate === selectedSignal?.gate) ||
+    currentFrame?.gates[0] ||
+    null;
+  const gateField = useMemo(() => buildGateField(currentTurn), [currentTurn]);
 
   useEffect(() => {
     if (!turns.length) {
@@ -1147,7 +1259,7 @@ function ManifoldRoute() {
         <section className="manifold-stage">
           <div className="manifold-stage-head">
             <div>
-              <div className="manifold-stage-title">Steering Signal Manifold</div>
+              <div className="manifold-stage-title">Steering Gate Manifold</div>
               <div className="manifold-stage-meta" id="manifold-stage-meta">
                 {!turns.length
                   ? 'Awaiting replay-backed manifold frames'
@@ -1198,110 +1310,159 @@ function ManifoldRoute() {
           <div className="manifold-canvas" id="manifold-canvas">
             {!turns.length ? (
               <div className="manifold-empty-state">
-                <strong>Steering signal manifold route is armed.</strong>
+                <strong>Steering gate manifold route is armed.</strong>
                 <p>
-                  Once replay-backed steering snapshots arrive, the chamber canvas, timeline, and
-                  source panes will populate here.
+                  Once replay-backed steering snapshots arrive, the temporal gate field, timeline,
+                  and source panes will populate here.
                 </p>
               </div>
             ) : (
               <div className="manifold-machine">
                 <div className="manifold-playback-banner">
-                  <strong>Temporal manifold playback is active.</strong>
+                  <strong>Temporal gate playback is active.</strong>
                   <p>
-                    Current turn: {currentTurn?.turn_id || 'none'}
+                    Time sweeps left to right, gate families stack top to bottom, and force rises
+                    toward you with magnitude.
                     <br />
-                    Latest frame: {currentFrame ? currentFrame.sequence : 'none'}
+                    Current turn: {currentTurn?.turn_id || 'none'} · frame sequence{' '}
+                    {currentFrame?.sequence || 'none'}
                     <br />
-                    Primitives: {currentFrame?.primitives.length || 0} · Conduits:{' '}
-                    {currentFrame?.conduits.length || 0}
+                    Active gates: {currentFrame?.gates.length || 0} · sources:{' '}
+                    {currentFrame?.active_signals.length || 0} · projected anchors:{' '}
+                    {currentFrame?.primitives.length || 0}
                   </p>
                 </div>
-                <div className="manifold-machine-grid">
-                  {(currentFrame?.primitives || []).length ? (
-                    currentFrame!.primitives.map((primitive) => {
-                      const phase = primitivePhase(currentTurn, effectiveFrameIndex, primitive);
-                      return (
-                        <button
-                          className={`manifold-node${
-                            primitive.evidence_record_id === selectedSourceRecordId
-                              ? ' is-selected'
-                              : ''
-                          }`}
-                          data-lifecycle={manifoldLifecycleClass(currentLifecycle)}
-                          data-phase={phase}
-                          data-source-record-id={primitive.evidence_record_id || ''}
-                          key={primitive.primitive_id}
-                          onClick={() => setSelectedSourceRecordId(primitive.evidence_record_id || null)}
-                          type="button"
-                        >
-                          <div className="manifold-node__eyebrow">
-                            <span>
-                              {manifoldPrimitiveKindLabel(primitive.kind)} ·{' '}
-                              {phase.replace('_', ' ')}
-                            </span>
-                            <span className={`manifold-node__badge is-${manifoldLifecycleClass(currentLifecycle)}`}>
-                              {lifecycleLabel(currentLifecycle)}
-                            </span>
-                          </div>
-                          <div className="manifold-node__title">
-                            {primitive.label || primitive.primitive_id}
-                          </div>
-                          <div className="manifold-node__meta">
-                            magnitude {primitive.magnitude_percent || 0}% · {primitive.level}
-                          </div>
-                          <div className="manifold-node__fill">
-                            <span style={{ width: `${Math.max(0, Math.min(100, primitive.magnitude_percent || 0))}%` }} />
-                          </div>
-                          <div className="manifold-node__basis">
-                            {manifoldPrimitiveBasisLabel(primitive.basis)}
-                          </div>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="manifold-empty-state">
-                      <strong>No primitives yet.</strong>
-                      <p>This frame has signal state but no projected topology.</p>
+                <div className="manifold-spacefield">
+                  <div className="manifold-spacefield__meta">
+                    <span>Temporal gate field</span>
+                    <span>turn anchor {manifoldAnchorLabel(currentFrame?.anchor)}</span>
+                  </div>
+                  <div className="manifold-spacefield__viewport">
+                    <div className="manifold-spacefield__axes">
+                      <div className="manifold-spacefield__axis manifold-spacefield__axis--gate">
+                        Gate family
+                      </div>
+                      <div className="manifold-spacefield__axis manifold-spacefield__axis--time">
+                        Time
+                      </div>
+                      <div className="manifold-spacefield__axis manifold-spacefield__axis--force">
+                        Force
+                      </div>
                     </div>
-                  )}
-                </div>
-                <div className="manifold-conduit-strip">
-                  {(currentFrame?.conduits || []).length ? (
-                    currentFrame!.conduits.map((conduit) => {
-                      const targetPrimitive =
-                        currentFrame?.primitives.find(
-                          (primitive) => primitive.primitive_id === conduit.to_primitive_id
-                        ) || null;
-                      const phase = targetPrimitive
-                        ? primitivePhase(currentTurn, effectiveFrameIndex, targetPrimitive)
-                        : 'stable';
-                      return (
-                        <button
-                          className={`manifold-conduit${
-                            conduit.evidence_record_id === selectedSourceRecordId
-                              ? ' is-selected'
-                              : ''
-                          }`}
-                          data-lifecycle={manifoldLifecycleClass(currentLifecycle)}
-                          data-phase={phase}
-                          data-source-record-id={conduit.evidence_record_id || ''}
-                          key={conduit.conduit_id}
-                          onClick={() => setSelectedSourceRecordId(conduit.evidence_record_id || null)}
-                          type="button"
+                    <div className="manifold-spacefield__deck">
+                      <div className="manifold-spacefield__floor" />
+                      {STEERING_GATE_ORDER.map((gate, laneIndex) => (
+                        <div
+                          className={`manifold-gate-lane is-${steeringGateClass(gate)}`}
+                          key={gate}
+                          style={{ top: `${18 + laneIndex * 28}%` } as React.CSSProperties}
                         >
-                          <strong>{conduit.label || conduit.conduit_id}</strong>
-                          <span>
-                            {conduit.from_primitive_id} → {conduit.to_primitive_id}
-                          </span>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="manifold-panel-copy">
-                      No conduits were active in the selected frame.
+                          <div className="manifold-gate-lane__label">{steeringGateLabel(gate)}</div>
+                          <div className="manifold-gate-lane__rail" />
+                        </div>
+                      ))}
+                      {gateField.links.map((link) => (
+                        <div
+                          className={`manifold-force-link is-${steeringGateClass(link.gate)}`}
+                          key={link.key}
+                          style={{
+                            left: `${link.leftPercent}%`,
+                            top: `${link.topPercent}%`,
+                            width: `${link.widthPercent}%`,
+                            transform: `translate3d(0, -50%, ${Math.max(
+                              12,
+                              link.magnitudePercent * 1.2
+                            )}px)`,
+                          } as React.CSSProperties}
+                        />
+                      ))}
+                      {gateField.points.map((point) => {
+                        const isCurrent = point.frameIndex === effectiveFrameIndex;
+                        const isSelected = point.dominantRecordId === selectedSourceRecordId;
+                        return (
+                          <button
+                            className={`manifold-force-point is-${steeringGateClass(point.gate)}${
+                              isCurrent ? ' is-current' : ''
+                            }${isSelected ? ' is-selected' : ''}`}
+                            key={point.key}
+                            onClick={() => {
+                              setTailMode(false);
+                              setFrameIndex(point.frameIndex);
+                              setSelectedSourceRecordId(point.dominantRecordId);
+                            }}
+                            style={{
+                              left: `${point.leftPercent}%`,
+                              top: `${point.topPercent}%`,
+                              transform: `translate3d(-50%, -50%, ${Math.max(
+                                18,
+                                point.magnitudePercent * 1.4
+                              )}px)`,
+                              ['--gate-color' as string]:
+                                STEERING_GATE_COLORS[point.gate] || STEERING_GATE_COLORS.containment,
+                            } as React.CSSProperties}
+                            type="button"
+                          >
+                            <span className="manifold-force-point__halo" />
+                            <span className="manifold-force-point__core" />
+                            <span className="manifold-force-point__label">
+                              {point.label} · {point.magnitudePercent}%
+                            </span>
+                            <span className="sr-only">
+                              {point.label}, frame {point.frameIndex + 1}, {point.magnitudePercent}%
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
-                  )}
+                  </div>
+                  <div className="manifold-frame-ruler">
+                    {(currentTurn?.frames || []).map((frame, index) => (
+                      <button
+                        className={`manifold-frame-ruler__tick${
+                          index === effectiveFrameIndex ? ' is-active' : ''
+                        }`}
+                        key={frame.record_id}
+                        onClick={() => {
+                          setTailMode(false);
+                          setFrameIndex(index);
+                        }}
+                        type="button"
+                      >
+                        <strong>F{index + 1}</strong>
+                        <span>seq {frame.sequence}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="manifold-gate-ledger">
+                    {(currentFrame?.gates || []).length ? (
+                      currentFrame!.gates.map((gate) => {
+                        const isSelected = gate.gate === selectedGate?.gate;
+                        return (
+                          <button
+                            className={`manifold-gate-card is-${steeringGateClass(gate.gate)}${
+                              isSelected ? ' is-selected' : ''
+                            }`}
+                            key={gate.gate}
+                            onClick={() => setSelectedSourceRecordId(gate.dominant_record_id || null)}
+                            type="button"
+                          >
+                            <div className="manifold-gate-card__eyebrow">
+                              <span>{manifoldGateLabel(gate)}</span>
+                              <span>{steeringPhaseLabel(gate.phase)}</span>
+                            </div>
+                            <div className="manifold-gate-card__value">{gate.magnitude_percent}%</div>
+                            <div className="manifold-gate-card__meta">
+                              {signalKindLabel(gate.dominant_signal_kind)} · {gate.level}
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="manifold-panel-copy">
+                        No steering gates were active in the selected frame.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1358,10 +1519,10 @@ function ManifoldRoute() {
           </section>
 
           <section className="manifold-panel" id="manifold-source-panel">
-            <div className="manifold-panel-title">Sources</div>
+            <div className="manifold-panel-title">Gate Sources</div>
             {!turns.length ? (
               <div className="manifold-panel-copy">
-                Active steering signal anchors and contributions will appear here after the first
+                Active steering gates and their source signals will appear here after the first
                 replay-backed manifold frame arrives.
               </div>
             ) : (
@@ -1373,6 +1534,28 @@ function ManifoldRoute() {
                     {lifecycleLabel(currentLifecycle)}
                   </span>
                 </div>
+                {selectedGate ? (
+                  <div className={`manifold-source-detail manifold-source-detail--gate is-${steeringGateClass(selectedGate.gate)}`}>
+                    <div className="manifold-source-detail__head">
+                      <div>
+                        <div className="manifold-source-detail__title">
+                          {manifoldGateLabel(selectedGate)}
+                        </div>
+                        <div className="manifold-source-detail__meta">
+                          {steeringPhaseLabel(selectedGate.phase)} · dominant source{' '}
+                          {signalKindLabel(selectedGate.dominant_signal_kind)} · anchor{' '}
+                          {manifoldAnchorLabel(selectedGate.anchor)}
+                        </div>
+                      </div>
+                      <span className={`manifold-panel-status is-${manifoldLifecycleClass(currentLifecycle)}`}>
+                        {selectedGate.magnitude_percent}%
+                      </span>
+                    </div>
+                    <div className="manifold-source-detail__meta">
+                      Active kinds: {selectedGate.signal_kinds.map((kind) => signalKindLabel(kind)).join(' · ')}
+                    </div>
+                  </div>
+                ) : null}
                 {selectedSignal ? (
                   <div className="manifold-source-detail">
                     <div className="manifold-source-detail__head">
@@ -1381,7 +1564,8 @@ function ManifoldRoute() {
                           {selectedSignal.summary || manifoldSignalLabel(selectedSignal)}
                         </div>
                         <div className="manifold-source-detail__meta">
-                          {manifoldSignalLabel(selectedSignal)} · record{' '}
+                          {manifoldSignalLabel(selectedSignal)} · {steeringGateLabel(selectedSignal.gate)} ·{' '}
+                          {steeringPhaseLabel(selectedSignal.phase)} · record{' '}
                           {selectedSignal.snapshot_record_id} · anchor{' '}
                           {manifoldAnchorLabel(selectedSignal.anchor)}
                         </div>
@@ -1399,20 +1583,57 @@ function ManifoldRoute() {
                       )}
                     </div>
                     <div className="manifold-source-detail__meta">
-                      {selectedSignal.contributions
-                        .map(
-                          (contribution) =>
-                            `${contribution.source} ${contribution.share_percent || 0}%`
-                        )
-                        .join(' · ')}
+                      {selectedSignal.contributions.length
+                        ? selectedSignal.contributions
+                            .map(
+                              (contribution) =>
+                                `${contribution.source} ${contribution.share_percent || 0}%`
+                            )
+                            .join(' · ')
+                        : 'No contribution breakdown recorded.'}
                     </div>
                   </div>
                 ) : (
                   <div className="manifold-panel-copy">
-                    Select a chamber or conduit to inspect the exact trace record behind that
-                    manifold state.
+                    Select a gate orbit or ledger row to inspect the exact trace record behind the
+                    current steering force.
                   </div>
                 )}
+                <div className="manifold-panel-copy">
+                  <strong>Current frame gate ledger</strong>
+                </div>
+                <div className="manifold-panel-list">
+                  {(currentFrame?.gates || []).length ? (
+                    currentFrame!.gates.map((gate) => (
+                      <button
+                        className={`manifold-panel-button${
+                          gate.gate === selectedGate?.gate ? ' is-selected' : ''
+                        }`}
+                        data-source-record-id={gate.dominant_record_id || ''}
+                        key={gate.gate}
+                        onClick={() => setSelectedSourceRecordId(gate.dominant_record_id || null)}
+                        type="button"
+                      >
+                        <div className="manifold-panel-row">
+                          <strong>{manifoldGateLabel(gate)}</strong>
+                          <span>
+                            {steeringPhaseLabel(gate.phase)} · {gate.magnitude_percent}%
+                          </span>
+                        </div>
+                        <span className={`manifold-panel-status is-${steeringGateClass(gate.gate)}`}>
+                          {signalKindLabel(gate.dominant_signal_kind)}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="manifold-panel-copy">
+                      No steering gates were present in the current frame.
+                    </div>
+                  )}
+                </div>
+                <div className="manifold-panel-copy">
+                  <strong>Current frame source signals</strong>
+                </div>
                 <div className="manifold-panel-list">
                   {activeSignals.length ? (
                     activeSignals.map((signal) => (
@@ -1433,8 +1654,8 @@ function ManifoldRoute() {
                             {manifoldSignalLabel(signal)} · {signal.magnitude_percent || 0}%
                           </span>
                         </div>
-                        <span className={`manifold-panel-status is-${manifoldLifecycleClass(signal.lifecycle)}`}>
-                          {lifecycleLabel(signal.lifecycle)}
+                        <span className={`manifold-panel-status is-${steeringGateClass(signal.gate)}`}>
+                          {steeringPhaseLabel(signal.phase)}
                         </span>
                       </button>
                     ))
@@ -1444,6 +1665,12 @@ function ManifoldRoute() {
                     </div>
                   )}
                 </div>
+                {selectedSignalFrame && selectedSignalFrame.record_id !== currentFrame?.record_id ? (
+                  <div className="manifold-panel-copy">
+                    Selected source originated in historical frame{' '}
+                    <strong>{selectedSignalFrame.sequence}</strong>.
+                  </div>
+                ) : null}
               </>
             )}
           </section>

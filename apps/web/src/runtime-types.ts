@@ -90,6 +90,8 @@ export interface ManifoldSignalState {
   snapshot_record_id: string;
   lifecycle: string;
   kind: string;
+  gate: string;
+  phase: string;
   summary: string;
   level: string;
   magnitude_percent: number;
@@ -101,6 +103,7 @@ export interface ManifoldSignalState {
 export interface ManifoldPrimitiveBasis {
   kind: string;
   signal_kind?: string;
+  gate?: string;
   anchor?: TraceLineageRef;
 }
 
@@ -124,12 +127,25 @@ export interface ManifoldConduitState {
   evidence_record_id?: string | null;
 }
 
+export interface ManifoldGateState {
+  gate: string;
+  label: string;
+  phase: string;
+  level: string;
+  magnitude_percent: number;
+  anchor?: TraceLineageRef | null;
+  dominant_signal_kind: string;
+  signal_kinds: string[];
+  dominant_record_id?: string | null;
+}
+
 export interface ManifoldFrame {
   record_id: string;
   sequence: number;
   lifecycle: string;
   anchor?: TraceLineageRef | null;
   active_signals: ManifoldSignalState[];
+  gates: ManifoldGateState[];
   primitives: ManifoldPrimitiveState[];
   conduits: ManifoldConduitState[];
 }

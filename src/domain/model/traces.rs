@@ -237,6 +237,66 @@ impl TraceSignalKind {
             Self::BudgetBoundary => "budget_boundary",
         }
     }
+
+    pub fn steering_gate(&self) -> SteeringGateKind {
+        match self {
+            Self::ContextStrain => SteeringGateKind::Evidence,
+            Self::ActionBias => SteeringGateKind::Convergence,
+            Self::CompactionCue | Self::Fallback | Self::BudgetBoundary => {
+                SteeringGateKind::Containment
+            }
+        }
+    }
+
+    pub fn steering_phase(&self) -> SteeringGatePhase {
+        match self {
+            Self::ContextStrain => SteeringGatePhase::Sensing,
+            Self::ActionBias => SteeringGatePhase::Narrowing,
+            Self::CompactionCue => SteeringGatePhase::Compressing,
+            Self::Fallback => SteeringGatePhase::Recovering,
+            Self::BudgetBoundary => SteeringGatePhase::Boundary,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SteeringGateKind {
+    Evidence,
+    Convergence,
+    Containment,
+}
+
+impl SteeringGateKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Evidence => "evidence",
+            Self::Convergence => "convergence",
+            Self::Containment => "containment",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SteeringGatePhase {
+    Sensing,
+    Narrowing,
+    Compressing,
+    Recovering,
+    Boundary,
+}
+
+impl SteeringGatePhase {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Sensing => "sensing",
+            Self::Narrowing => "narrowing",
+            Self::Compressing => "compressing",
+            Self::Recovering => "recovering",
+            Self::Boundary => "boundary",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,12 +309,26 @@ pub struct TraceSignalContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceSignalSnapshot {
     pub kind: TraceSignalKind,
+    #[serde(default)]
+    pub gate: Option<SteeringGateKind>,
+    #[serde(default)]
+    pub phase: Option<SteeringGatePhase>,
     pub summary: String,
     pub level: String,
     pub magnitude_percent: u8,
     pub applies_to: Option<TraceLineageNodeRef>,
     pub contributions: Vec<TraceSignalContribution>,
     pub artifact: ArtifactEnvelope,
+}
+
+impl TraceSignalSnapshot {
+    pub fn resolved_gate(&self) -> SteeringGateKind {
+        self.gate.unwrap_or_else(|| self.kind.steering_gate())
+    }
+
+    pub fn resolved_phase(&self) -> SteeringGatePhase {
+        self.phase.unwrap_or_else(|| self.kind.steering_phase())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

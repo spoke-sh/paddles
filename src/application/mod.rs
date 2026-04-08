@@ -792,6 +792,8 @@ impl StructuredTurnTrace {
             self.default_branch_id(),
             TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                 kind: record.kind,
+                gate: Some(record.kind.steering_gate()),
+                phase: Some(record.kind.steering_phase()),
                 summary: summary.clone(),
                 level: record.level,
                 magnitude_percent: record.magnitude_percent,
@@ -2695,7 +2697,8 @@ impl MechSuitService {
     ) -> Result<PlannerLoopOutcome> {
         let mut context = context;
         let mut execution_checklist = execution_checklist;
-        let budget = planner_budget_for_turn(&context.initial_edit);
+        let base_budget = planner_budget_for_turn(&context.initial_edit);
+        let mut budget = planner_budget_for_replan_attempt(&base_budget, 0);
         let mut loop_state = PlannerLoopState::default();
         if let Some(checklist) = execution_checklist.as_ref() {
             checklist.sync_loop_state_notes(&mut loop_state);
@@ -2706,6 +2709,8 @@ impl MechSuitService {
         let mut instruction_frame = context.instruction_frame.clone();
         let mut pending_initial_decision = initial_decision;
         let mut steps_without_new_evidence = 0usize;
+        let mut replan_count = 0usize;
+        let mut sequence = 1usize;
         let gatherer_provider = context
             .prepared
             .gatherer
@@ -2713,7 +2718,25 @@ impl MechSuitService {
             .map(|lane| lane.label.clone())
             .unwrap_or_else(|| "workspace".to_string());
 
-        for sequence in 1..=budget.max_steps {
+        loop {
+            if sequence > budget.max_steps {
+                if activate_replan(
+                    "planner-budget-exhausted",
+                    ReplanActivation {
+                        instruction_frame: instruction_frame.as_ref(),
+                        base_budget: &base_budget,
+                        completed_replans: &mut replan_count,
+                        budget: &mut budget,
+                        loop_state: &mut loop_state,
+                        execution_checklist: execution_checklist.as_mut(),
+                        trace: trace.as_ref(),
+                    },
+                ) {
+                    continue;
+                }
+                break;
+            }
+
             let evidence_count_before = loop_state.evidence_items.len();
             let planner_selected_this_step = pending_initial_decision.is_none();
             let mut decision = if let Some(decision) = pending_initial_decision.take() {
@@ -3151,6 +3174,7 @@ impl MechSuitService {
                                 "oscillation guard prevented refinement to recently seen interpretation signature"
                                     .to_string(),
                         });
+                        sequence += 1;
                         continue;
                     }
                     loop_state
@@ -3177,9 +3201,27 @@ impl MechSuitService {
                 break;
             }
 
-            if stop_reason.is_some() {
+            if let Some(reason) = stop_reason.clone() {
+                if activate_replan(
+                    &reason,
+                    ReplanActivation {
+                        instruction_frame: instruction_frame.as_ref(),
+                        base_budget: &base_budget,
+                        completed_replans: &mut replan_count,
+                        budget: &mut budget,
+                        loop_state: &mut loop_state,
+                        execution_checklist: execution_checklist.as_mut(),
+                        trace: trace.as_ref(),
+                    },
+                ) {
+                    stop_reason = None;
+                    sequence += 1;
+                    continue;
+                }
                 break;
             }
+
+            sequence += 1;
         }
 
         let completed = stop_reason.is_some();
@@ -3470,6 +3512,40 @@ impl ExecutionChecklistState {
         item.status = PlanChecklistItemStatus::Completed;
         true
     }
+
+    fn note_replan(&mut self, stop_reason: &str) -> bool {
+        let label = format!(
+            "Replanned from current evidence after {}.",
+            planner_budget_stop_reason_label(stop_reason)
+        );
+
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == "replan") {
+            let changed = item.label != label || item.status != PlanChecklistItemStatus::Completed;
+            item.label = label;
+            item.status = PlanChecklistItemStatus::Completed;
+            return changed;
+        }
+
+        let insert_at = self
+            .items
+            .iter()
+            .position(|item| item.id == "apply-edit")
+            .unwrap_or_else(|| {
+                self.items
+                    .iter()
+                    .position(|item| item.id == "finalize")
+                    .unwrap_or(self.items.len())
+            });
+        self.items.insert(
+            insert_at,
+            PlanChecklistItem {
+                id: "replan".to_string(),
+                label,
+                status: PlanChecklistItemStatus::Completed,
+            },
+        );
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -3567,6 +3643,125 @@ fn build_execution_checklist(
     });
 
     Some(ExecutionChecklistState { items })
+}
+
+fn planner_budget_stop_reason_label(stop_reason: &str) -> String {
+    stop_reason
+        .strip_suffix("-exhausted")
+        .unwrap_or(stop_reason)
+        .replace('-', " ")
+}
+
+fn planner_budget_for_replan_attempt(
+    base_budget: &PlannerBudget,
+    completed_replans: usize,
+) -> PlannerBudget {
+    let multiplier = completed_replans.saturating_add(1);
+    PlannerBudget {
+        max_steps: base_budget.max_steps.saturating_mul(multiplier),
+        max_branch_factor: base_budget.max_branch_factor,
+        max_evidence_items: base_budget.max_evidence_items,
+        max_reads: base_budget.max_reads.saturating_mul(multiplier),
+        max_inspects: base_budget.max_inspects.saturating_mul(multiplier),
+        max_searches: base_budget.max_searches.saturating_mul(multiplier),
+        max_replans: base_budget.max_replans,
+    }
+}
+
+fn stop_reason_supports_replan(stop_reason: &str) -> bool {
+    stop_reason.contains("budget-exhausted") || stop_reason == "planner-budget-exhausted"
+}
+
+fn sync_replan_note(
+    loop_state: &mut PlannerLoopState,
+    stop_reason: &str,
+    instruction_frame: Option<&InstructionFrame>,
+) {
+    const REPLAN_NOTE_PREFIX: &str = "Replan from current evidence";
+
+    loop_state
+        .notes
+        .retain(|note| !note.starts_with(REPLAN_NOTE_PREFIX));
+
+    let mut lines = vec![format!(
+        "Replan from current evidence after {}.",
+        planner_budget_stop_reason_label(stop_reason)
+    )];
+    lines.push("Do not restart broad exploration or repeat missing or failed paths.".to_string());
+    lines.push(
+        "Choose the single most direct next step toward an applied repository change.".to_string(),
+    );
+    if let Some(summary) = instruction_frame.and_then(InstructionFrame::candidate_summary) {
+        lines.push(format!("Authored candidate files: {summary}"));
+    }
+    loop_state.notes.push(lines.join("\n"));
+}
+
+fn should_activate_replan(
+    stop_reason: &str,
+    instruction_frame: Option<&InstructionFrame>,
+    completed_replans: usize,
+    base_budget: &PlannerBudget,
+) -> bool {
+    instruction_frame.is_some_and(InstructionFrame::requires_applied_edit)
+        && completed_replans < base_budget.max_replans
+        && stop_reason_supports_replan(stop_reason)
+}
+
+struct ReplanActivation<'a> {
+    instruction_frame: Option<&'a InstructionFrame>,
+    base_budget: &'a PlannerBudget,
+    completed_replans: &'a mut usize,
+    budget: &'a mut PlannerBudget,
+    loop_state: &'a mut PlannerLoopState,
+    execution_checklist: Option<&'a mut ExecutionChecklistState>,
+    trace: &'a StructuredTurnTrace,
+}
+
+fn activate_replan(stop_reason: &str, activation: ReplanActivation<'_>) -> bool {
+    let ReplanActivation {
+        instruction_frame,
+        base_budget,
+        completed_replans,
+        budget,
+        loop_state,
+        execution_checklist,
+        trace,
+    } = activation;
+
+    if !should_activate_replan(
+        stop_reason,
+        instruction_frame,
+        *completed_replans,
+        base_budget,
+    ) {
+        return false;
+    }
+
+    *completed_replans += 1;
+    *budget = planner_budget_for_replan_attempt(base_budget, *completed_replans);
+    sync_replan_note(loop_state, stop_reason, instruction_frame);
+
+    if let Some(checklist) = execution_checklist {
+        let changed = checklist.note_replan(stop_reason);
+        checklist.sync_loop_state_notes(loop_state);
+        if changed {
+            checklist.emit(trace);
+        }
+    }
+
+    trace.emit(TurnEvent::Fallback {
+        stage: "replan".to_string(),
+        reason: format!(
+            "pending edit remained open after {}; extending planner budget to {} steps, {} reads, {} inspects, and {} searches while continuing from current evidence",
+            planner_budget_stop_reason_label(stop_reason),
+            budget.max_steps,
+            budget.max_reads,
+            budget.max_inspects,
+            budget.max_searches,
+        ),
+    });
+    true
 }
 
 fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<InstructionFrame> {
@@ -4286,6 +4481,7 @@ fn planner_budget_for_turn(initial_edit: &InitialEditInstruction) -> PlannerBudg
             max_reads: 4,
             max_inspects: 3,
             max_searches: 2,
+            max_replans: 1,
             ..PlannerBudget::default()
         }
     } else {
@@ -8758,6 +8954,7 @@ mod tests {
         assert_eq!(budget.max_reads, 4);
         assert_eq!(budget.max_inspects, 3);
         assert_eq!(budget.max_searches, 2);
+        assert_eq!(budget.max_replans, 1);
     }
 
     #[test]
@@ -9871,6 +10068,244 @@ mod tests {
             Some(WorkspaceAction::ReplaceInFile { path, new, .. })
                 if path == "apps/web/src/runtime-shell.css" && new == "padding: 8px;"
         ));
+    }
+
+    #[test]
+    fn known_edit_turns_can_replan_after_budget_exhaustion_and_still_apply_a_patch() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create web src");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-shell.css"),
+            ".runtime-shell-host {\n  padding: 0;\n}\n",
+        )
+        .expect("write css");
+        fs::write(
+            workspace.path().join("apps/web/src/runtime-app.tsx"),
+            "export function RuntimeApp() { return null; }\n",
+        )
+        .expect("write runtime app");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer = "Replanned after exhausting inspect budget, then applied 8px padding to `.runtime-shell-host`.".to_string();
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "the controller should bootstrap the likely file first".to_string(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec![
+                        "apps/web/src/runtime-shell.css".to_string(),
+                        "apps/web/src/runtime-app.tsx".to_string(),
+                    ],
+                },
+                grounding: None,
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "inspect the workspace root before editing".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "the action-bias review still allows one inspect".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "inspect again before editing".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "the action-bias review still allows another inspect".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "inspect a third time before editing".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "the action-bias review still allows a third inspect".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "ask for a fourth inspect, which should force replanning"
+                        .to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "pwd".to_string(),
+                        },
+                    },
+                    rationale: "the action-bias review repeats the exhausted inspect".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::ReplaceInFile {
+                            path: "apps/web/src/runtime-shell.css".to_string(),
+                            old: "padding: 0;".to_string(),
+                            new: "padding: 8px;".to_string(),
+                            replace_all: false,
+                        },
+                    },
+                    rationale: "replanning should now go straight to the patch".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+            ],
+            recorded_requests.clone(),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "Upgrade the runtime shell padding to 8px. Keep going if the first plan runs out of room.",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        assert!(matches!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .last(),
+            Some(WorkspaceAction::ReplaceInFile { path, new, .. })
+                if path == "apps/web/src/runtime-shell.css" && new == "padding: 8px;"
+        ));
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.budget.max_steps > 10 && request.budget.max_inspects > 3),
+            "replanning should expand the known-edit planner budget"
+        );
+        assert!(
+            requests
+                .iter()
+                .skip(1)
+                .flat_map(|request| request.loop_state.notes.iter())
+                .any(|note| note.contains("Replan from current evidence")),
+            "follow-on planner requests should carry a replanning note after budget exhaustion"
+        );
+
+        let plan_updates = sink
+            .recorded()
+            .into_iter()
+            .filter_map(|event| match event {
+                TurnEvent::PlanUpdated { items } => Some(items),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            plan_updates
+                .iter()
+                .any(|items| items.iter().any(|item| item.id == "replan")),
+            "replanning should surface through the shared execution checklist"
+        );
     }
 
     #[test]

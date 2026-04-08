@@ -1095,6 +1095,8 @@ mod tests {
                 },
                 kind: TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                     kind: TraceSignalKind::ActionBias,
+                    gate: None,
+                    phase: None,
                     summary: "action bias accumulated".to_string(),
                     level: "high".to_string(),
                     magnitude_percent: 82,

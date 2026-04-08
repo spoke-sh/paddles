@@ -247,6 +247,8 @@ Action bias exists to encode the principle that action produces information. On 
 
 Known-edit turns also reserve a modest amount of extra read, inspect, and search headroom before the workspace-editor boundary fires, so the planner can inspect a few candidate files without exhausting the turn before any patch is applied.
 
+If that first contained budget still runs out before an edit lands, the controller now performs one bounded replan. The replan preserves accumulated evidence, injects an explicit "do not restart" note into loop state, updates the shared checklist, and expands the known-edit step/read/inspect/search envelope for one more pass.
+
 This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
 
 ### Premise Challenge
@@ -287,9 +289,21 @@ Each snapshot carries a magnitude, a summary, and source-attributed contribution
 The web UI now carries two distinct trace projections over the same recorder-backed source of truth:
 
 - the **forensic inspector**, which stays precise and payload-oriented
-- the **steering-signal manifold**, which stays expressive and systemic
+- the **steering-gate manifold**, which stays expressive and systemic
 
-The manifold route is intentionally metaphorical. Chambers, reservoirs, valves, conduits, opacity, accumulation, and bleed-off are not hidden runtime entities. They are a visualization layer projected from recorded steering-signal snapshots, lineage anchors, and lifecycle state.
+The manifold route is intentionally metaphorical. It now simplifies the steering layer into three first-class gates:
+
+- **Evidence** — whether the turn has enough grounded local evidence to justify narrowing
+- **Convergence** — whether the planner is being pulled toward an exact next action or edit
+- **Containment** — whether the controller is compressing, recovering, or enforcing a boundary
+
+Raw signal kinds still exist in the recorder, but the manifold no longer asks the UI to infer structure from them. Instead, each snapshot resolves onto one of those gate families and a gate phase, and the web route projects them onto three axes:
+
+- time across replay frames
+- gate family across the lane stack
+- magnitude as depth toward the viewer
+
+That makes the route easier to scan without weakening accountability to the recorder.
 
 That metaphor is only valid if it remains accountable to exact trace sources. Selecting a manifold state must reveal the exact underlying source record and provide a direct route back to the forensic inspector for raw/rendered payload inspection. The manifold is therefore an expressive overview, not a second source of truth.
 

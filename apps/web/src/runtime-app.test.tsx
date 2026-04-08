@@ -148,6 +148,8 @@ const bootstrapProjection: ConversationProjectionSnapshot = {
                 snapshot_record_id: 'record-2',
                 lifecycle: 'final',
                 kind: 'action_bias',
+                gate: 'convergence',
+                phase: 'narrowing',
                 summary: 'Action bias strengthened after local evidence.',
                 level: 'medium',
                 magnitude_percent: 62,
@@ -170,12 +172,29 @@ const bootstrapProjection: ConversationProjectionSnapshot = {
                 },
               },
             ],
+            gates: [
+              {
+                gate: 'convergence',
+                label: 'convergence gate',
+                phase: 'narrowing',
+                level: 'medium',
+                magnitude_percent: 62,
+                anchor: {
+                  id: 'planner-step:record-2',
+                  kind: 'planner_step',
+                  label: 'inspect git status',
+                },
+                dominant_signal_kind: 'action_bias',
+                signal_kinds: ['action_bias'],
+                dominant_record_id: 'record-2',
+              },
+            ],
             primitives: [
               {
-                primitive_id: 'family:action_bias',
+                primitive_id: 'gate:convergence',
                 kind: 'valve',
-                label: 'Action bias valve',
-                basis: { kind: 'signal_family', signal_kind: 'action_bias' },
+                label: 'Convergence gate',
+                basis: { kind: 'steering_gate', gate: 'convergence' },
                 evidence_record_id: 'record-2',
                 anchor: {
                   id: 'planner-step:record-2',
@@ -540,17 +559,21 @@ describe('RuntimeApp', () => {
   it('renders the primary manifold route through the client router', async () => {
     renderAtPath('/manifold');
 
-    expect(await screen.findByText('Steering Signal Manifold', { selector: '#trace-subhead' })).toBeInTheDocument();
+    expect(await screen.findByText('Steering Gate Manifold', { selector: '#trace-subhead' })).toBeInTheDocument();
     expect(document.getElementById('manifold-canvas')).toBeInTheDocument();
-    expect(document.querySelectorAll('.manifold-node').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.manifold-force-point').length).toBeGreaterThan(0);
+    expect(screen.getByText('Evidence gate')).toBeInTheDocument();
+    expect(screen.getByText('Convergence gate')).toBeInTheDocument();
+    expect(screen.getByText('Containment gate')).toBeInTheDocument();
     expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
 
-  it('renders a compact playback banner instead of the empty-state filler once frames exist', async () => {
+  it('renders the temporal gate field instead of the empty-state filler once frames exist', async () => {
     renderAtPath('/manifold');
 
-    const banner = await screen.findByText('Temporal manifold playback is active.');
+    const banner = await screen.findByText('Temporal gate playback is active.');
     expect(banner.closest('.manifold-playback-banner')).toBeInTheDocument();
     expect(banner.closest('.manifold-empty-state')).toBeNull();
+    expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
   });
 });

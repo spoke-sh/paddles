@@ -103,11 +103,13 @@ In transit traces and the web forensic inspector, steering signals and influence
 
 The web UI also exposes a dedicated `/manifold` route. It is a higher-level projection of the same trace data:
 
-- chambers and reservoirs for accumulated signal families
-- valves and conduits for how those signals steer the loop
-- opacity, accumulation, supersession, and bleed-off for temporal change
+- three steering gates:
+  `evidence`, `convergence`, and `containment`
+- replay time across the horizontal axis
+- gate family across the lane stack
+- force magnitude as depth in the scene
 
-That route is intentionally metaphorical. It is not a second reasoning engine and it does not invent hidden runtime state. Every manifold state is projected from exact recorded steering-signal snapshots and lineage anchors.
+That route is intentionally metaphorical. It is not a second reasoning engine and it does not invent hidden runtime state. Every manifold state is projected from exact recorded steering-signal snapshots and lineage anchors, and the raw signal kinds remain available behind the selected gate state.
 
 For that reason, the manifold route must stay accountable to the forensic inspector:
 
