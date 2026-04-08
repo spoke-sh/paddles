@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGDNh30T9
-status: planned
+status: in-progress
 epic: VGDNcabks
 created_at: 2026-04-08T08:46:07
 # authored
 title: Integrate Resolver Into Edit Convergence
 index: 2
 updated_at: 2026-04-08T08:50:22
+started_at: 2026-04-08T09:19:37
 ---
 
 # Integrate Resolver Into Edit Convergence
@@ -26,11 +27,11 @@ updated_at: 2026-04-08T08:50:22
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Use Deterministic Resolution Before Edit State Actions](../../../../stories/VGDNlZK5Z/README.md) | feat | backlog |
+| [Use Deterministic Resolution Before Edit State Actions](../../../../stories/VGDNlZK5Z/README.md) | feat | done |
 | [Fail Closed On Ambiguous Or Missing Entity Targets](../../../../stories/VGDNlZu6I/README.md) | feat | backlog |
 | [Document And Visualize Deterministic Resolution Behavior](../../../../stories/VGDNlaV6E/README.md) | feat | backlog |
 <!-- END GENERATED -->

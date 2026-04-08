@@ -1,0 +1,20 @@
+---
+recorded_at: 2026-04-08T09:29:29.454593735-07:00
+command: cargo nextest run execution_pressure_prefers_resolved_targets_over_repeated_search --no-tests pass
+---
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.36s
+────────────
+ Nextest run ID 8c244875-cbdd-4645-8b0b-ec4a0a9c50d1 with nextest profile: default
+    Starting 1 test across 2 binaries (472 tests skipped)
+        PASS [   0.013s] (1/1) paddles application::tests::execution_pressure_prefers_resolved_targets_over_repeated_search
+────────────
+     Summary [   0.014s] 1 test run: 1 passed, 472 skipped

@@ -1,6 +1,7 @@
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
+use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::terminal::run_background_terminal_command;
@@ -25,15 +26,17 @@ use crate::domain::model::{
     TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherer, ContextResolver, EvidenceBudget, EvidenceBundle,
-    EvidenceItem, GathererCapability, GroundingRequirement, InitialAction, InitialActionDecision,
-    InitialEditInstruction, InterpretationContext, InterpretationProcedure,
+    ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
+    EntityResolutionOutcome, EntityResolutionRequest, EntityResolver, EvidenceBudget,
+    EvidenceBundle, EvidenceItem, GathererCapability, GroundingRequirement, InitialAction,
+    InitialActionDecision, InitialEditInstruction, InterpretationContext, InterpretationProcedure,
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
-    ModelRegistry, NoopTraceRecorder, OperatorMemory, PlannerAction, PlannerBudget,
-    PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord,
-    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner,
-    RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
-    SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+    ModelRegistry, NoopTraceRecorder, NormalizedEntityHint, OperatorMemory, PlannerAction,
+    PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest,
+    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+    RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
+    WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -75,6 +78,7 @@ pub struct MechSuitService {
     synthesizer_factory: Box<SynthesizerFactory>,
     planner_factory: Box<PlannerFactory>,
     gatherer_factory: Box<GathererFactory>,
+    entity_resolver: Arc<dyn EntityResolver>,
     runtime: RwLock<Option<ActiveRuntimeState>>,
     verbose: AtomicU8,
     event_sink: Arc<dyn TurnEventSink>,
@@ -236,6 +240,7 @@ struct PlannerLoopContext {
     synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
     resolver: Arc<dyn ContextResolver>,
+    entity_resolver: Arc<dyn EntityResolver>,
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
@@ -1660,6 +1665,7 @@ impl MechSuitService {
             synthesizer_factory,
             planner_factory,
             gatherer_factory,
+            entity_resolver: Arc::new(WorkspaceEntityResolver::new()),
             runtime: RwLock::new(None),
             verbose: AtomicU8::new(0),
             event_sink: Arc::new(ConsoleTurnEventSink::default()),
@@ -2273,7 +2279,8 @@ impl MechSuitService {
         )
         .with_recent_turns(recent_turns.clone())
         .with_recent_thread_summary(recent_thread_summary.clone())
-        .with_runtime_notes(planner_runtime_notes_for_gatherer(gatherer.as_ref()));
+        .with_runtime_notes(planner_runtime_notes_for_gatherer(gatherer.as_ref()))
+        .with_entity_resolver(Arc::clone(&self.entity_resolver));
 
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
@@ -2394,6 +2401,7 @@ impl MechSuitService {
                         synthesizer_engine: Arc::clone(&synthesizer_engine),
                         gatherer,
                         resolver,
+                        entity_resolver: Arc::clone(&self.entity_resolver),
                         interpretation: interpretation.clone(),
                         recent_turns,
                         recent_thread_summary: recent_thread_summary.clone(),
@@ -2516,24 +2524,49 @@ impl MechSuitService {
             return Ok(None);
         }
 
-        let ranked_candidates = if let Some(gatherer) = gatherer {
+        let resolution = resolve_known_edit_target(
+            &self.entity_resolver,
+            &self.workspace_root,
+            prompt,
+            &candidates,
+            &[],
+            decision.edit.resolution.as_ref(),
+        )
+        .await;
+        let seeded_candidates = resolution
+            .as_ref()
+            .map(|outcome| merge_resolution_candidate_paths(&candidates, outcome))
+            .unwrap_or_else(|| candidates.clone());
+
+        let ranked_candidates = if matches!(
+            resolution.as_ref(),
+            Some(EntityResolutionOutcome::Resolved { .. })
+        ) {
+            seeded_candidates.clone()
+        } else if let Some(gatherer) = gatherer {
             rerank_known_edit_candidates_with_vector_lookup(
                 gatherer,
                 &self.workspace_root,
                 prompt,
                 interpretation,
                 recent_turns,
-                &candidates,
+                &seeded_candidates,
             )
             .await
         } else {
-            candidates.clone()
+            seeded_candidates.clone()
         };
 
-        let best_path = ranked_candidates
-            .first()
-            .cloned()
-            .unwrap_or_else(|| candidates[0].clone());
+        let best_path = resolution
+            .as_ref()
+            .and_then(EntityResolutionOutcome::resolved_path)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                ranked_candidates
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| candidates[0].clone())
+            });
         Ok(Some(InitialActionDecision {
             action: InitialAction::Workspace {
                 action: WorkspaceAction::Read {
@@ -2547,7 +2580,7 @@ impl MechSuitService {
             edit: crate::domain::ports::InitialEditInstruction {
                 known_edit: decision.edit.known_edit,
                 candidate_files: ranked_candidates,
-                resolution: decision.edit.resolution.clone(),
+                resolution: resolution.or_else(|| decision.edit.resolution.clone()),
             },
             grounding: decision.grounding.clone(),
         }))
@@ -2755,7 +2788,8 @@ impl MechSuitService {
                     context.gatherer.as_ref(),
                 ))
                 .with_loop_state(loop_state.clone())
-                .with_resolver(context.resolver.clone());
+                .with_resolver(context.resolver.clone())
+                .with_entity_resolver(context.entity_resolver.clone());
                 context
                     .planner_engine
                     .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
@@ -4949,13 +4983,33 @@ async fn review_decision_under_signals(
     workspace_root: &Path,
     trace: Arc<StructuredTurnTrace>,
 ) -> Result<RecursivePlannerDecision> {
+    let mut review_loop_state = loop_state.clone();
+    if context.initial_edit.known_edit {
+        let likely_targets = likely_action_bias_targets(loop_state, workspace_root, 3);
+        if let Some(resolution) = resolve_known_edit_target(
+            &context.entity_resolver,
+            workspace_root,
+            prompt,
+            &context.initial_edit.candidate_files,
+            &likely_targets,
+            context
+                .initial_edit
+                .resolution
+                .as_ref()
+                .or(loop_state.target_resolution.as_ref()),
+        )
+        .await
+        {
+            review_loop_state.target_resolution = Some(resolution);
+        }
+    }
+
     let steering_notes =
-        collect_steering_review_notes(context, loop_state, &decision, workspace_root);
+        collect_steering_review_notes(context, &review_loop_state, &decision, workspace_root);
     if steering_notes.is_empty() {
         return Ok(decision);
     }
 
-    let mut review_loop_state = loop_state.clone();
     for note in &steering_notes {
         review_loop_state.notes.push(note.note.clone());
     }
@@ -4972,7 +5026,8 @@ async fn review_decision_under_signals(
         context.gatherer.as_ref(),
     ))
     .with_loop_state(review_loop_state)
-    .with_resolver(context.resolver.clone());
+    .with_resolver(context.resolver.clone())
+    .with_entity_resolver(context.entity_resolver.clone());
 
     let reviewed = context
         .planner_engine
@@ -5017,7 +5072,7 @@ fn collect_steering_review_notes(
     }
 
     let likely_targets = if context.initial_edit.known_edit {
-        let likely_targets = likely_action_bias_targets(loop_state, workspace_root, 3);
+        let likely_targets = resolution_backed_action_bias_targets(loop_state, workspace_root, 3);
         if likely_targets.is_empty() {
             normalize_candidate_files(workspace_root, &context.initial_edit.candidate_files, 3)
         } else {
@@ -5036,6 +5091,7 @@ fn collect_steering_review_notes(
                 decision,
                 &likely_targets,
                 workspace_editor_pressure(loop_state, decision, &likely_targets),
+                loop_state.target_resolution.as_ref(),
             ),
         });
     }
@@ -5050,6 +5106,17 @@ fn should_apply_execution_review(
 ) -> bool {
     if decision_is_exact_edit(&decision.action) {
         return false;
+    }
+
+    if let Some(resolved_path) = loop_state
+        .target_resolution
+        .as_ref()
+        .and_then(EntityResolutionOutcome::resolved_path)
+    {
+        match decision_workspace_path(&decision.action) {
+            Some(path) if path == resolved_path => {}
+            _ => return true,
+        }
     }
 
     if !has_file_targeting_step(loop_state) && !decision_targets_file(&decision.action) {
@@ -5158,6 +5225,7 @@ fn format_action_bias_review_note(
     decision: &RecursivePlannerDecision,
     likely_targets: &[String],
     pressure: WorkspaceEditorPressure,
+    resolution: Option<&EntityResolutionOutcome>,
 ) -> String {
     let mut lines = vec![
         "Steering review [action-bias]".to_string(),
@@ -5169,6 +5237,25 @@ fn format_action_bias_review_note(
         "If the requested change is local and mechanical (padding, copy, one selector, one condition, or a small UI tweak), move into exact-diff state space now.".to_string(),
         "Hand the turn to the workspace editor. Use `replace_in_file` when you can name the exact old and new text. Use `apply_patch` when the change spans a few nearby lines.".to_string(),
     ];
+
+    if let Some(resolution) = resolution {
+        match resolution {
+            EntityResolutionOutcome::Resolved { target, .. } => lines.push(format!(
+                "Deterministic resolver outcome: resolved -> {}",
+                target.path
+            )),
+            EntityResolutionOutcome::Ambiguous { candidates, .. } => {
+                lines.push("Deterministic resolver outcome: ambiguous.".to_string());
+                for candidate in candidates.iter().take(3) {
+                    lines.push(format!("- {}", candidate.path));
+                }
+            }
+            EntityResolutionOutcome::Missing { explanation, .. } => lines.push(format!(
+                "Deterministic resolver outcome: missing -> {}",
+                explanation
+            )),
+        }
+    }
 
     if !likely_targets.is_empty() {
         lines.push("Likely target files:".to_string());
@@ -5292,6 +5379,34 @@ fn likely_action_bias_targets(
         .take(limit)
         .map(|(path, _)| path)
         .collect()
+}
+
+fn resolution_backed_action_bias_targets(
+    loop_state: &PlannerLoopState,
+    workspace_root: &Path,
+    limit: usize,
+) -> Vec<String> {
+    if let Some(resolution) = loop_state.target_resolution.as_ref() {
+        let candidates = resolution.candidate_paths();
+        if !candidates.is_empty() {
+            return candidates.into_iter().take(limit).collect();
+        }
+    }
+
+    likely_action_bias_targets(loop_state, workspace_root, limit)
+}
+
+fn decision_workspace_path(action: &PlannerAction) -> Option<&str> {
+    match action {
+        PlannerAction::Workspace {
+            action:
+                WorkspaceAction::Read { path }
+                | WorkspaceAction::Diff { path: Some(path) }
+                | WorkspaceAction::WriteFile { path, .. }
+                | WorkspaceAction::ReplaceInFile { path, .. },
+        } => Some(path.as_str()),
+        _ => None,
+    }
 }
 
 fn normalize_known_edit_candidate(
@@ -5450,6 +5565,109 @@ fn known_edit_search_tokens(prompt: &str, hinted_paths: &[String]) -> Vec<String
         }
     }
     tokens
+}
+
+async fn resolve_known_edit_target(
+    entity_resolver: &Arc<dyn EntityResolver>,
+    workspace_root: &Path,
+    prompt: &str,
+    candidate_files: &[String],
+    likely_targets: &[String],
+    existing_resolution: Option<&EntityResolutionOutcome>,
+) -> Option<EntityResolutionOutcome> {
+    if let Some(resolution) = existing_resolution {
+        return Some(resolution.clone());
+    }
+
+    let normalized_candidates = normalize_candidate_files(workspace_root, candidate_files, 6);
+    let normalized_likely_targets = normalize_candidate_files(workspace_root, likely_targets, 6);
+    let hints =
+        known_edit_resolution_hints(prompt, &normalized_candidates, &normalized_likely_targets);
+    let seeded_targets =
+        merge_known_edit_target_lists(&normalized_candidates, &normalized_likely_targets);
+    if hints.is_empty() && seeded_targets.is_empty() {
+        return None;
+    }
+
+    let raw_hint = seeded_targets
+        .first()
+        .cloned()
+        .unwrap_or_else(|| prompt.to_string());
+    entity_resolver
+        .resolve(
+            &EntityResolutionRequest::new(workspace_root.to_path_buf(), raw_hint, hints)
+                .with_likely_targets(seeded_targets),
+        )
+        .await
+        .ok()
+}
+
+fn known_edit_resolution_hints(
+    prompt: &str,
+    candidate_files: &[String],
+    likely_targets: &[String],
+) -> Vec<NormalizedEntityHint> {
+    let mut hints = Vec::new();
+    for candidate in merge_known_edit_target_lists(candidate_files, likely_targets) {
+        push_known_edit_resolution_hint(&mut hints, EntityLookupMode::ExactPath, candidate.clone());
+        push_known_edit_resolution_hint(
+            &mut hints,
+            EntityLookupMode::PathFragment,
+            candidate.clone(),
+        );
+
+        let path = Path::new(&candidate);
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            push_known_edit_resolution_hint(
+                &mut hints,
+                EntityLookupMode::Basename,
+                name.to_ascii_lowercase(),
+            );
+        }
+        if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
+            let stem = stem.to_ascii_lowercase();
+            push_known_edit_resolution_hint(&mut hints, EntityLookupMode::Basename, stem.clone());
+            push_known_edit_resolution_hint(&mut hints, EntityLookupMode::SymbolFragment, stem);
+        }
+    }
+
+    for token in known_edit_search_tokens(prompt, candidate_files)
+        .into_iter()
+        .take(6)
+    {
+        push_known_edit_resolution_hint(&mut hints, EntityLookupMode::SymbolFragment, token);
+    }
+
+    hints
+}
+
+fn push_known_edit_resolution_hint(
+    hints: &mut Vec<NormalizedEntityHint>,
+    mode: EntityLookupMode,
+    value: impl Into<String>,
+) {
+    let hint = NormalizedEntityHint::new(mode, value.into());
+    if hint.value.trim().is_empty() || hints.contains(&hint) {
+        return;
+    }
+    hints.push(hint);
+}
+
+fn merge_known_edit_target_lists(primary: &[String], secondary: &[String]) -> Vec<String> {
+    let mut merged = primary.to_vec();
+    for path in secondary {
+        if !merged.contains(path) {
+            merged.push(path.clone());
+        }
+    }
+    merged
+}
+
+fn merge_resolution_candidate_paths(
+    candidates: &[String],
+    resolution: &EntityResolutionOutcome,
+) -> Vec<String> {
+    merge_known_edit_target_lists(&resolution.candidate_paths(), candidates)
 }
 
 fn normalize_action_bias_source(
@@ -5978,20 +6196,22 @@ mod tests {
         TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
-        ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-        GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
-        InitialEditInstruction, InterpretationContext, InterpretationRequest, ModelPaths,
-        ModelRegistry, PlannerAction, PlannerBudget, PlannerCapability, PlannerGraphBranch,
-        PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState, PlannerRequest,
-        PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
-        RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-        RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
-        WorkspaceAction,
+        ContextGatherRequest, ContextGatherResult, ContextGatherer, EntityLookupMode,
+        EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
+        EntityResolver, EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement,
+        InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
+        InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction, PlannerBudget,
+        PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode,
+        PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
+        PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
+        RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff, SynthesizerEngine,
+        ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
     use crate::infrastructure::providers::ModelProvider;
     use anyhow::{Result, anyhow};
@@ -6248,6 +6468,26 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct StaticEntityResolver {
+        outcome: EntityResolutionOutcome,
+        recorded_requests: Arc<Mutex<Vec<EntityResolutionRequest>>>,
+    }
+
+    #[async_trait]
+    impl EntityResolver for StaticEntityResolver {
+        async fn resolve(
+            &self,
+            request: &EntityResolutionRequest,
+        ) -> Result<EntityResolutionOutcome> {
+            self.recorded_requests
+                .lock()
+                .expect("entity resolver requests lock")
+                .push(request.clone());
+            Ok(self.outcome.clone())
+        }
+    }
+
     struct StaticConversation {
         responses: VecDeque<String>,
         history: Vec<String>,
@@ -6409,6 +6649,7 @@ mod tests {
             synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
             gatherer: None,
             resolver: Arc::new(NoopContextResolver),
+            entity_resolver: Arc::new(WorkspaceEntityResolver::new()),
             interpretation: InterpretationContext::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
@@ -9085,6 +9326,178 @@ mod tests {
             executed_actions.first(),
             Some(WorkspaceAction::Read { path }) if path == "src/two.rs"
         ));
+    }
+
+    #[tokio::test]
+    async fn known_edit_bootstrap_uses_deterministic_resolution() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src/components"))
+            .expect("create components");
+        fs::write(
+            workspace
+                .path()
+                .join("apps/web/src/components/ManifoldVisualization.tsx"),
+            "export function ManifoldVisualization() { return null; }\n",
+        )
+        .expect("write component");
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let mut service = test_service(workspace.path());
+        service.entity_resolver = Arc::new(StaticEntityResolver {
+            outcome: EntityResolutionOutcome::Resolved {
+                target: EntityResolutionCandidate::new(
+                    "apps/web/src/components/ManifoldVisualization.tsx",
+                    EntityLookupMode::ExactPath,
+                    1,
+                ),
+                alternatives: Vec::new(),
+                explanation: "single authored target".to_string(),
+            },
+            recorded_requests: Arc::clone(&recorded_requests),
+        });
+        let decision = InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::Search {
+                    query: "find the manifold component".to_string(),
+                    mode: RetrievalMode::Linear,
+                    strategy: RetrievalStrategy::Lexical,
+                    retrievers: Vec::new(),
+                    intent: Some("implementation search".to_string()),
+                },
+            },
+            rationale: "search first".to_string(),
+            answer: None,
+            edit: InitialEditInstruction {
+                known_edit: true,
+                candidate_files: vec![
+                    "apps/web/src/components/ManifoldVisualization.tsx".to_string(),
+                ],
+                resolution: None,
+            },
+            grounding: None,
+        };
+
+        let bootstrapped = service
+            .bootstrap_known_edit_initial_action(
+                "Tighten the ManifoldVisualization copy in the web UI.",
+                &InterpretationContext::default(),
+                &[],
+                None,
+                &decision,
+            )
+            .await
+            .expect("bootstrap should succeed")
+            .expect("known edit should bootstrap");
+
+        assert!(matches!(
+            bootstrapped.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Read { ref path }
+            } if path == "apps/web/src/components/ManifoldVisualization.tsx"
+        ));
+        assert_eq!(
+            bootstrapped
+                .edit
+                .resolution
+                .as_ref()
+                .and_then(EntityResolutionOutcome::resolved_path),
+            Some("apps/web/src/components/ManifoldVisualization.tsx")
+        );
+        assert_eq!(
+            recorded_requests
+                .lock()
+                .expect("resolver requests lock")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn execution_pressure_prefers_resolved_targets_over_repeated_search() {
+        let resolution = EntityResolutionOutcome::Resolved {
+            target: EntityResolutionCandidate::new(
+                "src/application/mod.rs",
+                EntityLookupMode::ExactPath,
+                1,
+            ),
+            alternatives: Vec::new(),
+            explanation: "deterministic bootstrap already resolved the authored target".to_string(),
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "src/application/mod.rs".to_string(),
+                    },
+                },
+                rationale: "move into the resolved file".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let mut context = test_planner_loop_context(InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec!["src/application/mod.rs".to_string()],
+            resolution: Some(resolution.clone()),
+        });
+        context.planner_engine = planner;
+
+        let reviewed = super::review_decision_under_signals(
+            "Fix the planner stream text in src/application/mod.rs",
+            &context,
+            &PlannerBudget::default(),
+            &PlannerLoopState {
+                evidence_items: vec![EvidenceItem {
+                    source: "src/application/mod.rs".to_string(),
+                    snippet: "fn planner_loop() {}".to_string(),
+                    rationale: "known authored target".to_string(),
+                    rank: 1,
+                }],
+                ..Default::default()
+            },
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "cargo test".to_string(),
+                    },
+                },
+                rationale: "search a bit more".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+            Path::new("/workspace"),
+            Arc::new(StructuredTurnTrace::new(
+                Arc::new(RecordingTurnEventSink::default()),
+                Arc::new(InMemoryTraceRecorder::default()),
+                Vec::new(),
+                ConversationSession::new(TaskTraceId::new("task-review").expect("task trace id")),
+                crate::domain::model::TurnTraceId::new("turn").expect("turn id"),
+                ConversationThreadRef::Mainline,
+            )),
+        )
+        .await
+        .expect("steering review should succeed");
+
+        assert!(matches!(
+            reviewed.action,
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Read { ref path }
+            } if path == "src/application/mod.rs"
+        ));
+        assert_eq!(
+            recorded_requests
+                .lock()
+                .expect("recorded requests lock")
+                .last()
+                .expect("review planner request")
+                .loop_state
+                .target_resolution,
+            Some(resolution)
+        );
     }
 
     #[test]

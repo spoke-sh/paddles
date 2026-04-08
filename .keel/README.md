@@ -301,7 +301,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Build Deterministic Resolver Backbone](epics/VGDNcabks/voyages/VGDNgMbMW/) | done |
-| [Integrate Resolver Into Edit Convergence](epics/VGDNcabks/voyages/VGDNh30T9/) | planned |
+| [Integrate Resolver Into Edit Convergence](epics/VGDNcabks/voyages/VGDNh30T9/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

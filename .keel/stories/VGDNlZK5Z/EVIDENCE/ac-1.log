@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-04-08T09:29:29.407574792-07:00
+command: cargo nextest run known_edit_bootstrap_uses_deterministic_resolution --no-tests pass
+---
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.38s
+────────────
+ Nextest run ID 1fe12f64-831a-4418-b354-cdb24ff1249f with nextest profile: default
+    Starting 1 test across 2 binaries (472 tests skipped)
+        PASS [   0.013s] (1/1) paddles application::tests::known_edit_bootstrap_uses_deterministic_resolution
+────────────
+     Summary [   0.014s] 1 test run: 1 passed, 472 skipped

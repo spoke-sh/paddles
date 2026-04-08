@@ -22,9 +22,9 @@ mission: VGDNb8eTS
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 3/6 stories done
+**Progress:** 1/2 voyages complete, 4/6 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Build Deterministic Resolver Backbone](voyages/VGDNgMbMW/) | done | 3/3 |
-| [Integrate Resolver Into Edit Convergence](voyages/VGDNh30T9/) | planned | 0/3 |
+| [Integrate Resolver Into Edit Convergence](voyages/VGDNh30T9/) | in-progress | 1/3 |
 <!-- END GENERATED -->
