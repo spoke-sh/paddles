@@ -565,6 +565,8 @@ describe('RuntimeApp', () => {
     expect(screen.getByText('Evidence gate')).toBeInTheDocument();
     expect(screen.getByText('Convergence gate')).toBeInTheDocument();
     expect(screen.getByText('Containment gate')).toBeInTheDocument();
+    expect(screen.queryByText('Timeline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gate Sources')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
 
@@ -575,5 +577,55 @@ describe('RuntimeApp', () => {
     expect(banner.closest('.manifold-playback-banner')).toBeInTheDocument();
     expect(banner.closest('.manifold-empty-state')).toBeNull();
     expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
+  });
+
+  it('supports mouse pan tilt and zoom on the manifold camera', async () => {
+    const outerWheel = vi.fn();
+    window.history.pushState({}, '', '/manifold');
+    render(
+      <div onWheel={outerWheel}>
+        <RuntimeApp />
+      </div>
+    );
+
+    const viewport = await screen.findByTestId('manifold-spacefield-viewport');
+    const deck = await screen.findByTestId('manifold-spacefield-deck');
+
+    expect(deck.getAttribute('data-pan-x')).toBe('0');
+    expect(deck.getAttribute('data-pan-y')).toBe('0');
+    expect(deck.getAttribute('data-pitch')).toBe('62');
+    expect(deck.getAttribute('data-yaw')).toBe('-18');
+    expect(deck.getAttribute('data-roll')).toBe('0');
+    expect(deck.getAttribute('data-zoom')).toBe('1.00');
+
+    fireEvent.mouseDown(viewport, { button: 0, clientX: 120, clientY: 120 });
+    fireEvent.mouseMove(window, { clientX: 260, clientY: 330 });
+    fireEvent.mouseUp(window);
+
+    expect(Math.abs(Number(deck.getAttribute('data-pitch')) - 62)).toBeGreaterThan(30);
+    expect(deck.getAttribute('data-yaw')).not.toBe('-18');
+
+    fireEvent.mouseDown(viewport, { button: 0, shiftKey: true, clientX: 160, clientY: 90 });
+    fireEvent.mouseMove(window, { clientX: 190, clientY: 130 });
+    fireEvent.mouseUp(window);
+
+    expect(deck.getAttribute('data-pan-x')).not.toBe('0');
+    expect(deck.getAttribute('data-pan-y')).not.toBe('0');
+
+    fireEvent.mouseDown(viewport, { button: 0, altKey: true, clientX: 160, clientY: 90 });
+    fireEvent.mouseMove(window, { clientX: 260, clientY: 90 });
+    fireEvent.mouseUp(window);
+
+    expect(deck.getAttribute('data-roll')).not.toBe('0');
+
+    const zoomEvent = new WheelEvent('wheel', {
+      deltaY: -120,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(viewport, zoomEvent);
+
+    expect(deck.getAttribute('data-zoom')).not.toBe('1.00');
+    expect(outerWheel).not.toHaveBeenCalled();
   });
 });

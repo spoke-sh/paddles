@@ -44,6 +44,8 @@ test('externally injected turns flow live through chat, transit, manifold, and s
     'Awaiting replay-backed manifold frames'
   );
   await expect(page.getByText('Temporal gate field')).toBeVisible();
+  await expect(page.getByText('Timeline')).toHaveCount(0);
+  await expect(page.getByText('Gate Sources')).toHaveCount(0);
 
   await page.reload();
   await expect(page.locator('.manifold-force-point').first()).toBeVisible();

@@ -26,7 +26,6 @@ import {
   TRACE_ZOOM_MAX,
   TRACE_ZOOM_MIN,
   aggregateSignalContributions,
-  artifactText,
   formatTraceKind,
   kindEntry,
   kindLabel,
@@ -34,7 +33,6 @@ import {
   latestRecordForTurn,
   manifoldAnchorLabel,
   manifoldGateLabel,
-  manifoldLifecycleClass,
   manifoldSignalLabel,
   modelCallsForTurn,
   plannerStepsForTurn,
@@ -1117,9 +1115,38 @@ type ManifoldForceLink = {
   magnitudePercent: number;
 };
 
+type ManifoldCameraState = {
+  pitch: number;
+  yaw: number;
+  roll: number;
+  panX: number;
+  panY: number;
+  zoom: number;
+};
+
+type ManifoldDragState = {
+  mode: 'tilt' | 'pan' | 'rotate';
+  startX: number;
+  startY: number;
+  origin: ManifoldCameraState;
+};
+
+const DEFAULT_MANIFOLD_CAMERA: ManifoldCameraState = {
+  pitch: 62,
+  yaw: -18,
+  roll: 0,
+  panX: 0,
+  panY: 0,
+  zoom: 1,
+};
+
 function laneIndexForGate(gate: string) {
   const index = STEERING_GATE_ORDER.indexOf(gate);
   return index >= 0 ? index : STEERING_GATE_ORDER.length - 1;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function buildGateField(turn: ManifoldTurnProjection | null): {
@@ -1201,6 +1228,9 @@ function ManifoldRoute() {
   const [tailMode, setTailMode] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [selectedSourceRecordId, setSelectedSourceRecordId] = useState<string | null>(null);
+  const [camera, setCamera] = useState<ManifoldCameraState>(DEFAULT_MANIFOLD_CAMERA);
+  const [dragMode, setDragMode] = useState<'tilt' | 'pan' | 'rotate' | null>(null);
+  const dragStateRef = useRef<ManifoldDragState | null>(null);
 
   const currentTurn =
     turns.find((turn) => turn.turn_id === selectedTurnId) || turns[turns.length - 1] || null;
@@ -1215,7 +1245,6 @@ function ManifoldRoute() {
     activeSignals.find((signal) => signal.snapshot_record_id === selectedSourceRecordId) ||
     activeSignals[0] ||
     null;
-  const currentLifecycle = currentFrame?.lifecycle || currentTurn?.lifecycle || 'provisional';
   const totalFrames = turns.reduce((sum, turn) => sum + turn.frames.length, 0);
   const selectedSignalFrame = frameForSelectedRecord(currentTurn, selectedSourceRecordId) || currentFrame;
   const selectedGate =
@@ -1253,6 +1282,79 @@ function ManifoldRoute() {
     return () => window.clearInterval(handle);
   }, [currentTurn, playing]);
 
+  useEffect(() => {
+    function stopDragging() {
+      dragStateRef.current = null;
+      setDragMode(null);
+    }
+
+    function handleMouseMove(event: MouseEvent) {
+      const dragState = dragStateRef.current;
+      if (!dragState) {
+        return;
+      }
+
+      const dx = event.clientX - dragState.startX;
+      const dy = event.clientY - dragState.startY;
+
+      if (dragState.mode === 'pan') {
+        setCamera({
+          ...dragState.origin,
+          panX: clamp(dragState.origin.panX + dx, -320, 320),
+          panY: clamp(dragState.origin.panY + dy, -220, 220),
+        });
+        return;
+      }
+
+      if (dragState.mode === 'rotate') {
+        setCamera({
+          ...dragState.origin,
+          roll: clamp(dragState.origin.roll + dx * 0.28, -85, 85),
+        });
+        return;
+      }
+
+      setCamera({
+        ...dragState.origin,
+        pitch: clamp(dragState.origin.pitch - dy * 0.28, 6, 96),
+        yaw: clamp(dragState.origin.yaw + dx * 0.32, -88, 88),
+      });
+    }
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', stopDragging);
+    window.addEventListener('blur', stopDragging);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopDragging);
+      window.removeEventListener('blur', stopDragging);
+    };
+  }, []);
+
+  function resetCamera() {
+    dragStateRef.current = null;
+    setDragMode(null);
+    setCamera(DEFAULT_MANIFOLD_CAMERA);
+  }
+
+  function beginCameraDrag(
+    event: React.MouseEvent<HTMLDivElement>,
+    mode: 'tilt' | 'pan' | 'rotate'
+  ) {
+    if (event.button !== 0 && event.button !== 1) {
+      return;
+    }
+    event.preventDefault();
+    dragStateRef.current = {
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: camera,
+    };
+    setDragMode(mode);
+  }
+
   return (
     <div className="trace-view trace-view--active trace-view--manifold manifold-view" id="manifold-view">
       <div className="manifold-shell" id="manifold-shell">
@@ -1269,6 +1371,30 @@ function ManifoldRoute() {
               </div>
             </div>
             <div className="manifold-stage-controls">
+              {turns.length ? (
+                <label className="manifold-stage-select-wrap" htmlFor="manifold-turn-select">
+                  <span className="sr-only">Select manifold turn</span>
+                  <select
+                    className="manifold-stage-select"
+                    id="manifold-turn-select"
+                    onChange={(event) => {
+                      setSelectedTurnId(event.target.value);
+                      setTailMode(true);
+                      setSelectedSourceRecordId(null);
+                    }}
+                    value={currentTurn?.turn_id || ''}
+                  >
+                    {turns
+                      .slice()
+                      .reverse()
+                      .map((turn) => (
+                        <option key={turn.turn_id} value={turn.turn_id}>
+                          {truncate(turn.turn_id, 34)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
               <button
                 className="trace-tab manifold-stage-button"
                 id="manifold-play-toggle"
@@ -1288,6 +1414,14 @@ function ManifoldRoute() {
                 type="button"
               >
                 Replay
+              </button>
+              <button
+                className="trace-tab manifold-stage-button"
+                id="manifold-reset-view-button"
+                onClick={resetCamera}
+                type="button"
+              >
+                Reset View
               </button>
             </div>
           </div>
@@ -1312,8 +1446,8 @@ function ManifoldRoute() {
               <div className="manifold-empty-state">
                 <strong>Steering gate manifold route is armed.</strong>
                 <p>
-                  Once replay-backed steering snapshots arrive, the temporal gate field, timeline,
-                  and source panes will populate here.
+                  Once replay-backed steering snapshots arrive, the temporal gate field will
+                  populate here.
                 </p>
               </div>
             ) : (
@@ -1337,7 +1471,35 @@ function ManifoldRoute() {
                     <span>Temporal gate field</span>
                     <span>turn anchor {manifoldAnchorLabel(currentFrame?.anchor)}</span>
                   </div>
-                  <div className="manifold-spacefield__viewport">
+                  <div
+                    className={`manifold-spacefield__viewport${
+                      dragMode ? ` is-dragging is-${dragMode}` : ''
+                    }`}
+                    data-testid="manifold-spacefield-viewport"
+                    onDoubleClick={resetCamera}
+                    onMouseDown={(event) =>
+                      beginCameraDrag(
+                        event,
+                        event.altKey
+                          ? 'rotate'
+                          : event.shiftKey || event.button === 1
+                            ? 'pan'
+                            : 'tilt'
+                      )
+                    }
+                    onWheel={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setCamera((current) => ({
+                        ...current,
+                        zoom: clamp(
+                          current.zoom * Math.exp(-event.deltaY * 0.0012),
+                          0.68,
+                          2.2
+                        ),
+                      }));
+                    }}
+                  >
                     <div className="manifold-spacefield__axes">
                       <div className="manifold-spacefield__axis manifold-spacefield__axis--gate">
                         Gate family
@@ -1349,7 +1511,27 @@ function ManifoldRoute() {
                         Force
                       </div>
                     </div>
-                    <div className="manifold-spacefield__deck">
+                    <div className="manifold-spacefield__hint">
+                      Drag to tilt · Alt+drag to rotate · Shift+drag to pan · Wheel to zoom · Double-click to reset
+                    </div>
+                    <div className="manifold-spacefield__camera-stats">
+                      pan {Math.round(camera.panX)},{Math.round(camera.panY)} · tilt{' '}
+                      {Math.round(camera.pitch)}°/{Math.round(camera.yaw)}° · roll{' '}
+                      {Math.round(camera.roll)}° · zoom {camera.zoom.toFixed(2)}x
+                    </div>
+                    <div
+                      className="manifold-spacefield__deck"
+                      data-pan-x={Math.round(camera.panX).toString()}
+                      data-pan-y={Math.round(camera.panY).toString()}
+                      data-pitch={Math.round(camera.pitch).toString()}
+                      data-roll={Math.round(camera.roll).toString()}
+                      data-testid="manifold-spacefield-deck"
+                      data-yaw={Math.round(camera.yaw).toString()}
+                      data-zoom={camera.zoom.toFixed(2)}
+                      style={{
+                        transform: `translate(${camera.panX}px, ${camera.panY}px) scale(${camera.zoom}) rotateX(${camera.pitch}deg) rotateY(${camera.yaw}deg) rotateZ(${camera.roll}deg)`,
+                      } as React.CSSProperties}
+                    >
                       <div className="manifold-spacefield__floor" />
                       {STEERING_GATE_ORDER.map((gate, laneIndex) => (
                         <div
@@ -1385,6 +1567,7 @@ function ManifoldRoute() {
                               isCurrent ? ' is-current' : ''
                             }${isSelected ? ' is-selected' : ''}`}
                             key={point.key}
+                            onMouseDown={(event) => event.stopPropagation()}
                             onClick={() => {
                               setTailMode(false);
                               setFrameIndex(point.frameIndex);
@@ -1413,6 +1596,54 @@ function ManifoldRoute() {
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+                  <div className="manifold-readout">
+                    <div
+                      className={`manifold-readout-card is-${
+                        selectedGate ? steeringGateClass(selectedGate.gate) : 'containment'
+                      }`}
+                    >
+                      <div className="manifold-readout-card__eyebrow">
+                        <span>Selected gate</span>
+                        <span>
+                          {selectedGate ? steeringPhaseLabel(selectedGate.phase) : 'Idle'}
+                        </span>
+                      </div>
+                      <div className="manifold-readout-card__title">
+                        {selectedGate ? manifoldGateLabel(selectedGate) : 'No active gate'}
+                      </div>
+                      <div className="manifold-readout-card__meta">
+                        {selectedGate
+                          ? `${selectedGate.magnitude_percent}% · ${signalKindLabel(
+                              selectedGate.dominant_signal_kind
+                            )} · ${selectedGate.level}`
+                          : 'Awaiting replay-backed steering state.'}
+                      </div>
+                    </div>
+                    <div
+                      className={`manifold-readout-card is-${
+                        selectedSignal ? steeringGateClass(selectedSignal.gate) : 'containment'
+                      }`}
+                    >
+                      <div className="manifold-readout-card__eyebrow">
+                        <span>Selected source</span>
+                        <span>
+                          {selectedSignalFrame
+                            ? `Frame ${selectedSignalFrame.sequence}`
+                            : 'No source'}
+                        </span>
+                      </div>
+                      <div className="manifold-readout-card__title">
+                        {selectedSignal?.summary || 'Select a force point or gate card'}
+                      </div>
+                      <div className="manifold-readout-card__meta">
+                        {selectedSignal
+                          ? `${manifoldSignalLabel(selectedSignal)} · ${steeringGateLabel(
+                              selectedSignal.gate
+                            )} · ${steeringPhaseLabel(selectedSignal.phase)}`
+                          : 'The readout follows the selected orbit in the field.'}
+                      </div>
                     </div>
                   </div>
                   <div className="manifold-frame-ruler">
@@ -1468,213 +1699,6 @@ function ManifoldRoute() {
             )}
           </div>
         </section>
-
-        <aside className="manifold-side">
-          <section className="manifold-panel" id="manifold-timeline-panel">
-            <div className="manifold-panel-title">Timeline</div>
-            {!turns.length ? (
-              <div className="manifold-panel-copy">
-                Replay-backed turn frames will accumulate here.
-              </div>
-            ) : (
-              <>
-                <div className="manifold-panel-copy">
-                  Selecting a turn retargets the scrubber without replacing the whole route.
-                </div>
-                <div className="manifold-panel-list">
-                  {turns
-                    .slice()
-                    .reverse()
-                    .map((turn) => {
-                      const latestFrame = turn.frames[turn.frames.length - 1] || null;
-                      return (
-                        <button
-                          className="manifold-panel-button"
-                          data-lifecycle={manifoldLifecycleClass(turn.lifecycle)}
-                          data-manifold-turn-id={turn.turn_id}
-                          key={turn.turn_id}
-                          onClick={() => {
-                            setSelectedTurnId(turn.turn_id);
-                            setTailMode(true);
-                            setSelectedSourceRecordId(null);
-                          }}
-                          type="button"
-                        >
-                          <div className="manifold-panel-row">
-                            <strong>{truncate(turn.turn_id, 28)}</strong>
-                            <span>
-                              {turn.frames.length} frames
-                              {latestFrame ? ` · step ${latestFrame.sequence}` : ''}
-                            </span>
-                          </div>
-                          <span className={`manifold-panel-status is-${manifoldLifecycleClass(turn.lifecycle)}`}>
-                            {lifecycleLabel(turn.lifecycle)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                </div>
-              </>
-            )}
-          </section>
-
-          <section className="manifold-panel" id="manifold-source-panel">
-            <div className="manifold-panel-title">Gate Sources</div>
-            {!turns.length ? (
-              <div className="manifold-panel-copy">
-                Active steering gates and their source signals will appear here after the first
-                replay-backed manifold frame arrives.
-              </div>
-            ) : (
-              <>
-                <div className="manifold-panel-copy">
-                  Current turn anchor: <strong>{manifoldAnchorLabel(currentFrame?.anchor)}</strong>{' '}
-                  · frame state{' '}
-                  <span className={`manifold-panel-status is-${manifoldLifecycleClass(currentLifecycle)}`}>
-                    {lifecycleLabel(currentLifecycle)}
-                  </span>
-                </div>
-                {selectedGate ? (
-                  <div className={`manifold-source-detail manifold-source-detail--gate is-${steeringGateClass(selectedGate.gate)}`}>
-                    <div className="manifold-source-detail__head">
-                      <div>
-                        <div className="manifold-source-detail__title">
-                          {manifoldGateLabel(selectedGate)}
-                        </div>
-                        <div className="manifold-source-detail__meta">
-                          {steeringPhaseLabel(selectedGate.phase)} · dominant source{' '}
-                          {signalKindLabel(selectedGate.dominant_signal_kind)} · anchor{' '}
-                          {manifoldAnchorLabel(selectedGate.anchor)}
-                        </div>
-                      </div>
-                      <span className={`manifold-panel-status is-${manifoldLifecycleClass(currentLifecycle)}`}>
-                        {selectedGate.magnitude_percent}%
-                      </span>
-                    </div>
-                    <div className="manifold-source-detail__meta">
-                      Active kinds: {selectedGate.signal_kinds.map((kind) => signalKindLabel(kind)).join(' · ')}
-                    </div>
-                  </div>
-                ) : null}
-                {selectedSignal ? (
-                  <div className="manifold-source-detail">
-                    <div className="manifold-source-detail__head">
-                      <div>
-                        <div className="manifold-source-detail__title">
-                          {selectedSignal.summary || manifoldSignalLabel(selectedSignal)}
-                        </div>
-                        <div className="manifold-source-detail__meta">
-                          {manifoldSignalLabel(selectedSignal)} · {steeringGateLabel(selectedSignal.gate)} ·{' '}
-                          {steeringPhaseLabel(selectedSignal.phase)} · record{' '}
-                          {selectedSignal.snapshot_record_id} · anchor{' '}
-                          {manifoldAnchorLabel(selectedSignal.anchor)}
-                        </div>
-                      </div>
-                      <span className={`manifold-panel-status is-${manifoldLifecycleClass(selectedSignal.lifecycle)}`}>
-                        {lifecycleLabel(selectedSignal.lifecycle)}
-                      </span>
-                    </div>
-                    <div className="manifold-source-detail__body">
-                      {truncate(
-                        artifactText(selectedSignal.artifact) ||
-                          selectedSignal.summary ||
-                          'No inline source payload recorded.',
-                        420
-                      )}
-                    </div>
-                    <div className="manifold-source-detail__meta">
-                      {selectedSignal.contributions.length
-                        ? selectedSignal.contributions
-                            .map(
-                              (contribution) =>
-                                `${contribution.source} ${contribution.share_percent || 0}%`
-                            )
-                            .join(' · ')
-                        : 'No contribution breakdown recorded.'}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="manifold-panel-copy">
-                    Select a gate orbit or ledger row to inspect the exact trace record behind the
-                    current steering force.
-                  </div>
-                )}
-                <div className="manifold-panel-copy">
-                  <strong>Current frame gate ledger</strong>
-                </div>
-                <div className="manifold-panel-list">
-                  {(currentFrame?.gates || []).length ? (
-                    currentFrame!.gates.map((gate) => (
-                      <button
-                        className={`manifold-panel-button${
-                          gate.gate === selectedGate?.gate ? ' is-selected' : ''
-                        }`}
-                        data-source-record-id={gate.dominant_record_id || ''}
-                        key={gate.gate}
-                        onClick={() => setSelectedSourceRecordId(gate.dominant_record_id || null)}
-                        type="button"
-                      >
-                        <div className="manifold-panel-row">
-                          <strong>{manifoldGateLabel(gate)}</strong>
-                          <span>
-                            {steeringPhaseLabel(gate.phase)} · {gate.magnitude_percent}%
-                          </span>
-                        </div>
-                        <span className={`manifold-panel-status is-${steeringGateClass(gate.gate)}`}>
-                          {signalKindLabel(gate.dominant_signal_kind)}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="manifold-panel-copy">
-                      No steering gates were present in the current frame.
-                    </div>
-                  )}
-                </div>
-                <div className="manifold-panel-copy">
-                  <strong>Current frame source signals</strong>
-                </div>
-                <div className="manifold-panel-list">
-                  {activeSignals.length ? (
-                    activeSignals.map((signal) => (
-                      <button
-                        className={`manifold-panel-button${
-                          signal.snapshot_record_id === selectedSourceRecordId
-                            ? ' is-selected'
-                            : ''
-                        }`}
-                        data-source-record-id={signal.snapshot_record_id}
-                        key={signal.snapshot_record_id}
-                        onClick={() => setSelectedSourceRecordId(signal.snapshot_record_id)}
-                        type="button"
-                      >
-                        <div className="manifold-panel-row">
-                          <strong>{signal.summary || manifoldSignalLabel(signal)}</strong>
-                          <span>
-                            {manifoldSignalLabel(signal)} · {signal.magnitude_percent || 0}%
-                          </span>
-                        </div>
-                        <span className={`manifold-panel-status is-${steeringGateClass(signal.gate)}`}>
-                          {steeringPhaseLabel(signal.phase)}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="manifold-panel-copy">
-                      No active steering signals were present in the current frame.
-                    </div>
-                  )}
-                </div>
-                {selectedSignalFrame && selectedSignalFrame.record_id !== currentFrame?.record_id ? (
-                  <div className="manifold-panel-copy">
-                    Selected source originated in historical frame{' '}
-                    <strong>{selectedSignalFrame.sequence}</strong>.
-                  </div>
-                ) : null}
-              </>
-            )}
-          </section>
-        </aside>
       </div>
     </div>
   );
