@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:15:28.625870593-07:00
+mode: manual
+---
+Verified the split route and shell contracts with npm --workspace @paddles/web run test and npm --workspace @paddles/web run lint.

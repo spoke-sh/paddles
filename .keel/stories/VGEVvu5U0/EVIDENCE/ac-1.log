@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:15:28.582927023-07:00
+mode: manual
+---
+Split runtime web tests into chat, inspector, manifold, and transit surfaces with shared harness support; verified by cargo test runtime_web_tests_follow_domain_partitioning -- --nocapture.

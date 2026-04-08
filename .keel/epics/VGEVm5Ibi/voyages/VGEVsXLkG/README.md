@@ -27,11 +27,11 @@ started_at: 2026-04-08T14:05:59
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Partition Runtime Styles By Feature Surface](../../../../stories/VGEVvtWS6/README.md) | feat | done |
-| [Split Web Runtime Tests By Domain Surface](../../../../stories/VGEVvu5U0/README.md) | feat | backlog |
+| [Split Web Runtime Tests By Domain Surface](../../../../stories/VGEVvu5U0/README.md) | feat | done |
 | [Codify Embedded Fallback Shell Parity Boundaries](../../../../stories/VGEVvuZUb/README.md) | feat | backlog |
 <!-- END GENERATED -->

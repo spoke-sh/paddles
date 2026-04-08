@@ -490,6 +490,34 @@ fn runtime_web_app_uses_tanstack_router_instead_of_react_router() {
 }
 
 #[test]
+fn runtime_web_tests_follow_domain_partitioning() {
+    assert!(
+        repo_file("apps/web/src/test-support/runtime-harness.tsx").exists(),
+        "runtime web tests should expose a shared harness for bootstrap state and render helpers",
+    );
+    assert!(
+        repo_file("apps/web/src/chat/runtime-shell.test.tsx").exists(),
+        "runtime web shell and chat behaviors should live in a domain test file",
+    );
+    assert!(
+        repo_file("apps/web/src/inspector/inspector-route.test.tsx").exists(),
+        "inspector behaviors should live in an inspector-scoped test file",
+    );
+    assert!(
+        repo_file("apps/web/src/manifold/manifold-route.test.tsx").exists(),
+        "manifold behaviors should live in a manifold-scoped test file",
+    );
+    assert!(
+        repo_file("apps/web/src/transit/transit-route.test.tsx").exists(),
+        "transit behaviors should live in a transit-scoped test file",
+    );
+    assert!(
+        !repo_file("apps/web/src/runtime-app.test.tsx").exists(),
+        "the legacy monolithic runtime-app test file should be retired after the domain split",
+    );
+}
+
+#[test]
 fn runtime_shell_host_keeps_panels_flush_to_the_viewport() {
     let runtime_shell_css = read_repo_file("apps/web/src/runtime-shell.css");
     let shared_css = read_repo_file("apps/web/src/styles/runtime-shell-base.css");
