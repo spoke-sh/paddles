@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result};
 use directories::ProjectDirs;

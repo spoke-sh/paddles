@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VGDNgMbMW
-status: in-progress
+status: done
 epic: VGDNcabks
 created_at: 2026-04-08T08:46:05
 # authored
@@ -22,16 +22,18 @@ started_at: 2026-04-08T08:50:30
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Deterministic Entity Resolver Contracts](../../../../stories/VGDNlXw4N/README.md) | feat | done |
 | [Implement Self Discovering Workspace Entity Index And Cache](../../../../stories/VGDNlYT3m/README.md) | feat | done |
-| [Resolve Symbols And Fuzzy Path Hints Into Authored Files](../../../../stories/VGDNlYj3n/README.md) | feat | backlog |
+| [Resolve Symbols And Fuzzy Path Hints Into Authored Files](../../../../stories/VGDNlYj3n/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-08T09:15:34.861751785-07:00
+command: cargo nextest run resolver_supports_exact_path_basename_and_symbol_hints --no-tests pass
+---
+
+--- stderr ---
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.93s
+────────────
+ Nextest run ID 7afb53ee-4161-4503-9986-4ac1b16c735c with nextest profile: default
+    Starting 1 test across 2 binaries (470 tests skipped)
+        PASS [   0.015s] (1/1) paddles infrastructure::adapters::workspace_entity_resolver::tests::resolver_supports_exact_path_basename_and_symbol_hints
+────────────
+     Summary [   0.016s] 1 test run: 1 passed, 470 skipped

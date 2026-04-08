@@ -14,5 +14,6 @@ pub mod sift_registry;
 pub(crate) mod sift_request_factory;
 pub mod trace_recorders;
 pub mod transit_resolver;
+pub mod workspace_entity_resolver;
 
 pub use transit_resolver::{NoopContextResolver, TransitContextResolver};
