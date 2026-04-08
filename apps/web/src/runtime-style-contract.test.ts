@@ -31,4 +31,14 @@ describe('runtime stylesheet partition', () => {
     expect(manifoldCss).toContain('.manifold-stage');
     expect(transitCss).toContain('.trace-transit-toolbar');
   });
+
+  it('lets the manifold stage claim the full trace panel height for the temporal gate field', () => {
+    const manifoldCss = readRelative('./styles/manifold.css');
+
+    expect(manifoldCss).toContain('.manifold-shell {');
+    expect(manifoldCss).toContain('.manifold-stage {');
+    expect(manifoldCss).toContain('.manifold-stage {\n  flex: 1;');
+    expect(manifoldCss).toContain('.manifold-canvas {\n  flex: 1;');
+    expect(manifoldCss).toContain('.manifold-spacefield__viewport {\n  position: relative;\n  min-height: 0;\n  height: 100%;');
+  });
 });
