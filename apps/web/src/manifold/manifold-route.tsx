@@ -1,6 +1,5 @@
 import { useRuntimeStore } from '../runtime-store';
 import { useManifoldTurnSelection } from '../chat/manifold-turn-selection-context';
-import { ManifoldReadout } from './manifold-readout';
 import { ManifoldStage } from './manifold-stage';
 import { useManifoldCamera } from './use-manifold-camera';
 import { useManifoldPlayback } from './use-manifold-playback';
@@ -23,6 +22,9 @@ export function ManifoldRoute() {
           effectiveFrameIndex={playback.effectiveFrameIndex}
           gateField={playback.gateField}
           playing={playback.playing}
+          selectedGate={playback.selectedGate}
+          selectedResolverOutcome={playback.selectedResolverOutcome}
+          selectedSignal={playback.selectedSignal}
           selectedSourceRecordId={playback.selectedSourceRecordId}
           taskId={projection?.manifold.task_id || null}
           totalFrames={playback.totalFrames}
@@ -35,21 +37,6 @@ export function ManifoldRoute() {
           onTogglePlay={() => playback.setPlaying((current) => !current)}
           onViewportWheel={camera.zoomFromWheel}
         />
-        {!!turns.length && (
-          <div className="manifold-machine">
-            <ManifoldReadout
-              currentFrame={playback.currentFrame}
-              currentTurn={playback.currentTurn}
-              effectiveFrameIndex={playback.effectiveFrameIndex}
-              selectedGate={playback.selectedGate}
-              selectedResolverOutcome={playback.selectedResolverOutcome}
-              selectedSignal={playback.selectedSignal}
-              selectedSignalFrame={playback.selectedSignalFrame}
-              onFrameSelect={playback.selectFrame}
-              onSourceSelect={playback.setSelectedSourceRecordId}
-            />
-          </div>
-        )}
       </div>
     </div>
   );

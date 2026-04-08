@@ -2,11 +2,18 @@ import {
   STEERING_GATE_COLORS,
   STEERING_GATE_ORDER,
   manifoldAnchorLabel,
+  manifoldGateLabel,
+  manifoldSignalLabel,
+  resolverOutcomeMeta,
+  resolverOutcomeNarrative,
+  resolverOutcomeTitle,
+  signalKindLabel,
   steeringGateClass,
   steeringGateLabel,
+  steeringPhaseLabel,
 } from '../runtime-helpers';
 import type { ManifoldFrame, ManifoldTurnProjection } from '../runtime-types';
-import type { ManifoldForceLink, ManifoldForcePoint } from './gate-field';
+import type { ManifoldForceLink, ManifoldForcePoint, ManifoldForceSlice } from './gate-field';
 import type { ManifoldCameraState } from './use-manifold-camera';
 
 interface ManifoldStageProps {
@@ -15,8 +22,13 @@ interface ManifoldStageProps {
   currentTurn: ManifoldTurnProjection | null;
   dragMode: 'tilt' | 'pan' | 'rotate' | null;
   effectiveFrameIndex: number;
-  gateField: { points: ManifoldForcePoint[]; links: ManifoldForceLink[] };
+  gateField: { points: ManifoldForcePoint[]; links: ManifoldForceLink[]; slices: ManifoldForceSlice[] };
   playing: boolean;
+  selectedGate: (ManifoldFrame['gates'][number]) | null;
+  selectedResolverOutcome: ReturnType<typeof resolverOutcomeTitle> extends string
+    ? ReturnType<typeof import('../runtime-helpers').resolverSignalDetails>
+    : never;
+  selectedSignal: (ManifoldFrame['active_signals'][number]) | null;
   selectedSourceRecordId: string | null;
   taskId: string | null;
   totalFrames: number;
@@ -38,6 +50,9 @@ export function ManifoldStage({
   effectiveFrameIndex,
   gateField,
   playing,
+  selectedGate,
+  selectedResolverOutcome,
+  selectedSignal,
   selectedSourceRecordId,
   taskId,
   totalFrames,
@@ -50,6 +65,15 @@ export function ManifoldStage({
   onTogglePlay,
   onViewportWheel,
 }: ManifoldStageProps) {
+  const activeSourceRecordId = selectedSourceRecordId || selectedSignal?.snapshot_record_id || null;
+  const selectedSlice =
+    activeSourceRecordId == null
+      ? null
+      : gateField.slices.find(
+          (slice) =>
+            slice.turnId === currentTurn?.turn_id && slice.frameIndex === effectiveFrameIndex
+        ) || null;
+
   return (
     <section className="manifold-stage">
       <div className="manifold-stage-head">
@@ -174,6 +198,39 @@ export function ManifoldStage({
                       <div className="manifold-gate-lane__rail" />
                     </div>
                   ))}
+                  {gateField.slices.map((slice) => {
+                    const isSelected =
+                      slice.turnId === currentTurn?.turn_id && slice.frameIndex === effectiveFrameIndex;
+                    return (
+                      <div
+                        className={`manifold-force-slice${
+                          slice.isSelectedTurn ? '' : ' is-contextual'
+                        }${isSelected ? ' is-selected' : ''}`}
+                        data-point-count={slice.pointCount.toString()}
+                        key={slice.key}
+                        style={{
+                          left: `${slice.leftPercent}%`,
+                          top: `${slice.topPercent}%`,
+                          height: `${slice.heightPercent}%`,
+                        } as React.CSSProperties}
+                      >
+                        <div className="manifold-force-slice__spine" />
+                        {slice.keys.map((key) => (
+                          <div
+                            className={`manifold-force-slice__key is-${steeringGateClass(key.gate)}`}
+                            key={key.key}
+                            style={{
+                              top: `${key.relativeTopPercent}%`,
+                              ['--slice-key-intensity' as string]: `${Math.max(
+                                0.28,
+                                key.magnitudePercent / 100
+                              )}`,
+                            } as React.CSSProperties}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })}
                   {gateField.links.map((link) => (
                     <div
                       className={`manifold-force-link is-${steeringGateClass(link.gate)}${
@@ -194,7 +251,7 @@ export function ManifoldStage({
                   {gateField.points.map((point) => {
                     const isCurrent =
                       point.turnId === currentTurn?.turn_id && point.frameIndex === effectiveFrameIndex;
-                    const isSelected = point.dominantRecordId === selectedSourceRecordId;
+                    const isSelected = point.dominantRecordId === activeSourceRecordId;
                     const isInteractive = point.turnId === currentTurn?.turn_id;
                     return (
                       <button
@@ -235,6 +292,64 @@ export function ManifoldStage({
                     );
                   })}
                 </div>
+                {selectedSignal ? (
+                  <div className="manifold-force-popup" role="dialog" aria-label="Selected steering point details">
+                    <div className="manifold-force-popup__head">
+                      <div>
+                        <div className="manifold-force-popup__eyebrow">
+                          <span>{selectedGate ? manifoldGateLabel(selectedGate) : 'Selected point'}</span>
+                          <span>
+                            {selectedGate ? steeringPhaseLabel(selectedGate.phase) : 'Active'}
+                          </span>
+                        </div>
+                        <div className="manifold-force-popup__title">
+                          {selectedSignal.summary || manifoldSignalLabel(selectedSignal)}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="manifold-force-popup__meta">
+                      {manifoldSignalLabel(selectedSignal)} · {steeringGateLabel(selectedSignal.gate)} ·{' '}
+                      {steeringPhaseLabel(selectedSignal.phase)} · {selectedSignal.level} ·{' '}
+                      {selectedSignal.magnitude_percent}%
+                    </div>
+                    <div className="manifold-force-popup__detail">
+                      <div>
+                        Frame {effectiveFrameIndex + 1} · sequence {currentFrame?.sequence || 'n/a'} · anchor{' '}
+                        {manifoldAnchorLabel(selectedSignal.anchor)}
+                      </div>
+                      {selectedSlice ? (
+                        <div>
+                          Piano slice contains {selectedSlice.pointCount} steering
+                          {selectedSlice.pointCount === 1 ? ' point' : ' points'} at this step.
+                        </div>
+                      ) : null}
+                      {selectedResolverOutcome ? (
+                        <>
+                          <div className="manifold-force-popup__resolver">
+                            <strong>{resolverOutcomeTitle(selectedResolverOutcome)}</strong>
+                            <span>{resolverOutcomeMeta(selectedResolverOutcome)}</span>
+                          </div>
+                          {selectedResolverOutcome.path ? (
+                            <div className="manifold-force-popup__path">
+                              {selectedResolverOutcome.path}
+                            </div>
+                          ) : null}
+                          <div>{resolverOutcomeNarrative(selectedResolverOutcome)}</div>
+                        </>
+                      ) : null}
+                      {!!selectedSignal.contributions.length && (
+                        <div className="manifold-force-popup__contributions">
+                          {selectedSignal.contributions.slice(0, 3).map((contribution) => (
+                            <div key={`${selectedSignal.snapshot_record_id}:${contribution.source}`}>
+                              <strong>{contribution.source}</strong> · {contribution.share_percent}% ·{' '}
+                              {contribution.rationale || signalKindLabel(selectedSignal.kind)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

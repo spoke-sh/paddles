@@ -31,6 +31,7 @@ describe('ManifoldRoute', () => {
     expect(screen.getByText('Evidence gate')).toBeInTheDocument();
     expect(screen.getByText('Convergence gate')).toBeInTheDocument();
     expect(screen.getByText('Containment gate')).toBeInTheDocument();
+    expect(document.querySelector('.manifold-readout')).toBeNull();
     expect(screen.queryByText('Timeline')).not.toBeInTheDocument();
     expect(screen.queryByText('Gate Sources')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
@@ -192,7 +193,7 @@ describe('ManifoldRoute', () => {
     expect(document.querySelectorAll('.manifold-force-point')).toHaveLength(2);
   });
 
-  it('surfaces deterministic resolver outcomes in the manifold readout', async () => {
+  it('shows steering point details in a popup instead of lower readout cards', async () => {
     const resolverProjection: ConversationProjectionSnapshot = {
       ...bootstrapProjection,
       forensics: {
@@ -356,10 +357,84 @@ describe('ManifoldRoute', () => {
     stubRuntimeFetch({ projection: resolverProjection });
     renderAtPath('/manifold');
 
+    expect(document.querySelector('.manifold-readout')).toBeNull();
     expect(await screen.findByText('Resolved target')).toBeInTheDocument();
     expect(await screen.findByText('apps/web/src/runtime-shell.css')).toBeInTheDocument();
     expect(
       await screen.findByText('deterministic ranking selected a single authored target')
+    ).toBeInTheDocument();
+  });
+
+  it('groups same-frame steering points into a piano key slice', async () => {
+    const multiPointProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      manifold: {
+        ...bootstrapProjection.manifold,
+        turns: [
+          {
+            ...bootstrapProjection.manifold.turns[0],
+            frames: [
+              {
+                ...bootstrapProjection.manifold.turns[0].frames[0],
+                active_signals: [
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].active_signals[0],
+                    snapshot_record_id: 'record-2-convergence',
+                  },
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].active_signals[0],
+                    snapshot_record_id: 'record-2-evidence',
+                    kind: 'candidate_file_evidence',
+                    gate: 'evidence',
+                    summary: 'Candidate file evidence accumulated around the authored target.',
+                    magnitude_percent: 48,
+                  },
+                ],
+                gates: [
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].gates[0],
+                    dominant_record_id: 'record-2-convergence',
+                  },
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].gates[0],
+                    gate: 'evidence',
+                    label: 'evidence gate',
+                    dominant_signal_kind: 'candidate_file_evidence',
+                    signal_kinds: ['candidate_file_evidence'],
+                    dominant_record_id: 'record-2-evidence',
+                    magnitude_percent: 48,
+                    level: 'medium',
+                  },
+                ],
+                primitives: [
+                  ...bootstrapProjection.manifold.turns[0].frames[0].primitives,
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].primitives[0],
+                    primitive_id: 'gate:evidence',
+                    label: 'Evidence gate',
+                    basis: { kind: 'steering_gate', gate: 'evidence' },
+                    magnitude_percent: 48,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    stubRuntimeFetch({ projection: multiPointProjection });
+    renderAtPath('/manifold');
+
+    await screen.findByText('Temporal gate field');
+    const slices = document.querySelectorAll('.manifold-force-slice');
+    expect(slices).toHaveLength(1);
+    expect(slices[0]?.getAttribute('data-point-count')).toBe('2');
+
+    const evidencePoint = await screen.findByRole('button', { name: /Evidence gate, frame 1, 48%/i });
+    fireEvent.click(evidencePoint);
+    expect(
+      await screen.findByText('Candidate file evidence accumulated around the authored target.')
     ).toBeInTheDocument();
   });
 

@@ -4,9 +4,8 @@
 .manifold-shell {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
 }
 .manifold-stage,
 .manifold-panel {
@@ -109,14 +108,16 @@
   color: #5c6d7a;
 }
 .manifold-machine {
-  display: grid;
-  gap: 18px;
+  display: flex;
+  flex: 1;
   min-height: 100%;
-  align-content: start;
 }
 .manifold-spacefield {
   display: grid;
+  flex: 1;
+  min-height: 100%;
   gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 .manifold-spacefield__meta {
   display: flex;
@@ -131,7 +132,8 @@
 }
 .manifold-spacefield__viewport {
   position: relative;
-  min-height: 460px;
+  min-height: 0;
+  height: 100%;
   padding: 18px 18px 26px 92px;
   border-radius: 24px;
   overflow: hidden;
@@ -209,7 +211,7 @@
 }
 .manifold-spacefield__deck {
   position: relative;
-  min-height: 416px;
+  min-height: 100%;
   transform-style: preserve-3d;
   transform-origin: center center;
   transition: box-shadow 140ms ease;
@@ -273,6 +275,67 @@
 }
 .manifold-gate-lane.is-containment .manifold-gate-lane__rail {
   background: linear-gradient(90deg, rgba(23, 149, 108, 0.48), rgba(23, 149, 108, 0.12));
+}
+.manifold-force-slice {
+  position: absolute;
+  width: 4.75%;
+  min-width: 28px;
+  transform: translateX(-50%) translateZ(8px);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.66), rgba(226, 234, 240, 0.3)),
+    rgba(197, 210, 219, 0.38);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -1px -1px 0 rgba(90, 108, 121, 0.08),
+    0 16px 28px rgba(73, 88, 99, 0.12);
+  pointer-events: none;
+}
+.manifold-force-slice.is-contextual {
+  opacity: 0.24;
+}
+.manifold-force-slice.is-selected {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.74), rgba(231, 238, 243, 0.38)),
+    rgba(205, 219, 228, 0.52);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.86),
+    0 18px 30px rgba(73, 88, 99, 0.16);
+}
+.manifold-force-slice__spine {
+  position: absolute;
+  inset: 8px 7px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(104, 121, 135, 0.14), rgba(104, 121, 135, 0.05));
+}
+.manifold-force-slice__key {
+  position: absolute;
+  left: 18%;
+  width: 64%;
+  height: 14px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245, 248, 250, 0.52)),
+    rgba(163, 177, 188, var(--slice-key-intensity, 0.4));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    0 8px 14px rgba(83, 99, 112, 0.08);
+}
+.manifold-force-slice__key.is-evidence {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245, 248, 250, 0.52)),
+    rgba(45, 144, 200, var(--slice-key-intensity, 0.4));
+}
+.manifold-force-slice__key.is-convergence {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245, 248, 250, 0.52)),
+    rgba(240, 138, 36, var(--slice-key-intensity, 0.4));
+}
+.manifold-force-slice__key.is-containment {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245, 248, 250, 0.52)),
+    rgba(23, 149, 108, var(--slice-key-intensity, 0.4));
 }
 .manifold-force-link {
   position: absolute;
@@ -358,6 +421,91 @@
   color: #24333d;
   background: rgba(255,255,255,0.8);
   box-shadow: 0 8px 18px rgba(83, 99, 112, 0.12);
+}
+.manifold-force-popup {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 4;
+  width: min(360px, calc(100% - 36px));
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(88, 104, 119, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.82), rgba(240,245,248,0.48)),
+    rgba(223, 232, 238, 0.9);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.86),
+    0 22px 38px rgba(92, 108, 122, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.manifold-force-popup__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.manifold-force-popup__eyebrow {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #5c6d7a;
+}
+.manifold-force-popup__title {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #21313b;
+}
+.manifold-force-popup__close {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #274253;
+  background: rgba(255,255,255,0.78);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.9),
+    0 10px 18px rgba(92, 108, 122, 0.1);
+}
+.manifold-force-popup__meta {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #566774;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.manifold-force-popup__detail {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #30424f;
+}
+.manifold-force-popup__resolver {
+  display: grid;
+  gap: 4px;
+}
+.manifold-force-popup__path {
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f303a;
+  word-break: break-word;
+}
+.manifold-force-popup__contributions {
+  display: grid;
+  gap: 6px;
 }
 .manifold-readout {
   display: grid;
@@ -843,9 +991,6 @@
 }
 
 @media (max-width: 960px) {
-  .manifold-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .manifold-spacefield__viewport {
     min-height: 380px;
     padding: 64px 14px 22px 66px;
@@ -861,5 +1006,9 @@
   }
   .manifold-readout {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .manifold-force-popup {
+    position: static;
+    width: 100%;
   }
 }

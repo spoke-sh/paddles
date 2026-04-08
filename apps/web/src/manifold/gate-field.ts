@@ -34,6 +34,26 @@ export type ManifoldForceLink = {
   isSelectedTurn: boolean;
 };
 
+export type ManifoldForceSliceKey = {
+  key: string;
+  gate: string;
+  relativeTopPercent: number;
+  magnitudePercent: number;
+};
+
+export type ManifoldForceSlice = {
+  key: string;
+  turnId: string;
+  frameIndex: number;
+  globalFrameIndex: number;
+  leftPercent: number;
+  topPercent: number;
+  heightPercent: number;
+  pointCount: number;
+  isSelectedTurn: boolean;
+  keys: ManifoldForceSliceKey[];
+};
+
 function laneIndexForGate(gate: string) {
   const index = STEERING_GATE_ORDER.indexOf(gate);
   return index >= 0 ? index : STEERING_GATE_ORDER.length - 1;
@@ -45,14 +65,16 @@ export function buildGateField(
 ): {
   points: ManifoldForcePoint[];
   links: ManifoldForceLink[];
+  slices: ManifoldForceSlice[];
 } {
   const totalFrames = turns.reduce((sum, turn) => sum + turn.frames.length, 0);
   if (!totalFrames) {
-    return { points: [], links: [] };
+    return { points: [], links: [], slices: [] };
   }
 
   const points: ManifoldForcePoint[] = [];
   const links: ManifoldForceLink[] = [];
+  const slices: ManifoldForceSlice[] = [];
   const lastGlobalFrameIndex = Math.max(1, totalFrames - 1);
   let globalFrameIndex = 0;
 
@@ -61,6 +83,7 @@ export function buildGateField(
     const isSelectedTurn = !selectedTurnId || turn.turn_id === selectedTurnId;
 
     turn.frames.forEach((frame, frameIndex) => {
+      const framePoints: ManifoldForcePoint[] = [];
       frame.gates.forEach((gate) => {
         const normalizedGate = gate.gate || 'containment';
         const laneIndex = laneIndexForGate(normalizedGate);
@@ -83,10 +106,39 @@ export function buildGateField(
           label: manifoldGateLabel(gate),
         };
         points.push(point);
+        framePoints.push(point);
         const gatePoints = pointsByGate.get(normalizedGate) || [];
         gatePoints.push(point);
         pointsByGate.set(normalizedGate, gatePoints);
       });
+
+      if (framePoints.length) {
+        const sortedFramePoints = [...framePoints].sort((left, right) => left.topPercent - right.topPercent);
+        const minTop = sortedFramePoints[0].topPercent;
+        const maxTop = sortedFramePoints[sortedFramePoints.length - 1].topPercent;
+        const padding = 8;
+        const topPercent = Math.max(10, minTop - padding);
+        const bottomPercent = Math.min(96, maxTop + padding);
+        const heightPercent = Math.max(18, bottomPercent - topPercent);
+        slices.push({
+          key: `${turn.turn_id}:frame:${frame.record_id}`,
+          turnId: turn.turn_id,
+          frameIndex,
+          globalFrameIndex,
+          leftPercent: sortedFramePoints[0].leftPercent,
+          topPercent,
+          heightPercent,
+          pointCount: sortedFramePoints.length,
+          isSelectedTurn,
+          keys: sortedFramePoints.map((point) => ({
+            key: point.key,
+            gate: point.gate,
+            relativeTopPercent:
+              heightPercent <= 0 ? 50 : ((point.topPercent - topPercent) / heightPercent) * 100,
+            magnitudePercent: point.magnitudePercent,
+          })),
+        });
+      }
 
       globalFrameIndex += 1;
     });
@@ -109,7 +161,7 @@ export function buildGateField(
     }
   });
 
-  return { points, links };
+  return { points, links, slices };
 }
 
 export function frameForSelectedRecord(
