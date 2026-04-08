@@ -280,6 +280,50 @@ function renderAtPath(pathname: string) {
   return render(<RuntimeApp />);
 }
 
+function installScrollMetrics(
+  element: HTMLElement,
+  {
+    clientHeight,
+    scrollHeight,
+    scrollTop,
+  }: { clientHeight: number; scrollHeight: number; scrollTop: number }
+) {
+  let currentClientHeight = clientHeight;
+  let currentScrollHeight = scrollHeight;
+  let currentScrollTop = scrollTop;
+
+  Object.defineProperty(element, 'clientHeight', {
+    configurable: true,
+    get: () => currentClientHeight,
+  });
+  Object.defineProperty(element, 'scrollHeight', {
+    configurable: true,
+    get: () => currentScrollHeight,
+  });
+  Object.defineProperty(element, 'scrollTop', {
+    configurable: true,
+    get: () => currentScrollTop,
+    set: (value: number) => {
+      currentScrollTop = Number(value);
+    },
+  });
+
+  return {
+    get scrollTop() {
+      return currentScrollTop;
+    },
+    set scrollHeight(value: number) {
+      currentScrollHeight = value;
+    },
+    set scrollTop(value: number) {
+      currentScrollTop = value;
+    },
+    set clientHeight(value: number) {
+      currentClientHeight = value;
+    },
+  };
+}
+
 describe('RuntimeApp', () => {
   it('renders the primary conversation route through the client router without iframe proxies', async () => {
     renderAtPath('/');
@@ -400,6 +444,60 @@ describe('RuntimeApp', () => {
     expect(await screen.findByText('alpha')).toBeInTheDocument();
     expect(await screen.findByText('beta')).toBeInTheDocument();
     expect(document.querySelectorAll('.event-badge.tool-terminal')).toHaveLength(1);
+  });
+
+  it('keeps live stream rows from snapping chat to the bottom after the user scrolls up', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+
+    const messages = document.getElementById('messages');
+    expect(messages).not.toBeNull();
+    const scrollBox = installScrollMetrics(messages as HTMLElement, {
+      clientHeight: 200,
+      scrollHeight: 1000,
+      scrollTop: 120,
+    });
+
+    fireEvent.scroll(messages as HTMLElement);
+    scrollBox.scrollHeight = 1120;
+
+    const [stream] = FakeEventSource.instances;
+    stream.dispatch('turn_event', {
+      type: 'tool_called',
+      tool_name: 'shell',
+      invocation: 'git status --short',
+    });
+
+    expect(await screen.findByText('shell: git status --short')).toBeInTheDocument();
+    await waitFor(() => expect(scrollBox.scrollTop).toBe(120));
+  });
+
+  it('keeps the chat pinned to the tail when the user is already near the bottom', async () => {
+    renderAtPath('/');
+
+    expect(await screen.findByText('Mock provider completed the turn after local inspection.')).toBeInTheDocument();
+
+    const messages = document.getElementById('messages');
+    expect(messages).not.toBeNull();
+    const scrollBox = installScrollMetrics(messages as HTMLElement, {
+      clientHeight: 200,
+      scrollHeight: 1000,
+      scrollTop: 792,
+    });
+
+    fireEvent.scroll(messages as HTMLElement);
+    scrollBox.scrollHeight = 1120;
+
+    const [stream] = FakeEventSource.instances;
+    stream.dispatch('turn_event', {
+      type: 'tool_called',
+      tool_name: 'shell',
+      invocation: 'git diff --stat',
+    });
+
+    expect(await screen.findByText('shell: git diff --stat')).toBeInTheDocument();
+    await waitFor(() => expect(scrollBox.scrollTop).toBe(1120));
   });
 
   it('renders assistant transcript blocks instead of flattening them to plain strings', async () => {

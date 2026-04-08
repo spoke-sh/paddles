@@ -2290,6 +2290,11 @@ async function ensureSession() {
 
 function wireStaticUi() {
   const prompt = document.getElementById('prompt');
+  const messages = messagesElement();
+  if (messages) {
+    messages.addEventListener('scroll', rememberMessagesTailPreference);
+    rememberMessagesTailPreference();
+  }
   prompt.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -3243,6 +3248,30 @@ function connectSSE() {
   });
 }
 
+const CHAT_TAIL_THRESHOLD_PX = 24;
+let shouldStickMessagesToTail = true;
+
+function messagesElement() {
+  return document.getElementById('messages');
+}
+
+function chatViewportNearTail(container) {
+  return container.scrollHeight - (container.scrollTop + container.clientHeight) <= CHAT_TAIL_THRESHOLD_PX;
+}
+
+function rememberMessagesTailPreference() {
+  const messages = messagesElement();
+  shouldStickMessagesToTail = !messages || chatViewportNearTail(messages);
+}
+
+function syncMessagesScrollToTailIfNeeded() {
+  const messages = messagesElement();
+  if (!messages || !shouldStickMessagesToTail) {
+    return;
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
 function addMessage(cls, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + cls;
@@ -3260,7 +3289,7 @@ function addMessage(cls, text) {
   } else {
     messages.appendChild(el);
   }
-  el.scrollIntoView({ behavior: 'smooth' });
+  syncMessagesScrollToTailIfNeeded();
 }
 
 function clearTranscriptMessages() {
@@ -3295,7 +3324,7 @@ function addEventRow(badge, badgeCls, text, htmlContent = null, options = {}) {
       const content = htmlContent === null ? escapeHtml(text) : htmlContent;
       existing.innerHTML = '<span class="event-badge ' + badgeCls + '">' + badge + '</span><span>' + content + '</span>';
       existing.dataset.eventText = text;
-      existing.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      syncMessagesScrollToTailIfNeeded();
       return;
     }
   }
@@ -3311,7 +3340,7 @@ function addEventRow(badge, badgeCls, text, htmlContent = null, options = {}) {
   }
   row.dataset.eventText = text;
   group.appendChild(row);
-  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  syncMessagesScrollToTailIfNeeded();
 }
 
 function formatDuration(totalSeconds) {

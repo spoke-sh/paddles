@@ -147,6 +147,12 @@ type ComposerPart =
   | { id: string; kind: 'text'; text: string }
   | { id: string; kind: 'paste'; text: string; lines: number; preview: string };
 
+const CHAT_TAIL_THRESHOLD_PX = 24;
+
+function chatViewportNearTail(container: HTMLElement) {
+  return container.scrollHeight - (container.scrollTop + container.clientHeight) <= CHAT_TAIL_THRESHOLD_PX;
+}
+
 function normalizeComposerText(text: string) {
   return text.replace(/\r\n/g, '\n');
 }
@@ -173,6 +179,7 @@ function RuntimeShellLayout() {
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [historyDraft, setHistoryDraft] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickMessagesToTailRef = useRef(true);
   const composerPartId = useRef(0);
 
   function nextComposerPartId() {
@@ -211,8 +218,15 @@ function RuntimeShellLayout() {
     if (!container) {
       return;
     }
+    if (!shouldStickMessagesToTailRef.current) {
+      return;
+    }
     container.scrollTop = container.scrollHeight;
   }, [events, projection?.transcript.entries.length]);
+
+  function onMessagesScroll(event: React.UIEvent<HTMLDivElement>) {
+    shouldStickMessagesToTailRef.current = chatViewportNearTail(event.currentTarget);
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -320,7 +334,7 @@ function RuntimeShellLayout() {
     <>
       <div className="chat-panel">
         <div className="chat-header">Paddles</div>
-        <div className="chat-messages" id="messages" ref={messagesRef}>
+        <div className="chat-messages" id="messages" onScroll={onMessagesScroll} ref={messagesRef}>
           {projection?.transcript.entries.map((entry) => (
             <div
               className={`msg ${entry.speaker === 'assistant' ? 'assistant' : 'user'}`}

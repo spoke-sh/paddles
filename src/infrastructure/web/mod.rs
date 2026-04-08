@@ -1752,6 +1752,23 @@ mod tests {
         assert!(html.contains("event-output"));
     }
 
+    #[test]
+    fn embedded_primary_shell_only_auto_scrolls_chat_when_the_viewport_is_at_the_tail() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("const CHAT_TAIL_THRESHOLD_PX = 24;"));
+        assert!(html.contains("let shouldStickMessagesToTail = true;"));
+        assert!(
+            html.contains("messages.addEventListener('scroll', rememberMessagesTailPreference);")
+        );
+        assert!(html.contains("messages.scrollTop = messages.scrollHeight;"));
+        assert!(!html.contains("el.scrollIntoView({ behavior: 'smooth' })"));
+        assert!(
+            !html.contains("existing.scrollIntoView({ behavior: 'smooth', block: 'nearest' })")
+        );
+        assert!(!html.contains("row.scrollIntoView({ behavior: 'smooth', block: 'nearest' })"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn session_routes_project_live_shared_session_turns_from_mock_provider() {
         let workspace = tempfile::tempdir().expect("workspace");
