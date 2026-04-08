@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:35:30.188162719-07:00
+mode: manual
+---
+Updated voyage-one SDD with the concrete runtime module tree, ownership boundaries, and extraction sequence for app/chat/store decomposition.

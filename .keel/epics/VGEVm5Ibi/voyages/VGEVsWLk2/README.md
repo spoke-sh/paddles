@@ -27,11 +27,11 @@ started_at: 2026-04-08T13:28:44
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Runtime Module Map And Migration Contract](../../../../stories/VGEVvqjOV/README.md) | feat | in-progress |
+| [Define Runtime Module Map And Migration Contract](../../../../stories/VGEVvqjOV/README.md) | feat | done |
 | [Extract Shell Transcript And Composer Surfaces](../../../../stories/VGEVvrJOP/README.md) | feat | backlog |
 | [Separate Runtime Store Transport And Event Reduction](../../../../stories/VGEVvrlPA/README.md) | feat | backlog |
 <!-- END GENERATED -->

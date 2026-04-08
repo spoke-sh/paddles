@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:35:30.223236060-07:00
+mode: manual
+---
+Documented shell-owned cross-route state in the voyage-one SDD and mission log, explicitly retaining prompt history, sticky-tail transcript scrolling, and manifold turn selection in the shell boundary.
