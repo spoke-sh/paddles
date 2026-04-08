@@ -1,0 +1,20 @@
+---
+recorded_at: 2026-04-08T09:37:37.689806405-07:00
+command: cargo nextest run resolver_never_promotes_non_authored_targets --no-tests pass
+---
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+────────────
+ Nextest run ID 188ca8c8-ab08-48d5-a970-32c57abd0808 with nextest profile: default
+    Starting 1 test across 2 binaries (474 tests skipped)
+        PASS [   0.012s] (1/1) paddles application::tests::resolver_never_promotes_non_authored_targets
+────────────
+     Summary [   0.014s] 1 test run: 1 passed, 474 skipped

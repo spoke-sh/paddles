@@ -27,16 +27,16 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
-    EntityResolutionOutcome, EntityResolutionRequest, EntityResolver, EvidenceBudget,
-    EvidenceBundle, EvidenceItem, GathererCapability, GroundingRequirement, InitialAction,
-    InitialActionDecision, InitialEditInstruction, InterpretationContext, InterpretationProcedure,
-    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
-    ModelRegistry, NoopTraceRecorder, NormalizedEntityHint, OperatorMemory, PlannerAction,
-    PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-    RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
-    WorkspaceAction,
+    EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest, EntityResolver,
+    EvidenceBudget, EvidenceBundle, EvidenceItem, GathererCapability, GroundingRequirement,
+    InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, ModelPaths, ModelRegistry, NoopTraceRecorder, NormalizedEntityHint,
+    OperatorMemory, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
+    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+    RetrievalStrategy, RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest,
+    TraceRecorder, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -2733,7 +2733,10 @@ impl MechSuitService {
         let mut execution_checklist = execution_checklist;
         let base_budget = planner_budget_for_turn(&context.initial_edit);
         let mut budget = planner_budget_for_replan_attempt(&base_budget, 0);
-        let mut loop_state = PlannerLoopState::default();
+        let mut loop_state = PlannerLoopState {
+            target_resolution: context.initial_edit.resolution.clone(),
+            ..PlannerLoopState::default()
+        };
         if let Some(checklist) = execution_checklist.as_ref() {
             checklist.sync_loop_state_notes(&mut loop_state);
         }
@@ -2817,6 +2820,9 @@ impl MechSuitService {
 
             instruction_frame =
                 merge_instruction_frame_with_edit_signal(instruction_frame, &decision.edit);
+            if let Some(resolution) = decision.edit.resolution.clone() {
+                loop_state.target_resolution = Some(resolution);
+            }
 
             trace.emit(TurnEvent::PlannerStepProgress {
                 step_number: sequence,
@@ -2980,7 +2986,23 @@ impl MechSuitService {
                     | WorkspaceAction::WriteFile { .. }
                     | WorkspaceAction::ReplaceInFile { .. }
                     | WorkspaceAction::ApplyPatch { .. } => {
-                        if matches!(action, WorkspaceAction::Read { .. })
+                        maybe_promote_missing_resolution_for_mutation(
+                            &self.workspace_root,
+                            &context.initial_edit.candidate_files,
+                            &mut loop_state,
+                            action,
+                        );
+                        if let Some((reason, summary)) =
+                            unresolved_target_mutation_boundary(action, &loop_state)
+                        {
+                            trace.emit(TurnEvent::Fallback {
+                                stage: "entity-resolution".to_string(),
+                                reason: summary.clone(),
+                            });
+                            stop_reason = Some(reason);
+                            accepted_stop = true;
+                            summary
+                        } else if matches!(action, WorkspaceAction::Read { .. })
                             && read_steps(&loop_state) >= budget.max_reads
                         {
                             stop_reason = Some("read-budget-exhausted".to_string());
@@ -5210,6 +5232,60 @@ fn prior_read_counts(loop_state: &PlannerLoopState) -> HashMap<String, usize> {
     counts
 }
 
+fn workspace_action_path(action: &WorkspaceAction) -> Option<&str> {
+    match action {
+        WorkspaceAction::Read { path }
+        | WorkspaceAction::Diff { path: Some(path) }
+        | WorkspaceAction::WriteFile { path, .. }
+        | WorkspaceAction::ReplaceInFile { path, .. } => Some(path.as_str()),
+        WorkspaceAction::ListFiles { .. }
+        | WorkspaceAction::Diff { path: None }
+        | WorkspaceAction::ApplyPatch { .. }
+        | WorkspaceAction::Search { .. }
+        | WorkspaceAction::Inspect { .. }
+        | WorkspaceAction::Shell { .. } => None,
+    }
+}
+
+fn maybe_promote_missing_resolution_for_mutation(
+    workspace_root: &Path,
+    candidate_files: &[String],
+    loop_state: &mut PlannerLoopState,
+    action: &WorkspaceAction,
+) {
+    let Some(EntityResolutionOutcome::Missing { .. }) = loop_state.target_resolution.as_ref()
+    else {
+        return;
+    };
+    let Some(path) = workspace_action_path(action) else {
+        return;
+    };
+    let Some(normalized_path) = normalize_candidate_files(workspace_root, &[path.to_string()], 1)
+        .into_iter()
+        .next()
+    else {
+        return;
+    };
+
+    let normalized_candidates = normalize_candidate_files(workspace_root, candidate_files, 8);
+    let read_counts = prior_read_counts(loop_state);
+    let supported_by_turn_state = normalized_candidates
+        .iter()
+        .any(|candidate| candidate == &normalized_path)
+        || read_counts.contains_key(&normalized_path);
+    if !supported_by_turn_state {
+        return;
+    }
+
+    loop_state.target_resolution = Some(EntityResolutionOutcome::Resolved {
+        target: EntityResolutionCandidate::new(normalized_path, EntityLookupMode::ExactPath, 1),
+        alternatives: Vec::new(),
+        explanation:
+            "exact mutation path matched an authored candidate already present in the turn state"
+                .to_string(),
+    });
+}
+
 fn decision_is_exact_edit(action: &PlannerAction) -> bool {
     matches!(
         action,
@@ -5219,6 +5295,51 @@ fn decision_is_exact_edit(action: &PlannerAction) -> bool {
                 | WorkspaceAction::ApplyPatch { .. }
         }
     )
+}
+
+fn unresolved_target_mutation_boundary(
+    action: &WorkspaceAction,
+    loop_state: &PlannerLoopState,
+) -> Option<(String, String)> {
+    if !matches!(
+        action,
+        WorkspaceAction::WriteFile { .. }
+            | WorkspaceAction::ReplaceInFile { .. }
+            | WorkspaceAction::ApplyPatch { .. }
+    ) {
+        return None;
+    }
+
+    match loop_state.target_resolution.as_ref()? {
+        EntityResolutionOutcome::Resolved { .. } => None,
+        EntityResolutionOutcome::Ambiguous {
+            candidates,
+            explanation,
+        } => {
+            let candidate_summary = candidates
+                .iter()
+                .take(3)
+                .map(|candidate| candidate.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let reason = if candidate_summary.is_empty() {
+                format!(
+                    "deterministic entity resolution remained ambiguous; safe workspace mutation is blocked. {explanation}"
+                )
+            } else {
+                format!(
+                    "deterministic entity resolution remained ambiguous; safe workspace mutation is blocked until the target is narrowed. Candidates: {candidate_summary}. {explanation}"
+                )
+            };
+            Some(("unresolved-entity-target:ambiguous".to_string(), reason))
+        }
+        EntityResolutionOutcome::Missing { explanation, .. } => Some((
+            "unresolved-entity-target:missing".to_string(),
+            format!(
+                "deterministic entity resolution did not find a safe authored target; safe workspace mutation is blocked. {explanation}"
+            ),
+        )),
+    }
 }
 
 fn format_action_bias_review_note(
@@ -5576,7 +5697,10 @@ async fn resolve_known_edit_target(
     existing_resolution: Option<&EntityResolutionOutcome>,
 ) -> Option<EntityResolutionOutcome> {
     if let Some(resolution) = existing_resolution {
-        return Some(resolution.clone());
+        return Some(sanitize_existing_entity_resolution(
+            workspace_root,
+            resolution,
+        ));
     }
 
     let normalized_candidates = normalize_candidate_files(workspace_root, candidate_files, 6);
@@ -5600,6 +5724,43 @@ async fn resolve_known_edit_target(
         )
         .await
         .ok()
+        .map(|outcome| sanitize_entity_resolution_outcome(workspace_root, outcome))
+}
+
+fn sanitize_existing_entity_resolution(
+    workspace_root: &Path,
+    outcome: &EntityResolutionOutcome,
+) -> EntityResolutionOutcome {
+    let EntityResolutionOutcome::Resolved {
+        target,
+        alternatives,
+        explanation,
+    } = outcome
+    else {
+        return sanitize_entity_resolution_outcome(workspace_root, outcome.clone());
+    };
+
+    let path_policy = WorkspacePathPolicy::new(workspace_root);
+    let Some(preserved_target) =
+        normalize_action_bias_source(&target.path, workspace_root, &path_policy)
+    else {
+        return sanitize_entity_resolution_outcome(workspace_root, outcome.clone());
+    };
+
+    let mut sanitized_alternatives =
+        sanitize_entity_resolution_candidates(workspace_root, alternatives.clone())
+            .into_iter()
+            .filter(|candidate| candidate.path != preserved_target)
+            .collect::<Vec<_>>();
+    for (index, candidate) in sanitized_alternatives.iter_mut().enumerate() {
+        candidate.rank = index + 2;
+    }
+
+    EntityResolutionOutcome::Resolved {
+        target: EntityResolutionCandidate::new(preserved_target, target.matched_by, 1),
+        alternatives: sanitized_alternatives,
+        explanation: explanation.clone(),
+    }
 }
 
 fn known_edit_resolution_hints(
@@ -5668,6 +5829,84 @@ fn merge_resolution_candidate_paths(
     resolution: &EntityResolutionOutcome,
 ) -> Vec<String> {
     merge_known_edit_target_lists(&resolution.candidate_paths(), candidates)
+}
+
+fn sanitize_entity_resolution_outcome(
+    workspace_root: &Path,
+    outcome: EntityResolutionOutcome,
+) -> EntityResolutionOutcome {
+    match outcome {
+        EntityResolutionOutcome::Resolved {
+            target,
+            alternatives,
+            explanation,
+        } => {
+            let sanitized = sanitize_entity_resolution_candidates(
+                workspace_root,
+                std::iter::once(target).chain(alternatives).collect(),
+            );
+            collapse_sanitized_entity_resolution(sanitized, explanation)
+        }
+        EntityResolutionOutcome::Ambiguous {
+            candidates,
+            explanation,
+        } => {
+            let sanitized = sanitize_entity_resolution_candidates(workspace_root, candidates);
+            collapse_sanitized_entity_resolution(sanitized, explanation)
+        }
+        EntityResolutionOutcome::Missing { .. } => outcome,
+    }
+}
+
+fn collapse_sanitized_entity_resolution(
+    mut candidates: Vec<EntityResolutionCandidate>,
+    explanation: String,
+) -> EntityResolutionOutcome {
+    match candidates.len() {
+        0 => EntityResolutionOutcome::Missing {
+            attempted_hints: Vec::new(),
+            explanation: format!(
+                "deterministic resolver returned no safe authored targets. {explanation}"
+            ),
+        },
+        1 => EntityResolutionOutcome::Resolved {
+            target: candidates.remove(0),
+            alternatives: Vec::new(),
+            explanation,
+        },
+        _ => EntityResolutionOutcome::Ambiguous {
+            candidates,
+            explanation,
+        },
+    }
+}
+
+fn sanitize_entity_resolution_candidates(
+    workspace_root: &Path,
+    candidates: Vec<EntityResolutionCandidate>,
+) -> Vec<EntityResolutionCandidate> {
+    let mut sanitized = Vec::new();
+    for candidate in candidates {
+        let Some(path) =
+            normalize_candidate_files(workspace_root, std::slice::from_ref(&candidate.path), 1)
+                .into_iter()
+                .next()
+        else {
+            continue;
+        };
+        if sanitized
+            .iter()
+            .any(|existing: &EntityResolutionCandidate| existing.path == path)
+        {
+            continue;
+        }
+        sanitized.push(EntityResolutionCandidate::new(
+            path,
+            candidate.matched_by,
+            sanitized.len() + 1,
+        ));
+    }
+    sanitized
 }
 
 fn normalize_action_bias_source(
@@ -9497,6 +9736,143 @@ mod tests {
                 .loop_state
                 .target_resolution,
             Some(resolution)
+        );
+    }
+
+    #[test]
+    fn unresolved_targets_fail_closed_before_workspace_mutation() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::write(workspace.path().join("src/application/mod.rs"), "before\n").expect("write file");
+
+        let service = test_service(workspace.path());
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = ConversationSession::new(TaskTraceId::new("task-ambiguous").expect("task"));
+        let turn_id = session.allocate_turn_id();
+        let trace = Arc::new(StructuredTurnTrace::new(
+            sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            turn_id,
+            session.active_thread().thread_ref,
+        ));
+        let resolution = EntityResolutionOutcome::Ambiguous {
+            candidates: vec![
+                EntityResolutionCandidate::new(
+                    "src/application/mod.rs",
+                    EntityLookupMode::Basename,
+                    1,
+                ),
+                EntityResolutionCandidate::new(
+                    "src/domain/model/turns.rs",
+                    EntityLookupMode::Basename,
+                    2,
+                ),
+            ],
+            explanation: "two authored files remained tied".to_string(),
+        };
+        let mut context = test_planner_loop_context(InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec!["src/application/mod.rs".to_string()],
+            resolution: Some(resolution.clone()),
+        });
+        context.synthesizer_engine = synthesizer.clone();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            service
+                .execute_recursive_planner_loop(
+                    "Update the planner stream text",
+                    context,
+                    Some(RecursivePlannerDecision {
+                        action: PlannerAction::Workspace {
+                            action: WorkspaceAction::ReplaceInFile {
+                                path: "src/application/mod.rs".to_string(),
+                                old: "before".to_string(),
+                                new: "after".to_string(),
+                                replace_all: false,
+                            },
+                        },
+                        rationale: "edit immediately".to_string(),
+                        answer: None,
+                        edit: InitialEditInstruction::default(),
+                        grounding: None,
+                    }),
+                    None,
+                    trace,
+                )
+                .await
+                .expect("planner loop should succeed");
+        });
+
+        assert!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .is_empty()
+        );
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::Fallback { stage, reason }
+                if stage == "entity-resolution" && reason.contains("ambiguous")
+        )));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerSummary {
+                stop_reason: Some(reason),
+                ..
+            } if reason.contains("unresolved-entity-target:ambiguous")
+        )));
+    }
+
+    #[tokio::test]
+    async fn resolver_never_promotes_non_authored_targets() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src")).expect("create src");
+        fs::create_dir_all(workspace.path().join("dist")).expect("create dist");
+        fs::write(workspace.path().join(".gitignore"), "/dist/\n").expect("write gitignore");
+        fs::write(workspace.path().join("src/runtime.rs"), "fn runtime() {}\n").expect("write src");
+        fs::write(workspace.path().join("dist/runtime.js"), "export {};\n").expect("write dist");
+
+        let resolver: Arc<dyn EntityResolver> = Arc::new(StaticEntityResolver {
+            outcome: EntityResolutionOutcome::Ambiguous {
+                candidates: vec![
+                    EntityResolutionCandidate::new(
+                        "dist/runtime.js",
+                        EntityLookupMode::ExactPath,
+                        1,
+                    ),
+                    EntityResolutionCandidate::new(
+                        "src/runtime.rs",
+                        EntityLookupMode::ExactPath,
+                        2,
+                    ),
+                ],
+                explanation: "unsafe candidate leaked into the resolver output".to_string(),
+            },
+            recorded_requests: Arc::new(Mutex::new(Vec::new())),
+        });
+
+        let outcome = super::resolve_known_edit_target(
+            &resolver,
+            workspace.path(),
+            "Update runtime",
+            &["dist/runtime.js".to_string(), "src/runtime.rs".to_string()],
+            &[],
+            None,
+        )
+        .await
+        .expect("resolution outcome");
+
+        assert_eq!(outcome.resolved_path(), Some("src/runtime.rs"));
+        assert!(
+            !outcome
+                .candidate_paths()
+                .iter()
+                .any(|path| path == "dist/runtime.js")
         );
     }
 

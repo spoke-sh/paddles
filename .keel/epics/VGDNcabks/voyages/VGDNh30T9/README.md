@@ -27,11 +27,11 @@ started_at: 2026-04-08T09:19:37
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Use Deterministic Resolution Before Edit State Actions](../../../../stories/VGDNlZK5Z/README.md) | feat | done |
-| [Fail Closed On Ambiguous Or Missing Entity Targets](../../../../stories/VGDNlZu6I/README.md) | feat | backlog |
+| [Fail Closed On Ambiguous Or Missing Entity Targets](../../../../stories/VGDNlZu6I/README.md) | feat | done |
 | [Document And Visualize Deterministic Resolution Behavior](../../../../stories/VGDNlaV6E/README.md) | feat | backlog |
 <!-- END GENERATED -->

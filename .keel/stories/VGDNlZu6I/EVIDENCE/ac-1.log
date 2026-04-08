@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-04-08T09:37:37.643091935-07:00
+command: cargo nextest run unresolved_targets_fail_closed_before_workspace_mutation --no-tests pass
+---
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+────────────
+ Nextest run ID 3cb91bc7-a5fe-423b-b0dc-c49e096cf2f5 with nextest profile: default
+    Starting 1 test across 2 binaries (474 tests skipped)
+        PASS [   0.023s] (1/1) paddles application::tests::unresolved_targets_fail_closed_before_workspace_mutation
+────────────
+     Summary [   0.025s] 1 test run: 1 passed, 474 skipped
