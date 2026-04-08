@@ -114,24 +114,12 @@ export function ManifoldStage({
           </div>
         ) : (
           <div className="manifold-machine">
-            <div className="manifold-playback-banner">
-              <strong>Temporal gate playback is active.</strong>
-              <p>
-                Time sweeps left to right, gate families stack top to bottom, and force rises
-                toward you with magnitude.
-                <br />
-                Current turn: {currentTurn?.turn_id || 'none'} · frame sequence{' '}
-                {currentFrame?.sequence || 'none'}
-                <br />
-                Active gates: {currentFrame?.gates.length || 0} · sources:{' '}
-                {currentFrame?.active_signals.length || 0} · projected anchors:{' '}
-                {currentFrame?.primitives.length || 0}
-              </p>
-            </div>
             <div className="manifold-spacefield">
               <div className="manifold-spacefield__meta">
                 <span>Temporal gate field</span>
-                <span>turn anchor {manifoldAnchorLabel(currentFrame?.anchor)}</span>
+                <span>
+                  {currentTurn?.turn_id || 'no-turn'} · anchor {manifoldAnchorLabel(currentFrame?.anchor)}
+                </span>
               </div>
               <div
                 className={`manifold-spacefield__viewport${
@@ -188,7 +176,9 @@ export function ManifoldStage({
                   ))}
                   {gateField.links.map((link) => (
                     <div
-                      className={`manifold-force-link is-${steeringGateClass(link.gate)}`}
+                      className={`manifold-force-link is-${steeringGateClass(link.gate)}${
+                        link.isSelectedTurn ? '' : ' is-contextual'
+                      }`}
                       key={link.key}
                       style={{
                         left: `${link.leftPercent}%`,
@@ -202,16 +192,25 @@ export function ManifoldStage({
                     />
                   ))}
                   {gateField.points.map((point) => {
-                    const isCurrent = point.frameIndex === effectiveFrameIndex;
+                    const isCurrent =
+                      point.turnId === currentTurn?.turn_id && point.frameIndex === effectiveFrameIndex;
                     const isSelected = point.dominantRecordId === selectedSourceRecordId;
+                    const isInteractive = point.turnId === currentTurn?.turn_id;
                     return (
                       <button
                         className={`manifold-force-point is-${steeringGateClass(point.gate)}${
                           isCurrent ? ' is-current' : ''
-                        }${isSelected ? ' is-selected' : ''}`}
+                        }${isSelected ? ' is-selected' : ''}${
+                          point.isSelectedTurn ? '' : ' is-contextual'
+                        }`}
+                        disabled={!isInteractive}
                         key={point.key}
                         onMouseDown={(event) => event.stopPropagation()}
-                        onClick={() => onPointSelect(point.frameIndex, point.dominantRecordId)}
+                        onClick={() => {
+                          if (isInteractive) {
+                            onPointSelect(point.frameIndex, point.dominantRecordId);
+                          }
+                        }}
                         style={{
                           left: `${point.leftPercent}%`,
                           top: `${point.topPercent}%`,

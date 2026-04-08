@@ -39,9 +39,9 @@ describe('ManifoldRoute', () => {
   it('renders the temporal gate field instead of the empty-state filler once frames exist', async () => {
     renderAtPath('/manifold');
 
-    const banner = await screen.findByText('Temporal gate playback is active.');
-    expect(banner.closest('.manifold-playback-banner')).toBeInTheDocument();
-    expect(banner.closest('.manifold-empty-state')).toBeNull();
+    expect(screen.queryByText('Temporal gate playback is active.')).not.toBeInTheDocument();
+    expect(document.querySelector('.manifold-playback-banner')).toBeNull();
+    expect(document.querySelector('.manifold-empty-state')).toBeNull();
     expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
   });
 
@@ -181,6 +181,7 @@ describe('ManifoldRoute', () => {
     expect(
       await screen.findByText('Containment held the authored target steady.')
     ).toBeInTheDocument();
+    expect(document.querySelectorAll('.manifold-force-point')).toHaveLength(2);
 
     const olderTurnMessage = screen.getByText('CI is failing. Can you debug it?').closest('.msg');
     expect(olderTurnMessage).not.toBeNull();
@@ -188,6 +189,7 @@ describe('ManifoldRoute', () => {
 
     await waitFor(() => expect(olderTurnMessage).toHaveClass('is-selected-turn'));
     expect(await screen.findByText('Action bias strengthened after local evidence.')).toBeInTheDocument();
+    expect(document.querySelectorAll('.manifold-force-point')).toHaveLength(2);
   });
 
   it('surfaces deterministic resolver outcomes in the manifold readout', async () => {

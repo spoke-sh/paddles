@@ -39,7 +39,10 @@ export function useManifoldPlayback(
     currentFrame?.gates[0] ||
     null;
   const selectedResolverOutcome = resolverSignalDetails(selectedSignal);
-  const gateField = useMemo(() => buildGateField(currentTurn), [currentTurn]);
+  const gateField = useMemo(
+    () => buildGateField(turns, selectedTurnId),
+    [turns, selectedTurnId]
+  );
   const totalFrames = turns.reduce((sum, turn) => sum + turn.frames.length, 0);
 
   useEffect(() => {
