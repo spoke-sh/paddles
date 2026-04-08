@@ -2547,6 +2547,7 @@ impl MechSuitService {
             edit: crate::domain::ports::InitialEditInstruction {
                 known_edit: decision.edit.known_edit,
                 candidate_files: ranked_candidates,
+                resolution: decision.edit.resolution.clone(),
             },
             grounding: decision.grounding.clone(),
         }))
@@ -3766,7 +3767,11 @@ fn activate_replan(stop_reason: &str, activation: ReplanActivation<'_>) -> bool 
 
 fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<InstructionFrame> {
     if edit.known_edit {
-        Some(InstructionFrame::for_edit(edit.candidate_files.clone()))
+        let mut frame = InstructionFrame::for_edit(edit.candidate_files.clone());
+        if let Some(resolution) = edit.resolution.clone() {
+            frame.note_resolution(resolution);
+        }
+        Some(frame)
     } else {
         None
     }
@@ -3788,10 +3793,13 @@ fn merge_instruction_frame_with_edit_signal(
                         frame.candidate_files.push(candidate.clone());
                     }
                 }
+                if let Some(resolution) = edit.resolution.clone() {
+                    frame.note_resolution(resolution);
+                }
             }
             Some(frame)
         }
-        None => Some(InstructionFrame::for_edit(edit.candidate_files.clone())),
+        None => instruction_frame_from_initial_edit(edit),
     }
 }
 
@@ -3809,6 +3817,10 @@ fn merge_initial_edit_instruction(
     InitialEditInstruction {
         known_edit: current.known_edit || inferred.known_edit,
         candidate_files,
+        resolution: inferred
+            .resolution
+            .clone()
+            .or_else(|| current.resolution.clone()),
     }
 }
 
@@ -3823,6 +3835,7 @@ fn controller_prompt_edit_instruction(
     InitialEditInstruction {
         known_edit: true,
         candidate_files: known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3),
+        resolution: None,
     }
 }
 
@@ -5968,7 +5981,7 @@ mod tests {
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
         GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
         InitialEditInstruction, InterpretationContext, InterpretationRequest, ModelPaths,
-        ModelRegistry, PlannerAction, PlannerCapability, PlannerGraphBranch,
+        ModelRegistry, PlannerAction, PlannerBudget, PlannerCapability, PlannerGraphBranch,
         PlannerGraphBranchStatus, PlannerGraphEpisode, PlannerLoopState, PlannerRequest,
         PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner,
         RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
@@ -7827,6 +7840,7 @@ mod tests {
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec!["src/lib.rs".to_string()],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -7843,6 +7857,7 @@ mod tests {
                     edit: InitialEditInstruction {
                         known_edit: true,
                         candidate_files: vec!["src/lib.rs".to_string()],
+                        resolution: None,
                     },
                     grounding: None,
                 },
@@ -7855,6 +7870,7 @@ mod tests {
                     edit: InitialEditInstruction {
                         known_edit: true,
                         candidate_files: vec!["src/lib.rs".to_string()],
+                        resolution: None,
                     },
                     grounding: None,
                 },
@@ -8394,6 +8410,7 @@ mod tests {
             &test_planner_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["src/application/mod.rs".to_string()],
+                resolution: None,
             }),
             &loop_state,
             &decision,
@@ -8445,6 +8462,7 @@ mod tests {
             &test_planner_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["src/infrastructure/providers.rs".to_string()],
+                resolution: None,
             }),
             &loop_state,
             &decision,
@@ -8497,6 +8515,7 @@ mod tests {
             &test_planner_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                resolution: None,
             }),
             &loop_state,
             &decision,
@@ -8561,6 +8580,7 @@ mod tests {
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec!["src/application/mod.rs".to_string()],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -8726,6 +8746,7 @@ mod tests {
                         "README.md".to_string(),
                         "src/application/mod.rs".to_string(),
                     ],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -8948,6 +8969,7 @@ mod tests {
         let budget = super::planner_budget_for_turn(&InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+            resolution: None,
         });
 
         assert_eq!(budget.max_steps, 10);
@@ -9000,6 +9022,7 @@ mod tests {
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec!["src/one.rs".to_string(), "src/two.rs".to_string()],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -9634,6 +9657,7 @@ mod tests {
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -9739,6 +9763,7 @@ mod tests {
                     edit: InitialEditInstruction {
                         known_edit: true,
                         candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                        resolution: None,
                     },
                     grounding: None,
                 },
@@ -9751,6 +9776,7 @@ mod tests {
                     edit: InitialEditInstruction {
                         known_edit: true,
                         candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                        resolution: None,
                     },
                     grounding: None,
                 },
@@ -9821,6 +9847,7 @@ mod tests {
                 edit: InitialEditInstruction {
                     known_edit: true,
                     candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -9938,6 +9965,7 @@ mod tests {
                         "apps/web/src/runtime-app.tsx".to_string(),
                         "apps/web/src/runtime-store.tsx".to_string(),
                     ],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -10113,6 +10141,7 @@ mod tests {
                         "apps/web/src/runtime-shell.css".to_string(),
                         "apps/web/src/runtime-app.tsx".to_string(),
                     ],
+                    resolution: None,
                 },
                 grounding: None,
             },
@@ -11454,6 +11483,7 @@ mod tests {
             &test_planner_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["src/application/mod.rs".to_string()],
+                resolution: None,
             }),
             &PlannerLoopState::default(),
             &decision,
@@ -11465,6 +11495,46 @@ mod tests {
                 && note.note.contains("Steering review [action-bias]")
                 && note.note.contains("src/application/mod.rs")
         }));
+    }
+
+    #[test]
+    fn planner_can_carry_resolver_outcomes_from_edit_signal_into_instruction_frame() {
+        let resolution = crate::domain::ports::EntityResolutionOutcome::Resolved {
+            target: crate::domain::ports::EntityResolutionCandidate::new(
+                "apps/web/src/runtime-app.tsx",
+                crate::domain::ports::EntityLookupMode::ExactPath,
+                1,
+            ),
+            alternatives: vec![crate::domain::ports::EntityResolutionCandidate::new(
+                "apps/web/src/runtime-shell.css",
+                crate::domain::ports::EntityLookupMode::PathFragment,
+                2,
+            )],
+            explanation: "exact authored path match".to_string(),
+        };
+        let edit = InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec!["apps/web/src/runtime-app.tsx".to_string()],
+            resolution: Some(resolution.clone()),
+        };
+
+        let frame = super::instruction_frame_from_initial_edit(&edit)
+            .expect("known edit should produce an instruction frame");
+
+        assert_eq!(frame.candidate_files, edit.candidate_files);
+        assert_eq!(frame.resolution, Some(resolution.clone()));
+
+        let request = PlannerRequest::new(
+            "tighten the manifold copy",
+            "/workspace",
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        )
+        .with_loop_state(PlannerLoopState {
+            target_resolution: Some(resolution.clone()),
+            ..Default::default()
+        });
+        assert_eq!(request.loop_state.target_resolution, Some(resolution));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

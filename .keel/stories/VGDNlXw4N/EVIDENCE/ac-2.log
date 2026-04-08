@@ -1,0 +1,19 @@
+---
+recorded_at: 2026-04-08T09:06:03.733788001-07:00
+command: cargo nextest run planner_can_carry_resolver_outcomes --no-tests pass
+---
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.92s
+────────────
+ Nextest run ID 0b838702-565c-40fc-b08e-eb97ac293765 with nextest profile: default
+    Starting 1 test across 2 binaries (467 tests skipped)
+        PASS [   0.010s] (1/1) paddles application::tests::planner_can_carry_resolver_outcomes_from_edit_signal_into_instruction_frame
+────────────
+     Summary [   0.012s] 1 test run: 1 passed, 467 skipped

@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-04-08T09:06:03.697117192-07:00
+command: cargo nextest run entity_resolver_contracts --no-tests pass
+---
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.94s
+────────────
+ Nextest run ID 6dac0434-e8bb-44f9-9bb4-c1ed2125efcc with nextest profile: default
+    Starting 1 test across 2 binaries (467 tests skipped)
+        PASS [   0.013s] (1/1) paddles domain::ports::entity_resolution::tests::entity_resolver_contracts_define_explicit_outcomes_and_ranked_candidates
+────────────
+     Summary [   0.015s] 1 test run: 1 passed, 467 skipped

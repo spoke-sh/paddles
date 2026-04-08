@@ -27,11 +27,11 @@ started_at: 2026-04-08T08:50:30
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Deterministic Entity Resolver Contracts](../../../../stories/VGDNlXw4N/README.md) | feat | in-progress |
+| [Define Deterministic Entity Resolver Contracts](../../../../stories/VGDNlXw4N/README.md) | feat | done |
 | [Implement Self Discovering Workspace Entity Index And Cache](../../../../stories/VGDNlYT3m/README.md) | feat | backlog |
 | [Resolve Symbols And Fuzzy Path Hints Into Authored Files](../../../../stories/VGDNlYj3n/README.md) | feat | backlog |
 <!-- END GENERATED -->

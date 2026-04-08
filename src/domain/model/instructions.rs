@@ -1,4 +1,5 @@
 use super::interpretation::WorkspaceAction;
+use crate::domain::ports::EntityResolutionOutcome;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -7,6 +8,8 @@ pub struct InstructionFrame {
     pub obligations: Vec<InstructionObligation>,
     #[serde(default)]
     pub candidate_files: Vec<String>,
+    #[serde(default)]
+    pub resolution: Option<EntityResolutionOutcome>,
 }
 
 impl InstructionFrame {
@@ -18,6 +21,7 @@ impl InstructionFrame {
                 satisfaction: InstructionSatisfaction::Pending,
             }],
             candidate_files,
+            resolution: None,
         }
     }
 
@@ -49,6 +53,10 @@ impl InstructionFrame {
         } else {
             Some(self.candidate_files.join(", "))
         }
+    }
+
+    pub fn note_resolution(&mut self, resolution: EntityResolutionOutcome) {
+        self.resolution = Some(resolution);
     }
 }
 

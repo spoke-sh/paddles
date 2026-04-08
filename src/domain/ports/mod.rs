@@ -1,5 +1,6 @@
 mod context_gathering;
 mod context_resolution;
+mod entity_resolution;
 mod operator_memory;
 mod planning;
 mod synthesis;
@@ -17,6 +18,10 @@ pub use context_gathering::{
     PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
 };
 pub use context_resolution::ContextResolver;
+pub use entity_resolution::{
+    EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
+    EntityResolver, NormalizedEntityHint,
+};
 pub use operator_memory::OperatorMemory;
 pub use planning::{
     CompactionPlan, CompactionRequest, GroundingDomain, GroundingRequirement, GuidanceCategory,

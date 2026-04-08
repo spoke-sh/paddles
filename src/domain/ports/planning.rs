@@ -2,6 +2,7 @@ use super::context_gathering::{
     EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy, RetrieverOption,
 };
 use super::context_resolution::ContextResolver;
+use super::entity_resolution::{EntityResolutionOutcome, EntityResolver};
 pub use crate::domain::model::{
     CompactionPlan, CompactionRequest, ConversationThread, GuidanceCategory,
     InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
@@ -175,6 +176,7 @@ pub struct PlannerRequest {
     pub loop_state: PlannerLoopState,
     pub budget: PlannerBudget,
     pub resolver: Option<Arc<dyn ContextResolver>>,
+    pub entity_resolver: Option<Arc<dyn EntityResolver>>,
 }
 
 impl PlannerRequest {
@@ -194,11 +196,17 @@ impl PlannerRequest {
             loop_state: PlannerLoopState::default(),
             budget,
             resolver: None,
+            entity_resolver: None,
         }
     }
 
     pub fn with_resolver(mut self, resolver: Arc<dyn ContextResolver>) -> Self {
         self.resolver = Some(resolver);
+        self
+    }
+
+    pub fn with_entity_resolver(mut self, resolver: Arc<dyn EntityResolver>) -> Self {
+        self.entity_resolver = Some(resolver);
         self
     }
 
@@ -273,6 +281,7 @@ pub struct PlannerLoopState {
     pub steps: Vec<PlannerStepRecord>,
     pub evidence_items: Vec<EvidenceItem>,
     pub notes: Vec<String>,
+    pub target_resolution: Option<EntityResolutionOutcome>,
     pub pending_branches: Vec<TraceBranch>,
     pub latest_gatherer_trace: Option<PlannerTraceMetadata>,
     pub refinement_count: usize,
@@ -421,6 +430,7 @@ pub struct InitialActionDecision {
 pub struct InitialEditInstruction {
     pub known_edit: bool,
     pub candidate_files: Vec<String>,
+    pub resolution: Option<EntityResolutionOutcome>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -632,6 +642,7 @@ mod tests {
         assert_eq!(state.refinement_count, 0);
         assert!(state.last_refinement_step.is_none());
         assert!(state.refinement_signatures.is_empty());
+        assert!(state.target_resolution.is_none());
         assert_eq!(state.refinement_policy, RefinementPolicy::default());
     }
 

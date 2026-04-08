@@ -2316,6 +2316,7 @@ fn edit_instruction_from_http_envelope(
     Ok(InitialEditInstruction {
         known_edit,
         candidate_files,
+        resolution: None,
     })
 }
 

@@ -4657,6 +4657,7 @@ fn edit_instruction_from_fields(
     Ok(InitialEditInstruction {
         known_edit,
         candidate_files,
+        resolution: None,
     })
 }
 
@@ -6559,6 +6560,7 @@ mod tests {
                 rank: 1,
             }],
             notes: vec![],
+            target_resolution: None,
             pending_branches: vec![],
             latest_gatherer_trace: None,
             refinement_count: 0,
@@ -6636,6 +6638,7 @@ mod tests {
                 rank: 0,
             }],
             notes: vec![],
+            target_resolution: None,
             pending_branches: vec![],
             latest_gatherer_trace: None,
             refinement_count: 0,
