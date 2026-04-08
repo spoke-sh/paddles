@@ -1,9 +1,8 @@
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::{Component, Path, PathBuf};
 
-const ALWAYS_NON_AUTHORED_WORKSPACE_DIRECTORIES: &[&str] = &[".git"];
-
-const FALLBACK_NON_AUTHORED_WORKSPACE_DIRECTORIES: &[&str] = &[
+const ALWAYS_NON_AUTHORED_WORKSPACE_DIRECTORIES: &[&str] = &[
+    ".git",
     ".direnv",
     ".docusaurus",
     ".sift",
@@ -88,15 +87,7 @@ impl WorkspacePathPolicy {
     }
 
     fn directory_name_is_authored(&self, name: &str) -> bool {
-        if ALWAYS_NON_AUTHORED_WORKSPACE_DIRECTORIES.contains(&name) {
-            return false;
-        }
-
-        if self.gitignore.is_some() {
-            return true;
-        }
-
-        !FALLBACK_NON_AUTHORED_WORKSPACE_DIRECTORIES.contains(&name)
+        !ALWAYS_NON_AUTHORED_WORKSPACE_DIRECTORIES.contains(&name)
     }
 
     fn is_gitignored(&self, candidate: &Path, is_dir: bool) -> bool {

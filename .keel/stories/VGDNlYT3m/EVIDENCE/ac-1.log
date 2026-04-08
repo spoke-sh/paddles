@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-08T09:11:39.656994566-07:00
+command: cargo nextest run resolver_inventory_respects_workspace_boundary --no-tests pass
+---
+
+--- stderr ---
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.03s
+────────────
+ Nextest run ID 13840388-33a3-4fa1-9953-1ebe55eebb96 with nextest profile: default
+    Starting 1 test across 2 binaries (469 tests skipped)
+        PASS [   0.013s] (1/1) paddles infrastructure::workspace_entity_index::tests::resolver_inventory_respects_workspace_boundary
+────────────
+     Summary [   0.015s] 1 test run: 1 passed, 469 skipped
