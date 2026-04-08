@@ -328,6 +328,27 @@ The runtime web UI now hydrates from one canonical conversation projection:
 
 That simplification matters because it makes replay recovery, live sync, and browser E2E all follow the same path. When a turn is injected from outside the page — for example from the TUI or a test harness — the web UI updates by consuming the same shared projection contract it would use after a reload.
 
+## Embedded Fallback Shell Parity Boundary
+
+When `apps/web/dist` is unavailable, the Rust server falls back to the
+compiled-in `src/infrastructure/web/index.html` shell. That artifact is a
+delivery boundary, not a second frontend architecture.
+
+The embedded shell must stay aligned on the operator-facing runtime contract:
+
+- primary routes `/`, `/transit`, and `/manifold`
+- the shared chat transcript and prompt composer
+- live turn/event streaming, including tool output and plan updates
+- the forensic inspector shell
+- the transit trace shell
+- the manifold route shell and transcript-driven manifold turn selection
+- sticky-tail chat scrolling so off-tail operators keep their place during live updates
+
+The embedded shell does not need React component/module parity with the
+decomposed `apps/web` runtime. It may remain a single-file DOM/JS delivery
+surface as long as those operator-facing behaviors remain aligned and the
+bounded differences stay explicit in tests and docs.
+
 ## Planner Action Vocabulary
 
 The planner expresses its intentions through a constrained action schema:

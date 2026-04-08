@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:19:35.245374799-07:00
+mode: manual
+---
+Added explicit fallback-shell parity contracts and verified them with cargo test embedded_fallback_shell_parity_boundary_is_documented -- --nocapture, cargo test embedded_primary_shell_preserves_core_runtime_parity_boundary -- --nocapture, and cargo fmt --check.

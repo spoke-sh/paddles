@@ -322,6 +322,19 @@ precedence order too: CLI `-v`, `-vv`, or `-vvv` wins over authored
 stream and the web UI event stream. When neither the CLI nor authored config
 sets verbosity, Paddles uses level `0`.
 
+### Embedded Fallback Shell Parity Boundary
+
+The shipped fallback artifact is the compiled-in `src/infrastructure/web/index.html` shell.
+It is intentionally a single-file DOM/JS runtime rather than a mirror of the
+decomposed React source tree under `apps/web/src`.
+
+That fallback must preserve the core operator contract for the primary routes,
+chat transcript/composer, live stream rows, tool output, plan updates,
+forensic inspector, transit trace, manifold route, transcript-driven manifold
+turn selection, and sticky-tail chat scrolling. It does not need React
+component/module parity as long as those operator-facing behaviors remain
+aligned and the bounded differences stay documented.
+
 Local `sift` retrieval artifacts are machine-managed too. Paddles stores the
 search cache under `~/.cache/paddles/sift/workspaces/<workspace-key>` instead
 of inside the repository workspace, and the repo-level `.siftignore` excludes

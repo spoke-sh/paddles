@@ -1754,6 +1754,21 @@ mod tests {
     }
 
     #[test]
+    fn embedded_primary_shell_preserves_core_runtime_parity_boundary() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("id=\"messages\""));
+        assert!(html.contains("id=\"prompt\""));
+        assert!(html.contains("id=\"forensic-view\""));
+        assert!(html.contains("id=\"manifold-view\""));
+        assert!(html.contains("id=\"trace-board\""));
+        assert!(html.contains("let transcriptEventSource = null;"));
+        assert!(html.contains("t === 'tool_output'"));
+        assert!(html.contains("t === 'plan_updated'"));
+        assert!(html.contains("function selectManifoldTurnFromMessage(turnId)"));
+    }
+
+    #[test]
     fn embedded_primary_shell_only_auto_scrolls_chat_when_the_viewport_is_at_the_tail() {
         let html = include_str!("index.html");
 

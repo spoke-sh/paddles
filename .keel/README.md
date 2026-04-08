@@ -303,13 +303,13 @@
 | [Build Deterministic Resolver Backbone](epics/VGDNcabks/voyages/VGDNgMbMW/) | done |
 | [Integrate Resolver Into Edit Convergence](epics/VGDNcabks/voyages/VGDNh30T9/) | done |
 
-### [Decompose The React Runtime Web UI](epics/VGEVm5Ibi/) (active)
+### [Decompose The React Runtime Web UI](epics/VGEVm5Ibi/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Extract Runtime Shell And Chat Boundaries](epics/VGEVm5Ibi/voyages/VGEVsWLk2/) | done |
 | [Split Route Surfaces Into Domain Modules](epics/VGEVm5Ibi/voyages/VGEVsWxjv/) | done |
-| [Stabilize Styling Tests And Fallback Contracts](epics/VGEVm5Ibi/voyages/VGEVsXLkG/) | in-progress |
+| [Stabilize Styling Tests And Fallback Contracts](epics/VGEVm5Ibi/voyages/VGEVsXLkG/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

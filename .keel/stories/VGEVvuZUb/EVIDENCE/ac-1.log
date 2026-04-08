@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:19:35.212997258-07:00
+mode: manual
+---
+Documented the embedded fallback-shell parity boundary in ARCHITECTURE.md and CONFIGURATION.md against the modular React runtime architecture.
