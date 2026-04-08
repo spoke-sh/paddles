@@ -3350,9 +3350,8 @@ impl MechSuitService {
                             stage: "instruction-manifold".to_string(),
                             reason: note.clone(),
                         });
-                        direct_answer = Some(blocked_edit_response(frame));
+                        direct_answer = None;
                         stop_reason = Some("instruction-unsatisfied".to_string());
-                        accepted_stop = true;
                         "planner stop converted into a blocked reply because the requested applied edit is still unsatisfied"
                             .to_string()
                     } else {
@@ -3930,7 +3929,9 @@ fn planner_budget_for_replan_attempt(
 }
 
 fn stop_reason_supports_replan(stop_reason: &str) -> bool {
-    stop_reason.contains("budget-exhausted") || stop_reason == "planner-budget-exhausted"
+    stop_reason.contains("budget-exhausted")
+        || stop_reason == "planner-budget-exhausted"
+        || stop_reason == "instruction-unsatisfied"
 }
 
 fn sync_replan_note(
@@ -9334,6 +9335,24 @@ mod tests {
                     edit: InitialEditInstruction::default(),
                     grounding: None,
                 },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "enough information".to_string(),
+                    },
+                    rationale: "stop after acting".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "enough information".to_string(),
+                    },
+                    rationale: "stop after acting".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
             ],
             Arc::clone(&request_log),
         ));
@@ -9456,6 +9475,24 @@ mod tests {
                 grounding: None,
             },
             vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
@@ -9621,6 +9658,24 @@ mod tests {
                     edit: InitialEditInstruction::default(),
                     grounding: None,
                 },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "the file was enough".to_string(),
+                    },
+                    rationale: "stop after the read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
             ],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -9732,6 +9787,24 @@ mod tests {
                 grounding: None,
             },
             vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "done".to_string(),
+                    },
+                    rationale: "stop".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "done".to_string(),
+                    },
+                    rationale: "stop".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "done".to_string(),
@@ -10705,6 +10778,24 @@ mod tests {
                     edit: InitialEditInstruction::default(),
                     grounding: None,
                 },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
             ],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -10738,6 +10829,156 @@ mod tests {
                 .expect("handoffs lock")
                 .is_empty(),
             "unsatisfied edit turns should not fall through to the synthesizer"
+        );
+    }
+
+    #[test]
+    fn edit_turn_stop_answers_replan_into_workspace_editor_actions() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create css dir");
+        let css_path = workspace.path().join("apps/web/src/runtime-shell.css");
+        fs::write(&css_path, ".runtime-shell-host {\n  padding: 0;\n}\n").expect("write css");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer =
+            "Added 8px padding to `.runtime-shell-host` after handing the turn to the workspace editor."
+                .to_string();
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "the file is obvious, so answer directly".to_string(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                    resolution: None,
+                },
+                grounding: None,
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "apps/web/src/runtime-shell.css".to_string(),
+                        },
+                    },
+                    rationale: "read the CSS file before editing".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the action-bias review still returned an advice-only answer"
+                        .to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::ReplaceInFile {
+                            path: "apps/web/src/runtime-shell.css".to_string(),
+                            old: "padding: 0;".to_string(),
+                            new: "padding: 8px;".to_string(),
+                            replace_all: false,
+                        },
+                    },
+                    rationale: "the replan should now hand the turn to the workspace editor"
+                        .to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested edit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+            ],
+            recorded_requests.clone(),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt(
+                    "Add 8px padding to `.runtime-shell-host` in the runtime shell styles.",
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        assert!(matches!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .last(),
+            Some(WorkspaceAction::ReplaceInFile { path, new, .. })
+                if path == "apps/web/src/runtime-shell.css" && new == "padding: 8px;"
+        ));
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(
+            requests.iter().any(|request| request
+                .loop_state
+                .notes
+                .iter()
+                .any(|note| note
+                    .contains("Replan from current evidence after instruction unsatisfied."))),
+            "advice-only planner stops with an open applied-edit obligation should trigger a bounded replan into workspace editing"
         );
     }
 
@@ -10779,6 +11020,32 @@ mod tests {
                 grounding: None,
             },
             vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested padding edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction {
+                        known_edit: true,
+                        candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                        resolution: None,
+                    },
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "describe the requested padding edit".to_string(),
+                    answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
+                    edit: InitialEditInstruction {
+                        known_edit: true,
+                        candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
+                        resolution: None,
+                    },
+                    grounding: None,
+                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
