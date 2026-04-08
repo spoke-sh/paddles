@@ -22,10 +22,10 @@ mission: VGEVlVbOJ
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 voyages complete, 4/9 stories done
+**Progress:** 1/3 voyages complete, 5/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Extract Runtime Shell And Chat Boundaries](voyages/VGEVsWLk2/) | done | 3/3 |
-| [Split Route Surfaces Into Domain Modules](voyages/VGEVsWxjv/) | in-progress | 1/3 |
+| [Split Route Surfaces Into Domain Modules](voyages/VGEVsWxjv/) | in-progress | 2/3 |
 | [Stabilize Styling Tests And Fallback Contracts](voyages/VGEVsXLkG/) | planned | 0/3 |
 <!-- END GENERATED -->

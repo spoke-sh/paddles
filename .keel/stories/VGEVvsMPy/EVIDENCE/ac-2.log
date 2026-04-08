@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:57:00.436109833-07:00
+mode: manual
+---
+Preserved manifold interactions under npm --workspace @paddles/web run test -- runtime-app.test.tsx, covering transcript-driven turn selection, playback, pan, tilt, rotation, resolver readout, and zoom, plus npm --workspace @paddles/web run lint and npm --workspace @paddles/web run build.

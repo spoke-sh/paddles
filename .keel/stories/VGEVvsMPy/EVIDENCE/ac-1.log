@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T13:57:00.396079978-07:00
+mode: manual
+---
+Split the manifold route into dedicated manifold modules for playback state, camera interaction, gate-field derivation, stage rendering, and readout presentation, leaving runtime-app as the route assembler.
