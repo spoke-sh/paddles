@@ -309,7 +309,7 @@
 |--------|--------|
 | [Extract Runtime Shell And Chat Boundaries](epics/VGEVm5Ibi/voyages/VGEVsWLk2/) | done |
 | [Split Route Surfaces Into Domain Modules](epics/VGEVm5Ibi/voyages/VGEVsWxjv/) | done |
-| [Stabilize Styling Tests And Fallback Contracts](epics/VGEVm5Ibi/voyages/VGEVsXLkG/) | planned |
+| [Stabilize Styling Tests And Fallback Contracts](epics/VGEVm5Ibi/voyages/VGEVsXLkG/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

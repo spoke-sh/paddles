@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:06:10.823841764-07:00
+mode: manual
+---
+Partitioned runtime-shell.css into explicit shared shell, chat, inspector, manifold, and transit stylesheet imports under apps/web/src/styles, with a contract test locking the feature-aligned decomposition.

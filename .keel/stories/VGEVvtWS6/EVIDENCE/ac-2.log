@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T14:06:10.854108737-07:00
+mode: manual
+---
+Preserved runtime presentation under npm --workspace @paddles/web run test, npm --workspace @paddles/web run lint, and npm --workspace @paddles/web run build after the stylesheet split, while keeping shared tokens and shell layout in runtime-shell-base.css.

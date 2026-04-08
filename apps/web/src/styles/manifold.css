@@ -1,0 +1,875 @@
+.manifold-view {
+  min-height: 0;
+}
+.manifold-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
+  gap: 14px;
+}
+.manifold-stage,
+.manifold-panel {
+  min-height: 0;
+  border-radius: 22px;
+  border: 1px solid rgba(90, 108, 121, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.76), rgba(241, 246, 249, 0.28)),
+    linear-gradient(160deg, rgba(229, 237, 242, 0.96), rgba(209, 219, 227, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -2px -2px 0 rgba(104, 121, 135, 0.08),
+    0 18px 28px rgba(102, 118, 132, 0.12);
+}
+.manifold-stage {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  grid-column: 1 / -1;
+}
+.manifold-stage-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(90, 108, 121, 0.14);
+}
+.manifold-stage-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #4d5e6b;
+}
+.manifold-stage-meta {
+  font-size: 11px;
+  color: #6c7c88;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.manifold-stage-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.manifold-stage-button {
+  min-width: 88px;
+}
+.manifold-stage-timeline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px 0;
+}
+.manifold-stage-timeline input[type="range"] {
+  flex: 1;
+}
+.manifold-stage-frame-meta {
+  min-width: 140px;
+  font-size: 11px;
+  color: #5e6f7c;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  text-align: right;
+}
+.manifold-canvas {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background:
+    radial-gradient(circle at 24% 22%, rgba(45, 144, 200, 0.16), transparent 20%),
+    radial-gradient(circle at 72% 74%, rgba(240, 138, 36, 0.12), transparent 20%),
+    linear-gradient(180deg, rgba(235, 242, 247, 0.76), rgba(212, 223, 232, 0.82));
+}
+.manifold-empty-state {
+  min-height: 320px;
+  height: 100%;
+  border-radius: 18px;
+  border: 1px dashed rgba(92, 109, 123, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.46), rgba(255,255,255,0.12)),
+    linear-gradient(155deg, rgba(222, 231, 237, 0.8), rgba(201, 213, 223, 0.9));
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.72);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: #32414d;
+}
+.manifold-playback-banner {
+  border-radius: 18px;
+  border: 1px solid rgba(92, 109, 123, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.56), rgba(255,255,255,0.22)),
+    linear-gradient(155deg, rgba(222, 231, 237, 0.62), rgba(201, 213, 223, 0.72));
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  color: #32414d;
+}
+.manifold-empty-state strong {
+  font-size: 18px;
+  line-height: 1.3;
+}
+.manifold-empty-state p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #5c6d7a;
+}
+.manifold-playback-banner strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+.manifold-playback-banner p {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #5c6d7a;
+}
+.manifold-machine {
+  display: grid;
+  gap: 18px;
+  min-height: 100%;
+  align-content: start;
+}
+.manifold-spacefield {
+  display: grid;
+  gap: 14px;
+}
+.manifold-spacefield__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #5b6c79;
+}
+.manifold-spacefield__viewport {
+  position: relative;
+  min-height: 460px;
+  padding: 18px 18px 26px 92px;
+  border-radius: 24px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  perspective: 1800px;
+  cursor: grab;
+  touch-action: none;
+  background:
+    radial-gradient(circle at 20% 18%, rgba(45, 144, 200, 0.14), transparent 24%),
+    radial-gradient(circle at 78% 70%, rgba(240, 138, 36, 0.12), transparent 26%),
+    linear-gradient(180deg, rgba(255,255,255,0.34), rgba(233, 240, 245, 0.18)),
+    linear-gradient(160deg, rgba(210, 221, 229, 0.96), rgba(190, 204, 214, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.7),
+    inset -1px -1px 0 rgba(109, 125, 138, 0.08);
+}
+.manifold-spacefield__viewport.is-dragging {
+  cursor: grabbing;
+}
+.manifold-spacefield__viewport.is-rotate {
+  cursor: alias;
+}
+.manifold-spacefield__axes {
+  pointer-events: none;
+}
+.manifold-spacefield__axis {
+  position: absolute;
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(57, 72, 82, 0.68);
+}
+.manifold-spacefield__axis--gate {
+  left: 18px;
+  top: 24px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.manifold-spacefield__axis--time {
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+}
+.manifold-spacefield__axis--force {
+  right: 20px;
+  top: 18px;
+}
+.manifold-spacefield__hint,
+.manifold-spacefield__camera-stats {
+  position: absolute;
+  z-index: 2;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #30414d;
+  background: rgba(255,255,255,0.74);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 10px 18px rgba(92, 108, 122, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.manifold-spacefield__hint {
+  left: 92px;
+  top: 18px;
+}
+.manifold-spacefield__camera-stats {
+  right: 18px;
+  top: 18px;
+}
+.manifold-spacefield__deck {
+  position: relative;
+  min-height: 416px;
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  transition: box-shadow 140ms ease;
+}
+.manifold-spacefield__floor {
+  position: absolute;
+  inset: 8% 8% 12% 8%;
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.24), rgba(255,255,255,0.06)),
+    repeating-linear-gradient(
+      90deg,
+      rgba(88, 104, 119, 0.06) 0,
+      rgba(88, 104, 119, 0.06) 1px,
+      transparent 1px,
+      transparent 9%
+    ),
+    repeating-linear-gradient(
+      180deg,
+      rgba(88, 104, 119, 0.08) 0,
+      rgba(88, 104, 119, 0.08) 1px,
+      transparent 1px,
+      transparent 16%
+    );
+  border: 1px solid rgba(78, 95, 110, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.3),
+    0 24px 40px rgba(94, 109, 122, 0.16);
+}
+.manifold-gate-lane {
+  position: absolute;
+  left: 10%;
+  right: 8%;
+  height: 0;
+  transform: translateY(-50%);
+  transform-style: preserve-3d;
+}
+.manifold-gate-lane__label {
+  position: absolute;
+  left: -74px;
+  top: -10px;
+  width: 62px;
+  text-align: right;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #4f616d;
+}
+.manifold-gate-lane__rail {
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(78, 96, 110, 0.24), rgba(78, 96, 110, 0.08));
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.16);
+}
+.manifold-gate-lane.is-evidence .manifold-gate-lane__rail {
+  background: linear-gradient(90deg, rgba(45, 144, 200, 0.5), rgba(45, 144, 200, 0.12));
+}
+.manifold-gate-lane.is-convergence .manifold-gate-lane__rail {
+  background: linear-gradient(90deg, rgba(240, 138, 36, 0.52), rgba(240, 138, 36, 0.12));
+}
+.manifold-gate-lane.is-containment .manifold-gate-lane__rail {
+  background: linear-gradient(90deg, rgba(23, 149, 108, 0.48), rgba(23, 149, 108, 0.12));
+}
+.manifold-force-link {
+  position: absolute;
+  height: 8px;
+  border-radius: 999px;
+  transform-origin: left center;
+  opacity: 0.74;
+  box-shadow: 0 10px 20px rgba(57, 72, 82, 0.12);
+}
+.manifold-force-link.is-evidence {
+  background: linear-gradient(90deg, rgba(45, 144, 200, 0.72), rgba(45, 144, 200, 0.2));
+}
+.manifold-force-link.is-convergence {
+  background: linear-gradient(90deg, rgba(240, 138, 36, 0.76), rgba(240, 138, 36, 0.22));
+}
+.manifold-force-link.is-containment {
+  background: linear-gradient(90deg, rgba(23, 149, 108, 0.76), rgba(23, 149, 108, 0.22));
+}
+.manifold-force-point {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transform-style: preserve-3d;
+}
+.manifold-force-point__halo,
+.manifold-force-point__core {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.manifold-force-point__halo {
+  inset: -6px;
+  background: radial-gradient(circle, rgba(255,255,255,0.34), transparent 72%);
+  opacity: 0.88;
+}
+.manifold-force-point__core {
+  background:
+    radial-gradient(circle at 32% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.18) 38%, transparent 40%),
+    var(--gate-color, rgba(45, 144, 200, 0.88));
+  box-shadow:
+    0 0 0 2px rgba(255,255,255,0.5),
+    0 18px 28px rgba(42, 55, 65, 0.18);
+}
+.manifold-force-point.is-current .manifold-force-point__core {
+  box-shadow:
+    0 0 0 3px rgba(255,255,255,0.6),
+    0 0 0 8px rgba(255,255,255,0.2),
+    0 20px 30px rgba(42, 55, 65, 0.22);
+}
+.manifold-force-point.is-selected .manifold-force-point__halo {
+  inset: -12px;
+  opacity: 1;
+  background: radial-gradient(circle, rgba(255,255,255,0.52), transparent 72%);
+}
+.manifold-force-point__label {
+  position: absolute;
+  left: 50%;
+  top: 34px;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #24333d;
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 8px 18px rgba(83, 99, 112, 0.12);
+}
+.manifold-readout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.manifold-readout-card {
+  border: 1px solid rgba(88, 104, 119, 0.16);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.72), rgba(240,245,248,0.32)),
+    rgba(223, 232, 238, 0.84);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 12px 20px rgba(92, 108, 122, 0.1);
+}
+.manifold-readout-card.is-evidence {
+  border-color: rgba(45, 144, 200, 0.22);
+}
+.manifold-readout-card.is-convergence {
+  border-color: rgba(240, 138, 36, 0.22);
+}
+.manifold-readout-card.is-containment {
+  border-color: rgba(23, 149, 108, 0.22);
+}
+.manifold-readout-card__eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #5c6d7a;
+}
+.manifold-readout-card__title {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #21313b;
+}
+.manifold-readout-card__meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #566774;
+}
+.manifold-readout-card__detail {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #30424f;
+}
+.manifold-readout-card__path {
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f303a;
+  word-break: break-word;
+}
+.manifold-frame-ruler {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 10px;
+}
+.manifold-frame-ruler__tick {
+  border: 1px solid rgba(88, 104, 119, 0.16);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.68), rgba(240,245,248,0.28)),
+    rgba(223, 232, 238, 0.78);
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  color: #4b5d6a;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    0 10px 18px rgba(92, 108, 122, 0.08);
+}
+.manifold-frame-ruler__tick strong {
+  font-size: 12px;
+  color: #24323c;
+}
+.manifold-frame-ruler__tick span {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.manifold-frame-ruler__tick.is-active {
+  border-color: rgba(45, 144, 200, 0.28);
+  color: #1b5e87;
+}
+.manifold-gate-ledger {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.manifold-gate-card {
+  border: 1px solid rgba(88, 104, 119, 0.16);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.72), rgba(240,245,248,0.32)),
+    rgba(223, 232, 238, 0.84);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 12px 20px rgba(92, 108, 122, 0.1);
+  cursor: pointer;
+  text-align: left;
+}
+.manifold-gate-card.is-evidence {
+  border-color: rgba(45, 144, 200, 0.22);
+}
+.manifold-gate-card.is-convergence {
+  border-color: rgba(240, 138, 36, 0.22);
+}
+.manifold-gate-card.is-containment {
+  border-color: rgba(23, 149, 108, 0.22);
+}
+.manifold-gate-card.is-selected {
+  outline: 2px solid rgba(45, 144, 200, 0.16);
+}
+.manifold-gate-card__eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #5c6d7a;
+}
+.manifold-gate-card__value {
+  margin-top: 10px;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  color: #20303a;
+}
+.manifold-gate-card__meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #576875;
+}
+.manifold-source-detail--gate {
+  border: 1px solid rgba(88, 104, 119, 0.14);
+}
+.manifold-source-detail--gate.is-evidence {
+  border-color: rgba(45, 144, 200, 0.22);
+}
+.manifold-source-detail--gate.is-convergence {
+  border-color: rgba(240, 138, 36, 0.22);
+}
+.manifold-source-detail--gate.is-containment {
+  border-color: rgba(23, 149, 108, 0.22);
+}
+.manifold-spacefield__viewport.is-pan {
+  cursor: move;
+}
+.manifold-machine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.manifold-node {
+  width: 100%;
+  border: 1px solid rgba(88, 105, 119, 0.18);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  padding: 16px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.68), rgba(244,248,250,0.18)),
+    linear-gradient(155deg, rgba(227, 236, 242, 0.92), rgba(206, 217, 226, 0.84));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(92, 108, 122, 0.12);
+}
+.manifold-node[data-lifecycle="provisional"] {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(240, 138, 36, 0.14);
+}
+.manifold-node[data-lifecycle="final"] {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(23, 149, 108, 0.14);
+}
+.manifold-node[data-lifecycle="superseded"] {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(108, 124, 138, 0.08),
+    0 14px 22px rgba(214, 95, 74, 0.16);
+}
+.manifold-node[data-phase="accumulating"] {
+  transform: translateY(-2px);
+  border-color: rgba(45, 144, 200, 0.28);
+}
+.manifold-node.is-selected {
+  outline: 2px solid rgba(45, 144, 200, 0.2);
+  border-color: rgba(45, 144, 200, 0.32);
+}
+.manifold-node[data-phase="stable"] {
+  border-color: rgba(64, 120, 84, 0.2);
+}
+.manifold-node[data-phase="superseded"] {
+  border-style: dashed;
+  opacity: 0.78;
+}
+.manifold-node[data-phase="bleed_off"] {
+  opacity: 0.62;
+  filter: saturate(0.78);
+}
+.manifold-node__eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #60727f;
+}
+.manifold-node__badge,
+.manifold-panel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.manifold-node__badge.is-final,
+.manifold-panel-status.is-final {
+  background: rgba(23, 149, 108, 0.16);
+  color: #166751;
+}
+.manifold-node__badge.is-provisional,
+.manifold-panel-status.is-provisional {
+  background: rgba(240, 138, 36, 0.18);
+  color: #915219;
+}
+.manifold-node__badge.is-superseded,
+.manifold-panel-status.is-superseded {
+  background: rgba(214, 95, 74, 0.16);
+  color: #984739;
+}
+.manifold-panel-status.is-evidence {
+  background: rgba(45, 144, 200, 0.16);
+  color: #1b5e87;
+}
+.manifold-panel-status.is-convergence {
+  background: rgba(240, 138, 36, 0.16);
+  color: #915219;
+}
+.manifold-panel-status.is-containment {
+  background: rgba(23, 149, 108, 0.14);
+  color: #166751;
+}
+.manifold-node__title {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #21303a;
+}
+.manifold-node__meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #5c6e7b;
+}
+.manifold-node__basis {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #43535f;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  word-break: break-word;
+}
+.manifold-node__fill {
+  margin-top: 12px;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(153, 170, 182, 0.24);
+}
+.manifold-node__fill span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(45, 144, 200, 0.9), rgba(240, 138, 36, 0.82));
+}
+.manifold-conduit-strip {
+  display: grid;
+  gap: 10px;
+}
+.manifold-conduit {
+  display: flex;
+  width: 100%;
+  border: 1px dashed rgba(82, 99, 113, 0.22);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.54), rgba(241,246,249,0.18)),
+    rgba(223, 232, 238, 0.84);
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4f616e;
+}
+.manifold-conduit[data-lifecycle="provisional"] {
+  border-color: rgba(240, 138, 36, 0.22);
+}
+.manifold-conduit[data-lifecycle="final"] {
+  border-color: rgba(23, 149, 108, 0.22);
+}
+.manifold-conduit[data-lifecycle="superseded"] {
+  border-color: rgba(214, 95, 74, 0.22);
+}
+.manifold-conduit[data-phase="accumulating"] {
+  border-color: rgba(45, 144, 200, 0.34);
+}
+.manifold-conduit[data-phase="stable"] {
+  border-color: rgba(23, 149, 108, 0.26);
+}
+.manifold-conduit[data-phase="superseded"] {
+  opacity: 0.74;
+}
+.manifold-conduit[data-phase="bleed_off"] {
+  opacity: 0.56;
+}
+.manifold-conduit.is-selected {
+  outline: 2px solid rgba(45, 144, 200, 0.18);
+}
+.manifold-conduit strong {
+  color: #22313b;
+}
+.manifold-panel-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.manifold-panel-button.is-selected .manifold-panel-row {
+  border-bottom-color: rgba(45, 144, 200, 0.28);
+}
+.manifold-panel-button.is-selected .manifold-panel-row strong {
+  color: #1b5e87;
+}
+.manifold-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+.manifold-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.manifold-panel-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #50616d;
+}
+.manifold-panel-copy {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #566774;
+}
+.manifold-panel-copy strong {
+  color: #24323c;
+}
+.manifold-panel-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+.manifold-panel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #5f707d;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(88, 104, 119, 0.12);
+}
+.manifold-panel-row strong {
+  color: #23313b;
+}
+.manifold-source-detail {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(240, 245, 248, 0.44));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(113, 128, 141, 0.08);
+}
+.manifold-source-detail__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.manifold-source-detail__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #21313b;
+}
+.manifold-source-detail__meta {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #5d6e7b;
+}
+.manifold-source-detail__body {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(237, 243, 246, 0.84);
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #22333d;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.manifold-source-detail__actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.manifold-source-detail__button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #153042;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(228, 236, 240, 0.88));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    0 8px 14px rgba(101, 117, 132, 0.14);
+}
+
+@media (max-width: 960px) {
+  .manifold-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manifold-spacefield__viewport {
+    min-height: 380px;
+    padding: 64px 14px 22px 66px;
+  }
+  .manifold-spacefield__hint,
+  .manifold-spacefield__camera-stats {
+    position: static;
+    width: max-content;
+    max-width: 100%;
+  }
+  .manifold-spacefield {
+    gap: 10px;
+  }
+  .manifold-readout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

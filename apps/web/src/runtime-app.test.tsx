@@ -1021,8 +1021,8 @@ describe('RuntimeApp', () => {
     expect(olderTurnMessage).not.toBeNull();
     fireEvent.click(olderTurnMessage as HTMLElement);
 
+    await waitFor(() => expect(olderTurnMessage).toHaveClass('is-selected-turn'));
     expect(await screen.findByText('Action bias strengthened after local evidence.')).toBeInTheDocument();
-    expect(olderTurnMessage).toHaveClass('is-selected-turn');
   });
 
   it('surfaces deterministic resolver outcomes in the manifold readout', async () => {

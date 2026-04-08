@@ -491,30 +491,38 @@ fn runtime_web_app_uses_tanstack_router_instead_of_react_router() {
 
 #[test]
 fn runtime_shell_host_keeps_panels_flush_to_the_viewport() {
-    let css = read_repo_file("apps/web/src/runtime-shell.css");
+    let runtime_shell_css = read_repo_file("apps/web/src/runtime-shell.css");
+    let shared_css = read_repo_file("apps/web/src/styles/runtime-shell-base.css");
 
     assert!(
-        css.contains(".runtime-shell-host {\n  font-family:") && css.contains("  padding: 8px;"),
+        runtime_shell_css.contains("@import './styles/runtime-shell-base.css';"),
+        "runtime shell aggregate stylesheet should import the shared shell base",
+    );
+    assert!(
+        shared_css.contains(".runtime-shell-host {\n  font-family:")
+            && shared_css.contains("  padding: 8px;"),
         "runtime shell host should add around 8px padding around the two-panel layout",
     );
     assert!(
-        css.contains("@media (max-width: 960px) {\n  .runtime-shell-host { flex-direction: column; height: 100dvh; padding: 8px; }"),
+        shared_css.contains("@media (max-width: 960px) {\n  .runtime-shell-host { flex-direction: column; height: 100dvh; padding: 8px; }"),
         "mobile runtime shell should add outer viewport padding as well",
     );
 }
 
 #[test]
 fn runtime_shell_buttons_do_not_underline_and_transit_toggles_use_ui_font() {
-    let css = read_repo_file("apps/web/src/runtime-shell.css");
+    let shared_css = read_repo_file("apps/web/src/styles/runtime-shell-base.css");
+    let transit_css = read_repo_file("apps/web/src/styles/transit.css");
 
     assert!(
-        css.contains(".trace-tab {\n  border: 0;") && css.contains("  text-decoration: none;"),
+        shared_css.contains(".trace-tab {\n  border: 0;")
+            && shared_css.contains("  text-decoration: none;"),
         "runtime route tabs should explicitly suppress link underlines",
     );
     assert!(
-        css.contains(".trace-transit-toggle {\n  border: 0;")
-            && css.contains("  font-family: \"SF Pro Display\", \"SF Pro Text\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;")
-            && css.contains("  text-decoration: none;"),
+        transit_css.contains(".trace-transit-toggle {\n  border: 0;")
+            && transit_css.contains("  font-family: \"SF Pro Display\", \"SF Pro Text\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;")
+            && transit_css.contains("  text-decoration: none;"),
         "transit toggle buttons should use the regular UI font and suppress text underlines",
     );
 }

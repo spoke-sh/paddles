@@ -1,0 +1,160 @@
+:root {
+  --bg: #c6d0d8;
+  --bg-deep: #6f8392;
+  --surface: rgba(239, 243, 246, 0.82);
+  --surface-strong: rgba(251, 252, 253, 0.97);
+  --surface-soft: rgba(219, 227, 233, 0.82);
+  --border: rgba(69, 84, 97, 0.24);
+  --border-strong: rgba(48, 62, 74, 0.46);
+  --text: #0f1820;
+  --muted: #556472;
+  --accent: #2d90c8;
+  --accent-soft: #8ccae6;
+  --nav: #2d90c8;
+  --action: #f08a24;
+  --evidence: #17956c;
+  --branch: #dfb23f;
+  --merge: #d65f4a;
+  --thread: #70808d;
+  --green: #17956c;
+  --orange: #f08a24;
+  --red: #d65f4a;
+  --purple: #5376a3;
+  --pink: #d16a66;
+  --shadow-raised:
+    -10px -10px 24px rgba(255, 255, 255, 0.62),
+    16px 20px 38px rgba(62, 79, 94, 0.22);
+  --shadow-inset:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.82),
+    inset -1px -1px 0 rgba(111, 127, 141, 0.14);
+  --glass-highlight: linear-gradient(180deg, rgba(255,255,255,0.68), rgba(255,255,255,0.1));
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+.runtime-shell-host {
+  font-family: "SF Pro Display", "SF Pro Text", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.96), transparent 20%),
+    radial-gradient(circle at 84% 16%, rgba(45, 144, 200, 0.26), transparent 16%),
+    radial-gradient(circle at 76% 76%, rgba(240, 138, 36, 0.16), transparent 18%),
+    linear-gradient(160deg, #dde4ea 0%, #bac6cf 42%, #90a1af 100%);
+  color: var(--text);
+  height: 100dvh;
+  display: flex;
+  gap: 12px;
+  padding: 8px;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+}
+
+.chat-panel,
+.trace-panel {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  box-shadow: var(--shadow-raised), var(--shadow-inset);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.chat-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.42), rgba(255,255,255,0.08)),
+    linear-gradient(155deg, rgba(237, 242, 246, 0.94), rgba(206, 216, 225, 0.88));
+}
+.trace-panel {
+  width: min(56vw, 980px);
+  min-width: 520px;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  min-height: 0;
+  background:
+    radial-gradient(circle at top right, rgba(45, 144, 200, 0.24), transparent 34%),
+    radial-gradient(circle at 18% 84%, rgba(240, 138, 36, 0.14), transparent 22%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(214, 223, 230, 0.92));
+}
+
+.trace-header-wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 4px 6px 10px;
+}
+.trace-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #495b68;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+}
+.trace-subhead {
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: #61717e;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.trace-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(244, 248, 250, 0.68);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(110, 127, 140, 0.14);
+}
+.trace-tab {
+  border: 0;
+  background: transparent;
+  color: #5d6a76;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 10px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.trace-tab:hover,
+.trace-tab:focus,
+.trace-tab:active {
+  text-decoration: none;
+}
+.trace-tab.is-active {
+  color: #10202d;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(230, 237, 242, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 10px 18px rgba(100, 116, 131, 0.16);
+}
+.trace-view {
+  display: none;
+  min-height: 0;
+  flex: 1;
+}
+.trace-view.trace-view--active {
+  display: flex;
+}
+
+@media (max-width: 960px) {
+  .runtime-shell-host { flex-direction: column; height: 100dvh; padding: 8px; }
+  .chat-panel { flex: 1 1 48vh; min-height: 0; }
+  .trace-panel { width: 100%; min-width: 0; flex: 1 1 42vh; min-height: 0; }
+}
