@@ -1552,7 +1552,8 @@ mod tests {
         assert!(html.contains("id=\"manifold-play-toggle\""));
         assert!(html.contains("id=\"manifold-replay-button\""));
         assert!(html.contains("id=\"manifold-time-scrubber\""));
-        assert!(html.contains("data-manifold-turn-id"));
+        assert!(html.contains("data-message-turn-id"));
+        assert!(!html.contains("data-manifold-turn-id"));
         assert!(html.contains("function advanceManifoldPlayback"));
         assert!(html.contains("requestAnimationFrame"));
     }
@@ -1767,6 +1768,17 @@ mod tests {
             !html.contains("existing.scrollIntoView({ behavior: 'smooth', block: 'nearest' })")
         );
         assert!(!html.contains("row.scrollIntoView({ behavior: 'smooth', block: 'nearest' })"));
+    }
+
+    #[test]
+    fn embedded_primary_shell_selects_manifold_turns_from_transcript_messages() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("data-message-turn-id"));
+        assert!(html.contains("function selectManifoldTurnFromMessage(turnId)"));
+        assert!(html.contains("syncTranscriptTurnSelectionState()"));
+        assert!(!html.contains("id=\"manifold-timeline-panel\""));
+        assert!(!html.contains("data-manifold-turn-id"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

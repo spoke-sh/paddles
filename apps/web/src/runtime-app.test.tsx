@@ -677,6 +677,178 @@ describe('RuntimeApp', () => {
     expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
   });
 
+  it('selects manifold turns from transcript messages instead of an in-stage dropdown', async () => {
+    const multiTurnProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      transcript: {
+        ...bootstrapProjection.transcript,
+        entries: [
+          ...bootstrapProjection.transcript.entries,
+          {
+            record_id: 'record-3',
+            turn_id: 'task-123.turn-0002',
+            speaker: 'user',
+            content: 'Please tune the steering gate manifold copy.',
+          },
+          {
+            record_id: 'record-4',
+            turn_id: 'task-123.turn-0002',
+            speaker: 'assistant',
+            content: '**Update**\n\nThe manifold now carries a second turn for selection tests.',
+            response_mode: 'grounded_answer',
+            render: {
+              blocks: [
+                { type: 'heading', text: 'Update' },
+                {
+                  type: 'paragraph',
+                  text: 'The manifold now carries a second turn for selection tests.',
+                },
+              ],
+            },
+          },
+        ],
+      },
+      forensics: {
+        ...bootstrapProjection.forensics,
+        turns: [
+          ...bootstrapProjection.forensics.turns,
+          {
+            turn_id: 'task-123.turn-0002',
+            lifecycle: 'final',
+            records: [],
+          },
+        ],
+      },
+      manifold: {
+        ...bootstrapProjection.manifold,
+        turns: [
+          ...bootstrapProjection.manifold.turns,
+          {
+            turn_id: 'task-123.turn-0002',
+            lifecycle: 'final',
+            frames: [
+              {
+                record_id: 'record-4',
+                sequence: 4,
+                lifecycle: 'final',
+                anchor: {
+                  id: 'planner-step:record-4',
+                  kind: 'planner_step',
+                  label: 'retune manifold narration',
+                },
+                active_signals: [
+                  {
+                    snapshot_record_id: 'record-4',
+                    lifecycle: 'final',
+                    kind: 'containment_pressure',
+                    gate: 'containment',
+                    phase: 'holding',
+                    summary: 'Containment held the authored target steady.',
+                    level: 'high',
+                    magnitude_percent: 71,
+                    anchor: {
+                      id: 'planner-step:record-4',
+                      kind: 'planner_step',
+                      label: 'retune manifold narration',
+                    },
+                    contributions: [
+                      {
+                        source: 'authored_path_boundary',
+                        share_percent: 71,
+                        rationale: 'The authored workspace boundary kept the turn on target.',
+                      },
+                    ],
+                    artifact: {
+                      summary: 'signal snapshot',
+                      inline_content: '{"kind":"containment_pressure"}',
+                      mime_type: 'application/json',
+                    },
+                  },
+                ],
+                gates: [
+                  {
+                    gate: 'containment',
+                    label: 'containment gate',
+                    phase: 'holding',
+                    level: 'high',
+                    magnitude_percent: 71,
+                    anchor: {
+                      id: 'planner-step:record-4',
+                      kind: 'planner_step',
+                      label: 'retune manifold narration',
+                    },
+                    dominant_signal_kind: 'containment_pressure',
+                    signal_kinds: ['containment_pressure'],
+                    dominant_record_id: 'record-4',
+                  },
+                ],
+                primitives: [
+                  {
+                    primitive_id: 'gate:containment',
+                    kind: 'shield',
+                    label: 'Containment gate',
+                    basis: { kind: 'steering_gate', gate: 'containment' },
+                    evidence_record_id: 'record-4',
+                    anchor: {
+                      id: 'planner-step:record-4',
+                      kind: 'planner_step',
+                      label: 'retune manifold narration',
+                    },
+                    level: 'high',
+                    magnitude_percent: 71,
+                  },
+                ],
+                conduits: [],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/session/shared/bootstrap')) {
+          return new Response(
+            JSON.stringify({
+              session_id: 'task-123',
+              projection: multiTurnProjection,
+              prompt_history: bootstrapPromptHistory,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          );
+        }
+        if (url.endsWith('/sessions/task-123/projection')) {
+          return new Response(JSON.stringify(multiTurnProjection), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/sessions/task-123/turns')) {
+          return new Response(JSON.stringify({ response: 'ok' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      })
+    );
+
+    renderAtPath('/manifold');
+
+    expect(document.getElementById('manifold-turn-select')).toBeNull();
+    expect(await screen.findByText('Containment held the authored target steady.')).toBeInTheDocument();
+
+    const olderTurnMessage = screen.getByText('CI is failing. Can you debug it?').closest('.msg');
+    expect(olderTurnMessage).not.toBeNull();
+    fireEvent.click(olderTurnMessage as HTMLElement);
+
+    expect(await screen.findByText('Action bias strengthened after local evidence.')).toBeInTheDocument();
+    expect(olderTurnMessage).toHaveClass('is-selected-turn');
+  });
+
   it('surfaces deterministic resolver outcomes in the manifold readout', async () => {
     const resolverProjection: ConversationProjectionSnapshot = {
       ...bootstrapProjection,

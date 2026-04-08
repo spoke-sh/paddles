@@ -105,6 +105,7 @@ body {
   gap: 14px;
 }
 .msg {
+  display: block;
   max-width: 85%;
   padding: 14px 16px;
   border-radius: 22px;
@@ -112,10 +113,41 @@ body {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  appearance: none;
   border: 1px solid rgba(255,255,255,0.46);
   box-shadow:
     inset 1px 1px 0 rgba(255,255,255,0.75),
     0 10px 20px rgba(90, 104, 120, 0.14);
+}
+.msg.is-turn-selectable {
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.msg.is-turn-selectable:hover,
+.msg.is-turn-selectable:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(45, 144, 200, 0.48);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    0 14px 26px rgba(44, 95, 130, 0.18);
+}
+.msg.is-turn-selectable:focus-visible {
+  outline: 2px solid rgba(45, 144, 200, 0.32);
+  outline-offset: 2px;
+}
+.msg.is-selected-turn {
+  border-color: rgba(45, 144, 200, 0.56);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 0 0 3px rgba(45, 144, 200, 0.16),
+    0 14px 28px rgba(45, 95, 130, 0.2);
 }
 .msg-body {
   display: flex;
@@ -804,28 +836,6 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-}
-.manifold-stage-select-wrap {
-  display: inline-flex;
-  align-items: center;
-}
-.manifold-stage-select {
-  min-width: 220px;
-  max-width: 320px;
-  border: 1px solid rgba(88, 104, 119, 0.18);
-  border-radius: 999px;
-  padding: 10px 14px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #334652;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.74), rgba(240,245,248,0.38)),
-    rgba(223, 232, 238, 0.78);
-  box-shadow:
-    inset 1px 1px 0 rgba(255,255,255,0.78),
-    0 8px 16px rgba(92, 108, 122, 0.08);
 }
 .manifold-stage-button {
   min-width: 88px;
@@ -2412,9 +2422,5 @@ body {
   }
   .manifold-readout {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .manifold-stage-select {
-    min-width: 180px;
-    max-width: 100%;
   }
 }

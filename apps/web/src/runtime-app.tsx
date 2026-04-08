@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -149,6 +151,13 @@ type ComposerPart =
 
 const CHAT_TAIL_THRESHOLD_PX = 24;
 
+interface ManifoldTurnSelectionValue {
+  selectedTurnId: string | null;
+  setSelectedTurnId: (turnId: string | null) => void;
+}
+
+const ManifoldTurnSelectionContext = createContext<ManifoldTurnSelectionValue | null>(null);
+
 function chatViewportNearTail(container: HTMLElement) {
   return container.scrollHeight - (container.scrollTop + container.clientHeight) <= CHAT_TAIL_THRESHOLD_PX;
 }
@@ -174,6 +183,12 @@ function RuntimeShellLayout() {
   const activeView = activeViewForPath(pathname);
   const { connected, error, events, projection, promptHistory, sending, sendTurn } =
     useRuntimeStore();
+  const manifoldTurns = projection?.manifold.turns || [];
+  const manifoldTurnIds = useMemo(
+    () => new Set(manifoldTurns.map((turn) => turn.turn_id)),
+    [manifoldTurns]
+  );
+  const [selectedManifoldTurnId, setSelectedManifoldTurnId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [composerParts, setComposerParts] = useState<ComposerPart[]>([]);
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
@@ -224,8 +239,28 @@ function RuntimeShellLayout() {
     container.scrollTop = container.scrollHeight;
   }, [events, projection?.transcript.entries.length]);
 
+  useEffect(() => {
+    if (!manifoldTurns.length) {
+      setSelectedManifoldTurnId(null);
+      return;
+    }
+    if (
+      !selectedManifoldTurnId ||
+      !manifoldTurns.some((turn) => turn.turn_id === selectedManifoldTurnId)
+    ) {
+      setSelectedManifoldTurnId(manifoldTurns[manifoldTurns.length - 1].turn_id);
+    }
+  }, [manifoldTurns, selectedManifoldTurnId]);
+
   function onMessagesScroll(event: React.UIEvent<HTMLDivElement>) {
     shouldStickMessagesToTailRef.current = chatViewportNearTail(event.currentTarget);
+  }
+
+  function selectManifoldTurnFromTranscript(turnId: string) {
+    if (!manifoldTurnIds.has(turnId)) {
+      return;
+    }
+    setSelectedManifoldTurnId(turnId);
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -331,29 +366,66 @@ function RuntimeShellLayout() {
   }
 
   return (
-    <>
+    <ManifoldTurnSelectionContext.Provider
+      value={{
+        selectedTurnId: selectedManifoldTurnId,
+        setSelectedTurnId: setSelectedManifoldTurnId,
+      }}
+    >
+      <>
       <div className="chat-panel">
         <div className="chat-header">Paddles</div>
         <div className="chat-messages" id="messages" onScroll={onMessagesScroll} ref={messagesRef}>
-          {projection?.transcript.entries.map((entry) => (
-            <div
-              className={`msg ${entry.speaker === 'assistant' ? 'assistant' : 'user'}`}
-              key={entry.record_id}
-            >
-              {entry.speaker === 'assistant' && entry.response_mode ? (
-                <div className="msg-meta">
-                  <span className={`msg-mode-badge is-${entry.response_mode}`}>
-                    {responseModeLabel(entry.response_mode)}
-                  </span>
-                </div>
-              ) : null}
-              {entry.speaker === 'assistant' && entry.render ? (
-                <AssistantMessage render={entry.render} />
-              ) : (
-                <PlainMessage content={entry.content} />
-              )}
-            </div>
-          ))}
+          {projection?.transcript.entries.map((entry) => {
+            const isTurnSelectable =
+              activeView === 'manifold' && manifoldTurnIds.has(entry.turn_id);
+            const isTurnSelected =
+              isTurnSelectable && entry.turn_id === selectedManifoldTurnId;
+
+            return (
+              <div
+                aria-pressed={isTurnSelectable ? isTurnSelected : undefined}
+                className={`msg ${entry.speaker === 'assistant' ? 'assistant' : 'user'}${
+                  isTurnSelectable ? ' is-turn-selectable' : ''
+                }${isTurnSelected ? ' is-selected-turn' : ''}`}
+                data-message-turn-id={entry.turn_id}
+                key={entry.record_id}
+                onClick={
+                  isTurnSelectable
+                    ? () => selectManifoldTurnFromTranscript(entry.turn_id)
+                    : undefined
+                }
+                onKeyDown={
+                  isTurnSelectable
+                    ? (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectManifoldTurnFromTranscript(entry.turn_id);
+                        }
+                      }
+                    : undefined
+                }
+                role={isTurnSelectable ? 'button' : undefined}
+                tabIndex={isTurnSelectable ? 0 : undefined}
+                title={
+                  isTurnSelectable ? 'Select this turn in the steering gate manifold' : undefined
+                }
+              >
+                {entry.speaker === 'assistant' && entry.response_mode ? (
+                  <div className="msg-meta">
+                    <span className={`msg-mode-badge is-${entry.response_mode}`}>
+                      {responseModeLabel(entry.response_mode)}
+                    </span>
+                  </div>
+                ) : null}
+                {entry.speaker === 'assistant' && entry.render ? (
+                  <AssistantMessage render={entry.render} />
+                ) : (
+                  <PlainMessage content={entry.content} />
+                )}
+              </div>
+            );
+          })}
           {error ? <div className="msg system">Error: {error}</div> : null}
           {!projection && !error ? (
             <div className="msg system">Bootstrapping shared conversation projection...</div>
@@ -461,8 +533,17 @@ function RuntimeShellLayout() {
         </div>
         <Outlet />
       </div>
-    </>
+      </>
+    </ManifoldTurnSelectionContext.Provider>
   );
+}
+
+function useManifoldTurnSelection() {
+  const value = useContext(ManifoldTurnSelectionContext);
+  if (!value) {
+    throw new Error('useManifoldTurnSelection must be used inside RuntimeShellLayout');
+  }
+  return value;
 }
 
 function AssistantMessage({ render }: { render: RenderDocument }) {
@@ -1241,7 +1322,7 @@ function frameForSelectedRecord(
 function ManifoldRoute() {
   const { projection } = useRuntimeStore();
   const turns = projection?.manifold.turns || [];
-  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
+  const { selectedTurnId, setSelectedTurnId } = useManifoldTurnSelection();
   const [frameIndex, setFrameIndex] = useState<number | null>(null);
   const [tailMode, setTailMode] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -1274,15 +1355,11 @@ function ManifoldRoute() {
   const gateField = useMemo(() => buildGateField(currentTurn), [currentTurn]);
 
   useEffect(() => {
-    if (!turns.length) {
-      setSelectedTurnId(null);
-      return;
-    }
-    if (!selectedTurnId || !turns.some((turn) => turn.turn_id === selectedTurnId)) {
-      setSelectedTurnId(turns[turns.length - 1].turn_id);
-      setTailMode(true);
-    }
-  }, [selectedTurnId, turns]);
+    setTailMode(true);
+    setFrameIndex(null);
+    setSelectedSourceRecordId(null);
+    setPlaying(false);
+  }, [selectedTurnId]);
 
   useEffect(() => {
     if (!playing || !currentTurn || currentTurn.frames.length <= 1) {
@@ -1390,30 +1467,6 @@ function ManifoldRoute() {
               </div>
             </div>
             <div className="manifold-stage-controls">
-              {turns.length ? (
-                <label className="manifold-stage-select-wrap" htmlFor="manifold-turn-select">
-                  <span className="sr-only">Select manifold turn</span>
-                  <select
-                    className="manifold-stage-select"
-                    id="manifold-turn-select"
-                    onChange={(event) => {
-                      setSelectedTurnId(event.target.value);
-                      setTailMode(true);
-                      setSelectedSourceRecordId(null);
-                    }}
-                    value={currentTurn?.turn_id || ''}
-                  >
-                    {turns
-                      .slice()
-                      .reverse()
-                      .map((turn) => (
-                        <option key={turn.turn_id} value={turn.turn_id}>
-                          {truncate(turn.turn_id, 34)}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              ) : null}
               <button
                 className="trace-tab manifold-stage-button"
                 id="manifold-play-toggle"

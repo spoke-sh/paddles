@@ -112,6 +112,7 @@ body {
   gap: 14px;
 }
 .msg {
+  display: block;
   max-width: 85%;
   padding: 14px 16px;
   border-radius: 22px;
@@ -119,10 +120,41 @@ body {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  appearance: none;
   border: 1px solid rgba(255,255,255,0.46);
   box-shadow:
     inset 1px 1px 0 rgba(255,255,255,0.75),
     0 10px 20px rgba(90, 104, 120, 0.14);
+}
+.msg.is-turn-selectable {
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.msg.is-turn-selectable:hover,
+.msg.is-turn-selectable:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(45, 144, 200, 0.48);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    0 14px 26px rgba(44, 95, 130, 0.18);
+}
+.msg.is-turn-selectable:focus-visible {
+  outline: 2px solid rgba(45, 144, 200, 0.32);
+  outline-offset: 2px;
+}
+.msg.is-selected-turn {
+  border-color: rgba(45, 144, 200, 0.56);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 0 0 3px rgba(45, 144, 200, 0.16),
+    0 14px 28px rgba(45, 95, 130, 0.2);
 }
 .msg.user {
   align-self: flex-end;
@@ -1964,7 +1996,6 @@ body {
         <div class="manifold-canvas" id="manifold-canvas"></div>
       </section>
       <aside class="manifold-side">
-        <section class="manifold-panel" id="manifold-timeline-panel"></section>
         <section class="manifold-panel" id="manifold-source-panel"></section>
       </aside>
     </div>
@@ -2410,6 +2441,7 @@ function setTraceView(view, { syncHistory = true } = {}) {
   document.getElementById('manifold-view').classList.toggle('trace-view--active', view === 'manifold');
   document.getElementById('transit-view').classList.toggle('trace-view--active', view === 'transit');
   document.getElementById('trace-subhead').textContent = TRACE_VIEW_LABELS[view] || 'Transit Trace';
+  syncTranscriptTurnSelectionState();
   if (syncHistory) {
     const nextPath = tracePathForView(view);
     if (normalizedTracePath(window.location.pathname) !== nextPath) {
@@ -2752,7 +2784,6 @@ function syncManifoldControls(turn) {
 function renderManifoldShell() {
   const stageMeta = document.getElementById('manifold-stage-meta');
   const canvas = document.getElementById('manifold-canvas');
-  const timelinePanel = document.getElementById('manifold-timeline-panel');
   const sourcePanel = document.getElementById('manifold-source-panel');
   const turns = manifoldTurns();
   const turn = currentManifoldTurn();
@@ -2773,12 +2804,10 @@ function renderManifoldShell() {
         '<strong>Steering signal manifold route is armed.</strong>' +
         '<p>This route keeps the systemic manifold separate from the precise forensic inspector. Once replay-backed steering snapshots arrive, the chamber canvas, timeline, and source panes will populate here.</p>' +
       '</div>';
-    timelinePanel.innerHTML =
-      '<div class="manifold-panel-title">Timeline</div>' +
-      '<div class="manifold-panel-copy">Replay-backed turn frames will accumulate here without creating page-level overflow.</div>';
     sourcePanel.innerHTML =
       '<div class="manifold-panel-title">Sources</div>' +
-      '<div class="manifold-panel-copy">Active steering signal anchors and contributions will appear here after the first replay-backed manifold frame arrives.</div>';
+      '<div class="manifold-panel-copy">Active steering signal anchors and contributions will appear here after the first replay-backed manifold frame arrives. Transcript clicks on the left will become the turn selector.</div>';
+    syncTranscriptTurnSelectionState();
     return;
   }
 
@@ -2794,6 +2823,7 @@ function renderManifoldShell() {
       '<div class="manifold-playback-banner">' +
         '<strong>Temporal manifold playback is active.</strong>' +
         '<p>The manifold stage now scrubs through replay frames. Fill tracks accumulation, dashed topology indicates supersession, and historical frames can fade as the route moves through stabilization and bleed-off.</p>' +
+        '<p><strong>Turn selection:</strong> click a transcript message on the left panel to retarget the manifold without reopening this route.</p>' +
         '<p><strong>Current turn:</strong> ' + escapeHtml(turn ? turn.turn_id : 'none') + '<br>' +
         '<strong>Latest frame:</strong> ' + escapeHtml(frame ? String(frame.sequence) : 'none') + '<br>' +
         '<strong>Primitives:</strong> ' + primitives.length + ' · <strong>Conduits:</strong> ' + conduits.length + '</p>' +
@@ -2837,29 +2867,9 @@ function renderManifoldShell() {
       '</div>' +
     '</div>';
 
-  timelinePanel.innerHTML =
-    '<div class="manifold-panel-title">Timeline</div>' +
-    '<div class="manifold-panel-copy">Replay-backed frames stay bounded to this pane so long conversations scroll locally instead of expanding the page. Selecting a turn retargets the scrubber without replacing the whole route.</div>' +
-    '<div class="manifold-panel-list">' +
-      turns.slice().reverse().map((turnItem) => {
-        const latestFrame = turnItem.frames && turnItem.frames.length ? turnItem.frames[turnItem.frames.length - 1] : null;
-        return (
-          '<button class="manifold-panel-button" data-manifold-turn-id="' + escapeHtml(turnItem.turn_id) + '" data-lifecycle="' + escapeHtml(manifoldLifecycleClass(turnItem.lifecycle)) + '">' +
-            '<div class="manifold-panel-row">' +
-              '<strong>' + escapeHtml(truncate(turnItem.turn_id, 28)) + '</strong>' +
-              '<span>' + escapeHtml(String((turnItem.frames || []).length)) + ' frames' +
-              (latestFrame ? ' · step ' + escapeHtml(String(latestFrame.sequence)) : '') +
-              '</span>' +
-            '</div>' +
-            manifoldLifecycleBadge(turnItem.lifecycle, 'manifold-panel-status') +
-          '</button>'
-        );
-      }).join('') +
-    '</div>';
-
   sourcePanel.innerHTML =
     '<div class="manifold-panel-title">Sources</div>' +
-    '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong> · frame state ' + manifoldLifecycleBadge(currentLifecycle, 'manifold-panel-status') + '</div>' +
+    '<div class="manifold-panel-copy">Current turn anchor: <strong>' + escapeHtml(manifoldAnchorLabel(frame ? frame.anchor : null)) + '</strong> · frame state ' + manifoldLifecycleBadge(currentLifecycle, 'manifold-panel-status') + ' · turn selection follows transcript clicks on the left.</div>' +
     (selectedSignal
       ? '<div class="manifold-source-detail">' +
           '<div class="manifold-source-detail__head">' +
@@ -2908,17 +2918,6 @@ function renderManifoldShell() {
           )).join('')
         : '<div class="manifold-panel-copy">No active steering signals were present in the current frame.</div>') +
     '</div>';
-
-  timelinePanel.querySelectorAll('[data-manifold-turn-id]').forEach((button) => {
-    button.addEventListener('click', () => {
-      stopManifoldPlayback();
-      selectedTurnId = button.dataset.manifoldTurnId;
-      manifoldTailMode = true;
-      manifoldFrameIndex = null;
-      selectedManifoldSourceRecordId = null;
-      renderManifoldShell();
-    });
-  });
   canvas.querySelectorAll('[data-source-record-id]').forEach((button) => {
     button.addEventListener('click', () => {
       if (!button.dataset.sourceRecordId) {
@@ -2940,6 +2939,7 @@ function renderManifoldShell() {
       );
     });
   });
+  syncTranscriptTurnSelectionState();
 }
 
 function clampTraceZoom(value) {
@@ -3272,9 +3272,67 @@ function syncMessagesScrollToTailIfNeeded() {
   messages.scrollTop = messages.scrollHeight;
 }
 
-function addMessage(cls, text) {
+function availableManifoldTurnIds() {
+  const turns = latestManifold && Array.isArray(latestManifold.turns) ? latestManifold.turns : [];
+  return new Set(turns.map((turn) => turn.turn_id));
+}
+
+function selectManifoldTurnFromMessage(turnId) {
+  if (activeTraceView !== 'manifold') {
+    return;
+  }
+  if (!turnId || !availableManifoldTurnIds().has(turnId)) {
+    return;
+  }
+  stopManifoldPlayback();
+  selectedTurnId = turnId;
+  manifoldTailMode = true;
+  manifoldFrameIndex = null;
+  selectedManifoldSourceRecordId = null;
+  syncTranscriptTurnSelectionState();
+  renderManifoldShell();
+}
+
+function syncTranscriptTurnSelectionState() {
+  const messages = messagesElement();
+  if (!messages) {
+    return;
+  }
+  const selectableTurnIds = availableManifoldTurnIds();
+  const manifoldActive = activeTraceView === 'manifold';
+  messages.querySelectorAll('.msg[data-message-turn-id]').forEach((node) => {
+    const turnId = node.dataset.messageTurnId || '';
+    const selectable = manifoldActive && selectableTurnIds.has(turnId);
+    const selected = selectable && turnId === selectedTurnId;
+    node.classList.toggle('is-turn-selectable', selectable);
+    node.classList.toggle('is-selected-turn', selected);
+    if (selectable) {
+      node.setAttribute('role', 'button');
+      node.setAttribute('tabindex', '0');
+      node.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      node.setAttribute('title', 'Select this turn in the steering gate manifold');
+    } else {
+      node.removeAttribute('role');
+      node.removeAttribute('tabindex');
+      node.removeAttribute('aria-pressed');
+      node.removeAttribute('title');
+    }
+  });
+}
+
+function addMessage(cls, text, turnId = null) {
   const el = document.createElement('div');
   el.className = 'msg ' + cls;
+  if (turnId) {
+    el.dataset.messageTurnId = turnId;
+    el.addEventListener('click', () => selectManifoldTurnFromMessage(turnId));
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectManifoldTurnFromMessage(turnId);
+      }
+    });
+  }
   const body = document.createElement('div');
   body.className = 'msg-body';
   const paragraph = document.createElement('div');
@@ -3289,6 +3347,7 @@ function addMessage(cls, text) {
   } else {
     messages.appendChild(el);
   }
+  syncTranscriptTurnSelectionState();
   syncMessagesScrollToTailIfNeeded();
 }
 
@@ -4644,6 +4703,7 @@ async function refreshManifold() {
     } else {
       manifoldFrameIndex = Math.max(0, Math.min(turn.frames.length - 1, manifoldFrameIndex == null ? 0 : manifoldFrameIndex));
     }
+    syncTranscriptTurnSelectionState();
     if (activeTraceView === 'manifold') {
       renderManifoldShell();
     }
@@ -4658,7 +4718,7 @@ function renderConversationTranscript(transcript, { reset = false } = {}) {
     clearTranscriptMessages();
   }
   for (const entry of transcript.entries) {
-    addMessage(entry.speaker === 'assistant' ? 'assistant' : 'user', entry.content);
+    addMessage(entry.speaker === 'assistant' ? 'assistant' : 'user', entry.content, entry.turn_id);
   }
 }
 
