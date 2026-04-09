@@ -303,9 +303,6 @@ export function ManifoldStage({
                       >
                         <span className="manifold-force-point__halo" />
                         <span className="manifold-force-point__core" />
-                        <span className="manifold-force-point__label">
-                          {point.label} · {point.magnitudePercent}%
-                        </span>
                         <span className="sr-only">
                           {point.label}, frame {point.frameIndex + 1}, {point.magnitudePercent}%
                         </span>

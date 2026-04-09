@@ -352,9 +352,6 @@
 .manifold-force-point.is-contextual {
   opacity: 0.38;
 }
-.manifold-force-point.is-contextual .manifold-force-point__label {
-  opacity: 0.62;
-}
 .manifold-force-point__halo,
 .manifold-force-point__core {
   position: absolute;
@@ -384,21 +381,6 @@
   inset: -12px;
   opacity: 1;
   background: radial-gradient(circle, rgba(255,255,255,0.52), transparent 72%);
-}
-.manifold-force-point__label {
-  position: absolute;
-  left: 50%;
-  top: 34px;
-  transform: translateX(-50%);
-  padding: 4px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #24333d;
-  background: rgba(255,255,255,0.8);
-  box-shadow: 0 8px 18px rgba(83, 99, 112, 0.12);
 }
 .manifold-force-popup {
   position: absolute;

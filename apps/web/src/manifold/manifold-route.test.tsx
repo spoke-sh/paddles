@@ -49,6 +49,7 @@ describe('ManifoldRoute', () => {
     expect(document.querySelector('.manifold-spacefield__scrubber')).not.toBeNull();
     expect(document.getElementById('manifold-time-scrubber')).not.toBeNull();
     expect(document.querySelectorAll('.manifold-spacefield__scrubber-frame')).toHaveLength(1);
+    expect(document.querySelector('.manifold-force-point__label')).toBeNull();
   });
 
   it('scrubs manifold frames from the bottom filmstrip slider', async () => {
