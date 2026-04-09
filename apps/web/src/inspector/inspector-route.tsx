@@ -104,7 +104,7 @@ export function InspectorRoute() {
           </div>
 
           <div className="forensic-internals-grid">
-            <section className="forensic-detail-pane">
+            <section className="forensic-internals-detail">
               <div className="forensic-detail-toolbar">
                 <div>
                   <div className="forensic-detail-title" id="forensic-detail-title">
@@ -166,7 +166,7 @@ export function InspectorRoute() {
               </div>
             </section>
 
-            <section className="forensic-records" id="forensic-records">
+            <section className="forensic-linked-records" id="forensic-records">
               <div className="forensic-section-head">
                 <div className="forensic-section-title">Linked records</div>
                 <div className="forensic-section-meta">{linkedRecords.length} records</div>

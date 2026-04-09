@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:32:29.297931273-07:00
+mode: manual
+---
+Retired the legacy forensic nav/list/detail components and their chrome so the atlas, turn scrubber, and machine summary own the default operator path.

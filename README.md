@@ -153,7 +153,7 @@ The important invariant is that steering signals become stronger as real evidenc
 
 The web UI exposes three complementary trace routes:
 
-- `/` — the forensic inspector, which is the precise source-of-truth view over recorded transit artifacts
+- `/` — the forensic inspector, which is now a machine-first detail surface over recorded transit artifacts with a `Show internals` escape hatch for raw payloads and ids
 - `/manifold` — the steering-gate manifold, which folds raw steering signals into three gate families (`evidence`, `convergence`, `containment`) and visualizes them as a temporal force field across time, gate family, and magnitude
 - `/transit` — the snake-style turn-step trace, optimized for turn lineage and step sequencing
 
@@ -169,7 +169,7 @@ That simplified path also shares one interaction model across both routes:
 - selected moment
 - optional internals mode
 
-Internals still preserve raw ids, payloads, and evidence links, but they sit behind an explicit operator choice instead of dominating the first-read surface.
+Internals still preserve raw ids, payloads, and evidence links, but they sit behind an explicit `Show internals` operator choice instead of dominating the first-read surface.
 
 The frontend is now staged through a shared Turborepo workspace:
 

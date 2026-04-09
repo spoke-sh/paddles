@@ -605,3 +605,31 @@ fn runtime_shell_buttons_do_not_underline_and_transit_route_drops_legacy_toggle_
         "transit route should keep the machine scrubber buttons and drop the legacy toggle chrome",
     );
 }
+
+#[test]
+fn forensic_route_drops_legacy_nav_list_pane_chrome_and_docs_the_internals_escape_hatch() {
+    let inspector_css = read_repo_file("apps/web/src/styles/inspector.css");
+    let readme = read_repo_file("README.md");
+    let architecture = read_repo_file("ARCHITECTURE.md");
+
+    assert!(
+        !repo_file("apps/web/src/inspector/inspector-nav.tsx").exists()
+            && !repo_file("apps/web/src/inspector/inspector-record-list.tsx").exists()
+            && !repo_file("apps/web/src/inspector/inspector-detail-pane.tsx").exists(),
+        "legacy forensic nav/list/detail components should be retired once the machine route owns the default operator path",
+    );
+    assert!(
+        !inspector_css.contains(".forensic-nav {")
+            && !inspector_css.contains(".forensic-shell {")
+            && !inspector_css.contains(".forensic-main {")
+            && !inspector_css.contains(".forensic-detail-pane {"),
+        "inspector stylesheet should not keep the retired nav/list/pane chrome",
+    );
+    assert!(
+        readme.contains("machine-first detail surface")
+            && readme.contains("Show internals")
+            && architecture.contains("machine-first detail surface")
+            && architecture.contains("explicit internals path"),
+        "foundational docs should describe the new default forensic workflow and its internals escape hatch",
+    );
+}

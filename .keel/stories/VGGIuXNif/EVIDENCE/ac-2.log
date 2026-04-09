@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:32:29.333403775-07:00
+mode: manual
+---
+Updated route tests plus foundational docs to describe the machine-first forensic workflow and the explicit Show internals escape hatch.

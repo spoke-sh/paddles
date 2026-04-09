@@ -27,11 +27,11 @@ started_at: 2026-04-08T21:23:31
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Collapse Forensic Selection To Moments And Internals](../../../../stories/VGGIuWphu/README.md) | feat | done |
-| [Retire Legacy Forensic Nav List And Pane](../../../../stories/VGGIuXNif/README.md) | feat | backlog |
+| [Retire Legacy Forensic Nav List And Pane](../../../../stories/VGGIuXNif/README.md) | feat | done |
 | [Build Forensic Machine Detail Drawer](../../../../stories/VGGIuXjjA/README.md) | feat | backlog |
 <!-- END GENERATED -->
