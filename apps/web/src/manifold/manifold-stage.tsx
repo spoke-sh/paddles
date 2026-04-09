@@ -40,7 +40,6 @@ interface ManifoldStageProps {
   onClearSelection: () => void;
   onFrameChange: (frameIndex: number) => void;
   onPointSelect: (point: ManifoldForcePoint) => void;
-  onReplay: () => void;
   onResetView: () => void;
   onTogglePlay: () => void;
   onViewportWheel: (event: React.WheelEvent<HTMLDivElement>) => void;
@@ -66,7 +65,6 @@ export function ManifoldStage({
   onClearSelection,
   onFrameChange,
   onPointSelect,
-  onReplay,
   onResetView,
   onTogglePlay,
   onViewportWheel,
@@ -118,32 +116,6 @@ export function ManifoldStage({
                   effectiveFrameIndex + 1
                 }`}
           </div>
-        </div>
-        <div className="manifold-stage-controls">
-          <button
-            className="trace-tab manifold-stage-button"
-            id="manifold-play-toggle"
-            onClick={onTogglePlay}
-            type="button"
-          >
-            {playing ? 'Pause' : 'Play'}
-          </button>
-          <button
-            className="trace-tab manifold-stage-button"
-            id="manifold-replay-button"
-            onClick={onReplay}
-            type="button"
-          >
-            Replay
-          </button>
-          <button
-            className="trace-tab manifold-stage-button"
-            id="manifold-reset-view-button"
-            onClick={onResetView}
-            type="button"
-          >
-            Reset View
-          </button>
         </div>
       </div>
       <div className="manifold-canvas" id="manifold-canvas">
@@ -378,10 +350,20 @@ export function ManifoldStage({
                 >
                   <div className="manifold-spacefield__scrubber-meta">
                     <span>Temporal crop</span>
-                    <span id="manifold-frame-meta">
-                      Frame {currentTurn ? effectiveFrameIndex + 1 : 0} /{' '}
-                      {currentTurn?.frames.length || 0}
-                    </span>
+                    <div className="manifold-spacefield__scrubber-controls">
+                      <span id="manifold-frame-meta">
+                        Frame {currentTurn ? effectiveFrameIndex + 1 : 0} /{' '}
+                        {currentTurn?.frames.length || 0}
+                      </span>
+                      <button
+                        className="trace-tab manifold-stage-button manifold-spacefield__scrubber-play"
+                        id="manifold-play-toggle"
+                        onClick={onTogglePlay}
+                        type="button"
+                      >
+                        {playing ? 'Pause' : 'Play'}
+                      </button>
+                    </div>
                   </div>
                   <div className="manifold-spacefield__scrubber-filmstrip">
                     {(currentTurn?.frames || []).map((frame, index) => {

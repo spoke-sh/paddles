@@ -55,6 +55,11 @@ describe('ManifoldRoute', () => {
     expect(document.getElementById('manifold-time-scrubber')).not.toBeNull();
     expect(document.querySelectorAll('.manifold-spacefield__scrubber-frame')).toHaveLength(1);
     expect(document.querySelector('.manifold-force-point__label')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Replay' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset View' })).toBeNull();
+    const scrubber = document.querySelector('.manifold-spacefield__scrubber');
+    expect(scrubber?.querySelector('#manifold-play-toggle')).not.toBeNull();
+    expect(document.querySelector('.manifold-stage-head #manifold-play-toggle')).toBeNull();
   });
 
   it('scrubs manifold frames from the bottom filmstrip slider', async () => {

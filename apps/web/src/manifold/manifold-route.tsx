@@ -34,7 +34,6 @@ export function ManifoldRoute() {
           onClearSelection={playback.clearSelection}
           onFrameChange={playback.selectFrame}
           onPointSelect={playback.selectPoint}
-          onReplay={playback.replay}
           onResetView={camera.resetCamera}
           onTogglePlay={() => playback.setPlaying((current) => !current)}
           onViewportWheel={camera.zoomFromWheel}

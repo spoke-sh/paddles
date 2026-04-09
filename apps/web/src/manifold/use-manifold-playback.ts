@@ -141,12 +141,6 @@ export function useManifoldPlayback(
     setSelection({ mode: 'closed' });
   }
 
-  function replay() {
-    setTailMode(false);
-    setFrameIndex(0);
-    setPlaying(false);
-  }
-
   return {
     currentFrame,
     currentTurn,
@@ -163,7 +157,6 @@ export function useManifoldPlayback(
     clearSelection,
     selectFrame,
     selectPoint,
-    replay,
     setPlaying,
   };
 }

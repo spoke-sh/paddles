@@ -47,12 +47,6 @@
   color: #6c7c88;
   font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
 }
-.manifold-stage-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 .manifold-stage-button {
   min-width: 88px;
 }
@@ -479,6 +473,7 @@
 .manifold-spacefield__scrubber-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   flex-wrap: wrap;
   font-size: 10px;
@@ -486,6 +481,15 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #51626f;
+}
+.manifold-spacefield__scrubber-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.manifold-spacefield__scrubber-play {
+  min-width: 88px;
 }
 .manifold-spacefield__scrubber-filmstrip {
   display: grid;
