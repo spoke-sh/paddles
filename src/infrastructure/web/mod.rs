@@ -1766,6 +1766,8 @@ mod tests {
         assert!(html.contains("t === 'tool_output'"));
         assert!(html.contains("t === 'plan_updated'"));
         assert!(html.contains("function selectManifoldTurnFromMessage(turnId)"));
+        assert!(html.contains("function appendInlineCodeContent(parent, text)"));
+        assert!(html.contains("msg-inline-code"));
     }
 
     #[test]

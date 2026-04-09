@@ -189,6 +189,19 @@ body {
 .msg-paragraph {
   white-space: pre-wrap;
 }
+.msg-inline-code {
+  display: inline;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(24, 33, 45, 0.08);
+  color: #18212d;
+  font-family: "Iosevka Term", "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-size: 0.94em;
+}
+.msg.user .msg-inline-code {
+  background: rgba(255,255,255,0.16);
+  color: #f8fbfd;
+}
 
 .events-group { align-self: flex-start; width: 100%; }
 .event-row {
@@ -3337,7 +3350,7 @@ function addMessage(cls, text, turnId = null) {
   body.className = 'msg-body';
   const paragraph = document.createElement('div');
   paragraph.className = 'msg-paragraph';
-  paragraph.textContent = text;
+  appendInlineCodeContent(paragraph, text);
   body.appendChild(paragraph);
   el.appendChild(body);
   const messages = document.getElementById('messages');
@@ -3349,6 +3362,27 @@ function addMessage(cls, text, turnId = null) {
   }
   syncTranscriptTurnSelectionState();
   syncMessagesScrollToTailIfNeeded();
+}
+
+function appendInlineCodeContent(parent, text) {
+  const matcher = /`([^`]+)`/g;
+  let match = null;
+  let lastIndex = 0;
+
+  while ((match = matcher.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parent.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+    }
+    const code = document.createElement('code');
+    code.className = 'msg-inline-code';
+    code.textContent = match[1];
+    parent.appendChild(code);
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length || parent.childNodes.length === 0) {
+    parent.appendChild(document.createTextNode(text.slice(lastIndex)));
+  }
 }
 
 function clearTranscriptMessages() {

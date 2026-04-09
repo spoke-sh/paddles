@@ -104,6 +104,15 @@
 .msg-paragraph {
   white-space: pre-wrap;
 }
+.msg-inline-code {
+  display: inline;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(24, 33, 45, 0.08);
+  color: #18212d;
+  font-family: "Iosevka Term", "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-size: 0.94em;
+}
 .msg-bullet-list {
   margin: 0;
   padding-left: 20px;
@@ -152,6 +161,10 @@
   background: rgba(255,255,255,0.3);
 }
 .msg.user .msg-code-block {
+  background: rgba(255,255,255,0.16);
+  color: #f8fbfd;
+}
+.msg.user .msg-inline-code {
   background: rgba(255,255,255,0.16);
   color: #f8fbfd;
 }

@@ -1,4 +1,5 @@
 import type { RenderDocument } from '../runtime-types';
+import { renderInlineCode } from './inline-code';
 
 export function AssistantMessage({ render }: { render: RenderDocument }) {
   return (
@@ -8,20 +9,22 @@ export function AssistantMessage({ render }: { render: RenderDocument }) {
           case 'heading':
             return (
               <div className="msg-heading" key={`heading-${index}`}>
-                {block.text}
+                {renderInlineCode(block.text, `heading-${index}`)}
               </div>
             );
           case 'paragraph':
             return (
               <div className="msg-paragraph" key={`paragraph-${index}`}>
-                {block.text}
+                {renderInlineCode(block.text, `paragraph-${index}`)}
               </div>
             );
           case 'bullet_list':
             return (
               <ul className="msg-bullet-list" key={`list-${index}`}>
                 {block.items.map((item, itemIndex) => (
-                  <li key={`item-${index}-${itemIndex}`}>{item}</li>
+                  <li key={`item-${index}-${itemIndex}`}>
+                    {renderInlineCode(item, `item-${index}-${itemIndex}`)}
+                  </li>
                 ))}
               </ul>
             );

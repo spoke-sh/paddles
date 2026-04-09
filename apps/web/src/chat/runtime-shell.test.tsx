@@ -253,6 +253,54 @@ describe('Runtime shell and chat', () => {
     expect(message.textContent).toBe('line one\nline two\nline three');
   });
 
+  it('renders inline code spans in user and assistant transcript text', async () => {
+    const inlineCodeProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      transcript: {
+        ...bootstrapProjection.transcript,
+        entries: [
+          {
+            record_id: 'record-inline-code-user',
+            turn_id: 'task-123.turn-0002',
+            speaker: 'user',
+            content: 'Inspect `apps/web/src/chat/plain-message.tsx` before changing it.',
+          },
+          {
+            record_id: 'record-inline-code-assistant',
+            turn_id: 'task-123.turn-0002',
+            speaker: 'assistant',
+            content: 'Updated `pitch` and `yaw` defaults.',
+            render: {
+              blocks: [
+                {
+                  type: 'paragraph',
+                  text: 'Updated `pitch` and `yaw` defaults.',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    stubRuntimeFetch({ projection: inlineCodeProjection });
+    renderAtPath('/');
+
+    await screen.findByText('apps/web/src/chat/plain-message.tsx', {
+      selector: '.msg-inline-code',
+    });
+    const inlineCode = Array.from(document.querySelectorAll('.msg-inline-code'));
+
+    expect(inlineCode).toHaveLength(3);
+    expect(inlineCode.map((node) => node.textContent)).toEqual([
+      'apps/web/src/chat/plain-message.tsx',
+      'pitch',
+      'yaw',
+    ]);
+    expect(inlineCode[0]?.closest('.msg')).toHaveClass('msg', 'user');
+    expect(inlineCode[1]?.closest('.msg')).toHaveClass('msg', 'assistant');
+  });
+
   it('disables native autocomplete and recalls bootstrapped prompt history with arrow keys', async () => {
     renderAtPath('/');
 
