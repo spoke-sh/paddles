@@ -15,15 +15,15 @@ use crate::domain::model::{
     ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
     ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
-    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, StrainFactor, StrainLevel,
-    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
-    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase,
+    StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
+    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
+    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -299,6 +299,8 @@ struct SynthesisTraceState {
 
 struct SignalSnapshotRecord {
     kind: TraceSignalKind,
+    gate: Option<SteeringGateKind>,
+    phase: Option<SteeringGatePhase>,
     summary: String,
     level: String,
     magnitude_percent: u8,
@@ -797,8 +799,8 @@ impl StructuredTurnTrace {
             self.default_branch_id(),
             TraceRecordKind::SignalSnapshot(TraceSignalSnapshot {
                 kind: record.kind,
-                gate: Some(record.kind.steering_gate()),
-                phase: Some(record.kind.steering_phase()),
+                gate: record.gate.or_else(|| Some(record.kind.steering_gate())),
+                phase: record.phase.or_else(|| Some(record.kind.steering_phase())),
                 summary: summary.clone(),
                 level: record.level,
                 magnitude_percent: record.magnitude_percent,
@@ -900,6 +902,8 @@ impl StructuredTurnTrace {
             entity_resolution_signal_record(outcome, source);
         self.record_signal_snapshot(SignalSnapshotRecord {
             kind,
+            gate: None,
+            phase: None,
             summary,
             level: level.to_string(),
             magnitude_percent,
@@ -971,6 +975,8 @@ impl TurnEventSink for StructuredTurnTrace {
                 let contributions = strain_signal_contributions(&strain);
                 self.record_signal_snapshot(SignalSnapshotRecord {
                     kind: TraceSignalKind::ContextStrain,
+                    gate: None,
+                    phase: None,
                     summary: format!("context strain reached {}", strain.level.label()),
                     level: strain.level.label().to_string(),
                     magnitude_percent: strain_level_magnitude(strain.level),
@@ -1005,8 +1011,18 @@ impl TurnEventSink for StructuredTurnTrace {
                         }),
                     )
                 };
+                let (gate, phase) = if stage == "premise-challenge" {
+                    (
+                        Some(SteeringGateKind::Convergence),
+                        Some(SteeringGatePhase::Narrowing),
+                    )
+                } else {
+                    (None, None)
+                };
                 self.record_signal_snapshot(SignalSnapshotRecord {
                     kind: signal_kind,
+                    gate,
+                    phase,
                     summary,
                     level: level.to_string(),
                     magnitude_percent,
@@ -1022,6 +1038,8 @@ impl TurnEventSink for StructuredTurnTrace {
             } => {
                 self.record_signal_snapshot(SignalSnapshotRecord {
                     kind: TraceSignalKind::CompactionCue,
+                    gate: None,
+                    phase: None,
                     summary: "context refinement applied".to_string(),
                     level: "medium".to_string(),
                     magnitude_percent: 58,
@@ -1044,6 +1062,8 @@ impl TurnEventSink for StructuredTurnTrace {
                         budget_signal_details(stop_reason.as_str());
                     self.record_signal_snapshot(SignalSnapshotRecord {
                         kind: TraceSignalKind::BudgetBoundary,
+                        gate: None,
+                        phase: None,
                         summary: format!("planner stop reason `{stop_reason}`"),
                         level: level.to_string(),
                         magnitude_percent,
@@ -8100,6 +8120,26 @@ mod tests {
                             .contributions
                             .iter()
                             .all(|item| item.source != "provider_or_parser")
+            )
+        }));
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            if snapshot.kind != TraceSignalKind::Fallback {
+                return false;
+            }
+            let payload = snapshot
+                .artifact
+                .inline_content
+                .as_deref()
+                .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok());
+            matches!(
+                payload,
+                Some(serde_json::Value::Object(ref details))
+                    if details.get("stage").and_then(serde_json::Value::as_str)
+                        == Some("premise-challenge")
+                        && snapshot.resolved_gate()
+                            == crate::domain::model::SteeringGateKind::Convergence
+                        && snapshot.resolved_phase()
+                            == crate::domain::model::SteeringGatePhase::Narrowing
             )
         }));
         assert!(signal_snapshots.iter().any(|snapshot| {
