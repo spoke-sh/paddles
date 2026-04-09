@@ -160,7 +160,7 @@ Transit and forensic surfaces also share one interaction contract:
 - selected moment id
 - optional internals mode
 
-The internals path keeps raw record ids, trace ids, and payload content reachable, but it remains an explicit drill-down rather than the primary narrative surface. In the forensic inspector, the default route is a machine-first detail surface, and the raw artifacts now sit behind an explicit internals path exposed through the `Show internals` control.
+The internals path keeps raw record ids, trace ids, and payload content reachable, but it remains an explicit drill-down rather than the primary narrative surface. In the forensic inspector, the default route is a machine-first detail surface: atlas first, then a focused detail drawer that explains why the selected moment mattered, which steering forces shaped it, and what changed in artifact lineage before exposing raw payloads through the explicit `Show internals` control.
 
 ### Visibility Throughout
 
@@ -328,7 +328,7 @@ Each snapshot carries a magnitude, a summary, and source-attributed contribution
 
 The web UI now carries two distinct trace projections over the same recorder-backed source of truth:
 
-- the **forensic inspector**, which now defaults to a machine-first detail surface before revealing raw payload internals
+- the **forensic inspector**, which now defaults to a machine-first detail drawer before revealing raw payload internals
 - the **steering-gate manifold**, which stays expressive and systemic
 
 The manifold route is intentionally metaphorical. It now simplifies the steering layer into three first-class gates:

@@ -628,8 +628,11 @@ fn forensic_route_drops_legacy_nav_list_pane_chrome_and_docs_the_internals_escap
     assert!(
         readme.contains("machine-first detail surface")
             && readme.contains("Show internals")
+            && readme.contains("detail drawer")
             && architecture.contains("machine-first detail surface")
-            && architecture.contains("explicit internals path"),
-        "foundational docs should describe the new default forensic workflow and its internals escape hatch",
+            && architecture.contains("detail drawer")
+            && architecture.contains("why the selected moment mattered")
+            && architecture.contains("explicit drill-down"),
+        "foundational docs should describe the new default forensic drawer workflow and its internals escape hatch",
     );
 }

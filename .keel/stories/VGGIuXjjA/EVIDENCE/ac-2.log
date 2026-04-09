@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:37:27.775999490-07:00
+mode: manual
+---
+Internals remain behind the explicit Show internals toggle, and the drawer stays visible while raw payloads and linked records appear below it. Verified by npm --workspace @paddles/web run test -- inspector-route.test.tsx and npm --workspace @paddles/web run build.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:37:27.814194950-07:00
+mode: manual
+---
+The detail surface now exposes an explicit internals path instead of restoring the old always-on pane composition. Verified by the route test, the updated README/ARCHITECTURE docs, and npm --workspace @paddles/web run lint.

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:37:27.732077120-07:00
+mode: manual
+---
+The forensic route now renders a dedicated machine detail drawer with a "Why this moment mattered" narrative before raw payloads. Verified by npm --workspace @paddles/web run test -- inspector-route.test.tsx.

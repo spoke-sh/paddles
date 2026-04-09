@@ -131,7 +131,8 @@ describe('InspectorRoute', () => {
     expect(document.getElementById('forensic-nav')).toBeNull();
     expect(document.getElementById('forensic-turn-scrubber')).not.toBeNull();
     expect(document.getElementById('forensic-internals-toggle')).not.toBeNull();
-    expect(document.getElementById('forensic-machine-summary')).not.toBeNull();
+    expect(document.getElementById('forensic-machine-summary')).toBeNull();
+    expect(document.getElementById('forensic-machine-drawer')).not.toBeNull();
     expect(document.getElementById('forensic-internals-shell')).toBeNull();
     expect(screen.queryByText('All records')).not.toBeInTheDocument();
     expect(document.getElementById('forensic-conversation-button')).toBeNull();
@@ -143,9 +144,26 @@ describe('InspectorRoute', () => {
     fireEvent.click(momentScrubber as HTMLButtonElement);
 
     await waitFor(() => {
-      expect(document.getElementById('forensic-machine-summary')?.textContent).toContain('Force');
+      expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain(
+        'Why this moment mattered'
+      );
     });
-    expect(document.getElementById('forensic-machine-summary')?.textContent).toContain('record-4');
+    expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain(
+      'Action bias stayed fixed on the runtime route.'
+    );
+    expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain(
+      'Steering forces'
+    );
+    expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain(
+      'Candidate file evidence'
+    );
+    expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain(
+      'Artifact context'
+    );
+    expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain('record-4');
+    expect(document.getElementById('forensic-machine-drawer')?.textContent).toContain(
+      'Show internals to inspect raw payloads, record ids, and lineage anchors.'
+    );
 
     fireEvent.click(
       screen.getByRole('button', {
@@ -155,6 +173,7 @@ describe('InspectorRoute', () => {
     await waitFor(() => {
       expect(document.getElementById('forensic-internals-shell')).not.toBeNull();
     });
+    expect(document.getElementById('forensic-machine-drawer')).not.toBeNull();
     expect(document.getElementById('forensic-detail')?.textContent).toContain('record-4');
   });
 

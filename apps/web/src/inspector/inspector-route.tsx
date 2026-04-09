@@ -6,7 +6,7 @@ import {
   renderedRecordBody,
 } from '../runtime-helpers';
 import { useRuntimeStore } from '../runtime-store';
-import { machineMomentLabel } from '../trace-machine/machine-model';
+import { ForensicMachineDrawer } from './forensic-machine-drawer';
 import { InspectorOverview } from './inspector-overview';
 import { linkedRecordHeadline, useInspectorSelection } from './use-inspector-selection';
 
@@ -24,7 +24,6 @@ export function InspectorRoute() {
     machineTurns,
     showInternals,
     strongestSignalValue,
-    taskId,
     toggleInternals,
     selectMoment,
     selectTurn,
@@ -70,27 +69,15 @@ export function InspectorRoute() {
         </button>
       </section>
 
-      <section className="forensic-machine-summary" id="forensic-machine-summary">
-        <div className="forensic-detail-chip-row">
-          <span className="forensic-chip">
-            {currentMoment ? machineMomentLabel(currentMoment.kind) : 'No moment'}
-          </span>
-          <span className="forensic-chip">{currentMachineTurn?.turnId || taskId || 'task'}</span>
-          {currentRecord ? <span className="forensic-chip">{currentRecord.record.record_id}</span> : null}
-        </div>
-        <div className="forensic-machine-summary__title">
-          {currentMoment?.headline || 'Awaiting a selected machine moment'}
-        </div>
-        <div className="forensic-machine-summary__body">
-          {currentMoment?.narrative ||
-            'Select a machine moment from the atlas to inspect how the turn moved.'}
-        </div>
-        {currentRecord ? (
-          <div className="forensic-machine-summary__note">
-            Linked forensic evidence: {linkedRecordHeadline(currentRecord)}
-          </div>
-        ) : null}
-      </section>
+      <ForensicMachineDrawer
+        baseline={baseline}
+        contributions={contributions}
+        currentMoment={currentMoment}
+        currentRecord={currentRecord}
+        currentTurn={currentMachineTurn}
+        showInternals={showInternals}
+        strongestSignalValue={strongestSignalValue}
+      />
 
       {showInternals ? (
         <section className="forensic-internals-shell" id="forensic-internals-shell">
