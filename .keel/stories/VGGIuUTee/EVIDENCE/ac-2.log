@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:04:11.174041772-07:00
+mode: manual
+---
+Pinned the shared turn + moment + internals contract and vocabulary in .keel/epics/VGGIor3dC/README.md and .keel/epics/VGGIor3dC/voyages/VGGIqsj2g/README.md, guarded by cargo test narrative_machine_planning_docs_define_shared_vocabulary_and_selection_contract.

@@ -12,6 +12,16 @@ mission: VGGIo7WWc
 
 > The current transit trace inspector and forensic inspector expose raw trace structure instead of a coherent causal story, so operators see too many records, modes, and filters without a simple narrative of how a turn moved through planning, steering, tools, and outcome.
 
+## Shared Contract
+
+Later voyages in this epic must preserve one shared operator selection model across transit and forensic:
+
+- selected turn
+- selected moment
+- optional internals
+
+The default path is always narrative-first. Raw record ids, trace ids, payloads, and comparison details remain available through internals, but they are no longer the first surface the operator has to parse.
+
 ## Documents
 
 | Document | Description |
@@ -22,10 +32,10 @@ mission: VGGIo7WWc
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 2/9 stories done
+**Progress:** 1/3 voyages complete, 3/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Define Narrative Machine Model And Shared Projection](voyages/VGGIqsj2g/) | in-progress | 2/3 |
+| [Define Narrative Machine Model And Shared Projection](voyages/VGGIqsj2g/) | done | 3/3 |
 | [Build Turn Machine Stage For Transit](voyages/VGGIqtM2e/) | planned | 0/3 |
 | [Simplify Forensic Inspector Around Machine Narrative](voyages/VGGIqts2y/) | planned | 0/3 |
 <!-- END GENERATED -->

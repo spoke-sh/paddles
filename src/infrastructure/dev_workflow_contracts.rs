@@ -547,6 +547,28 @@ fn embedded_fallback_shell_parity_boundary_is_documented() {
 }
 
 #[test]
+fn narrative_machine_planning_docs_define_shared_vocabulary_and_selection_contract() {
+    let epic = read_repo_file(".keel/epics/VGGIor3dC/README.md");
+    let voyage = read_repo_file(".keel/epics/VGGIor3dC/voyages/VGGIqsj2g/README.md");
+
+    assert!(
+        epic.contains("selected turn")
+            && epic.contains("selected moment")
+            && epic.contains("optional internals"),
+        "the narrative-machine epic should declare the shared turn + moment + internals selection model",
+    );
+    assert!(
+        voyage.contains("Input")
+            && voyage.contains("Diverter")
+            && voyage.contains("Jam")
+            && voyage.contains("Spring return")
+            && voyage.contains("Force")
+            && voyage.contains("Output"),
+        "the first voyage should pin the shared operator vocabulary for later UI stories",
+    );
+}
+
+#[test]
 fn runtime_shell_host_keeps_panels_flush_to_the_viewport() {
     let runtime_shell_css = read_repo_file("apps/web/src/runtime-shell.css");
     let shared_css = read_repo_file("apps/web/src/styles/runtime-shell-base.css");

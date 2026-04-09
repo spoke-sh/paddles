@@ -22,6 +22,25 @@ export interface MachineSelectionState {
   showInternals: boolean;
 }
 
+export const MACHINE_NARRATIVE_KINDS: MachineMomentKind[] = [
+  'input',
+  'planner',
+  'evidence_probe',
+  'diverter',
+  'jam',
+  'spring_return',
+  'tool_run',
+  'force',
+  'output',
+  'unknown',
+];
+
+export const MACHINE_SELECTION_FIELDS = [
+  'selectedTurnId',
+  'selectedMomentId',
+  'showInternals',
+] as const;
+
 export const MACHINE_MOMENT_LEXICON: Record<MachineMomentKind, MachineMomentLexiconEntry> = {
   input: {
     label: 'Input',
@@ -82,7 +101,7 @@ export const DEFAULT_MACHINE_SELECTION: MachineSelectionState = {
 };
 
 export function machineMomentKinds() {
-  return Object.keys(MACHINE_MOMENT_LEXICON) as MachineMomentKind[];
+  return MACHINE_NARRATIVE_KINDS.slice();
 }
 
 export function machineMomentEntry(kind: MachineMomentKind) {

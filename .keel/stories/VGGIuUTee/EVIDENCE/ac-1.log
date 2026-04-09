@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:04:11.134215958-07:00
+mode: manual
+---
+Added explicit machine contract tests in apps/web/src/trace-machine/machine-contract.test.ts and targeted them with npm --workspace @paddles/web run test -- machine-contract.test.ts machine-projection.test.ts machine-model.test.ts.
