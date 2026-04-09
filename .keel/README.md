@@ -311,6 +311,14 @@
 | [Split Route Surfaces Into Domain Modules](epics/VGEVm5Ibi/voyages/VGEVsWxjv/) | done |
 | [Stabilize Styling Tests And Fallback Contracts](epics/VGEVm5Ibi/voyages/VGEVsXLkG/) | done |
 
+### [Reframe Trace Surfaces As A Narrative Machine](epics/VGGIor3dC/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Define Narrative Machine Model And Shared Projection](epics/VGGIor3dC/voyages/VGGIqsj2g/) | in-progress |
+| [Build Turn Machine Stage For Transit](epics/VGGIor3dC/voyages/VGGIqtM2e/) | planned |
+| [Simplify Forensic Inspector Around Machine Narrative](epics/VGGIor3dC/voyages/VGGIqts2y/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
