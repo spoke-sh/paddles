@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  bootstrapProjection,
   installRuntimeHarness,
   renderAtPath,
   resetRuntimeHarness,
@@ -16,40 +17,39 @@ afterEach(() => {
 });
 
 describe('TransitRoute', () => {
-  it('renders the primary transit route through the client router', async () => {
+  it('renders a machine stage and bottom scrubber from shared machine moments', async () => {
     renderAtPath('/transit');
 
-    expect(await screen.findByText('Turn Steps')).toBeInTheDocument();
-    expect(document.getElementById('trace-board')).toBeInTheDocument();
-    expect(document.querySelectorAll('#trace-board .trace-node').length).toBeGreaterThan(0);
-    expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
+    expect(await screen.findByText('Turn Machine')).toBeInTheDocument();
+    expect(document.getElementById('transit-machine-stage')).not.toBeNull();
+    expect(document.getElementById('transit-machine-scrubber')).not.toBeNull();
+    expect(screen.getAllByText('Input').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Force').length).toBeGreaterThan(0);
+    expect(document.getElementById('trace-board')).toBeNull();
+    expect(document.getElementById('trace-observatory')).toBeNull();
   });
 
-  it('renders a selectable observatory with a step scrubber', async () => {
+  it('explains the selected machine moment in causal terms', async () => {
     renderAtPath('/transit');
 
-    await screen.findByText('Turn Steps');
-    expect(document.getElementById('trace-observatory')).not.toBeNull();
-    expect(document.getElementById('trace-step-scrubber')).not.toBeNull();
-
-    const firstNode = document.querySelector('[data-trace-node-id="record-1"]') as HTMLElement | null;
-    expect(firstNode).not.toBeNull();
-    fireEvent.click(firstNode as HTMLElement);
-
-    await waitFor(() => {
-      expect(document.getElementById('trace-observatory-popup')?.textContent).toContain('prompt');
-    });
-
+    await screen.findByText('Turn Machine');
     const scrubberButton = document.querySelector(
-      '[data-trace-scrub-node-id="record-2"]'
-    ) as HTMLElement | null;
+      '[data-transit-scrub-moment-id="task-123.turn-0001.moment-0002"]'
+    ) as HTMLButtonElement | null;
     expect(scrubberButton).not.toBeNull();
-    fireEvent.click(scrubberButton as HTMLElement);
+
+    fireEvent.click(scrubberButton as HTMLButtonElement);
 
     await waitFor(() => {
-      expect(document.getElementById('trace-observatory-popup')?.textContent).toContain(
-        'action bias medium'
+      expect(document.getElementById('transit-machine-detail')?.textContent).toContain(
+        'Where steering pressure pushes the machine toward evidence, convergence, or containment.'
       );
     });
+    expect(document.getElementById('transit-machine-detail')?.textContent).toContain(
+      'Action bias strengthened after local evidence.'
+    );
+    expect(document.getElementById('transit-machine-detail')?.textContent).toContain(
+      bootstrapProjection.forensics.turns[0].turn_id
+    );
   });
 });

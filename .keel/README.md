@@ -316,7 +316,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Define Narrative Machine Model And Shared Projection](epics/VGGIor3dC/voyages/VGGIqsj2g/) | done |
-| [Build Turn Machine Stage For Transit](epics/VGGIor3dC/voyages/VGGIqtM2e/) | planned |
+| [Build Turn Machine Stage For Transit](epics/VGGIor3dC/voyages/VGGIqtM2e/) | in-progress |
 | [Simplify Forensic Inspector Around Machine Narrative](epics/VGGIor3dC/voyages/VGGIqts2y/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)

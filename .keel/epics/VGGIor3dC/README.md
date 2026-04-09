@@ -32,10 +32,10 @@ The default path is always narrative-first. Raw record ids, trace ids, payloads,
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 voyages complete, 3/9 stories done
+**Progress:** 1/3 voyages complete, 4/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Define Narrative Machine Model And Shared Projection](voyages/VGGIqsj2g/) | done | 3/3 |
-| [Build Turn Machine Stage For Transit](voyages/VGGIqtM2e/) | planned | 0/3 |
+| [Build Turn Machine Stage For Transit](voyages/VGGIqtM2e/) | in-progress | 1/3 |
 | [Simplify Forensic Inspector Around Machine Narrative](voyages/VGGIqts2y/) | planned | 0/3 |
 <!-- END GENERATED -->

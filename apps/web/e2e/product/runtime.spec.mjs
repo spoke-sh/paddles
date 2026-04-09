@@ -34,8 +34,11 @@ test('externally injected turns flow live through chat, transit, manifold, and s
   await expect(page.locator('.msg.assistant').last()).toContainText('direct answer');
 
   await page.getByRole('link', { name: 'Transit' }).click();
-  await expect(page.locator('#trace-board .trace-node').first()).toBeVisible();
-  await expect(page.locator('#trace-transit-meta')).toContainText('significant steps');
+  await expect(page.locator('#transit-machine-stage')).toBeVisible();
+  await expect(page.locator('#transit-machine-scrubber')).toBeVisible();
+  await expect(page.locator('#transit-machine-detail')).toContainText(
+    /Where (the machine|steering pressure)/
+  );
 
   await page.getByRole('link', { name: 'Manifold' }).click();
   await expect(page.locator('#manifold-canvas')).toBeVisible();
