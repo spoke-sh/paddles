@@ -23,7 +23,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Reference',
-      items: ['reference/foundational-docs'],
+      items: ['reference/foundational-docs', 'reference/native-transports'],
     },
   ],
 };

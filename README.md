@@ -193,6 +193,11 @@ Native transport delivery now starts from one shared substrate instead of one-of
 - `websocket`
 - `transit`
 
+The first concrete slices on that substrate are:
+
+- `http_request_response` for one-shot local request/response integrations
+- `server_sent_events` for server-push streams on the shared runtime web surface
+
 Each slot flows through the same operator-facing diagnostics model before protocol-specific behavior is added. The shared diagnostics surface always answers the same questions first:
 
 - is the transport enabled
@@ -200,6 +205,8 @@ Each slot flows through the same operator-facing diagnostics model before protoc
 - which `bind_target` is it trying to own
 - which `auth_mode` is negotiated
 - what `last_error` most recently pushed it out of readiness
+
+Operators should inspect those diagnostics through `GET /health` or `GET /session/shared/bootstrap` before they reason about protocol-specific behavior. When both HTTP request/response and SSE are enabled, they must converge on the same `bind_target` because the runtime serves both through one shared listener.
 
 That shared substrate is what later HTTP, SSE, WebSocket, and Transit stories extend. Operators should not have to learn a different readiness or failure vocabulary for each transport.
 

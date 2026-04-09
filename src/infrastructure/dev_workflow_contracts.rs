@@ -638,6 +638,36 @@ fn native_transport_substrate_is_documented_in_owning_repo_docs() {
 }
 
 #[test]
+fn http_and_sse_transport_operator_workflow_is_documented() {
+    let configuration = read_repo_file("CONFIGURATION.md");
+    let public_reference = read_repo_file("apps/docs/docs/reference/native-transports.mdx");
+    let sidebar = read_repo_file("apps/docs/sidebars.ts");
+
+    assert!(
+        configuration.contains("GET /health")
+            && configuration.contains("GET /session/shared/bootstrap")
+            && configuration.contains("must share the same bind_target")
+            && configuration.contains("http_request_response")
+            && configuration.contains("server_sent_events"),
+        "CONFIGURATION should explain how operators inspect and debug the HTTP/SSE transport diagnostics surface",
+    );
+    assert!(
+        public_reference.contains("HTTP request/response")
+            && public_reference.contains("Server-Sent Events")
+            && public_reference.contains("GET /health")
+            && public_reference.contains("GET /session/shared/bootstrap")
+            && public_reference.contains("bind_target")
+            && public_reference.contains("last_error")
+            && public_reference.contains("same bind_target"),
+        "public docs should describe how HTTP and SSE are enabled, inspected, and debugged through the shared native transport diagnostics model",
+    );
+    assert!(
+        sidebar.contains("reference/native-transports"),
+        "the native transport operator guide should be reachable from the docs sidebar",
+    );
+}
+
+#[test]
 fn forensic_route_drops_legacy_nav_list_pane_chrome_and_docs_the_internals_escape_hatch() {
     let inspector_css = read_repo_file("apps/web/src/styles/inspector.css");
     let readme = read_repo_file("README.md");

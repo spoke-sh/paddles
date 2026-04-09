@@ -518,6 +518,34 @@ Every transport slot resolves through the same shared diagnostics surface, regar
 
 `GET /health` and `GET /session/shared/bootstrap` both expose this `native_transports` array so operators can inspect transport readiness before transport-specific UIs or clients are added. Later protocol adapters should update the same diagnostics model instead of inventing side-channel health output.
 
+### HTTP And SSE Operator Workflow
+
+The first delivered native transport modes are `http_request_response` and `server_sent_events`.
+
+Use `http_request_response` when the client only needs one-shot local request/response calls. Use `server_sent_events` when the client needs server-push streaming updates from the same runtime.
+
+When both are enabled, they must share the same bind_target. The runtime hosts both modes on one listener, so authored HTTP and SSE `bind_target` values must either match exactly or leave one side unset so it can inherit the shared listener.
+
+Operators should inspect these modes through the shared diagnostics endpoints:
+
+- `GET /health` for a quick readiness snapshot
+- `GET /session/shared/bootstrap` for the same diagnostics alongside the shared runtime projection
+
+Interpret the shared diagnostics like this:
+
+| Signal | Meaning |
+|--------|---------|
+| `phase = configured` | The transport is enabled in config but has not started binding yet |
+| `phase = binding` | The runtime is trying to claim the configured listener |
+| `phase = ready` | The listener is active and the transport is available on the shared web surface |
+| `phase = failed` with `last_error` | Startup or runtime rejected the transport; inspect the error before retrying |
+
+Common HTTP/SSE debugging rules:
+
+- If both transports are enabled and `last_error` says they must share the same `bind_target`, align the authored targets first.
+- If `phase = ready`, expect both transports to report the actual shared listener address in `bind_target`.
+- If one of the two paths fails during startup, inspect both diagnostics rows because the shared listener setup can fail both together.
+
 ## Trace Recording
 
 The runtime recorder boundary is independent of transcript rendering:

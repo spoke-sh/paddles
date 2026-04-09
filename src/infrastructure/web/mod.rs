@@ -745,7 +745,8 @@ mod tests {
         AppState, BroadcastForensicSink, BroadcastProjectionForensicSink,
         BroadcastProjectionTranscriptSink, ConversationBootstrapResponse,
         ConversationProjectionStreamEvent, ForensicProjectionResponse,
-        ForensicTurnProjectionResponse, conversation_forensics, parse_task_id, turn_forensics,
+        ForensicTurnProjectionResponse, HealthResponse, conversation_forensics, parse_task_id,
+        turn_forensics,
     };
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::NullTurnEventSink;
@@ -813,6 +814,16 @@ mod tests {
             Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
             recorder,
         ))
+    }
+
+    fn native_transport_by_kind(
+        transports: &[crate::domain::model::NativeTransportDiagnostic],
+        kind: crate::domain::model::NativeTransportKind,
+    ) -> &crate::domain::model::NativeTransportDiagnostic {
+        transports
+            .iter()
+            .find(|transport| transport.transport == kind)
+            .expect("transport diagnostic")
     }
 
     #[derive(Clone, Debug)]
@@ -2090,6 +2101,168 @@ mod tests {
             .expect("sse transport");
         assert_eq!(sse.phase, crate::domain::model::NativeTransportPhase::Ready);
         assert_eq!(sse.bind_target.as_deref(), Some("127.0.0.1:4200"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shared_bootstrap_reports_ready_http_and_sse_native_transports_on_shared_listener() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let http_transport = crate::domain::model::NativeTransportConfiguration {
+            transport: crate::domain::model::NativeTransportKind::HttpRequestResponse,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: crate::domain::model::NativeTransportAuth::default(),
+        };
+        let sse_transport = crate::domain::model::NativeTransportConfiguration {
+            transport: crate::domain::model::NativeTransportKind::ServerSentEvents,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: crate::domain::model::NativeTransportAuth::default(),
+        };
+        let registry = Arc::new(
+            crate::infrastructure::native_transport::NativeTransportRegistry::new(
+                crate::domain::model::NativeTransportConfigurations {
+                    http_request_response: http_transport.clone(),
+                    server_sent_events: sse_transport.clone(),
+                    ..crate::domain::model::NativeTransportConfigurations::default()
+                },
+            ),
+        );
+        crate::infrastructure::native_transport::record_binding_started(&registry, &http_transport);
+        crate::infrastructure::native_transport::record_binding_started(&registry, &sse_transport);
+        crate::infrastructure::native_transport::record_bound_transport(
+            &registry,
+            &http_transport,
+            "127.0.0.1:4100",
+        );
+        crate::infrastructure::native_transport::record_bound_transport(
+            &registry,
+            &sse_transport,
+            "127.0.0.1:4100",
+        );
+        service.set_native_transport_registry(registry);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx: broadcast::channel(8).0,
+            transcript_tx: broadcast::channel(8).0,
+            forensic_tx: broadcast::channel(8).0,
+            projection_tx: broadcast::channel(8).0,
+        });
+
+        let Json(HealthResponse {
+            native_transports, ..
+        }) = super::health(State(Arc::clone(&state))).await;
+        let Json(ConversationBootstrapResponse {
+            native_transports: bootstrap_native_transports,
+            ..
+        }) = super::shared_conversation_bootstrap(State(state))
+            .await
+            .expect("bootstrap response");
+
+        for transports in [&native_transports[..], &bootstrap_native_transports[..]] {
+            let http = native_transport_by_kind(
+                transports,
+                crate::domain::model::NativeTransportKind::HttpRequestResponse,
+            );
+            let sse = native_transport_by_kind(
+                transports,
+                crate::domain::model::NativeTransportKind::ServerSentEvents,
+            );
+
+            assert_eq!(
+                http.phase,
+                crate::domain::model::NativeTransportPhase::Ready
+            );
+            assert_eq!(http.bind_target.as_deref(), Some("127.0.0.1:4100"));
+            assert_eq!(http.last_error, None);
+            assert_eq!(sse.phase, crate::domain::model::NativeTransportPhase::Ready);
+            assert_eq!(sse.bind_target.as_deref(), Some("127.0.0.1:4100"));
+            assert_eq!(sse.last_error, None);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn health_and_shared_bootstrap_report_failed_http_and_sse_bind_conflicts() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let http_transport = crate::domain::model::NativeTransportConfiguration {
+            transport: crate::domain::model::NativeTransportKind::HttpRequestResponse,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: crate::domain::model::NativeTransportAuth::default(),
+        };
+        let sse_transport = crate::domain::model::NativeTransportConfiguration {
+            transport: crate::domain::model::NativeTransportKind::ServerSentEvents,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4200".to_string()),
+            auth: crate::domain::model::NativeTransportAuth::default(),
+        };
+        let registry = Arc::new(
+            crate::infrastructure::native_transport::NativeTransportRegistry::new(
+                crate::domain::model::NativeTransportConfigurations {
+                    http_request_response: http_transport.clone(),
+                    server_sent_events: sse_transport.clone(),
+                    ..crate::domain::model::NativeTransportConfigurations::default()
+                },
+            ),
+        );
+        let conflict = "http_request_response and server_sent_events must share the same bind_target when both transports are enabled";
+        crate::infrastructure::native_transport::record_transport_failure(
+            &registry,
+            &http_transport,
+            conflict,
+        );
+        crate::infrastructure::native_transport::record_transport_failure(
+            &registry,
+            &sse_transport,
+            conflict,
+        );
+        service.set_native_transport_registry(registry);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx: broadcast::channel(8).0,
+            transcript_tx: broadcast::channel(8).0,
+            forensic_tx: broadcast::channel(8).0,
+            projection_tx: broadcast::channel(8).0,
+        });
+
+        let Json(HealthResponse {
+            native_transports, ..
+        }) = super::health(State(Arc::clone(&state))).await;
+        let Json(ConversationBootstrapResponse {
+            native_transports: bootstrap_native_transports,
+            ..
+        }) = super::shared_conversation_bootstrap(State(state))
+            .await
+            .expect("bootstrap response");
+
+        for transports in [&native_transports[..], &bootstrap_native_transports[..]] {
+            let http = native_transport_by_kind(
+                transports,
+                crate::domain::model::NativeTransportKind::HttpRequestResponse,
+            );
+            let sse = native_transport_by_kind(
+                transports,
+                crate::domain::model::NativeTransportKind::ServerSentEvents,
+            );
+
+            assert_eq!(
+                http.phase,
+                crate::domain::model::NativeTransportPhase::Failed
+            );
+            assert_eq!(http.bind_target.as_deref(), Some("127.0.0.1:4100"));
+            assert_eq!(http.last_error.as_deref(), Some(conflict));
+            assert_eq!(
+                sse.phase,
+                crate::domain::model::NativeTransportPhase::Failed
+            );
+            assert_eq!(sse.bind_target.as_deref(), Some("127.0.0.1:4200"));
+            assert_eq!(sse.last_error.as_deref(), Some(conflict));
+        }
     }
 
     #[test]

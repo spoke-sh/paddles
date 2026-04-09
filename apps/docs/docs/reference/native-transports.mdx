@@ -1,0 +1,64 @@
+---
+title: Native Transports
+sidebar_position: 2
+description: How to enable, inspect, and debug the shared HTTP request/response and Server-Sent Events transport paths.
+---
+
+# Native Transports
+
+Paddles exposes native transport modes through one shared diagnostics model. The current delivered transports are:
+
+- **HTTP request/response** for one-shot local calls
+- **Server-Sent Events** for server-push streaming updates
+
+Both modes sit on the same native transport substrate. Operators should inspect the shared diagnostics first, then reason about protocol-specific behavior.
+
+## Enable HTTP And SSE
+
+Configure the shared native transport table in `paddles.toml`:
+
+```toml
+[native_transports.http_request_response]
+enabled = true
+bind_target = "127.0.0.1:4100"
+
+[native_transports.server_sent_events]
+enabled = true
+bind_target = "127.0.0.1:4100"
+```
+
+If both transports are enabled, they must use the same bind_target. The runtime serves both from one shared listener. If you want one side to inherit the shared listener, leave its `bind_target` unset instead of configuring a conflicting value.
+
+## Inspect Readiness
+
+Paddles exposes native transport diagnostics through two shared endpoints:
+
+- `GET /health`
+- `GET /session/shared/bootstrap`
+
+Both responses include a `native_transports` array. Each row tells you:
+
+- whether the transport is enabled
+- which `phase` it is in
+- which `bind_target` it is trying to own
+- which `auth_mode` is active
+- which `last_error` most recently pushed it out of readiness
+
+## Interpret HTTP/SSE States
+
+| Diagnostic | Meaning |
+|------------|---------|
+| `phase = configured` | The transport is enabled in config but has not started binding |
+| `phase = binding` | Paddles is trying to claim the shared listener |
+| `phase = ready` | The transport is live on the shared listener and the `bind_target` reflects the active runtime address |
+| `phase = failed` | Startup or runtime rejected the transport; inspect `last_error` |
+
+## Debug Common Failures
+
+- If `last_error` says the transports must share the same bind_target, align the HTTP request/response and Server-Sent Events targets first.
+- If both rows fail together, treat the listener setup as shared. One bind conflict can push both modes into `failed`.
+- If the listener binds successfully, both ready rows should converge on the same active `bind_target`.
+
+## Why This Model Exists
+
+Paddles keeps HTTP request/response, Server-Sent Events, WebSocket, and Transit under one native transport vocabulary so operators do not need a different readiness and failure model for every connection type.
