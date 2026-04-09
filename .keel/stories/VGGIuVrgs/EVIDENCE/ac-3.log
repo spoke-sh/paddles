@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:15:09.386730266-07:00
+mode: manual
+---
+Fallback-style snapshots now project as jam parts, thread merges as spring returns, and checkpoints as outputs so direction changes are legible at a glance.

@@ -137,6 +137,10 @@ function resolveMachineMomentKind(
     return 'input';
   }
   if (recordKind === 'SignalSnapshot') {
+    const signalKind = String(forensicKindValue(record).kind || '').toLowerCase();
+    if (signalKind === 'fallback' || signalKind === 'budget_boundary') {
+      return 'jam';
+    }
     return 'force';
   }
   if (recordKind === 'PlannerBranchDeclared' || node?.kind === 'branch') {

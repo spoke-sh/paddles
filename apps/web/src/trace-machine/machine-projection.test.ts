@@ -132,4 +132,98 @@ describe('machine-projection', () => {
     expect(projection.turns[0].moments[1].raw.forensicRecordIds).toEqual(['tool-1']);
     expect(projection.turns[0].moments[2].raw.traceNodeIds).toEqual(['out-1']);
   });
+
+  it('maps fallback-style steering snapshots into jam moments while leaving action bias as force', () => {
+    const projection = projectConversationMachine({
+      ...bootstrapProjection,
+      forensics: {
+        ...bootstrapProjection.forensics,
+        turns: [
+          {
+            turn_id: 'task-123.turn-0011',
+            lifecycle: 'final',
+            records: [
+              {
+                lifecycle: 'final',
+                superseded_by_record_id: null,
+                record: {
+                  record_id: 'jam-1',
+                  sequence: 1,
+                  lineage: {
+                    task_id: 'task-123',
+                    turn_id: 'task-123.turn-0011',
+                    branch_id: null,
+                    parent_record_id: null,
+                  },
+                  kind: {
+                    SignalSnapshot: {
+                      kind: 'fallback',
+                      level: 'high',
+                      magnitude_percent: 86,
+                      summary: 'fallback fired',
+                      contributions: [],
+                      artifact: {
+                        summary: 'fallback signal',
+                        inline_content: '{"kind":"fallback"}',
+                        mime_type: 'application/json',
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                lifecycle: 'final',
+                superseded_by_record_id: null,
+                record: {
+                  record_id: 'force-1',
+                  sequence: 2,
+                  lineage: {
+                    task_id: 'task-123',
+                    turn_id: 'task-123.turn-0011',
+                    branch_id: null,
+                    parent_record_id: 'jam-1',
+                  },
+                  kind: {
+                    SignalSnapshot: {
+                      kind: 'action_bias',
+                      level: 'medium',
+                      magnitude_percent: 61,
+                      summary: 'bias fired',
+                      contributions: [],
+                      artifact: {
+                        summary: 'action bias signal',
+                        inline_content: '{"kind":"action_bias"}',
+                        mime_type: 'application/json',
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      trace_graph: {
+        ...bootstrapProjection.trace_graph,
+        nodes: [
+          {
+            id: 'jam-1',
+            kind: 'signal',
+            label: 'fallback high',
+            branch_id: null,
+            sequence: 1,
+          },
+          {
+            id: 'force-1',
+            kind: 'signal',
+            label: 'action bias medium',
+            branch_id: null,
+            sequence: 2,
+          },
+        ],
+      },
+    });
+
+    expect(projection.turns[0].moments.map((moment) => moment.kind)).toEqual(['jam', 'force']);
+  });
 });

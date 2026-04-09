@@ -87,6 +87,36 @@
     0 16px 26px rgba(88, 104, 118, 0.14);
   color: #223441;
 }
+.transit-machine__part.is-diverter {
+  top: 38%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(248, 241, 229, 0.82)),
+    rgba(238, 221, 189, 0.92);
+}
+.transit-machine__part.is-jam {
+  top: 64%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(249, 234, 231, 0.82)),
+    rgba(239, 207, 201, 0.94);
+}
+.transit-machine__part.is-spring_return {
+  top: 34%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(236, 243, 231, 0.82)),
+    rgba(214, 232, 205, 0.92);
+}
+.transit-machine__part.is-force {
+  top: 52%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.88), rgba(232, 241, 249, 0.82)),
+    rgba(213, 228, 241, 0.94);
+}
+.transit-machine__part.is-output {
+  top: 46%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.9), rgba(235, 239, 249, 0.84)),
+    rgba(219, 225, 243, 0.94);
+}
 .transit-machine__part.is-selected {
   box-shadow:
     inset 1px 1px 0 rgba(255,255,255,0.88),

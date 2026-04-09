@@ -27,11 +27,11 @@ started_at: 2026-04-08T21:06:48
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Build Transit Machine Stage](../../../../stories/VGGIuVFfP/README.md) | feat | done |
-| [Render Diverters Jams And Outputs In Transit](../../../../stories/VGGIuVrgs/README.md) | feat | backlog |
+| [Render Diverters Jams And Outputs In Transit](../../../../stories/VGGIuVrgs/README.md) | feat | done |
 | [Remove Transit Chrome In Favor Of Machine Narrative](../../../../stories/VGGIuWOhH/README.md) | feat | backlog |
 <!-- END GENERATED -->

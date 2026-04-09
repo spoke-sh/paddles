@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:15:09.314533043-07:00
+mode: manual
+---
+The transit stage now renders diverter, jam, spring-return, force, and output machine parts with distinct route classes and visuals from the shared machine vocabulary.
