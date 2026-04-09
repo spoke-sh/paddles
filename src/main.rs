@@ -533,23 +533,37 @@ async fn main() -> Result<()> {
     }
 
     // Start HTTP API server
-    let (web_router, web_observer) =
-        paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
+    let (web_router, web_observer) = paddles::infrastructure::web::router(
+        Arc::clone(&service),
+        trace_recorder,
+        config.native_transports.clone(),
+    );
     service.register_event_observer(web_observer);
     let http_transport = &config.native_transports.http_request_response;
     let sse_transport = &config.native_transports.server_sent_events;
+    let websocket_transport = &config.native_transports.websocket;
     let default_bind_target = format!("0.0.0.0:{requested_port}");
-    let resolved_bind_target =
-        match resolve_shared_web_bind_target(http_transport, sse_transport, &default_bind_target) {
-            Ok(bind_target) => bind_target,
-            Err(error) => {
-                record_transport_failure(&native_transport_registry, http_transport, error.clone());
-                record_transport_failure(&native_transport_registry, sse_transport, error.clone());
-                return Err(anyhow::anyhow!(error));
-            }
-        };
+    let resolved_bind_target = match resolve_shared_web_bind_target(
+        http_transport,
+        sse_transport,
+        websocket_transport,
+        &default_bind_target,
+    ) {
+        Ok(bind_target) => bind_target,
+        Err(error) => {
+            record_transport_failure(&native_transport_registry, http_transport, error.clone());
+            record_transport_failure(&native_transport_registry, sse_transport, error.clone());
+            record_transport_failure(
+                &native_transport_registry,
+                websocket_transport,
+                error.clone(),
+            );
+            return Err(anyhow::anyhow!(error));
+        }
+    };
     record_binding_started(&native_transport_registry, http_transport);
     record_binding_started(&native_transport_registry, sse_transport);
+    record_binding_started(&native_transport_registry, websocket_transport);
     let listener = match tokio::net::TcpListener::bind(&resolved_bind_target).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -559,6 +573,11 @@ async fn main() -> Result<()> {
                 error.to_string(),
             );
             record_transport_failure(&native_transport_registry, sse_transport, error.to_string());
+            record_transport_failure(
+                &native_transport_registry,
+                websocket_transport,
+                error.to_string(),
+            );
             return Err(error.into());
         }
     };
@@ -571,6 +590,11 @@ async fn main() -> Result<()> {
     record_bound_transport(
         &native_transport_registry,
         sse_transport,
+        &web_server_addr.to_string(),
+    );
+    record_bound_transport(
+        &native_transport_registry,
+        websocket_transport,
         &web_server_addr.to_string(),
     );
     if verbose >= 3 {

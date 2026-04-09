@@ -325,7 +325,7 @@
 |--------|--------|
 | [Define Shared Native Transport Model](epics/VGKnsYg1z/voyages/VGKoF0hsS/) | done |
 | [Deliver HTTP And SSE Transports](epics/VGKnsYg1z/voyages/VGKoF1Stc/) | done |
-| [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | planned |
+| [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

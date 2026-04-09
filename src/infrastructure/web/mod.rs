@@ -4,21 +4,30 @@ use crate::domain::model::{
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
-    ManifoldTurnProjection, NativeTransportDiagnostic, RuntimeEventPresentation, TaskTraceId,
+    ManifoldTurnProjection, NativeTransportConfigurations, NativeTransportDiagnostic,
+    NativeTransportKind, NativeTransportSessionIdentity, RuntimeEventPresentation, TaskTraceId,
     TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnTraceId, project_runtime_event,
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
-use axum::extract::{Path, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+use axum::extract::{
+    Path, State,
+    ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
+};
+use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
@@ -27,6 +36,8 @@ use tower_http::cors::CorsLayer;
 struct AppState {
     service: Arc<MechSuitService>,
     trace_recorder: Arc<dyn TraceRecorder>,
+    native_transport_configurations: NativeTransportConfigurations,
+    websocket_connection_counter: AtomicU64,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     transcript_tx: broadcast::Sender<ConversationTranscriptUpdate>,
     forensic_tx: broadcast::Sender<ConversationForensicUpdate>,
@@ -173,6 +184,7 @@ impl ForensicUpdateSink for BroadcastProjectionForensicSink {
 pub fn router(
     service: Arc<MechSuitService>,
     trace_recorder: Arc<dyn TraceRecorder>,
+    native_transport_configurations: NativeTransportConfigurations,
 ) -> (Router, Arc<dyn TurnEventSink>) {
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
     let (transcript_tx, _) = broadcast::channel::<ConversationTranscriptUpdate>(256);
@@ -205,6 +217,8 @@ pub fn router(
     let state = Arc::new(AppState {
         service,
         trace_recorder,
+        native_transport_configurations,
+        websocket_connection_counter: AtomicU64::new(1),
         event_tx,
         transcript_tx,
         forensic_tx,
@@ -222,6 +236,7 @@ pub fn router(
             "/session/shared/bootstrap",
             get(shared_conversation_bootstrap),
         )
+        .route("/native-transports/websocket", get(websocket_transport))
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
         .route("/sessions/{id}/projection", get(conversation_projection))
@@ -461,6 +476,215 @@ async fn submit_turn(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(TurnResponse { response }))
+}
+
+fn authorize_websocket_transport(
+    state: &Arc<AppState>,
+    configuration: &crate::domain::model::NativeTransportConfiguration,
+    headers: &HeaderMap,
+) -> Result<(), StatusCode> {
+    match configuration.auth.mode {
+        crate::domain::model::NativeTransportAuthMode::Open => Ok(()),
+        crate::domain::model::NativeTransportAuthMode::BearerToken => {
+            let Some(token_env) = configuration.auth.token_env.as_deref() else {
+                let error = "websocket transport bearer_token mode requires token_env".to_string();
+                state
+                    .service
+                    .native_transport_registry()
+                    .record_failure(NativeTransportKind::WebSocket, error);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            };
+            let Ok(expected_token) = std::env::var(token_env) else {
+                let error =
+                    format!("websocket transport bearer token env `{token_env}` is not set");
+                state
+                    .service
+                    .native_transport_registry()
+                    .record_failure(NativeTransportKind::WebSocket, error);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            };
+            let authorization = headers
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            let expected_header = format!("Bearer {expected_token}");
+            if authorization != expected_header {
+                state.service.native_transport_registry().record_degraded(
+                    NativeTransportKind::WebSocket,
+                    "websocket transport rejected unauthorized session",
+                );
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn websocket_prompt_from_frame(frame: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(frame)
+        .ok()
+        .and_then(|payload| {
+            payload
+                .get("prompt")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            let trimmed = frame.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        })
+}
+
+async fn websocket_transport(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let configuration = state.native_transport_configurations.websocket.clone();
+    if !configuration.enabled {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    authorize_websocket_transport(&state, &configuration, &headers)?;
+
+    Ok(ws
+        .on_upgrade(move |socket| websocket_transport_session(socket, state, configuration))
+        .into_response())
+}
+
+async fn websocket_transport_session(
+    mut socket: WebSocket,
+    state: Arc<AppState>,
+    _configuration: crate::domain::model::NativeTransportConfiguration,
+) {
+    let session = state.service.shared_conversation_session();
+    let task_id = session.task_id();
+    let connection_id = format!(
+        "socket-{}",
+        state
+            .websocket_connection_counter
+            .fetch_add(1, Ordering::Relaxed)
+    );
+    let registry = state.service.native_transport_registry();
+    registry.record_session(
+        NativeTransportKind::WebSocket,
+        NativeTransportSessionIdentity {
+            transport: NativeTransportKind::WebSocket,
+            task_id: task_id.clone(),
+            channel: crate::domain::model::NativeTransportChannel::ConversationSession,
+            connection_id: Some(connection_id.clone()),
+        },
+    );
+
+    let _ = socket
+        .send(WebSocketMessage::Text(
+            json!({
+                "type": "session_ready",
+                "transport": "websocket",
+                "session_id": task_id.as_str(),
+                "connection_id": connection_id,
+            })
+            .to_string()
+            .into(),
+        ))
+        .await;
+
+    while let Some(message) = socket.recv().await {
+        match message {
+            Ok(WebSocketMessage::Text(text)) => {
+                let Some(prompt) = websocket_prompt_from_frame(&text) else {
+                    let error = "websocket transport requires non-empty text prompts".to_string();
+                    registry.record_degraded(NativeTransportKind::WebSocket, error.clone());
+                    let _ = socket
+                        .send(WebSocketMessage::Text(
+                            json!({
+                                "type": "transport_error",
+                                "transport": "websocket",
+                                "error": error,
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .await;
+                    break;
+                };
+                let sink: Arc<dyn TurnEventSink> = Arc::new(BroadcastEventSink {
+                    session_id: task_id.as_str().to_string(),
+                    task_id: task_id.clone(),
+                    verbose: state.service.verbose(),
+                    event_tx: state.event_tx.clone(),
+                    projection_tx: state.projection_tx.clone(),
+                });
+                match state
+                    .service
+                    .process_prompt_in_session_with_sink(&prompt, session.clone(), sink)
+                    .await
+                {
+                    Ok(response) => {
+                        let _ = socket
+                            .send(WebSocketMessage::Text(
+                                json!({
+                                    "type": "turn_response",
+                                    "transport": "websocket",
+                                    "session_id": task_id.as_str(),
+                                    "response": response,
+                                })
+                                .to_string()
+                                .into(),
+                            ))
+                            .await;
+                    }
+                    Err(error) => {
+                        registry.record_degraded(
+                            NativeTransportKind::WebSocket,
+                            format!("websocket prompt processing failed: {error}"),
+                        );
+                        let _ = socket
+                            .send(WebSocketMessage::Text(
+                                json!({
+                                    "type": "transport_error",
+                                    "transport": "websocket",
+                                    "error": error.to_string(),
+                                })
+                                .to_string()
+                                .into(),
+                            ))
+                            .await;
+                        break;
+                    }
+                }
+            }
+            Ok(WebSocketMessage::Binary(_)) => {
+                let error = "websocket transport expects UTF-8 text prompt frames".to_string();
+                registry.record_degraded(NativeTransportKind::WebSocket, error.clone());
+                let _ = socket
+                    .send(WebSocketMessage::Text(
+                        json!({
+                            "type": "transport_error",
+                            "transport": "websocket",
+                            "error": error,
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await;
+                break;
+            }
+            Ok(WebSocketMessage::Ping(payload)) => {
+                let _ = socket.send(WebSocketMessage::Pong(payload)).await;
+            }
+            Ok(WebSocketMessage::Pong(_)) => {}
+            Ok(WebSocketMessage::Close(_)) => break,
+            Err(error) => {
+                registry.record_degraded(
+                    NativeTransportKind::WebSocket,
+                    format!("websocket session failed: {error}"),
+                );
+                break;
+            }
+        }
+    }
+
+    registry.clear_session(NativeTransportKind::WebSocket);
 }
 
 async fn conversation_transcript(
@@ -779,15 +1003,20 @@ mod tests {
     use axum::response::{IntoResponse, Response};
     use axum::routing::any;
     use axum::{Router, body::Bytes};
+    use futures_util::{SinkExt, StreamExt};
     use paddles_conversation::{
         ArtifactEnvelope, ConversationSession, TraceArtifactId, TraceCheckpointId, TurnTraceId,
     };
     use serde_json::json;
     use std::collections::VecDeque;
     use std::path::Path as FsPath;
+    use std::sync::atomic::AtomicU64;
     use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
     use tokio::sync::broadcast;
     use tokio::task::JoinHandle;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
     use tower::util::ServiceExt;
 
     #[derive(Default)]
@@ -816,6 +1045,26 @@ mod tests {
         ))
     }
 
+    fn test_app_state(
+        service: Arc<MechSuitService>,
+        trace_recorder: Arc<dyn TraceRecorder>,
+    ) -> Arc<AppState> {
+        let (event_tx, _) = broadcast::channel(8);
+        let (transcript_tx, _) = broadcast::channel(8);
+        let (forensic_tx, _) = broadcast::channel(8);
+        Arc::new(AppState {
+            service,
+            trace_recorder,
+            native_transport_configurations:
+                crate::domain::model::NativeTransportConfigurations::default(),
+            websocket_connection_counter: AtomicU64::new(1),
+            event_tx,
+            transcript_tx,
+            forensic_tx,
+            projection_tx: broadcast::channel(8).0,
+        })
+    }
+
     fn native_transport_by_kind(
         transports: &[crate::domain::model::NativeTransportDiagnostic],
         kind: crate::domain::model::NativeTransportKind,
@@ -842,6 +1091,19 @@ mod tests {
     }
 
     impl Drop for MockServerHandle {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    struct RuntimeServerHandle {
+        _workspace: TempDir,
+        base_url: String,
+        websocket_url: String,
+        task: JoinHandle<()>,
+    }
+
+    impl Drop for RuntimeServerHandle {
         fn drop(&mut self) {
             self.task.abort();
         }
@@ -885,6 +1147,53 @@ mod tests {
 
         MockServerHandle {
             base_url: format!("http://{}", addr),
+            task,
+        }
+    }
+
+    async fn start_runtime_server_with_transports(
+        configurations: crate::domain::model::NativeTransportConfigurations,
+    ) -> RuntimeServerHandle {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let registry = Arc::new(
+            crate::infrastructure::native_transport::NativeTransportRegistry::new(
+                configurations.clone(),
+            ),
+        );
+        service.set_native_transport_registry(Arc::clone(&registry));
+        let (app, _observer) = super::router(service, recorder, configurations.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind runtime server");
+        let addr = listener.local_addr().expect("local addr");
+        let bound_target = addr.to_string();
+
+        for configuration in [
+            configurations.http_request_response,
+            configurations.server_sent_events,
+            configurations.websocket,
+        ] {
+            crate::infrastructure::native_transport::record_binding_started(
+                &registry,
+                &configuration,
+            );
+            crate::infrastructure::native_transport::record_bound_transport(
+                &registry,
+                &configuration,
+                &bound_target,
+            );
+        }
+
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve runtime");
+        });
+
+        RuntimeServerHandle {
+            _workspace: workspace,
+            base_url: format!("http://{}", addr),
+            websocket_url: format!("ws://{addr}/native-transports/websocket"),
             task,
         }
     }
@@ -1174,17 +1483,7 @@ mod tests {
         let (replay, latest_record_id) = seed_forensic_replay(&recorder, &session);
         let task_id = replay.task_id.clone();
         let turn_id = replay.records[0].lineage.turn_id.clone();
-        let (event_tx, _) = broadcast::channel(8);
-        let (transcript_tx, _) = broadcast::channel(8);
-        let (forensic_tx, _) = broadcast::channel(8);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx,
-            transcript_tx,
-            forensic_tx,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(ForensicProjectionResponse(conversation)) = conversation_forensics(
             State(Arc::clone(&state)),
@@ -1229,17 +1528,7 @@ mod tests {
         let (replay, signal_record_id) = seed_manifold_replay(&recorder, &session);
         let task_id = replay.task_id.clone();
         let turn_id = replay.records[0].lineage.turn_id.clone();
-        let (event_tx, _) = broadcast::channel(8);
-        let (transcript_tx, _) = broadcast::channel(8);
-        let (forensic_tx, _) = broadcast::channel(8);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx,
-            transcript_tx,
-            forensic_tx,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(super::ManifoldProjectionResponse(conversation)) = super::conversation_manifold(
             State(Arc::clone(&state)),
@@ -1280,17 +1569,7 @@ mod tests {
         let (replay, signal_record_id) = seed_manifold_replay(&recorder, &session);
         let task_id = replay.task_id.clone();
         let turn_id = replay.records[0].lineage.turn_id.clone();
-        let (event_tx, _) = broadcast::channel(8);
-        let (transcript_tx, _) = broadcast::channel(8);
-        let (forensic_tx, _) = broadcast::channel(8);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx,
-            transcript_tx,
-            forensic_tx,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let payload = super::manifold_update_payload(
             &state,
@@ -1643,7 +1922,11 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
-        let (app, _observer) = super::router(service, recorder);
+        let (app, _observer) = super::router(
+            service,
+            recorder,
+            crate::domain::model::NativeTransportConfigurations::default(),
+        );
 
         for route in ["/", "/manifold", "/transit"] {
             let response = app
@@ -1665,7 +1948,11 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
-        let (app, _observer) = super::router(service, recorder);
+        let (app, _observer) = super::router(
+            service,
+            recorder,
+            crate::domain::model::NativeTransportConfigurations::default(),
+        );
         let expected_shell = super::load_primary_shell_html();
 
         for route in ["/", "/manifold", "/transit"] {
@@ -1700,7 +1987,11 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
-        let (app, _observer) = super::router(service, recorder);
+        let (app, _observer) = super::router(
+            service,
+            recorder,
+            crate::domain::model::NativeTransportConfigurations::default(),
+        );
 
         for route in [
             "/legacy",
@@ -1876,17 +2167,7 @@ mod tests {
             .await
             .expect("process prompt");
 
-        let (event_tx, _) = broadcast::channel(8);
-        let (transcript_tx, _) = broadcast::channel(8);
-        let (forensic_tx, _) = broadcast::channel(8);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx,
-            transcript_tx,
-            forensic_tx,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(super::ConversationProjectionResponse(projection)) =
             super::conversation_projection(State(Arc::clone(&state)), Path(task_id.clone()))
@@ -1942,14 +2223,7 @@ mod tests {
             .record_prompt("second prompt")
             .expect("record prompt history");
         service.set_conversation_history_store(Arc::clone(&history_store));
-        let state = Arc::new(AppState {
-            service: Arc::clone(&service),
-            trace_recorder: recorder,
-            event_tx: broadcast::channel(8).0,
-            transcript_tx: broadcast::channel(8).0,
-            forensic_tx: broadcast::channel(8).0,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(Arc::clone(&service), recorder);
 
         let shared = service.shared_conversation_session();
         let task_id = shared.task_id();
@@ -1985,14 +2259,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx: broadcast::channel(8).0,
-            transcript_tx: broadcast::channel(8).0,
-            forensic_tx: broadcast::channel(8).0,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(response) = super::health(State(state)).await;
 
@@ -2029,14 +2296,7 @@ mod tests {
             "127.0.0.1:4100",
         );
         service.set_native_transport_registry(registry);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx: broadcast::channel(8).0,
-            transcript_tx: broadcast::channel(8).0,
-            forensic_tx: broadcast::channel(8).0,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(response) = super::health(State(state)).await;
 
@@ -2081,14 +2341,7 @@ mod tests {
             "127.0.0.1:4200",
         );
         service.set_native_transport_registry(registry);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx: broadcast::channel(8).0,
-            transcript_tx: broadcast::channel(8).0,
-            forensic_tx: broadcast::channel(8).0,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(response) = super::health(State(state)).await;
 
@@ -2142,14 +2395,7 @@ mod tests {
             "127.0.0.1:4100",
         );
         service.set_native_transport_registry(registry);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx: broadcast::channel(8).0,
-            transcript_tx: broadcast::channel(8).0,
-            forensic_tx: broadcast::channel(8).0,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(HealthResponse {
             native_transports, ..
@@ -2221,14 +2467,7 @@ mod tests {
             conflict,
         );
         service.set_native_transport_registry(registry);
-        let state = Arc::new(AppState {
-            service,
-            trace_recorder: recorder,
-            event_tx: broadcast::channel(8).0,
-            transcript_tx: broadcast::channel(8).0,
-            forensic_tx: broadcast::channel(8).0,
-            projection_tx: broadcast::channel(8).0,
-        });
+        let state = test_app_state(service, recorder);
 
         let Json(HealthResponse {
             native_transports, ..
@@ -2262,6 +2501,142 @@ mod tests {
             );
             assert_eq!(sse.bind_target.as_deref(), Some("127.0.0.1:4200"));
             assert_eq!(sse.last_error.as_deref(), Some(conflict));
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn websocket_transport_session_establishment_updates_shared_diagnostics() {
+        let handle = start_runtime_server_with_transports(
+            crate::domain::model::NativeTransportConfigurations {
+                websocket: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::WebSocket,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth::default(),
+                },
+                ..crate::domain::model::NativeTransportConfigurations::default()
+            },
+        )
+        .await;
+
+        let (mut socket, _response) = connect_async(handle.websocket_url.as_str())
+            .await
+            .expect("connect websocket");
+        let session_ready = socket
+            .next()
+            .await
+            .expect("session ready frame")
+            .expect("websocket frame");
+        let session_ready: serde_json::Value =
+            serde_json::from_str(session_ready.to_text().expect("text session frame"))
+                .expect("session ready json");
+        assert_eq!(session_ready["type"], "session_ready");
+        assert_eq!(session_ready["transport"], "websocket");
+
+        let health: serde_json::Value = reqwest::get(format!("{}/health", handle.base_url))
+            .await
+            .expect("health response")
+            .json()
+            .await
+            .expect("health json");
+        let bootstrap: serde_json::Value =
+            reqwest::get(format!("{}/session/shared/bootstrap", handle.base_url))
+                .await
+                .expect("bootstrap response")
+                .json()
+                .await
+                .expect("bootstrap json");
+
+        for transport_list in [
+            health["native_transports"]
+                .as_array()
+                .expect("health transports"),
+            bootstrap["native_transports"]
+                .as_array()
+                .expect("bootstrap transports"),
+        ] {
+            let websocket = transport_list
+                .iter()
+                .find(|transport| transport["transport"] == "websocket")
+                .expect("websocket transport");
+            assert_eq!(websocket["phase"], "ready");
+            assert_eq!(websocket["session"]["transport"], "websocket");
+            assert_eq!(websocket["session"]["channel"], "conversation_session");
+            assert!(
+                websocket["session"]["connection_id"]
+                    .as_str()
+                    .expect("connection id")
+                    .starts_with("socket-"),
+                "websocket diagnostics should expose the negotiated connection id",
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn websocket_transport_binary_frame_failures_degrade_shared_diagnostics() {
+        let handle = start_runtime_server_with_transports(
+            crate::domain::model::NativeTransportConfigurations {
+                websocket: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::WebSocket,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth::default(),
+                },
+                ..crate::domain::model::NativeTransportConfigurations::default()
+            },
+        )
+        .await;
+
+        let (mut socket, _response) = connect_async(handle.websocket_url.as_str())
+            .await
+            .expect("connect websocket");
+        let _session_ready = socket
+            .next()
+            .await
+            .expect("session frame")
+            .expect("session frame payload");
+        socket
+            .send(WebSocketMessage::Binary(vec![0x01, 0x02].into()))
+            .await
+            .expect("send binary frame");
+        let _error_frame = socket
+            .next()
+            .await
+            .expect("error frame")
+            .expect("error frame payload");
+
+        let health: serde_json::Value = reqwest::get(format!("{}/health", handle.base_url))
+            .await
+            .expect("health response")
+            .json()
+            .await
+            .expect("health json");
+        let bootstrap: serde_json::Value =
+            reqwest::get(format!("{}/session/shared/bootstrap", handle.base_url))
+                .await
+                .expect("bootstrap response")
+                .json()
+                .await
+                .expect("bootstrap json");
+
+        for transport_list in [
+            health["native_transports"]
+                .as_array()
+                .expect("health transports"),
+            bootstrap["native_transports"]
+                .as_array()
+                .expect("bootstrap transports"),
+        ] {
+            let websocket = transport_list
+                .iter()
+                .find(|transport| transport["transport"] == "websocket")
+                .expect("websocket transport");
+            assert_eq!(websocket["phase"], "degraded");
+            assert_eq!(websocket["session"], serde_json::Value::Null);
+            assert_eq!(
+                websocket["last_error"],
+                "websocket transport expects UTF-8 text prompt frames"
+            );
         }
     }
 

@@ -17,7 +17,7 @@ sift = { git = "https://github.com/rupurt/sift", rev = "003932b6e57c8fc1e81950b1
 candle-core = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-nn = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 candle-transformers = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1.43", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -47,3 +47,5 @@ cuda = ["sift/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/
 [dev-dependencies]
 tempfile = "3.17.1"
 tower = "0.5"
+futures-util = "0.3"
+tokio-tungstenite = "0.28"

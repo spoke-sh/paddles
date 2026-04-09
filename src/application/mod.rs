@@ -1970,11 +1970,17 @@ impl MechSuitService {
             .expect("native transport registry lock") = registry;
     }
 
+    pub fn native_transport_registry(&self) -> Arc<NativeTransportRegistry> {
+        Arc::clone(
+            &self
+                .native_transport_registry
+                .lock()
+                .expect("native transport registry lock"),
+        )
+    }
+
     pub fn native_transport_diagnostics(&self) -> Vec<NativeTransportDiagnostic> {
-        self.native_transport_registry
-            .lock()
-            .expect("native transport registry lock")
-            .diagnostics()
+        self.native_transport_registry().diagnostics()
     }
 
     pub fn prompt_history(&self) -> Result<Vec<String>> {

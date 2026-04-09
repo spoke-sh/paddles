@@ -89,9 +89,37 @@ impl NativeTransportRegistry {
         });
     }
 
+    pub fn record_session(
+        &self,
+        transport: NativeTransportKind,
+        session: NativeTransportSessionIdentity,
+    ) {
+        self.update_diagnostic(transport, |diagnostic| {
+            diagnostic.phase = NativeTransportPhase::Ready;
+            diagnostic.capabilities = transport.default_capabilities();
+            diagnostic.session = Some(session);
+            diagnostic.last_error = None;
+        });
+    }
+
+    pub fn clear_session(&self, transport: NativeTransportKind) {
+        self.update_diagnostic(transport, |diagnostic| {
+            diagnostic.session = None;
+        });
+    }
+
+    pub fn record_degraded(&self, transport: NativeTransportKind, error: impl Into<String>) {
+        self.update_diagnostic(transport, |diagnostic| {
+            diagnostic.phase = NativeTransportPhase::Degraded;
+            diagnostic.session = None;
+            diagnostic.last_error = Some(error.into());
+        });
+    }
+
     pub fn record_failure(&self, transport: NativeTransportKind, error: impl Into<String>) {
         self.update_diagnostic(transport, |diagnostic| {
             diagnostic.phase = NativeTransportPhase::Failed;
+            diagnostic.session = None;
             diagnostic.last_error = Some(error.into());
         });
     }
@@ -129,38 +157,45 @@ pub fn resolve_bind_target(
 pub fn resolve_shared_web_bind_target(
     http_request_response: &NativeTransportConfiguration,
     server_sent_events: &NativeTransportConfiguration,
+    websocket: &NativeTransportConfiguration,
     fallback_bind_target: &str,
 ) -> Result<String, String> {
-    let http_target = http_request_response.bind_target.as_deref();
-    let sse_target = server_sent_events.bind_target.as_deref();
+    let shared_web_transports = [http_request_response, server_sent_events, websocket];
+    let enabled_targets = shared_web_transports
+        .into_iter()
+        .filter(|configuration| configuration.enabled)
+        .filter_map(|configuration| {
+            configuration
+                .bind_target
+                .as_ref()
+                .map(|bind_target| (configuration.transport.label(), bind_target.as_str()))
+        })
+        .collect::<Vec<_>>();
 
-    if http_request_response.enabled
-        && server_sent_events.enabled
-        && let (Some(http_target), Some(sse_target)) = (http_target, sse_target)
-        && http_target != sse_target
-    {
-        return Err(format!(
-            "{} and {} must share the same bind_target when both transports are enabled",
-            http_request_response.transport.label(),
-            server_sent_events.transport.label()
-        ));
+    if let Some((_, canonical_target)) = enabled_targets.first() {
+        let conflicting_labels = enabled_targets
+            .iter()
+            .filter_map(|(label, bind_target)| {
+                (*bind_target != *canonical_target).then_some(*label)
+            })
+            .collect::<Vec<_>>();
+        if !conflicting_labels.is_empty() {
+            let shared_labels = shared_web_transports
+                .into_iter()
+                .filter(|configuration| configuration.enabled)
+                .map(|configuration| configuration.transport.label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "{shared_labels} must share the same bind_target when they are enabled on the shared web listener"
+            ));
+        }
     }
 
-    if server_sent_events.enabled {
-        return Ok(resolve_bind_target(
-            server_sent_events,
-            &resolve_bind_target(http_request_response, fallback_bind_target),
-        ));
-    }
-
-    if http_request_response.enabled {
-        return Ok(resolve_bind_target(
-            http_request_response,
-            fallback_bind_target,
-        ));
-    }
-
-    Ok(fallback_bind_target.to_string())
+    Ok(shared_web_transports.into_iter().fold(
+        fallback_bind_target.to_string(),
+        |resolved, configuration| resolve_bind_target(configuration, &resolved),
+    ))
 }
 
 pub fn record_binding_started(
@@ -299,9 +334,10 @@ mod tests {
             bind_target: Some("127.0.0.1:4200".to_string()),
             auth: NativeTransportAuth::default(),
         };
+        let websocket = NativeTransportConfiguration::for_kind(NativeTransportKind::WebSocket);
 
-        let bind_target =
-            resolve_shared_web_bind_target(&http, &sse, "0.0.0.0:3000").expect("bind target");
+        let bind_target = resolve_shared_web_bind_target(&http, &sse, &websocket, "0.0.0.0:3000")
+            .expect("bind target");
 
         assert_eq!(bind_target, "127.0.0.1:4200");
     }
@@ -320,11 +356,74 @@ mod tests {
             bind_target: Some("127.0.0.1:4200".to_string()),
             auth: NativeTransportAuth::default(),
         };
+        let websocket = NativeTransportConfiguration::for_kind(NativeTransportKind::WebSocket);
 
-        let error = resolve_shared_web_bind_target(&http, &sse, "0.0.0.0:3000")
+        let error = resolve_shared_web_bind_target(&http, &sse, &websocket, "0.0.0.0:3000")
             .expect_err("conflicting authored bind targets should fail closed");
 
         assert!(error.contains("http_request_response"));
         assert!(error.contains("server_sent_events"));
+    }
+
+    #[test]
+    fn resolve_shared_web_bind_target_rejects_conflicting_http_and_websocket_targets() {
+        let http = NativeTransportConfiguration {
+            transport: NativeTransportKind::HttpRequestResponse,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+        let sse = NativeTransportConfiguration::for_kind(NativeTransportKind::ServerSentEvents);
+        let websocket = NativeTransportConfiguration {
+            transport: NativeTransportKind::WebSocket,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4200".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+
+        let error = resolve_shared_web_bind_target(&http, &sse, &websocket, "0.0.0.0:3000")
+            .expect_err("conflicting authored bind targets should fail closed");
+
+        assert!(error.contains("http_request_response"));
+        assert!(error.contains("websocket"));
+    }
+
+    #[test]
+    fn record_degraded_clears_websocket_session_and_preserves_bind_target() {
+        let websocket = NativeTransportConfiguration {
+            transport: NativeTransportKind::WebSocket,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4300".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+        let registry = NativeTransportRegistry::new(NativeTransportConfigurations {
+            websocket: websocket.clone(),
+            ..NativeTransportConfigurations::default()
+        });
+        registry.record_session(
+            NativeTransportKind::WebSocket,
+            NativeTransportSessionIdentity {
+                transport: NativeTransportKind::WebSocket,
+                task_id: crate::domain::model::TaskTraceId::new("task-websocket").expect("task id"),
+                channel: crate::domain::model::NativeTransportChannel::ConversationSession,
+                connection_id: Some("socket-1".to_string()),
+            },
+        );
+
+        registry.record_degraded(
+            NativeTransportKind::WebSocket,
+            "websocket transport expects UTF-8 text prompt frames",
+        );
+
+        let diagnostic = registry
+            .diagnostic(NativeTransportKind::WebSocket)
+            .expect("websocket diagnostic");
+        assert_eq!(diagnostic.phase, NativeTransportPhase::Degraded);
+        assert_eq!(diagnostic.bind_target.as_deref(), Some("127.0.0.1:4300"));
+        assert_eq!(diagnostic.session, None);
+        assert_eq!(
+            diagnostic.last_error.as_deref(),
+            Some("websocket transport expects UTF-8 text prompt frames")
+        );
     }
 }

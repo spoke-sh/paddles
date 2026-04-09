@@ -470,7 +470,10 @@ The domain model in `NativeTransportKind`, `NativeTransportCapability`, `NativeT
 - which phase it is in
 - which bind target it is using
 - which auth mode it negotiated
+- which active session identity it has negotiated
 - which error most recently pushed it into failure
+
+HTTP request/response, SSE, and WebSocket now bind through the same primary web listener. WebSocket adds session-oriented behavior on top of that shared listener, but it still records readiness, session identity, degradation, and failure through `NativeTransportRegistry` rather than inventing a parallel socket-health surface.
 
 This keeps the shared native transport substrate stable while protocol-specific stories add bind loops, session semantics, or stream behavior.
 

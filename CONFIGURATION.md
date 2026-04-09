@@ -546,6 +546,19 @@ Common HTTP/SSE debugging rules:
 - If `phase = ready`, expect both transports to report the actual shared listener address in `bind_target`.
 - If one of the two paths fails during startup, inspect both diagnostics rows because the shared listener setup can fail both together.
 
+### WebSocket Session Adapter
+
+The WebSocket transport upgrades on `GET /native-transports/websocket` when `[native_transports.websocket].enabled = true`.
+
+It shares the same listener and diagnostics model as the HTTP and SSE paths:
+
+- authored `bind_target` must align with any other enabled shared-web transports
+- `phase = ready` means the listener is available for upgrades
+- `session` is populated while a socket is actively established
+- session-level protocol failures degrade the shared diagnostics row instead of disappearing into a socket-only side channel
+
+The current adapter sends a `session_ready` frame when the socket upgrades, records the negotiated `connection_id` under the shared `session` diagnostic, and degrades the transport with `last_error` if the client sends a non-text prompt frame.
+
 ## Trace Recording
 
 The runtime recorder boundary is independent of transcript rendering:

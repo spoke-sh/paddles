@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum NativeTransportKind {
     HttpRequestResponse,
     ServerSentEvents,
+    #[serde(rename = "websocket")]
     WebSocket,
     Transit,
 }
