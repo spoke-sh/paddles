@@ -589,7 +589,7 @@ fn runtime_shell_host_keeps_panels_flush_to_the_viewport() {
 }
 
 #[test]
-fn runtime_shell_buttons_do_not_underline_and_transit_toggles_use_ui_font() {
+fn runtime_shell_buttons_do_not_underline_and_transit_route_drops_legacy_toggle_chrome() {
     let shared_css = read_repo_file("apps/web/src/styles/runtime-shell-base.css");
     let transit_css = read_repo_file("apps/web/src/styles/transit.css");
 
@@ -599,9 +599,9 @@ fn runtime_shell_buttons_do_not_underline_and_transit_toggles_use_ui_font() {
         "runtime route tabs should explicitly suppress link underlines",
     );
     assert!(
-        transit_css.contains(".trace-transit-toggle {\n  border: 0;")
-            && transit_css.contains("  font-family: \"SF Pro Display\", \"SF Pro Text\", \"Helvetica Neue\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;")
-            && transit_css.contains("  text-decoration: none;"),
-        "transit toggle buttons should use the regular UI font and suppress text underlines",
+        transit_css.contains(".transit-machine__scrubber-chip {\n  border: 0;")
+            && !transit_css.contains(".trace-transit-toggle {")
+            && !transit_css.contains(".trace-transit-toolbar {"),
+        "transit route should keep the machine scrubber buttons and drop the legacy toggle chrome",
     );
 }

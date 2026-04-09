@@ -29,7 +29,8 @@ describe('runtime stylesheet partition', () => {
     expect(chatCss).toContain('.chat-header');
     expect(inspectorCss).toContain('.forensic-view');
     expect(manifoldCss).toContain('.manifold-stage');
-    expect(transitCss).toContain('.trace-transit-toolbar');
+    expect(transitCss).toContain('.transit-machine__stage');
+    expect(transitCss).not.toContain('.trace-transit-toolbar');
   });
 
   it('lets the manifold stage claim the full trace panel height for the temporal gate field', () => {

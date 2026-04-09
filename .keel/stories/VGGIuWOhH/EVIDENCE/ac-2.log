@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:21:25.684867420-07:00
+mode: manual
+---
+Updated transit route and stylesheet contract tests to guard the simplified machine-stage path and reject legacy chrome selectors.

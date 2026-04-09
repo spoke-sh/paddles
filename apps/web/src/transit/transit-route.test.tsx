@@ -239,6 +239,9 @@ describe('TransitRoute', () => {
     expect(screen.getAllByText('Force').length).toBeGreaterThan(0);
     expect(document.getElementById('trace-board')).toBeNull();
     expect(document.getElementById('trace-observatory')).toBeNull();
+    expect(screen.queryByText('Significant')).not.toBeInTheDocument();
+    expect(screen.queryByText('Full Trace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tool Done')).not.toBeInTheDocument();
   });
 
   it('explains the selected machine moment in causal terms', async () => {

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:21:25.643303237-07:00
+mode: manual
+---
+Removed the retired transit board, observatory, and toolbar components so the route only ships the machine narrative surface.
