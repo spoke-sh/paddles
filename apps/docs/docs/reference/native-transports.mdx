@@ -1,7 +1,7 @@
 ---
 title: Native Transports
 sidebar_position: 2
-description: How to enable, inspect, and debug the shared HTTP request/response and Server-Sent Events transport paths.
+description: How to enable, inspect, and debug the shared HTTP, SSE, WebSocket, and Transit transport paths.
 ---
 
 # Native Transports
@@ -10,8 +10,10 @@ Paddles exposes native transport modes through one shared diagnostics model. The
 
 - **HTTP request/response** for one-shot local calls
 - **Server-Sent Events** for server-push streaming updates
+- **WebSocket** for bidirectional session-oriented exchanges
+- **Transit** for structured request/response exchanges
 
-Both modes sit on the same native transport substrate. Operators should inspect the shared diagnostics first, then reason about protocol-specific behavior.
+All four modes sit on the same native transport substrate. Operators should inspect the shared diagnostics first, then reason about protocol-specific behavior.
 
 ## Enable HTTP And SSE
 
@@ -58,6 +60,38 @@ Both responses include a `native_transports` array. Each row tells you:
 - If `last_error` says the transports must share the same bind_target, align the HTTP request/response and Server-Sent Events targets first.
 - If both rows fail together, treat the listener setup as shared. One bind conflict can push both modes into `failed`.
 - If the listener binds successfully, both ready rows should converge on the same active `bind_target`.
+
+## WebSocket And Transit
+
+The bidirectional adapters extend the same shared listener and diagnostics model instead of inventing separate health channels.
+
+### WebSocket
+
+- Route: `GET /native-transports/websocket`
+- Upgrade result: a `session_ready` frame with a negotiated `connection_id`
+- Shared diagnostics focus: `phase`, `bind_target`, `session`, and `last_error`
+
+WebSocket auth and protocol failures degrade the shared diagnostics row instead of hiding inside socket-only logs.
+
+### Transit
+
+- Route: `POST /native-transports/transit`
+- Content type: `application/transit+json`
+- Current channel: `transit_exchange`
+- Success payload: `turn_response`
+- Failure payload: `transport_error`
+
+Example request:
+
+```json
+{
+  "type": "turn_request",
+  "channel": "transit_exchange",
+  "prompt": "Summarize the transport readiness state."
+}
+```
+
+Like the other transports, Transit reports readiness and failure through `GET /health` and `GET /session/shared/bootstrap`. If `last_error` reports a payload or auth failure, fix that negotiation issue first before retrying the route.
 
 ## Why This Model Exists
 

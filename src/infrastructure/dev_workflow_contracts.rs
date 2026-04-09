@@ -668,6 +668,44 @@ fn http_and_sse_transport_operator_workflow_is_documented() {
 }
 
 #[test]
+fn websocket_and_transit_transport_operator_workflow_is_documented() {
+    let readme = read_repo_file("README.md");
+    let configuration = read_repo_file("CONFIGURATION.md");
+    let architecture = read_repo_file("ARCHITECTURE.md");
+    let public_reference = read_repo_file("apps/docs/docs/reference/native-transports.mdx");
+
+    assert!(
+        configuration.contains("GET /native-transports/websocket")
+            && configuration.contains("POST /native-transports/transit")
+            && configuration.contains("application/transit+json")
+            && configuration.contains("session_ready")
+            && configuration.contains("connection_id")
+            && configuration.contains("transit_exchange"),
+        "CONFIGURATION should explain how operators enable and inspect the WebSocket and Transit adapters",
+    );
+    assert!(
+        public_reference.contains("WebSocket")
+            && public_reference.contains("Transit")
+            && public_reference.contains("GET /native-transports/websocket")
+            && public_reference.contains("POST /native-transports/transit")
+            && public_reference.contains("application/transit+json")
+            && public_reference.contains("session_ready")
+            && public_reference.contains("transport_error"),
+        "public docs should describe the WebSocket and Transit routes, payload expectations, and shared diagnostics behavior",
+    );
+    assert!(
+        readme.contains("websocket")
+            && readme.contains("transit")
+            && readme.contains("shared listener")
+            && architecture.contains("WebSocket")
+            && architecture.contains("Transit")
+            && architecture.contains("shared listener")
+            && architecture.contains("structured request/response semantics"),
+        "foundational docs should describe how WebSocket and Transit extend the shared native transport substrate",
+    );
+}
+
+#[test]
 fn forensic_route_drops_legacy_nav_list_pane_chrome_and_docs_the_internals_escape_hatch() {
     let inspector_css = read_repo_file("apps/web/src/styles/inspector.css");
     let readme = read_repo_file("README.md");

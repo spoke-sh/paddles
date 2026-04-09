@@ -473,7 +473,7 @@ The domain model in `NativeTransportKind`, `NativeTransportCapability`, `NativeT
 - which active session identity it has negotiated
 - which error most recently pushed it into failure
 
-HTTP request/response, SSE, and WebSocket now bind through the same primary web listener. WebSocket adds session-oriented behavior on top of that shared listener, but it still records readiness, session identity, degradation, and failure through `NativeTransportRegistry` rather than inventing a parallel socket-health surface.
+HTTP request/response, SSE, WebSocket, and Transit now bind through the same primary web listener. WebSocket adds session-oriented behavior on top of that shared listener, while Transit adds structured request/response semantics on top of the same shared listener. Both adapters still record readiness, negotiated session or channel identity, degradation, and failure through `NativeTransportRegistry` rather than inventing parallel transport-specific health surfaces.
 
 This keeps the shared native transport substrate stable while protocol-specific stories add bind loops, session semantics, or stream behavior.
 

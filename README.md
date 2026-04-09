@@ -198,6 +198,7 @@ The first concrete slices on that substrate are:
 - `http_request_response` for one-shot local request/response integrations
 - `server_sent_events` for server-push streams on the shared runtime web surface
 - `websocket` for bidirectional session-oriented exchanges on that same listener
+- `transit` for structured request/response exchanges on that same shared listener
 
 Each slot flows through the same operator-facing diagnostics model before protocol-specific behavior is added. The shared diagnostics surface always answers the same questions first:
 
@@ -207,7 +208,7 @@ Each slot flows through the same operator-facing diagnostics model before protoc
 - which `auth_mode` is negotiated
 - what `last_error` most recently pushed it out of readiness
 
-Operators should inspect those diagnostics through `GET /health` or `GET /session/shared/bootstrap` before they reason about protocol-specific behavior. When HTTP request/response, SSE, and WebSocket are enabled together, they must converge on the same `bind_target` because the runtime serves them through one shared listener. WebSocket now also records negotiated session identity in the shared diagnostics surface instead of inventing a separate socket-only health channel.
+Operators should inspect those diagnostics through `GET /health` or `GET /session/shared/bootstrap` before they reason about protocol-specific behavior. When HTTP request/response, SSE, WebSocket, and Transit are enabled together, they must converge on the same `bind_target` because the runtime serves them through one shared listener. WebSocket now records negotiated session identity through `session_ready` plus a shared `connection_id`, while Transit uses `POST /native-transports/transit` with `application/transit+json` payloads and returns explicit `turn_response` or `transport_error` frames under the same diagnostics contract.
 
 That shared substrate is what later HTTP, SSE, WebSocket, and Transit stories extend. Operators should not have to learn a different readiness or failure vocabulary for each transport.
 

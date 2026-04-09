@@ -319,13 +319,13 @@
 | [Build Turn Machine Stage For Transit](epics/VGGIor3dC/voyages/VGGIqtM2e/) | done |
 | [Simplify Forensic Inspector Around Machine Narrative](epics/VGGIor3dC/voyages/VGGIqts2y/) | done |
 
-### [Add Native Transport Connection Stack](epics/VGKnsYg1z/) (active)
+### [Add Native Transport Connection Stack](epics/VGKnsYg1z/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Define Shared Native Transport Model](epics/VGKnsYg1z/voyages/VGKoF0hsS/) | done |
 | [Deliver HTTP And SSE Transports](epics/VGKnsYg1z/voyages/VGKoF1Stc/) | done |
-| [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | in-progress |
+| [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

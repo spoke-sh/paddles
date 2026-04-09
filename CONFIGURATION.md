@@ -559,6 +559,30 @@ It shares the same listener and diagnostics model as the HTTP and SSE paths:
 
 The current adapter sends a `session_ready` frame when the socket upgrades, records the negotiated `connection_id` under the shared `session` diagnostic, and degrades the transport with `last_error` if the client sends a non-text prompt frame.
 
+### Transit Structured Exchange Adapter
+
+The Transit transport exchanges structured request/response payloads on `POST /native-transports/transit` when `[native_transports.transit].enabled = true`.
+
+It also shares the same primary listener and diagnostics model as the HTTP, SSE, and WebSocket paths:
+
+- authored `bind_target` must align with any other enabled shared-web transports
+- `phase = ready` means the shared listener is available for Transit exchanges
+- the adapter currently accepts `application/transit+json` request bodies only
+- the current structured channel is `transit_exchange`
+- negotiation or payload failures degrade the shared diagnostics row with `last_error`
+
+The current adapter expects payloads shaped like:
+
+```json
+{
+  "type": "turn_request",
+  "channel": "transit_exchange",
+  "prompt": "Inspect the workspace and summarize the CI failure."
+}
+```
+
+Successful exchanges return `application/transit+json` with a `turn_response` payload. Negotiation failures return a `transport_error` payload instead of silently disappearing into HTTP-only status handling.
+
 ## Trace Recording
 
 The runtime recorder boundary is independent of transcript rendering:

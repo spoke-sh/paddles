@@ -3071,6 +3071,92 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn websocket_and_transit_auth_rejections_degrade_shared_diagnostics() {
+        let handle = start_runtime_server_with_transports(
+            crate::domain::model::NativeTransportConfigurations {
+                websocket: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::WebSocket,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth {
+                        mode: crate::domain::model::NativeTransportAuthMode::BearerToken,
+                        token_env: Some("HOME".to_string()),
+                    },
+                },
+                transit: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::Transit,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth {
+                        mode: crate::domain::model::NativeTransportAuthMode::BearerToken,
+                        token_env: Some("HOME".to_string()),
+                    },
+                },
+                ..crate::domain::model::NativeTransportConfigurations::default()
+            },
+        )
+        .await;
+
+        let _websocket_error = connect_async(handle.websocket_url.as_str())
+            .await
+            .expect_err("websocket auth should fail closed without authorization");
+        let transit_response = reqwest::Client::new()
+            .post(handle.transit_url.clone())
+            .header("content-type", "application/transit+json")
+            .json(&json!({
+                "type": "turn_request",
+                "channel": "transit_exchange",
+                "prompt": "Hello from transit",
+            }))
+            .send()
+            .await
+            .expect("transit response");
+        assert_eq!(transit_response.status(), StatusCode::UNAUTHORIZED);
+
+        let health: serde_json::Value = reqwest::get(format!("{}/health", handle.base_url))
+            .await
+            .expect("health response")
+            .json()
+            .await
+            .expect("health json");
+        let bootstrap: serde_json::Value =
+            reqwest::get(format!("{}/session/shared/bootstrap", handle.base_url))
+                .await
+                .expect("bootstrap response")
+                .json()
+                .await
+                .expect("bootstrap json");
+
+        for transport_list in [
+            health["native_transports"]
+                .as_array()
+                .expect("health transports"),
+            bootstrap["native_transports"]
+                .as_array()
+                .expect("bootstrap transports"),
+        ] {
+            let websocket = transport_list
+                .iter()
+                .find(|transport| transport["transport"] == "websocket")
+                .expect("websocket transport");
+            let transit = transport_list
+                .iter()
+                .find(|transport| transport["transport"] == "transit")
+                .expect("transit transport");
+            assert_eq!(websocket["phase"], "degraded");
+            assert_eq!(
+                websocket["last_error"],
+                "websocket transport rejected unauthorized session"
+            );
+            assert_eq!(transit["phase"], "degraded");
+            assert_eq!(
+                transit["last_error"],
+                "transit transport rejected unauthorized session"
+            );
+        }
+    }
+
     #[test]
     fn transit_trace_html_supports_wheel_zoom() {
         let html = include_str!("index.html");
