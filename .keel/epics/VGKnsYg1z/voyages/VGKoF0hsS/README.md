@@ -26,11 +26,11 @@ started_at: 2026-04-09T15:21:15
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Transport Capability Vocabulary And Lifecycle Contract](../../../../stories/VGKoL8RMj/README.md) | feat | in-progress |
+| [Define Transport Capability Vocabulary And Lifecycle Contract](../../../../stories/VGKoL8RMj/README.md) | feat | done |
 | [Model Transport Configuration Auth And Diagnostics](../../../../stories/VGKoL95Nv/README.md) | feat | icebox |
 | [Guard Shared Transport Contracts And Docs](../../../../stories/VGKoL9ZOg/README.md) | feat | icebox |
 <!-- END GENERATED -->

@@ -9,6 +9,7 @@ pub mod harness_projector;
 pub mod instructions;
 pub mod interpretation;
 pub mod manifold;
+pub mod native_transport;
 pub mod projection;
 pub mod render;
 pub mod runtime_events;
@@ -39,6 +40,10 @@ pub use interpretation::{
 pub use manifold::{
     ConversationManifoldProjection, ManifoldConduitState, ManifoldFrame, ManifoldPrimitiveBasis,
     ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
+};
+pub use native_transport::{
+    NativeTransportCapability, NativeTransportChannel, NativeTransportKind, NativeTransportPhase,
+    NativeTransportSessionIdentity,
 };
 pub use paddles_conversation::{
     ArtifactEnvelope, ArtifactKind, ContextLocator, ContextTier, ConversationThread,
