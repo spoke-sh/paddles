@@ -160,9 +160,10 @@ export function ManifoldStage({
             <div className="manifold-spacefield">
               <div className="manifold-spacefield__meta">
                 <span>Temporal gate field</span>
-                <span>
-                  {currentTurn?.turn_id || 'no-turn'} · anchor {manifoldAnchorLabel(currentFrame?.anchor)}
-                </span>
+                <div className="manifold-spacefield__control-bar">
+                  Drag to tilt · Alt+drag to rotate · Shift+drag to pan · Wheel to zoom ·
+                  Double-click to reset
+                </div>
               </div>
               <div
                 className={`manifold-spacefield__viewport${
@@ -181,10 +182,6 @@ export function ManifoldStage({
                   <div className="manifold-spacefield__axis manifold-spacefield__axis--force">
                     Force
                   </div>
-                </div>
-                <div className="manifold-spacefield__hint">
-                  Drag to tilt · Alt+drag to rotate · Shift+drag to pan · Wheel to zoom ·
-                  Double-click to reset
                 </div>
                 <div className="manifold-spacefield__camera-stats">
                   pan {Math.round(camera.panX)},{Math.round(camera.panY)} · tilt{' '}

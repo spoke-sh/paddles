@@ -17,8 +17,8 @@ type ManifoldDragState = {
 };
 
 export const DEFAULT_MANIFOLD_CAMERA: ManifoldCameraState = {
-  pitch: 62,
-  yaw: -18,
+  pitch: 21,
+  yaw: -4,
   roll: 0,
   panX: 0,
   panY: 0,

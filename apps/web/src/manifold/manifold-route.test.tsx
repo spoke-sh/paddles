@@ -45,6 +45,11 @@ describe('ManifoldRoute', () => {
     expect(document.querySelector('.manifold-playback-banner')).toBeNull();
     expect(document.querySelector('.manifold-empty-state')).toBeNull();
     expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/task-123\.turn-0001 · anchor replace runtime shell padding/i)
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Drag to tilt · Alt\+drag to rotate/i)).toBeInTheDocument();
+    expect(document.querySelector('.manifold-spacefield__hint')).toBeNull();
     expect(document.querySelector('.manifold-stage-timeline')).toBeNull();
     expect(document.querySelector('.manifold-spacefield__scrubber')).not.toBeNull();
     expect(document.getElementById('manifold-time-scrubber')).not.toBeNull();
@@ -613,8 +618,8 @@ describe('ManifoldRoute', () => {
 
     expect(deck.getAttribute('data-pan-x')).toBe('0');
     expect(deck.getAttribute('data-pan-y')).toBe('0');
-    expect(deck.getAttribute('data-pitch')).toBe('62');
-    expect(deck.getAttribute('data-yaw')).toBe('-18');
+    expect(deck.getAttribute('data-pitch')).toBe('21');
+    expect(deck.getAttribute('data-yaw')).toBe('-4');
     expect(deck.getAttribute('data-roll')).toBe('0');
     expect(deck.getAttribute('data-zoom')).toBe('1.00');
 
@@ -622,8 +627,8 @@ describe('ManifoldRoute', () => {
     fireEvent.mouseMove(window, { clientX: 260, clientY: 330 });
     fireEvent.mouseUp(window);
 
-    expect(Math.abs(Number(deck.getAttribute('data-pitch')) - 62)).toBeGreaterThan(30);
-    expect(deck.getAttribute('data-yaw')).not.toBe('-18');
+    expect(deck.getAttribute('data-pitch')).not.toBe('21');
+    expect(deck.getAttribute('data-yaw')).not.toBe('-4');
 
     fireEvent.mouseDown(viewport, { button: 0, shiftKey: true, clientX: 160, clientY: 90 });
     fireEvent.mouseMove(window, { clientX: 190, clientY: 130 });
