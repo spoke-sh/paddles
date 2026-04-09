@@ -22,10 +22,10 @@ mission: VGGIo7WWc
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 1/9 stories done
+**Progress:** 0/3 voyages complete, 2/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Define Narrative Machine Model And Shared Projection](voyages/VGGIqsj2g/) | in-progress | 1/3 |
+| [Define Narrative Machine Model And Shared Projection](voyages/VGGIqsj2g/) | in-progress | 2/3 |
 | [Build Turn Machine Stage For Transit](voyages/VGGIqtM2e/) | planned | 0/3 |
 | [Simplify Forensic Inspector Around Machine Narrative](voyages/VGGIqts2y/) | planned | 0/3 |
 <!-- END GENERATED -->

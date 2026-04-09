@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:01:37.049819599-07:00
+mode: manual
+---
+The projector preserves narrative machine kinds while retaining raw trace node ids and forensic record ids inside each moment.raw payload, verified by npm --workspace @paddles/web run lint.

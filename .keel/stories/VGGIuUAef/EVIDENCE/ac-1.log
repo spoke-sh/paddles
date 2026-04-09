@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:01:37.027399240-07:00
+mode: manual
+---
+Defined the shared machine projection in apps/web/src/trace-machine/machine-projection.ts with stable moment ids, temporal ordering, and raw forensic/trace id links, verified by npm --workspace @paddles/web run test -- machine-projection.test.ts machine-model.test.ts.
