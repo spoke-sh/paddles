@@ -184,6 +184,25 @@ The runtime browser contract is now projection-first:
 - `GET /sessions/{id}/projection/events` is the single live stream for that session, carrying both projection rebuilds and turn-progress events
 - the React runtime owns one shared projection store, so chat, transit, and manifold all render from the same conversation snapshot instead of stitching together panel-local fetch paths
 
+### Native Transport Substrate
+
+Native transport delivery now starts from one shared substrate instead of one-off protocol adapters. The authored configuration layer names four transport slots:
+
+- `http_request_response`
+- `server_sent_events`
+- `websocket`
+- `transit`
+
+Each slot flows through the same operator-facing diagnostics model before protocol-specific behavior is added. The shared diagnostics surface always answers the same questions first:
+
+- is the transport enabled
+- what `phase` is it in
+- which `bind_target` is it trying to own
+- which `auth_mode` is negotiated
+- what `last_error` most recently pushed it out of readiness
+
+That shared substrate is what later HTTP, SSE, WebSocket, and Transit stories extend. Operators should not have to learn a different readiness or failure vocabulary for each transport.
+
 ### Trace Recording
 
 Every recursive step produces typed trace records alongside the visible transcript. The UI is a projection; durable lineage lives in the recorder boundary.

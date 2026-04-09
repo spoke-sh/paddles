@@ -607,6 +607,37 @@ fn runtime_shell_buttons_do_not_underline_and_transit_route_drops_legacy_toggle_
 }
 
 #[test]
+fn native_transport_substrate_is_documented_in_owning_repo_docs() {
+    let readme = read_repo_file("README.md");
+    let configuration = read_repo_file("CONFIGURATION.md");
+    let architecture = read_repo_file("ARCHITECTURE.md");
+
+    assert!(
+        readme.contains("Native Transport Substrate"),
+        "README should introduce the shared native transport substrate",
+    );
+    assert!(
+        configuration.contains("[native_transports.http_request_response]")
+            && configuration.contains("[native_transports.server_sent_events]")
+            && configuration.contains("[native_transports.websocket]")
+            && configuration.contains("[native_transports.transit]"),
+        "CONFIGURATION should show authored native transport sections for every shared transport",
+    );
+    assert!(
+        configuration.contains("phase")
+            && configuration.contains("bind_target")
+            && configuration.contains("auth_mode")
+            && configuration.contains("last_error"),
+        "CONFIGURATION should describe the shared native transport diagnostics surface",
+    );
+    assert!(
+        architecture.contains("NativeTransportRegistry")
+            && architecture.contains("shared native transport substrate"),
+        "ARCHITECTURE should describe the shared transport registry boundary and substrate role",
+    );
+}
+
+#[test]
 fn forensic_route_drops_legacy_nav_list_pane_chrome_and_docs_the_internals_escape_hatch() {
     let inspector_css = read_repo_file("apps/web/src/styles/inspector.css");
     let readme = read_repo_file("README.md");

@@ -22,10 +22,10 @@ mission: VGKno3A3X
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 2/9 stories done
+**Progress:** 1/3 voyages complete, 3/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Define Shared Native Transport Model](voyages/VGKoF0hsS/) | in-progress | 2/3 |
+| [Define Shared Native Transport Model](voyages/VGKoF0hsS/) | done | 3/3 |
 | [Deliver HTTP And SSE Transports](voyages/VGKoF1Stc/) | planned | 0/3 |
 | [Deliver WebSocket And Transit Transports](voyages/VGKoF1utS/) | planned | 0/3 |
 <!-- END GENERATED -->

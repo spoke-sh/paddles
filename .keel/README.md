@@ -323,7 +323,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Define Shared Native Transport Model](epics/VGKnsYg1z/voyages/VGKoF0hsS/) | in-progress |
+| [Define Shared Native Transport Model](epics/VGKnsYg1z/voyages/VGKoF0hsS/) | done |
 | [Deliver HTTP And SSE Transports](epics/VGKnsYg1z/voyages/VGKoF1Stc/) | planned |
 | [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | planned |
 

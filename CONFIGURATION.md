@@ -483,6 +483,41 @@ mode = "constrained"
 [doctor.checks.story-id-uniqueness]
 disabled = false
 ```
+
+## Native Transport Substrate
+
+Authored transport enablement lives under one shared `native_transports` table:
+
+```toml
+[native_transports.http_request_response]
+enabled = true
+bind_target = "127.0.0.1:4100"
+
+[native_transports.http_request_response.auth]
+mode = "bearer_token"
+token_env = "PADDLES_HTTP_TOKEN"
+
+[native_transports.server_sent_events]
+enabled = true
+bind_target = "127.0.0.1:4100"
+
+[native_transports.websocket]
+enabled = false
+
+[native_transports.transit]
+enabled = false
+```
+
+Every transport slot resolves through the same shared diagnostics surface, regardless of protocol:
+
+- `enabled` — whether the authored config has turned the transport on
+- `phase` — one of `disabled`, `configured`, `binding`, `ready`, `degraded`, or `failed`
+- `bind_target` — the address or endpoint the transport is trying to own
+- `auth_mode` — currently `open` or `bearer_token`
+- `last_error` — the latest bind, negotiation, or runtime failure recorded for the transport
+
+`GET /health` and `GET /session/shared/bootstrap` both expose this `native_transports` array so operators can inspect transport readiness before transport-specific UIs or clients are added. Later protocol adapters should update the same diagnostics model instead of inventing side-channel health output.
+
 ## Trace Recording
 
 The runtime recorder boundary is independent of transcript rendering:

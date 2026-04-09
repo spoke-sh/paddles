@@ -434,6 +434,8 @@ The target architecture is implemented across these modules:
 | **Trace Contract** | [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs) | Stable task/turn/record/branch/checkpoint ids |
 | **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
 | **Recorder Adapters** | [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs) | Noop, in-memory, embedded transit-core |
+| **Native Transport Substrate** | [src/domain/model/native_transport.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/native_transport.rs) | Shared lifecycle, auth, capability, and diagnostics vocabulary for HTTP, SSE, WebSocket, and Transit |
+| **Native Transport Registry** | [src/infrastructure/native_transport.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/native_transport.rs) | `NativeTransportRegistry` — shared transport diagnostics state and lifecycle recording |
 | **Thread Replay** | [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs) | Replay/projection layer for conversation traces |
 | **Context Quality** | [src/domain/model/context_quality.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/context_quality.rs) | `ContextStrain`, `StrainTracker`, `StrainLevel` types |
 | **Context Resolution** | [src/domain/ports/context_resolution.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/context_resolution.rs) | ContextResolver port for cross-tier locator resolution |
@@ -457,6 +459,20 @@ The runtime follows the backbone narrative from above:
 - **Automatic tier promotion/demotion** — content moves between tiers manually; automatic promotion policies are future work
 - **Default recorder policy** — embedded transit-core is available; the default runtime uses noop until the policy slice lands
 - **Context-1 integration** — available as an explicit experimental boundary for opt-in use
+
+## Shared Native Transport Substrate
+
+The shared native transport substrate sits beside the recorder boundary as the operator-facing contract for local connection modes. Its job is to keep HTTP request/response, SSE, WebSocket, and Transit adapters from inventing separate readiness vocabularies.
+
+The domain model in `NativeTransportKind`, `NativeTransportCapability`, `NativeTransportPhase`, `NativeTransportAuthMode`, and `NativeTransportDiagnostic` defines the common authored and observed state. The infrastructure `NativeTransportRegistry` owns the live diagnostic snapshot for each transport and is the single place where runtime code should record:
+
+- whether a transport is enabled
+- which phase it is in
+- which bind target it is using
+- which auth mode it negotiated
+- which error most recently pushed it into failure
+
+This keeps the shared native transport substrate stable while protocol-specific stories add bind loops, session semantics, or stream behavior.
 
 ## Recorder Boundary
 
