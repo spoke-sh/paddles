@@ -1133,9 +1133,17 @@ impl SynthesizerEngine for HttpProviderAdapter {
         }
         if let Some(frame) = handoff.instruction_frame.as_ref() {
             user_msg.push_str("## Instruction Manifold\n");
-            if frame.requires_applied_edit() {
+            if frame.requires_applied_edit() && frame.requires_applied_commit() {
+                user_msg.push_str(
+                    "Open obligation: this turn is not complete until Paddles applies the repository change and records the requested git commit.\n",
+                );
+            } else if frame.requires_applied_edit() {
                 user_msg.push_str(
                     "Open obligation: this turn is not complete until Paddles applies a repository edit.\n",
+                );
+            } else if frame.requires_applied_commit() {
+                user_msg.push_str(
+                    "Open obligation: this turn is not complete until Paddles records the requested git commit.\n",
                 );
             } else {
                 user_msg.push_str("Instruction obligations are currently satisfied.\n");

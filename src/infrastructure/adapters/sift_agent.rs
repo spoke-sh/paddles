@@ -2611,6 +2611,16 @@ Current user request:\n\
 
 fn format_instruction_handoff(handoff: &SynthesisHandoff) -> String {
     let base = match handoff.instruction_frame.as_ref() {
+        Some(frame) if frame.requires_applied_edit() && frame.requires_applied_commit() => {
+            if let Some(candidates) = frame.candidate_summary() {
+                format!(
+                    "Open obligation: this turn is not complete until Paddles applies the repository change and records the requested git commit.\nCandidate files: {candidates}"
+                )
+            } else {
+                "Open obligation: this turn is not complete until Paddles applies the repository change and records the requested git commit."
+                    .to_string()
+            }
+        }
         Some(frame) if frame.requires_applied_edit() => {
             if let Some(candidates) = frame.candidate_summary() {
                 format!(
@@ -2620,6 +2630,10 @@ fn format_instruction_handoff(handoff: &SynthesisHandoff) -> String {
                 "Open obligation: this turn is not complete until Paddles applies a repository edit."
                     .to_string()
             }
+        }
+        Some(frame) if frame.requires_applied_commit() => {
+            "Open obligation: this turn is not complete until Paddles records the requested git commit."
+                .to_string()
         }
         Some(_) => "Instruction obligations are currently satisfied.".to_string(),
         None => "No explicit instruction obligations are active.".to_string(),

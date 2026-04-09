@@ -259,6 +259,14 @@ If that first contained budget still runs out before an edit lands, the controll
 
 This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
 
+Git-commit turns now ride the same convergence rails. When a prompt explicitly
+asks Paddles to make a commit, the controller opens a commit obligation,
+bootstraps `git status --short` if the planner tries to answer directly, and
+keeps the turn inside the planner loop until a `git commit` action succeeds.
+Once both `git status` and `git diff` are already on the board, action-bias
+review treats another advice-only stop as non-convergent and steers the model
+toward recording the commit instead.
+
 ### Premise Challenge
 
 Premise challenge is the system that keeps the harness intellectually honest.

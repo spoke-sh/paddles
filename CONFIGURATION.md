@@ -255,6 +255,13 @@ Known-edit turns also get one bounded replan when they hit planner budget
 before an applied edit lands. That replan keeps the current evidence, updates
 the checklist, and expands the per-turn read/inspect/search envelope instead of
 dropping straight to the blocked-edit reply.
+Prompted git-commit turns now use the same containment path. When the prompt
+explicitly asks Paddles to record a commit, the controller opens a commit
+obligation, bootstraps a `git status --short` probe if the planner tried to
+answer directly, and keeps the turn open until a `git commit` shell action
+lands. After `git status` and `git diff` have already been inspected,
+action-bias review steers advice-only `stop` answers back toward recording the
+commit instead of ending the turn with guidance text.
 
 ### Deterministic Edit Target Resolution
 

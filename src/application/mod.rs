@@ -620,7 +620,7 @@ impl StructuredTurnTrace {
             });
 
         if let Some(frame) = instruction_frame {
-            if frame.requires_applied_edit() {
+            if frame.has_pending_workspace_obligation() {
                 return ResponseMode::BlockedEdit;
             }
             if frame.primary_intent == InstructionIntent::Edit {
@@ -1514,7 +1514,22 @@ fn entity_resolution_signal_record(
 }
 
 fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSignalContribution>) {
-    if stop_reason.contains("workspace-editor-boundary") {
+    if stop_reason.contains("workspace-editor-boundary")
+        || stop_reason.contains("workspace-commit-boundary")
+    {
+        let (boundary_source, boundary_summary) = if stop_reason
+            .contains("workspace-commit-boundary")
+        {
+            (
+                "workspace_commit_boundary",
+                "The turn crossed the boundary where planning should yield to recording the requested git commit.",
+            )
+        } else {
+            (
+                "workspace_editor_boundary",
+                "The turn crossed the boundary where planning should yield to the workspace editor for an applied edit.",
+            )
+        };
         let secondary_source = if stop_reason.contains("search-budget") {
             "search_budget"
         } else if stop_reason.contains("inspect-budget") {
@@ -1531,9 +1546,9 @@ fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSigna
             86,
             vec![
                 TraceSignalContribution {
-                    source: "workspace_editor_boundary".to_string(),
+                    source: boundary_source.to_string(),
                     share_percent: 60,
-                    rationale: "The turn crossed the boundary where planning should yield to the workspace editor for an applied edit.".to_string(),
+                    rationale: boundary_summary.to_string(),
                 },
                 TraceSignalContribution {
                     source: secondary_source.to_string(),
@@ -2557,6 +2572,18 @@ impl MechSuitService {
                         ),
                     });
                 }
+                let controller_commit_instruction = controller_prompt_commit_instruction(prompt);
+                if let Some(bootstrapped) = bootstrap_git_commit_initial_action(prompt, &decision) {
+                    trace.emit(TurnEvent::Fallback {
+                        stage: "commit-bootstrap".to_string(),
+                        reason: format!(
+                            "commit-oriented turn bypassed initial `{}` and forced `{}` to inspect workspace status before committing",
+                            decision.action.summary(),
+                            bootstrapped.action.summary()
+                        ),
+                    });
+                    decision = bootstrapped;
+                }
                 if let Some(bootstrapped) = self
                     .bootstrap_known_edit_initial_action(
                         prompt,
@@ -2606,7 +2633,12 @@ impl MechSuitService {
                     rationale: decision.rationale.clone(),
                 });
                 trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
-                execution_plan_from_initial_action(&prepared, decision)
+                let mut execution_plan = execution_plan_from_initial_action(&prepared, decision);
+                execution_plan.instruction_frame = merge_instruction_frames(
+                    execution_plan.instruction_frame.clone(),
+                    controller_commit_instruction,
+                );
+                execution_plan
             }
             PlannerCapability::Unsupported { reason } => {
                 trace.emit(TurnEvent::Fallback {
@@ -2679,9 +2711,9 @@ impl MechSuitService {
             let response = if let Some(frame) = planner_outcome
                 .instruction_frame
                 .as_ref()
-                .filter(|frame| frame.requires_applied_edit())
+                .filter(|frame| frame.has_pending_workspace_obligation())
             {
-                blocked_edit_response(frame)
+                blocked_instruction_response(frame)
             } else {
                 reply
             };
@@ -2711,9 +2743,9 @@ impl MechSuitService {
         if let Some(frame) = planner_outcome
             .instruction_frame
             .as_ref()
-            .filter(|frame| frame.requires_applied_edit())
+            .filter(|frame| frame.has_pending_workspace_obligation())
         {
-            let response = blocked_edit_response(frame);
+            let response = blocked_instruction_response(frame);
             trace.emit(TurnEvent::SynthesisReady {
                 grounded: false,
                 citations: Vec::new(),
@@ -2987,7 +3019,8 @@ impl MechSuitService {
     ) -> Result<PlannerLoopOutcome> {
         let mut context = context;
         let mut execution_checklist = execution_checklist;
-        let base_budget = planner_budget_for_turn(&context.initial_edit);
+        let base_budget =
+            planner_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
         let mut budget = planner_budget_for_replan_attempt(&base_budget, 0);
         let mut loop_state = PlannerLoopState {
             target_resolution: context.initial_edit.resolution.clone(),
@@ -3209,6 +3242,9 @@ impl MechSuitService {
                                     },
                                     budget.max_evidence_items,
                                 );
+                                if let Some(frame) = instruction_frame.as_mut() {
+                                    frame.note_successful_workspace_action(action);
+                                }
                                 used_workspace_resources = true;
                                 result
                             }
@@ -3399,7 +3435,7 @@ impl MechSuitService {
                 PlannerAction::Stop { reason } => {
                     if let Some(frame) = instruction_frame
                         .as_ref()
-                        .filter(|frame| frame.requires_applied_edit())
+                        .filter(|frame| frame.has_pending_workspace_obligation())
                     {
                         let note = instruction_unsatisfied_note(frame);
                         if !loop_state.notes.contains(&note) {
@@ -3438,10 +3474,13 @@ impl MechSuitService {
                 if completed_exact_edit {
                     changed |= checklist.mark_completed("apply-edit");
                 }
+                if decision_is_git_commit(&decision.action) {
+                    changed |= checklist.mark_completed("record-commit");
+                }
                 if accepted_stop
                     && !instruction_frame
                         .as_ref()
-                        .is_some_and(|frame| frame.requires_applied_edit())
+                        .is_some_and(|frame| frame.has_pending_workspace_obligation())
                 {
                     changed |= checklist.mark_completed("finalize");
                 }
@@ -3544,7 +3583,7 @@ impl MechSuitService {
         }
 
         let completed = stop_reason.is_some();
-        let stop_reason = annotate_stop_reason_for_pending_edit(
+        let stop_reason = annotate_stop_reason_for_pending_instruction(
             stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string()),
             instruction_frame.as_ref(),
         );
@@ -3595,8 +3634,8 @@ impl MechSuitService {
                 direct_answer: direct_answer.or_else(|| {
                     instruction_frame
                         .as_ref()
-                        .filter(|frame| frame.requires_applied_edit())
-                        .map(blocked_edit_response)
+                        .filter(|frame| frame.has_pending_workspace_obligation())
+                        .map(blocked_instruction_response)
                 }),
                 instruction_frame,
                 grounding: context.grounding.clone(),
@@ -3614,8 +3653,8 @@ impl MechSuitService {
             direct_answer: direct_answer.or_else(|| {
                 instruction_frame
                     .as_ref()
-                    .filter(|frame| frame.requires_applied_edit())
-                    .map(blocked_edit_response)
+                    .filter(|frame| frame.has_pending_workspace_obligation())
+                    .map(blocked_instruction_response)
             }),
             instruction_frame,
             grounding: context.grounding.clone(),
@@ -3776,12 +3815,17 @@ struct ExecutionChecklistPressure {
     continuation: bool,
     multi_phase: bool,
     edit_goal: bool,
+    commit_goal: bool,
     grounding_goal: bool,
 }
 
 impl ExecutionChecklistPressure {
     fn is_active(self) -> bool {
-        self.continuation || self.multi_phase || self.edit_goal || self.grounding_goal
+        self.continuation
+            || self.multi_phase
+            || self.edit_goal
+            || self.commit_goal
+            || self.grounding_goal
     }
 }
 
@@ -3908,6 +3952,8 @@ enum PromptExecutionPath {
 
 const POLICY_VIOLATION_DIRECT_REPLY: &str = "I can't help with that because it violates policy.";
 const EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested repository edit yet. This turn stays open until Paddles applies a workspace change.";
+const COMMIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested git commit yet. This turn stays open until Paddles records a commit in the workspace.";
+const EDIT_AND_COMMIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested repository work yet. This turn stays open until Paddles applies the requested workspace change and records the requested git commit.";
 
 fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
     PromptExecutionPlan {
@@ -3930,10 +3976,12 @@ fn execution_checklist_pressure(
     recent_turns: &[String],
     execution_plan: &PromptExecutionPlan,
 ) -> ExecutionChecklistPressure {
+    let instruction_frame = execution_plan.instruction_frame.as_ref();
     ExecutionChecklistPressure {
         continuation: !recent_turns.is_empty(),
         multi_phase: prompt_has_execution_chain(prompt),
-        edit_goal: execution_plan.initial_edit.known_edit,
+        edit_goal: instruction_frame.is_some_and(InstructionFrame::requires_applied_edit),
+        commit_goal: instruction_frame.is_some_and(InstructionFrame::requires_applied_commit),
         grounding_goal: execution_plan.grounding.is_some(),
     }
 }
@@ -3959,7 +4007,12 @@ fn build_execution_checklist(
         status: PlanChecklistItemStatus::Pending,
     }];
 
-    if execution_plan.initial_edit.known_edit && !decision_is_exact_edit(&initial_decision.action) {
+    if execution_plan
+        .instruction_frame
+        .as_ref()
+        .is_some_and(InstructionFrame::requires_applied_edit)
+        && !decision_is_exact_edit(&initial_decision.action)
+    {
         items.push(PlanChecklistItem {
             id: "apply-edit".to_string(),
             label: "Apply the requested repository change.".to_string(),
@@ -3967,8 +4020,37 @@ fn build_execution_checklist(
         });
     }
 
-    let finalize_label = if execution_plan.initial_edit.known_edit {
+    if execution_plan
+        .instruction_frame
+        .as_ref()
+        .is_some_and(InstructionFrame::requires_applied_commit)
+        && !decision_is_git_commit(&initial_decision.action)
+    {
+        items.push(PlanChecklistItem {
+            id: "record-commit".to_string(),
+            label: "Record the requested git commit.".to_string(),
+            status: PlanChecklistItemStatus::Pending,
+        });
+    }
+
+    let finalize_label = if execution_plan
+        .instruction_frame
+        .as_ref()
+        .is_some_and(|frame| frame.requires_applied_edit() && frame.requires_applied_commit())
+    {
+        "Verify the workspace change and commit, then summarize the outcome.".to_string()
+    } else if execution_plan
+        .instruction_frame
+        .as_ref()
+        .is_some_and(InstructionFrame::requires_applied_edit)
+    {
         "Verify the change and summarize the outcome.".to_string()
+    } else if execution_plan
+        .instruction_frame
+        .as_ref()
+        .is_some_and(InstructionFrame::requires_applied_commit)
+    {
+        "Verify the commit and summarize the outcome.".to_string()
     } else if execution_plan.grounding.is_some() {
         "Assemble the required evidence and summarize the answer.".to_string()
     } else if pressure.continuation || pressure.multi_phase {
@@ -4034,9 +4116,16 @@ fn sync_replan_note(
         planner_budget_stop_reason_label(stop_reason)
     )];
     lines.push("Do not restart broad exploration or repeat missing or failed paths.".to_string());
-    lines.push(
-        "Choose the single most direct next step toward an applied repository change.".to_string(),
-    );
+    let next_step_line = match instruction_frame {
+        Some(frame) if frame.requires_applied_edit() && frame.requires_applied_commit() => {
+            "Choose the single most direct next step toward the requested workspace change and git commit."
+        }
+        Some(frame) if frame.requires_applied_commit() => {
+            "Choose the single most direct next step toward recording the requested git commit."
+        }
+        _ => "Choose the single most direct next step toward an applied repository change.",
+    };
+    lines.push(next_step_line.to_string());
     if let Some(summary) = instruction_frame.and_then(InstructionFrame::candidate_summary) {
         lines.push(format!("Authored candidate files: {summary}"));
     }
@@ -4049,7 +4138,7 @@ fn should_activate_replan(
     completed_replans: usize,
     base_budget: &PlannerBudget,
 ) -> bool {
-    instruction_frame.is_some_and(InstructionFrame::requires_applied_edit)
+    instruction_frame.is_some_and(InstructionFrame::has_pending_workspace_obligation)
         && completed_replans < base_budget.max_replans
         && stop_reason_supports_replan(stop_reason)
 }
@@ -4122,6 +4211,28 @@ fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<
     }
 }
 
+fn merge_instruction_frames(
+    current: Option<InstructionFrame>,
+    incoming: Option<InstructionFrame>,
+) -> Option<InstructionFrame> {
+    match (current, incoming) {
+        (None, None) => None,
+        (Some(frame), None) | (None, Some(frame)) => Some(frame),
+        (Some(mut current), Some(incoming)) => {
+            if incoming.requires_applied_edit() {
+                current.ensure_applied_edit(incoming.candidate_files.clone());
+            }
+            if incoming.requires_applied_commit() {
+                current.ensure_applied_commit();
+            }
+            if current.resolution.is_none() {
+                current.resolution = incoming.resolution.clone();
+            }
+            Some(current)
+        }
+    }
+}
+
 fn merge_instruction_frame_with_edit_signal(
     instruction_frame: Option<InstructionFrame>,
     edit: &InitialEditInstruction,
@@ -4132,15 +4243,9 @@ fn merge_instruction_frame_with_edit_signal(
 
     match instruction_frame {
         Some(mut frame) => {
-            if frame.primary_intent == InstructionIntent::Edit {
-                for candidate in &edit.candidate_files {
-                    if !frame.candidate_files.contains(candidate) {
-                        frame.candidate_files.push(candidate.clone());
-                    }
-                }
-                if let Some(resolution) = edit.resolution.clone() {
-                    frame.note_resolution(resolution);
-                }
+            frame.ensure_applied_edit(edit.candidate_files.clone());
+            if let Some(resolution) = edit.resolution.clone() {
+                frame.note_resolution(resolution);
             }
             Some(frame)
         }
@@ -4181,6 +4286,14 @@ fn controller_prompt_edit_instruction(
         known_edit: true,
         candidate_files: known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3),
         resolution: None,
+    }
+}
+
+fn controller_prompt_commit_instruction(prompt: &str) -> Option<InstructionFrame> {
+    if prompt_requests_git_commit(prompt) {
+        Some(InstructionFrame::for_commit())
+    } else {
+        None
     }
 }
 
@@ -4272,6 +4385,17 @@ fn prompt_requests_workspace_edit(prompt: &str) -> bool {
                 | "file"
         )
     })
+}
+
+fn prompt_requests_git_commit(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    lower.contains("git commit") || {
+        let tokens = lower
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .filter(|token| !token.is_empty())
+            .collect::<Vec<_>>();
+        tokens.contains(&"git") && tokens.contains(&"commit")
+    }
 }
 
 fn prompt_has_execution_chain(prompt: &str) -> bool {
@@ -4380,6 +4504,34 @@ fn bootstrap_repository_grounding_initial_action(
         },
         rationale:
             "controller bootstrapped a local repository grounding probe before direct synthesis"
+                .to_string(),
+        answer: None,
+        edit: decision.edit.clone(),
+        grounding: decision.grounding.clone(),
+    })
+}
+
+fn bootstrap_git_commit_initial_action(
+    prompt: &str,
+    decision: &InitialActionDecision,
+) -> Option<InitialActionDecision> {
+    match decision.action {
+        InitialAction::Answer | InitialAction::Stop { .. } => {}
+        _ => return None,
+    }
+
+    if !prompt_requests_git_commit(prompt) {
+        return None;
+    }
+
+    Some(InitialActionDecision {
+        action: InitialAction::Workspace {
+            action: WorkspaceAction::Inspect {
+                command: "git status --short".to_string(),
+            },
+        },
+        rationale:
+            "controller bootstrapped a git status probe before allowing a commit turn to answer directly"
                 .to_string(),
         answer: None,
         edit: decision.edit.clone(),
@@ -4513,44 +4665,74 @@ fn is_code_anchor_token(token: &str) -> bool {
 }
 
 fn instruction_unsatisfied_note(frame: &InstructionFrame) -> String {
-    if let Some(candidates) = frame.candidate_summary() {
-        format!(
+    match (
+        frame.requires_applied_edit(),
+        frame.requires_applied_commit(),
+        frame.candidate_summary(),
+    ) {
+        (true, true, Some(candidates)) => format!(
+            "Instruction manifold [applied-edit, applied-commit]\nUser requested a repository change and a recorded git commit. Recommendation text is not completion. Hand the turn to the workspace editor, apply the workspace change, and record the commit before finishing. Candidate files: {candidates}"
+        ),
+        (true, true, None) => "Instruction manifold [applied-edit, applied-commit]\nUser requested a repository change and a recorded git commit. Recommendation text is not completion. Hand the turn to the workspace editor, apply the workspace change, and record the commit before finishing.".to_string(),
+        (true, false, Some(candidates)) => format!(
             "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: {candidates}"
-        )
-    } else {
-        "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing.".to_string()
+        ),
+        (true, false, None) => "Instruction manifold [applied-edit]\nUser requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing.".to_string(),
+        (false, true, _) => "Instruction manifold [applied-commit]\nUser requested a recorded git commit. Recommendation text is not completion. Inspect the current diff if needed, then record the commit before finishing.".to_string(),
+        (false, false, _) => "Instruction obligations are currently satisfied.".to_string(),
     }
 }
 
 fn instruction_unsatisfied_direct_reply(frame: &InstructionFrame) -> String {
+    let base = match (
+        frame.requires_applied_edit(),
+        frame.requires_applied_commit(),
+    ) {
+        (true, true) => EDIT_AND_COMMIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY,
+        (true, false) => EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY,
+        (false, true) => COMMIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY,
+        (false, false) => "",
+    };
+
     if let Some(candidates) = frame.candidate_summary() {
-        format!("{EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY}\n\nLikely target files: {candidates}")
+        format!("{base}\n\nLikely target files: {candidates}")
     } else {
-        EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY.to_string()
+        base.to_string()
     }
 }
 
-fn annotate_stop_reason_for_pending_edit(
+fn pending_workspace_boundary_prefix(frame: &InstructionFrame) -> &'static str {
+    if frame.requires_applied_edit() {
+        "workspace-editor-boundary"
+    } else if frame.requires_applied_commit() {
+        "workspace-commit-boundary"
+    } else {
+        "workspace-boundary"
+    }
+}
+
+fn annotate_stop_reason_for_pending_instruction(
     stop_reason: String,
     instruction_frame: Option<&InstructionFrame>,
 ) -> String {
     let Some(frame) = instruction_frame else {
         return stop_reason;
     };
-    if !frame.requires_applied_edit() || stop_reason.contains("workspace-editor-boundary") {
+    let boundary_prefix = pending_workspace_boundary_prefix(frame);
+    if !frame.has_pending_workspace_obligation() || stop_reason.contains(boundary_prefix) {
         return stop_reason;
     }
 
     if stop_reason == "instruction-unsatisfied" {
-        "workspace-editor-boundary".to_string()
+        boundary_prefix.to_string()
     } else if stop_reason.contains("budget") || stop_reason.contains("challenge") {
-        format!("workspace-editor-boundary:{stop_reason}")
+        format!("{boundary_prefix}:{stop_reason}")
     } else {
         stop_reason
     }
 }
 
-fn blocked_edit_response(frame: &InstructionFrame) -> AuthoredResponse {
+fn blocked_instruction_response(frame: &InstructionFrame) -> AuthoredResponse {
     AuthoredResponse::from_plain_text(
         ResponseMode::BlockedEdit,
         &instruction_unsatisfied_direct_reply(frame),
@@ -4832,13 +5014,27 @@ async fn build_planner_prior_context(
     prior
 }
 
-fn planner_budget_for_turn(initial_edit: &InitialEditInstruction) -> PlannerBudget {
-    if initial_edit.known_edit {
+fn planner_budget_for_turn(
+    instruction_frame: Option<&InstructionFrame>,
+    initial_edit: &InitialEditInstruction,
+) -> PlannerBudget {
+    if instruction_frame.is_some_and(InstructionFrame::requires_applied_edit)
+        || initial_edit.known_edit
+    {
         PlannerBudget {
             max_steps: 10,
             max_reads: 4,
             max_inspects: 3,
             max_searches: 2,
+            max_replans: 1,
+            ..PlannerBudget::default()
+        }
+    } else if instruction_frame.is_some_and(InstructionFrame::requires_applied_commit) {
+        PlannerBudget {
+            max_steps: 6,
+            max_reads: 0,
+            max_inspects: 2,
+            max_searches: 0,
             max_replans: 1,
             ..PlannerBudget::default()
         }
@@ -5403,6 +5599,18 @@ fn collect_steering_review_notes(
         });
     }
 
+    if context
+        .instruction_frame
+        .as_ref()
+        .is_some_and(InstructionFrame::requires_applied_commit)
+        && should_apply_commit_review(loop_state, decision)
+    {
+        notes.push(SteeringReviewNote {
+            kind: SteeringReviewKind::Execution,
+            note: format_commit_bias_review_note(decision, git_commit_pressure(loop_state)),
+        });
+    }
+
     notes
 }
 
@@ -5504,6 +5712,107 @@ fn workspace_editor_pressure(
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct GitCommitPressure {
+    status_inspected: bool,
+    diff_inspected: bool,
+    commit_attempted: bool,
+}
+
+fn git_commit_pressure(loop_state: &PlannerLoopState) -> GitCommitPressure {
+    let mut pressure = GitCommitPressure::default();
+
+    for step in &loop_state.steps {
+        match &step.action {
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect { command },
+            } => {
+                let command = command.trim().to_ascii_lowercase();
+                if command == "git status --short"
+                    || command == "git status"
+                    || command.starts_with("git status ")
+                {
+                    pressure.status_inspected = true;
+                }
+                if command == "git diff"
+                    || command.starts_with("git diff ")
+                    || command.starts_with("git diff --")
+                {
+                    pressure.diff_inspected = true;
+                }
+            }
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Diff { .. },
+            } => {
+                pressure.diff_inspected = true;
+            }
+            PlannerAction::Workspace {
+                action: WorkspaceAction::Shell { command },
+            } => {
+                if is_git_commit_command(command) {
+                    pressure.commit_attempted = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pressure
+}
+
+fn should_apply_commit_review(
+    loop_state: &PlannerLoopState,
+    decision: &RecursivePlannerDecision,
+) -> bool {
+    if decision_is_git_commit(&decision.action) {
+        return false;
+    }
+
+    let pressure = git_commit_pressure(loop_state);
+    !pressure.commit_attempted
+        && pressure.status_inspected
+        && pressure.diff_inspected
+        && (decision.action.is_terminal()
+            || matches!(
+                decision.action,
+                PlannerAction::Workspace {
+                    action: WorkspaceAction::Inspect { .. }
+                }
+            ))
+}
+
+fn format_commit_bias_review_note(
+    decision: &RecursivePlannerDecision,
+    pressure: GitCommitPressure,
+) -> String {
+    let mut lines = vec![
+        "Steering review [action-bias]".to_string(),
+        format!(
+            "Proposed action under review: {}",
+            decision.action.summary()
+        ),
+        "This turn is commit-oriented. The user asked Paddles to record a git commit.".to_string(),
+        "Advice is not completion for this turn.".to_string(),
+    ];
+
+    if pressure.status_inspected {
+        lines.push("`git status` has already been inspected.".to_string());
+    }
+    if pressure.diff_inspected {
+        lines.push("`git diff` has already been inspected.".to_string());
+    }
+
+    lines.push(
+        "Do not stop with guidance or spend another inspect unless commit safety is still unclear."
+            .to_string(),
+    );
+    lines.push(
+        "Choose the single safest next step toward a recorded commit. Prefer `shell git commit -m \"...\"` now."
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
 fn prior_read_counts(loop_state: &PlannerLoopState) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for step in &loop_state.steps {
@@ -5579,6 +5888,20 @@ fn decision_is_exact_edit(action: &PlannerAction) -> bool {
                 | WorkspaceAction::ReplaceInFile { .. }
                 | WorkspaceAction::ApplyPatch { .. }
         }
+    )
+}
+
+fn is_git_commit_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    trimmed == "git commit" || trimmed.starts_with("git commit ")
+}
+
+fn decision_is_git_commit(action: &PlannerAction) -> bool {
+    matches!(
+        action,
+        PlannerAction::Workspace {
+            action: WorkspaceAction::Shell { command }
+        } if is_git_commit_command(command)
     )
 }
 
@@ -9884,11 +10207,15 @@ mod tests {
 
     #[test]
     fn known_edit_planner_budget_preserves_workspace_editor_headroom() {
-        let budget = super::planner_budget_for_turn(&InitialEditInstruction {
+        let initial_edit = InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
             resolution: None,
-        });
+        };
+        let budget = super::planner_budget_for_turn(
+            super::instruction_frame_from_initial_edit(&initial_edit).as_ref(),
+            &initial_edit,
+        );
 
         assert_eq!(budget.max_steps, 10);
         assert_eq!(budget.max_reads, 4);
@@ -11137,6 +11464,184 @@ mod tests {
                 .any(|note| note
                     .contains("Replan from current evidence after instruction unsatisfied."))),
             "advice-only planner stops with an open applied-edit obligation should trigger a bounded replan into workspace editing"
+        );
+    }
+
+    #[test]
+    fn commit_turns_review_stop_answers_into_git_commit_actions() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application"))
+            .expect("create application dir");
+        let app_path = workspace.path().join("src/application/mod.rs");
+        fs::write(
+            &app_path,
+            "pub fn runtime_mode() -> &'static str { \"before\" }\n",
+        )
+        .expect("write tracked file");
+
+        std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .current_dir(workspace.path())
+            .status()
+            .expect("git init");
+        std::process::Command::new("git")
+            .args(["config", "user.email", "paddles@example.com"])
+            .current_dir(workspace.path())
+            .status()
+            .expect("git config user.email");
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Paddles Test"])
+            .current_dir(workspace.path())
+            .status()
+            .expect("git config user.name");
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(workspace.path())
+            .status()
+            .expect("git add");
+        std::process::Command::new("git")
+            .args(["commit", "-qm", "Initial state"])
+            .current_dir(workspace.path())
+            .status()
+            .expect("initial commit");
+
+        fs::write(
+            &app_path,
+            "pub fn runtime_mode() -> &'static str { \"after\" }\n",
+        )
+        .expect("write working change");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer =
+            "Recorded a git commit for the current workspace changes after reviewing the diff."
+                .to_string();
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "reply with commit guidance immediately".to_string(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "git diff -- src/application/mod.rs".to_string(),
+                        },
+                    },
+                    rationale: "inspect the changed file before committing".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "git diff -- src/application/mod.rs".to_string(),
+                        },
+                    },
+                    rationale:
+                        "premise review kept the same diff inspection because the workspace is dirty"
+                            .to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "advise the operator instead of committing".to_string(),
+                    answer: Some(
+                        "I need to inspect a little more before I can commit safely."
+                            .to_string(),
+                    ),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Shell {
+                            command: "git commit -am \"Clarify premise challenge containment signals\""
+                                .to_string(),
+                        },
+                    },
+                    rationale:
+                        "the commit-bias review should hand the turn to git commit now"
+                            .to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the requested commit is complete".to_string(),
+                    answer: Some(answer.clone()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                },
+            ],
+            recorded_requests.clone(),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt("Make a git commit")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, answer);
+        let head_subject = std::process::Command::new("git")
+            .args(["log", "-1", "--pretty=%s"])
+            .current_dir(workspace.path())
+            .output()
+            .expect("git log");
+        assert_eq!(
+            String::from_utf8_lossy(&head_subject.stdout).trim(),
+            "Clarify premise challenge containment signals"
+        );
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(
+            requests.iter().any(|request| request
+                .loop_state
+                .notes
+                .iter()
+                .any(|note| note.contains("Steering review [action-bias]")
+                    && note.contains("git commit"))),
+            "commit turns should steer advice-only stops back toward a git commit action"
         );
     }
 
