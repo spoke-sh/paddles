@@ -10,6 +10,7 @@ use crate::domain::model::{
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::{
     Path, State,
     ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
@@ -84,9 +85,35 @@ struct TurnRequest {
     prompt: String,
 }
 
+#[derive(Deserialize)]
+struct TransitTurnRequest {
+    #[serde(rename = "type")]
+    request_type: String,
+    channel: Option<String>,
+    prompt: Option<String>,
+}
+
 #[derive(Serialize)]
 struct TurnResponse {
     response: String,
+}
+
+#[derive(Serialize)]
+struct TransitTurnResponse {
+    #[serde(rename = "type")]
+    response_type: &'static str,
+    transport: &'static str,
+    channel: &'static str,
+    session_id: String,
+    response: String,
+}
+
+#[derive(Serialize)]
+struct TransitTransportErrorResponse {
+    #[serde(rename = "type")]
+    response_type: &'static str,
+    transport: &'static str,
+    error: String,
 }
 
 #[derive(Serialize)]
@@ -128,6 +155,12 @@ struct BroadcastEventSink {
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     projection_tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
+
+const TRANSIT_CONTENT_TYPE: &str = "application/transit+json";
+const TRANSIT_TURN_REQUEST_TYPE: &str = "turn_request";
+const TRANSIT_TURN_RESPONSE_TYPE: &str = "turn_response";
+const TRANSIT_ERROR_TYPE: &str = "transport_error";
+const TRANSIT_CHANNEL: &str = "transit_exchange";
 
 fn should_forward_projection_event(event: &TurnEvent, verbose: u8) -> bool {
     event.is_visible_at_verbosity(verbose)
@@ -237,6 +270,7 @@ pub fn router(
             get(shared_conversation_bootstrap),
         )
         .route("/native-transports/websocket", get(websocket_transport))
+        .route("/native-transports/transit", post(transit_transport))
         .route("/sessions", post(create_session))
         .route("/sessions/{id}/turns", post(submit_turn))
         .route("/sessions/{id}/projection", get(conversation_projection))
@@ -478,29 +512,33 @@ async fn submit_turn(
     Ok(Json(TurnResponse { response }))
 }
 
-fn authorize_websocket_transport(
+fn authorize_native_transport(
     state: &Arc<AppState>,
     configuration: &crate::domain::model::NativeTransportConfiguration,
     headers: &HeaderMap,
 ) -> Result<(), StatusCode> {
+    let transport = configuration.transport;
+    let transport_label = transport.label();
     match configuration.auth.mode {
         crate::domain::model::NativeTransportAuthMode::Open => Ok(()),
         crate::domain::model::NativeTransportAuthMode::BearerToken => {
             let Some(token_env) = configuration.auth.token_env.as_deref() else {
-                let error = "websocket transport bearer_token mode requires token_env".to_string();
+                let error =
+                    format!("{transport_label} transport bearer_token mode requires token_env");
                 state
                     .service
                     .native_transport_registry()
-                    .record_failure(NativeTransportKind::WebSocket, error);
+                    .record_failure(transport, error);
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             };
             let Ok(expected_token) = std::env::var(token_env) else {
-                let error =
-                    format!("websocket transport bearer token env `{token_env}` is not set");
+                let error = format!(
+                    "{transport_label} transport bearer token env `{token_env}` is not set"
+                );
                 state
                     .service
                     .native_transport_registry()
-                    .record_failure(NativeTransportKind::WebSocket, error);
+                    .record_failure(transport, error);
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             };
             let authorization = headers
@@ -510,14 +548,36 @@ fn authorize_websocket_transport(
             let expected_header = format!("Bearer {expected_token}");
             if authorization != expected_header {
                 state.service.native_transport_registry().record_degraded(
-                    NativeTransportKind::WebSocket,
-                    "websocket transport rejected unauthorized session",
+                    transport,
+                    format!("{transport_label} transport rejected unauthorized session"),
                 );
                 return Err(StatusCode::UNAUTHORIZED);
             }
             Ok(())
         }
     }
+}
+
+fn header_matches_content_type(headers: &HeaderMap, expected: &str) -> bool {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case(expected))
+}
+
+fn transit_error_response(status: StatusCode, error: impl Into<String>) -> Response {
+    let payload = TransitTransportErrorResponse {
+        response_type: TRANSIT_ERROR_TYPE,
+        transport: NativeTransportKind::Transit.label(),
+        error: error.into(),
+    };
+    (
+        status,
+        [(CONTENT_TYPE, TRANSIT_CONTENT_TYPE)],
+        serde_json::to_string(&payload).expect("serialize transit error payload"),
+    )
+        .into_response()
 }
 
 fn websocket_prompt_from_frame(frame: &str) -> Option<String> {
@@ -544,7 +604,7 @@ async fn websocket_transport(
     if !configuration.enabled {
         return Err(StatusCode::NOT_FOUND);
     }
-    authorize_websocket_transport(&state, &configuration, &headers)?;
+    authorize_native_transport(&state, &configuration, &headers)?;
 
     Ok(ws
         .on_upgrade(move |socket| websocket_transport_session(socket, state, configuration))
@@ -685,6 +745,129 @@ async fn websocket_transport_session(
     }
 
     registry.clear_session(NativeTransportKind::WebSocket);
+}
+
+async fn transit_transport(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, StatusCode> {
+    let configuration = state.native_transport_configurations.transit.clone();
+    if !configuration.enabled {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    authorize_native_transport(&state, &configuration, &headers)?;
+
+    if !header_matches_content_type(&headers, TRANSIT_CONTENT_TYPE) {
+        let error = "transit transport requires application/transit+json request bodies";
+        state
+            .service
+            .native_transport_registry()
+            .record_degraded(NativeTransportKind::Transit, error);
+        return Ok(transit_error_response(StatusCode::BAD_REQUEST, error));
+    }
+
+    let payload: TransitTurnRequest = match serde_json::from_slice(&body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            let error = format!("transit transport requires valid structured payloads: {error}");
+            state
+                .service
+                .native_transport_registry()
+                .record_degraded(NativeTransportKind::Transit, error.clone());
+            return Ok(transit_error_response(StatusCode::BAD_REQUEST, error));
+        }
+    };
+
+    if payload.request_type != TRANSIT_TURN_REQUEST_TYPE {
+        let error =
+            format!("transit transport requires `{TRANSIT_TURN_REQUEST_TYPE}` payload types");
+        state
+            .service
+            .native_transport_registry()
+            .record_degraded(NativeTransportKind::Transit, error.clone());
+        return Ok(transit_error_response(StatusCode::BAD_REQUEST, error));
+    }
+    if payload.channel.as_deref().unwrap_or(TRANSIT_CHANNEL) != TRANSIT_CHANNEL {
+        let error =
+            format!("transit transport only supports the `{TRANSIT_CHANNEL}` channel right now");
+        state
+            .service
+            .native_transport_registry()
+            .record_degraded(NativeTransportKind::Transit, error.clone());
+        return Ok(transit_error_response(StatusCode::BAD_REQUEST, error));
+    }
+    let Some(prompt) = payload
+        .prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    else {
+        let error = "transit transport requires non-empty prompt payloads".to_string();
+        state
+            .service
+            .native_transport_registry()
+            .record_degraded(NativeTransportKind::Transit, error.clone());
+        return Ok(transit_error_response(StatusCode::BAD_REQUEST, error));
+    };
+
+    let session = state.service.shared_conversation_session();
+    let task_id = session.task_id();
+    let registry = state.service.native_transport_registry();
+    let exchange_id = format!(
+        "exchange-{}",
+        state
+            .websocket_connection_counter
+            .fetch_add(1, Ordering::Relaxed)
+    );
+    registry.record_session(
+        NativeTransportKind::Transit,
+        NativeTransportSessionIdentity {
+            transport: NativeTransportKind::Transit,
+            task_id: task_id.clone(),
+            channel: crate::domain::model::NativeTransportChannel::TransitExchange,
+            connection_id: Some(exchange_id),
+        },
+    );
+
+    let sink: Arc<dyn TurnEventSink> = Arc::new(BroadcastEventSink {
+        session_id: task_id.as_str().to_string(),
+        task_id: task_id.clone(),
+        verbose: state.service.verbose(),
+        event_tx: state.event_tx.clone(),
+        projection_tx: state.projection_tx.clone(),
+    });
+
+    let response = match state
+        .service
+        .process_prompt_in_session_with_sink(prompt, session, sink)
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let error = format!("transit prompt processing failed: {error}");
+            registry.record_degraded(NativeTransportKind::Transit, error.clone());
+            return Ok(transit_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            ));
+        }
+    };
+    registry.clear_session(NativeTransportKind::Transit);
+
+    let payload = TransitTurnResponse {
+        response_type: TRANSIT_TURN_RESPONSE_TYPE,
+        transport: NativeTransportKind::Transit.label(),
+        channel: TRANSIT_CHANNEL,
+        session_id: task_id.as_str().to_string(),
+        response,
+    };
+    Ok((
+        StatusCode::OK,
+        [(CONTENT_TYPE, TRANSIT_CONTENT_TYPE)],
+        serde_json::to_string(&payload).expect("serialize transit response"),
+    )
+        .into_response())
 }
 
 async fn conversation_transcript(
@@ -1098,8 +1281,10 @@ mod tests {
 
     struct RuntimeServerHandle {
         _workspace: TempDir,
+        _provider: Option<MockServerHandle>,
         base_url: String,
         websocket_url: String,
+        transit_url: String,
         task: JoinHandle<()>,
     }
 
@@ -1174,6 +1359,7 @@ mod tests {
             configurations.http_request_response,
             configurations.server_sent_events,
             configurations.websocket,
+            configurations.transit,
         ] {
             crate::infrastructure::native_transport::record_binding_started(
                 &registry,
@@ -1192,8 +1378,78 @@ mod tests {
 
         RuntimeServerHandle {
             _workspace: workspace,
+            _provider: None,
             base_url: format!("http://{}", addr),
             websocket_url: format!("ws://{addr}/native-transports/websocket"),
+            transit_url: format!("http://{addr}/native-transports/transit"),
+            task,
+        }
+    }
+
+    async fn start_live_runtime_server_with_transports(
+        configurations: crate::domain::model::NativeTransportConfigurations,
+        responses: Vec<MockResponse>,
+    ) -> RuntimeServerHandle {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the local harness before answering.\n",
+        )
+        .expect("write AGENTS.md");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let provider = start_mock_provider_server(responses).await;
+        let service = live_http_test_service_with_recorder(
+            workspace.path(),
+            provider.base_url.clone(),
+            recorder.clone(),
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare lanes");
+        let registry = Arc::new(
+            crate::infrastructure::native_transport::NativeTransportRegistry::new(
+                configurations.clone(),
+            ),
+        );
+        service.set_native_transport_registry(Arc::clone(&registry));
+        let (app, _observer) = super::router(service, recorder, configurations.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind runtime server");
+        let addr = listener.local_addr().expect("local addr");
+        let bound_target = addr.to_string();
+
+        for configuration in [
+            configurations.http_request_response,
+            configurations.server_sent_events,
+            configurations.websocket,
+            configurations.transit,
+        ] {
+            crate::infrastructure::native_transport::record_binding_started(
+                &registry,
+                &configuration,
+            );
+            crate::infrastructure::native_transport::record_bound_transport(
+                &registry,
+                &configuration,
+                &bound_target,
+            );
+        }
+
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve runtime");
+        });
+
+        RuntimeServerHandle {
+            _workspace: workspace,
+            _provider: Some(provider),
+            base_url: format!("http://{}", addr),
+            websocket_url: format!("ws://{addr}/native-transports/websocket"),
+            transit_url: format!("http://{addr}/native-transports/transit"),
             task,
         }
     }
@@ -2636,6 +2892,181 @@ mod tests {
             assert_eq!(
                 websocket["last_error"],
                 "websocket transport expects UTF-8 text prompt frames"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn transit_transport_round_trip_uses_structured_payloads_and_reports_ready_diagnostics() {
+        let handle = start_live_runtime_server_with_transports(
+            crate::domain::model::NativeTransportConfigurations {
+                transit: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::Transit,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth::default(),
+                },
+                ..crate::domain::model::NativeTransportConfigurations::default()
+            },
+            vec![
+                MockResponse {
+                    status: StatusCode::OK,
+                    body: openai_content_response(
+                        "I should inspect the local workspace before answering.",
+                    ),
+                },
+                MockResponse {
+                    status: StatusCode::OK,
+                    body: openai_tool_call_response(
+                        r#"{"action":"inspect","command":"pwd","rationale":"inspect the local workspace before answering"}"#,
+                    ),
+                },
+                MockResponse {
+                    status: StatusCode::OK,
+                    body: openai_tool_call_response(
+                        r#"{"action":"answer","rationale":"the local evidence is sufficient"}"#,
+                    ),
+                },
+                MockResponse {
+                    status: StatusCode::OK,
+                    body: openai_content_response(
+                        r#"{"render_types":["paragraph"],"blocks":[{"type":"paragraph","text":"Mock provider completed the turn after local inspection."}]}"#,
+                    ),
+                },
+            ],
+        )
+        .await;
+
+        let response = reqwest::Client::new()
+            .post(handle.transit_url.clone())
+            .header("content-type", "application/transit+json")
+            .json(&json!({
+                "type": "turn_request",
+                "channel": "transit_exchange",
+                "prompt": "CI is failing. Can you debug it on this machine?",
+            }))
+            .send()
+            .await
+            .expect("transit response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("application/transit+json"),
+        );
+        let body: serde_json::Value = response.json().await.expect("transit json");
+        assert_eq!(body["type"], "turn_response");
+        assert_eq!(body["transport"], "transit");
+        assert_eq!(body["channel"], "transit_exchange");
+        assert!(
+            body["response"]
+                .as_str()
+                .expect("response text")
+                .contains("Mock provider completed the turn"),
+        );
+
+        let health: serde_json::Value = reqwest::get(format!("{}/health", handle.base_url))
+            .await
+            .expect("health response")
+            .json()
+            .await
+            .expect("health json");
+        let bootstrap: serde_json::Value =
+            reqwest::get(format!("{}/session/shared/bootstrap", handle.base_url))
+                .await
+                .expect("bootstrap response")
+                .json()
+                .await
+                .expect("bootstrap json");
+
+        for transport_list in [
+            health["native_transports"]
+                .as_array()
+                .expect("health transports"),
+            bootstrap["native_transports"]
+                .as_array()
+                .expect("bootstrap transports"),
+        ] {
+            let transit = transport_list
+                .iter()
+                .find(|transport| transport["transport"] == "transit")
+                .expect("transit transport");
+            assert_eq!(transit["phase"], "ready");
+            assert_eq!(transit["last_error"], serde_json::Value::Null);
+            assert!(transit["bind_target"].as_str().is_some());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn transit_transport_invalid_content_type_degrades_shared_diagnostics() {
+        let handle = start_runtime_server_with_transports(
+            crate::domain::model::NativeTransportConfigurations {
+                transit: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::Transit,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth::default(),
+                },
+                ..crate::domain::model::NativeTransportConfigurations::default()
+            },
+        )
+        .await;
+
+        let response = reqwest::Client::new()
+            .post(handle.transit_url.clone())
+            .header("content-type", "application/json")
+            .json(&json!({
+                "type": "turn_request",
+                "channel": "transit_exchange",
+                "prompt": "Hello from transit",
+            }))
+            .send()
+            .await
+            .expect("transit response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json().await.expect("transit error json");
+        assert_eq!(body["type"], "transport_error");
+        assert_eq!(body["transport"], "transit");
+        assert_eq!(
+            body["error"],
+            "transit transport requires application/transit+json request bodies"
+        );
+
+        let health: serde_json::Value = reqwest::get(format!("{}/health", handle.base_url))
+            .await
+            .expect("health response")
+            .json()
+            .await
+            .expect("health json");
+        let bootstrap: serde_json::Value =
+            reqwest::get(format!("{}/session/shared/bootstrap", handle.base_url))
+                .await
+                .expect("bootstrap response")
+                .json()
+                .await
+                .expect("bootstrap json");
+
+        for transport_list in [
+            health["native_transports"]
+                .as_array()
+                .expect("health transports"),
+            bootstrap["native_transports"]
+                .as_array()
+                .expect("bootstrap transports"),
+        ] {
+            let transit = transport_list
+                .iter()
+                .find(|transport| transport["transport"] == "transit")
+                .expect("transit transport");
+            assert_eq!(transit["phase"], "degraded");
+            assert_eq!(transit["session"], serde_json::Value::Null);
+            assert_eq!(
+                transit["last_error"],
+                "transit transport requires application/transit+json request bodies"
             );
         }
     }

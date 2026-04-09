@@ -542,11 +542,13 @@ async fn main() -> Result<()> {
     let http_transport = &config.native_transports.http_request_response;
     let sse_transport = &config.native_transports.server_sent_events;
     let websocket_transport = &config.native_transports.websocket;
+    let transit_transport = &config.native_transports.transit;
     let default_bind_target = format!("0.0.0.0:{requested_port}");
     let resolved_bind_target = match resolve_shared_web_bind_target(
         http_transport,
         sse_transport,
         websocket_transport,
+        transit_transport,
         &default_bind_target,
     ) {
         Ok(bind_target) => bind_target,
@@ -558,12 +560,14 @@ async fn main() -> Result<()> {
                 websocket_transport,
                 error.clone(),
             );
+            record_transport_failure(&native_transport_registry, transit_transport, error.clone());
             return Err(anyhow::anyhow!(error));
         }
     };
     record_binding_started(&native_transport_registry, http_transport);
     record_binding_started(&native_transport_registry, sse_transport);
     record_binding_started(&native_transport_registry, websocket_transport);
+    record_binding_started(&native_transport_registry, transit_transport);
     let listener = match tokio::net::TcpListener::bind(&resolved_bind_target).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -576,6 +580,11 @@ async fn main() -> Result<()> {
             record_transport_failure(
                 &native_transport_registry,
                 websocket_transport,
+                error.to_string(),
+            );
+            record_transport_failure(
+                &native_transport_registry,
+                transit_transport,
                 error.to_string(),
             );
             return Err(error.into());
@@ -595,6 +604,11 @@ async fn main() -> Result<()> {
     record_bound_transport(
         &native_transport_registry,
         websocket_transport,
+        &web_server_addr.to_string(),
+    );
+    record_bound_transport(
+        &native_transport_registry,
+        transit_transport,
         &web_server_addr.to_string(),
     );
     if verbose >= 3 {

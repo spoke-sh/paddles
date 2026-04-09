@@ -158,9 +158,15 @@ pub fn resolve_shared_web_bind_target(
     http_request_response: &NativeTransportConfiguration,
     server_sent_events: &NativeTransportConfiguration,
     websocket: &NativeTransportConfiguration,
+    transit: &NativeTransportConfiguration,
     fallback_bind_target: &str,
 ) -> Result<String, String> {
-    let shared_web_transports = [http_request_response, server_sent_events, websocket];
+    let shared_web_transports = [
+        http_request_response,
+        server_sent_events,
+        websocket,
+        transit,
+    ];
     let enabled_targets = shared_web_transports
         .into_iter()
         .filter(|configuration| configuration.enabled)
@@ -335,9 +341,11 @@ mod tests {
             auth: NativeTransportAuth::default(),
         };
         let websocket = NativeTransportConfiguration::for_kind(NativeTransportKind::WebSocket);
+        let transit = NativeTransportConfiguration::for_kind(NativeTransportKind::Transit);
 
-        let bind_target = resolve_shared_web_bind_target(&http, &sse, &websocket, "0.0.0.0:3000")
-            .expect("bind target");
+        let bind_target =
+            resolve_shared_web_bind_target(&http, &sse, &websocket, &transit, "0.0.0.0:3000")
+                .expect("bind target");
 
         assert_eq!(bind_target, "127.0.0.1:4200");
     }
@@ -357,9 +365,11 @@ mod tests {
             auth: NativeTransportAuth::default(),
         };
         let websocket = NativeTransportConfiguration::for_kind(NativeTransportKind::WebSocket);
+        let transit = NativeTransportConfiguration::for_kind(NativeTransportKind::Transit);
 
-        let error = resolve_shared_web_bind_target(&http, &sse, &websocket, "0.0.0.0:3000")
-            .expect_err("conflicting authored bind targets should fail closed");
+        let error =
+            resolve_shared_web_bind_target(&http, &sse, &websocket, &transit, "0.0.0.0:3000")
+                .expect_err("conflicting authored bind targets should fail closed");
 
         assert!(error.contains("http_request_response"));
         assert!(error.contains("server_sent_events"));
@@ -380,12 +390,39 @@ mod tests {
             bind_target: Some("127.0.0.1:4200".to_string()),
             auth: NativeTransportAuth::default(),
         };
+        let transit = NativeTransportConfiguration::for_kind(NativeTransportKind::Transit);
 
-        let error = resolve_shared_web_bind_target(&http, &sse, &websocket, "0.0.0.0:3000")
-            .expect_err("conflicting authored bind targets should fail closed");
+        let error =
+            resolve_shared_web_bind_target(&http, &sse, &websocket, &transit, "0.0.0.0:3000")
+                .expect_err("conflicting authored bind targets should fail closed");
 
         assert!(error.contains("http_request_response"));
         assert!(error.contains("websocket"));
+    }
+
+    #[test]
+    fn resolve_shared_web_bind_target_rejects_conflicting_http_and_transit_targets() {
+        let http = NativeTransportConfiguration {
+            transport: NativeTransportKind::HttpRequestResponse,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+        let sse = NativeTransportConfiguration::for_kind(NativeTransportKind::ServerSentEvents);
+        let websocket = NativeTransportConfiguration::for_kind(NativeTransportKind::WebSocket);
+        let transit = NativeTransportConfiguration {
+            transport: NativeTransportKind::Transit,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4400".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+
+        let error =
+            resolve_shared_web_bind_target(&http, &sse, &websocket, &transit, "0.0.0.0:3000")
+                .expect_err("conflicting authored bind targets should fail closed");
+
+        assert!(error.contains("http_request_response"));
+        assert!(error.contains("transit"));
     }
 
     #[test]
