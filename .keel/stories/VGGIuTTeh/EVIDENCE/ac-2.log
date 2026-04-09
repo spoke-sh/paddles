@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T20:58:11.286793697-07:00
+mode: manual
+---
+Documented the replacement of raw trace-storage language with the narrative-machine vocabulary in README.md and ARCHITECTURE.md, and verified the module remains type-safe with npm --workspace @paddles/web run lint.

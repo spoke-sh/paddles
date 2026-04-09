@@ -161,6 +161,16 @@ The important architectural limit is that the manifold route is still metaphoric
 
 When the selected source is a deterministic resolver outcome, the manifold readout now shows whether the target was `resolved`, `ambiguous`, or `missing`, along with the authored path or candidate set that produced that state. This keeps edit convergence visible without turning the manifold into a second editor.
 
+The next trace-surface simplification is a shared narrative-machine vocabulary for transit and forensic views. In the default operator path, the UI should talk about machine parts such as `Input`, `Evidence probe`, `Diverter`, `Jam`, `Spring return`, `Force`, and `Output` instead of exposing raw trace-storage labels like record kinds, nodes, or payload families first.
+
+That simplified path also shares one interaction model across both routes:
+
+- selected turn
+- selected moment
+- optional internals mode
+
+Internals still preserve raw ids, payloads, and evidence links, but they sit behind an explicit operator choice instead of dominating the first-read surface.
+
 The frontend is now staged through a shared Turborepo workspace:
 
 - `apps/docs` owns the Docusaurus documentation site

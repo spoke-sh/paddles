@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T20:58:11.260002193-07:00
+mode: manual
+---
+Defined the shared machine-moment lexicon in apps/web/src/trace-machine/machine-model.ts and verified it with npm --workspace @paddles/web run test -- machine-model.test.ts.

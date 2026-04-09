@@ -138,6 +138,30 @@ Those are separate concerns:
 
 Keeping those roles separate prevents the system from hiding control metadata inside user-facing prose or expecting the renderer to recover structure that the authoring layer never produced.
 
+### Narrative Machine Trace Surfaces
+
+The transit and forensic web routes are now moving toward one simpler mental model: a turn should read like a Rube Goldberg machine, not like a storage browser. The default operator vocabulary for those routes is:
+
+- `Input`: where the turn enters the machine
+- `Planner`: where the next bounded move is chosen
+- `Evidence probe`: where the machine inspects or gathers proof
+- `Diverter`: where the path changes direction
+- `Jam`: where progress catches and must recover
+- `Spring return`: where the machine replans and snaps back into motion
+- `Tool run`: where the machine acts on the workspace
+- `Force`: where steering pressure pushes the machine
+- `Output`: where the run lands in an answer, edit, commit, or explicit block
+
+Those labels intentionally replace raw trace-storage language in the default UI path. Operators should not need to reason in terms of record kinds, graph nodes, or payload envelopes just to understand what happened in a turn.
+
+Transit and forensic surfaces also share one interaction contract:
+
+- selected turn id
+- selected moment id
+- optional internals mode
+
+The internals path keeps raw record ids, trace ids, and payload content reachable, but it remains an explicit drill-down rather than the primary narrative surface.
+
 ### Visibility Throughout
 
 **`Renderer`** surfaces every step of this process — interpretation assembly, planner action selection, gatherer work, tool calls, context strain, fallback decisions, synthesis, and now typed harness/governor state — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI can now prefer the explicit harness chamber over guessed labels, so the operator sees real engine ownership rather than a best-effort inference.

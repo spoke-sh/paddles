@@ -27,11 +27,11 @@ started_at: 2026-04-08T20:49:26
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Machine Moments And Shared Lexicon](../../../../stories/VGGIuTTeh/README.md) | feat | in-progress |
+| [Define Machine Moments And Shared Lexicon](../../../../stories/VGGIuTTeh/README.md) | feat | done |
 | [Project Trace Records Into Narrative Machine Parts](../../../../stories/VGGIuUAef/README.md) | feat | backlog |
 | [Guard Narrative Machine Contracts And Copy](../../../../stories/VGGIuUTee/README.md) | feat | backlog |
 <!-- END GENERATED -->
