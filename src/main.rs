@@ -29,6 +29,7 @@ use paddles::infrastructure::config::{
 };
 use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
+use paddles::infrastructure::native_transport::NativeTransportRegistry;
 use paddles::infrastructure::providers::ModelProvider;
 use paddles::infrastructure::rendering::RenderCapability;
 use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
@@ -474,6 +475,9 @@ async fn main() -> Result<()> {
         trace_recorder.clone(),
     ));
     service.set_conversation_history_store(conversation_history_store);
+    service.set_native_transport_registry(Arc::new(NativeTransportRegistry::new(
+        config.native_transports.clone(),
+    )));
     service.set_verbose(verbose);
 
     // Boot sequence

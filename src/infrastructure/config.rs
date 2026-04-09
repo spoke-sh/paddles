@@ -1,6 +1,10 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+use crate::domain::model::{
+    NativeTransportAuth, NativeTransportAuthMode, NativeTransportConfiguration,
+    NativeTransportConfigurations, NativeTransportKind,
+};
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::runtime_preferences::RuntimeLanePreferences;
 
@@ -33,6 +37,7 @@ pub struct PaddlesConfig {
     pub weights: f64,
     pub biases: f64,
     pub reality_mode: bool,
+    pub native_transports: NativeTransportConfigurations,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -40,6 +45,30 @@ pub struct PaddlesConfig {
 struct ModelLaneOverlay {
     provider: Option<String>,
     model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct NativeTransportAuthOverlay {
+    mode: Option<String>,
+    token_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct NativeTransportConfigurationOverlay {
+    enabled: Option<bool>,
+    bind_target: Option<String>,
+    auth: Option<NativeTransportAuthOverlay>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct NativeTransportConfigurationsOverlay {
+    http_request_response: Option<NativeTransportConfigurationOverlay>,
+    server_sent_events: Option<NativeTransportConfigurationOverlay>,
+    websocket: Option<NativeTransportConfigurationOverlay>,
+    transit: Option<NativeTransportConfigurationOverlay>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -63,6 +92,7 @@ struct PaddlesConfigOverlay {
     weights: Option<f64>,
     biases: Option<f64>,
     reality_mode: Option<bool>,
+    native_transports: Option<NativeTransportConfigurationsOverlay>,
 }
 
 impl Default for PaddlesConfig {
@@ -85,6 +115,7 @@ impl Default for PaddlesConfig {
             weights: 0.5,
             biases: 0.0,
             reality_mode: false,
+            native_transports: NativeTransportConfigurations::default(),
         }
     }
 }
@@ -226,6 +257,9 @@ impl PaddlesConfig {
         if let Some(reality_mode) = overlay.reality_mode {
             self.reality_mode = reality_mode;
         }
+        if let Some(native_transports) = overlay.native_transports {
+            apply_native_transport_configurations(&mut self.native_transports, native_transports);
+        }
     }
 
     fn apply_runtime_preferences(&mut self, preferences: &RuntimeLanePreferences) {
@@ -337,6 +371,70 @@ fn normalize_optional_string(value: String) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+fn apply_native_transport_configurations(
+    configurations: &mut NativeTransportConfigurations,
+    overlay: NativeTransportConfigurationsOverlay,
+) {
+    if let Some(http) = overlay.http_request_response {
+        apply_native_transport_configuration(
+            configurations.get_mut(NativeTransportKind::HttpRequestResponse),
+            http,
+        );
+    }
+    if let Some(sse) = overlay.server_sent_events {
+        apply_native_transport_configuration(
+            configurations.get_mut(NativeTransportKind::ServerSentEvents),
+            sse,
+        );
+    }
+    if let Some(websocket) = overlay.websocket {
+        apply_native_transport_configuration(
+            configurations.get_mut(NativeTransportKind::WebSocket),
+            websocket,
+        );
+    }
+    if let Some(transit) = overlay.transit {
+        apply_native_transport_configuration(
+            configurations.get_mut(NativeTransportKind::Transit),
+            transit,
+        );
+    }
+}
+
+fn apply_native_transport_configuration(
+    configuration: &mut NativeTransportConfiguration,
+    overlay: NativeTransportConfigurationOverlay,
+) {
+    if let Some(enabled) = overlay.enabled {
+        configuration.enabled = enabled;
+    }
+    if let Some(bind_target) = overlay.bind_target {
+        configuration.bind_target = normalize_optional_string(bind_target);
+    }
+    if let Some(auth) = overlay.auth {
+        apply_native_transport_auth(&mut configuration.auth, auth);
+    }
+}
+
+fn apply_native_transport_auth(
+    auth: &mut NativeTransportAuth,
+    overlay: NativeTransportAuthOverlay,
+) {
+    if let Some(mode) = overlay.mode {
+        auth.mode = parse_native_transport_auth_mode(mode);
+    }
+    if let Some(token_env) = overlay.token_env {
+        auth.token_env = normalize_optional_string(token_env);
+    }
+}
+
+fn parse_native_transport_auth_mode(value: String) -> NativeTransportAuthMode {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "bearer_token" => NativeTransportAuthMode::BearerToken,
+        _ => NativeTransportAuthMode::Open,
     }
 }
 
@@ -455,6 +553,48 @@ model = "claude-sonnet-4-20250514"
             config.planner_model.as_deref(),
             Some("claude-sonnet-4-20250514")
         );
+    }
+
+    #[test]
+    fn load_parses_native_transport_configuration_and_auth() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("paddles.toml"),
+            r#"
+[native_transports.http_request_response]
+enabled = true
+bind_target = "127.0.0.1:4100"
+
+[native_transports.http_request_response.auth]
+mode = "bearer_token"
+token_env = "PADDLES_HTTP_TOKEN"
+
+[native_transports.server_sent_events]
+enabled = true
+bind_target = "127.0.0.1:4100"
+"#,
+        )
+        .expect("write config");
+
+        let config = PaddlesConfig::load(dir.path());
+        let http = &config.native_transports.http_request_response;
+        assert!(http.enabled);
+        assert_eq!(http.bind_target.as_deref(), Some("127.0.0.1:4100"));
+        assert_eq!(
+            http.auth.mode,
+            crate::domain::model::NativeTransportAuthMode::BearerToken
+        );
+        assert_eq!(http.auth.token_env.as_deref(), Some("PADDLES_HTTP_TOKEN"));
+
+        let sse = &config.native_transports.server_sent_events;
+        assert!(sse.enabled);
+        assert_eq!(sse.bind_target.as_deref(), Some("127.0.0.1:4100"));
+        assert_eq!(
+            sse.auth.mode,
+            crate::domain::model::NativeTransportAuthMode::Open
+        );
+        assert!(!config.native_transports.websocket.enabled);
+        assert!(!config.native_transports.transit.enabled);
     }
 
     #[test]

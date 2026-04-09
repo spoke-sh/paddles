@@ -42,7 +42,9 @@ pub use manifold::{
     ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
 };
 pub use native_transport::{
-    NativeTransportCapability, NativeTransportChannel, NativeTransportKind, NativeTransportPhase,
+    NativeTransportAuth, NativeTransportAuthMode, NativeTransportCapability,
+    NativeTransportChannel, NativeTransportConfiguration, NativeTransportConfigurations,
+    NativeTransportDiagnostic, NativeTransportKind, NativeTransportPhase,
     NativeTransportSessionIdentity,
 };
 pub use paddles_conversation::{

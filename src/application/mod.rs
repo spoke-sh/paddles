@@ -3,6 +3,7 @@ use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
+use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::terminal::run_background_terminal_command;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
@@ -15,15 +16,15 @@ use crate::domain::model::{
     ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
     ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
-    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase,
-    StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
-    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
-    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
-    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    NativeTransportDiagnostic, PlanChecklistItem, PlanChecklistItemStatus, ResponseMode,
+    SteeringGateKind, SteeringGatePhase, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate,
+    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
+    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
+    TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -90,6 +91,7 @@ pub struct MechSuitService {
     sessions: Mutex<HashMap<String, ConversationSession>>,
     shared_session_id: Mutex<Option<String>>,
     conversation_history_store: Mutex<Option<Arc<ConversationHistoryStore>>>,
+    native_transport_registry: Mutex<Arc<NativeTransportRegistry>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1942,6 +1944,7 @@ impl MechSuitService {
             sessions: Mutex::new(HashMap::new()),
             shared_session_id: Mutex::new(None),
             conversation_history_store: Mutex::new(None),
+            native_transport_registry: Mutex::new(Arc::new(NativeTransportRegistry::default())),
         }
     }
 
@@ -1958,6 +1961,20 @@ impl MechSuitService {
             .conversation_history_store
             .lock()
             .expect("conversation history store lock") = Some(store);
+    }
+
+    pub fn set_native_transport_registry(&self, registry: Arc<NativeTransportRegistry>) {
+        *self
+            .native_transport_registry
+            .lock()
+            .expect("native transport registry lock") = registry;
+    }
+
+    pub fn native_transport_diagnostics(&self) -> Vec<NativeTransportDiagnostic> {
+        self.native_transport_registry
+            .lock()
+            .expect("native transport registry lock")
+            .diagnostics()
     }
 
     pub fn prompt_history(&self) -> Result<Vec<String>> {

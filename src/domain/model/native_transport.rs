@@ -1,7 +1,7 @@
 use crate::domain::model::TaskTraceId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeTransportKind {
     HttpRequestResponse,
@@ -11,6 +11,13 @@ pub enum NativeTransportKind {
 }
 
 impl NativeTransportKind {
+    pub const ALL: [Self; 4] = [
+        Self::HttpRequestResponse,
+        Self::ServerSentEvents,
+        Self::WebSocket,
+        Self::Transit,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::HttpRequestResponse => "http_request_response",
@@ -41,7 +48,7 @@ impl NativeTransportKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeTransportCapability {
     RequestResponse,
@@ -63,7 +70,7 @@ impl NativeTransportCapability {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeTransportPhase {
     Disabled,
@@ -91,7 +98,7 @@ impl NativeTransportPhase {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeTransportChannel {
     TurnRequestResponse,
@@ -108,6 +115,106 @@ impl NativeTransportChannel {
             Self::ConversationSession => "conversation_session",
             Self::TransitExchange => "transit_exchange",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeTransportAuthMode {
+    Open,
+    BearerToken,
+}
+
+impl NativeTransportAuthMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::BearerToken => "bearer_token",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeTransportAuth {
+    pub mode: NativeTransportAuthMode,
+    pub token_env: Option<String>,
+}
+
+impl Default for NativeTransportAuth {
+    fn default() -> Self {
+        Self {
+            mode: NativeTransportAuthMode::Open,
+            token_env: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeTransportConfiguration {
+    pub transport: NativeTransportKind,
+    pub enabled: bool,
+    pub bind_target: Option<String>,
+    pub auth: NativeTransportAuth,
+}
+
+impl NativeTransportConfiguration {
+    pub fn for_kind(transport: NativeTransportKind) -> Self {
+        Self {
+            transport,
+            enabled: false,
+            bind_target: None,
+            auth: NativeTransportAuth::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeTransportConfigurations {
+    pub http_request_response: NativeTransportConfiguration,
+    pub server_sent_events: NativeTransportConfiguration,
+    pub websocket: NativeTransportConfiguration,
+    pub transit: NativeTransportConfiguration,
+}
+
+impl Default for NativeTransportConfigurations {
+    fn default() -> Self {
+        Self {
+            http_request_response: NativeTransportConfiguration::for_kind(
+                NativeTransportKind::HttpRequestResponse,
+            ),
+            server_sent_events: NativeTransportConfiguration::for_kind(
+                NativeTransportKind::ServerSentEvents,
+            ),
+            websocket: NativeTransportConfiguration::for_kind(NativeTransportKind::WebSocket),
+            transit: NativeTransportConfiguration::for_kind(NativeTransportKind::Transit),
+        }
+    }
+}
+
+impl NativeTransportConfigurations {
+    pub fn get(&self, kind: NativeTransportKind) -> &NativeTransportConfiguration {
+        match kind {
+            NativeTransportKind::HttpRequestResponse => &self.http_request_response,
+            NativeTransportKind::ServerSentEvents => &self.server_sent_events,
+            NativeTransportKind::WebSocket => &self.websocket,
+            NativeTransportKind::Transit => &self.transit,
+        }
+    }
+
+    pub fn get_mut(&mut self, kind: NativeTransportKind) -> &mut NativeTransportConfiguration {
+        match kind {
+            NativeTransportKind::HttpRequestResponse => &mut self.http_request_response,
+            NativeTransportKind::ServerSentEvents => &mut self.server_sent_events,
+            NativeTransportKind::WebSocket => &mut self.websocket,
+            NativeTransportKind::Transit => &mut self.transit,
+        }
+    }
+
+    pub fn all(&self) -> Vec<&NativeTransportConfiguration> {
+        NativeTransportKind::ALL
+            .iter()
+            .map(|kind| self.get(*kind))
+            .collect()
     }
 }
 
@@ -135,6 +242,37 @@ impl NativeTransportSessionIdentity {
                 self.task_id.as_str(),
                 self.channel.label()
             ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NativeTransportDiagnostic {
+    pub transport: NativeTransportKind,
+    pub enabled: bool,
+    pub phase: NativeTransportPhase,
+    pub bind_target: Option<String>,
+    pub auth_mode: NativeTransportAuthMode,
+    pub capabilities: Vec<NativeTransportCapability>,
+    pub session: Option<NativeTransportSessionIdentity>,
+    pub last_error: Option<String>,
+}
+
+impl NativeTransportDiagnostic {
+    pub fn from_configuration(configuration: &NativeTransportConfiguration) -> Self {
+        Self {
+            transport: configuration.transport,
+            enabled: configuration.enabled,
+            phase: if configuration.enabled {
+                NativeTransportPhase::Configured
+            } else {
+                NativeTransportPhase::Disabled
+            },
+            bind_target: configuration.bind_target.clone(),
+            auth_mode: configuration.auth.mode,
+            capabilities: configuration.transport.default_capabilities(),
+            session: None,
+            last_error: None,
         }
     }
 }
@@ -206,5 +344,28 @@ mod tests {
             identity_without_connection.stable_key(),
             "server_sent_events:task-transport:turn_event_stream"
         );
+    }
+
+    #[test]
+    fn native_transport_diagnostics_reflect_configuration_and_auth_mode() {
+        let diagnostic =
+            NativeTransportDiagnostic::from_configuration(&NativeTransportConfiguration {
+                transport: NativeTransportKind::HttpRequestResponse,
+                enabled: true,
+                bind_target: Some("127.0.0.1:4100".to_string()),
+                auth: NativeTransportAuth {
+                    mode: NativeTransportAuthMode::BearerToken,
+                    token_env: Some("PADDLES_HTTP_TOKEN".to_string()),
+                },
+            });
+
+        assert_eq!(
+            diagnostic.transport,
+            NativeTransportKind::HttpRequestResponse
+        );
+        assert_eq!(diagnostic.phase, NativeTransportPhase::Configured);
+        assert_eq!(diagnostic.bind_target.as_deref(), Some("127.0.0.1:4100"));
+        assert_eq!(diagnostic.auth_mode, NativeTransportAuthMode::BearerToken);
+        assert!(diagnostic.last_error.is_none());
     }
 }
