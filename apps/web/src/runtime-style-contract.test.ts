@@ -43,4 +43,14 @@ describe('runtime stylesheet partition', () => {
     expect(manifoldCss).toContain('padding: 18px 18px 122px 18px;');
     expect(manifoldCss).not.toContain('.manifold-spacefield__axis--gate');
   });
+
+  it('renders manifold gate lane titles outside the lane background on the left', () => {
+    const manifoldCss = readRelative('./styles/manifold.css');
+
+    expect(manifoldCss).toContain('.manifold-gate-lane__label {\n  position: absolute;');
+    expect(manifoldCss).toContain('right: calc(100% + 14px);');
+    expect(manifoldCss).toContain('top: 50%;');
+    expect(manifoldCss).toContain('transform: translateY(-50%);');
+    expect(manifoldCss).toContain('text-align: right;');
+  });
 });
