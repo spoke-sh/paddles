@@ -2597,7 +2597,8 @@ impl MechSuitService {
             }
         };
 
-        let execution_checklist = build_execution_checklist(prompt, &recent_turns, &execution_plan);
+        let mut execution_checklist =
+            build_execution_checklist(prompt, &recent_turns, &execution_plan);
 
         trace.emit(TurnEvent::IntentClassified {
             intent: execution_plan.intent.clone(),
@@ -2605,7 +2606,7 @@ impl MechSuitService {
         trace.emit(TurnEvent::RouteSelected {
             summary: execution_plan.route_summary.clone(),
         });
-        if let Some(checklist) = execution_checklist.as_ref() {
+        if let Some(checklist) = execution_checklist.as_mut() {
             checklist.emit(trace.as_ref());
         }
 
@@ -3767,13 +3768,35 @@ impl ExecutionChecklistPressure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ExecutionChecklistState {
     items: Vec<PlanChecklistItem>,
+    last_emitted_items: Option<Vec<PlanChecklistItem>>,
 }
 
 impl ExecutionChecklistState {
-    fn emit(&self, trace: &StructuredTurnTrace) {
+    fn stream_items(&self) -> Vec<PlanChecklistItem> {
+        let visible = self
+            .items
+            .iter()
+            .filter(|item| item.id != "initial-action")
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if visible.is_empty() {
+            return self.items.clone();
+        }
+
+        visible
+    }
+
+    fn emit(&mut self, trace: &StructuredTurnTrace) {
+        let items = self.stream_items();
+        if self.last_emitted_items.as_ref() == Some(&items) {
+            return;
+        }
+
         trace.emit(TurnEvent::PlanUpdated {
-            items: self.items.clone(),
+            items: items.clone(),
         });
+        self.last_emitted_items = Some(items);
     }
 
     fn sync_loop_state_notes(&self, loop_state: &mut PlannerLoopState) {
@@ -3940,7 +3963,10 @@ fn build_execution_checklist(
         status: PlanChecklistItemStatus::Pending,
     });
 
-    Some(ExecutionChecklistState { items })
+    Some(ExecutionChecklistState {
+        items,
+        last_emitted_items: None,
+    })
 }
 
 fn planner_budget_stop_reason_label(stop_reason: &str) -> String {
@@ -8703,6 +8729,16 @@ mod tests {
             !plan_updates.is_empty(),
             "edit-oriented planned turns should emit at least one plan update"
         );
+        assert!(
+            plan_updates
+                .iter()
+                .all(|items| items.iter().all(|item| item.id != "initial-action")),
+            "stream-visible plan updates should show remaining work, not restate the current planner step"
+        );
+        assert!(
+            plan_updates.windows(2).all(|window| window[0] != window[1]),
+            "plan updates should not replay identical visible checklists after the first planner step"
+        );
         assert_eq!(
             plan_updates[0]
                 .iter()
@@ -8711,15 +8747,10 @@ mod tests {
             vec![
                 crate::domain::model::PlanChecklistItemStatus::Pending,
                 crate::domain::model::PlanChecklistItemStatus::Pending,
-                crate::domain::model::PlanChecklistItemStatus::Pending,
             ]
         );
         assert!(
-            plan_updates[0][0].label.contains("git status --short"),
-            "first checklist item should reflect the initial planner action"
-        );
-        assert!(
-            plan_updates[0][1]
+            plan_updates[0][0]
                 .label
                 .contains("Apply the requested repository change"),
             "edit turns should keep an explicit apply-change checklist item"
@@ -8732,7 +8763,6 @@ mod tests {
                 .map(|item| item.status)
                 .collect::<Vec<_>>(),
             vec![
-                crate::domain::model::PlanChecklistItemStatus::Completed,
                 crate::domain::model::PlanChecklistItemStatus::Completed,
                 crate::domain::model::PlanChecklistItemStatus::Completed,
             ]
