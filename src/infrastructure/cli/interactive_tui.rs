@@ -984,6 +984,23 @@ fn format_tooling_in_flight_row(detail: Option<&str>) -> TranscriptRow {
     )
 }
 
+fn planner_step_matches_tool_call(
+    planner_event: Option<&TurnEvent>,
+    tool_name: &str,
+    invocation: &str,
+) -> bool {
+    let Some(TurnEvent::PlannerStepProgress {
+        action,
+        query: Some(query),
+        ..
+    }) = planner_event
+    else {
+        return false;
+    };
+
+    query == invocation && (action == tool_name || action.starts_with(&format!("{tool_name} ")))
+}
+
 fn transcript_row_from_runtime_event(presentation: RuntimeEventPresentation) -> TranscriptRow {
     let content = if presentation.detail.is_empty() {
         String::new()
@@ -2317,11 +2334,22 @@ impl InteractiveApp {
                 let is_search_progress = event.is_search_progress();
                 let is_planner_progress = event.is_planner_progress();
                 let is_gathering_harness_progress = event.is_gathering_harness_progress();
+                let prior_event = self.last_event.as_ref().map(|(event, _)| event);
+                let suppress_matching_tool_call = matches!(
+                    &event,
+                    TurnEvent::ToolCalled {
+                        tool_name,
+                        invocation,
+                        ..
+                    } if planner_step_matches_tool_call(prior_event, tool_name, invocation)
+                );
 
                 self.last_event = Some((event.clone(), occurred_at));
                 self.emitted_in_flight = false;
 
-                if self.should_show_event(&event, pace, is_first_step) {
+                if !suppress_matching_tool_call
+                    && self.should_show_event(&event, pace, is_first_step)
+                {
                     let row = format_turn_event_row(event.clone(), self.verbose);
                     let row = if let Some(timing) = self.active_turn_timing.as_mut() {
                         row.timed(timing.mark_step(occurred_at, pace))
@@ -2535,6 +2563,10 @@ impl InteractiveApp {
             } => !self
                 .tool_output_rows
                 .contains_key(&(call_id.clone(), stream.clone())),
+            TurnEvent::ToolFinished { .. } => false,
+            TurnEvent::HarnessState { snapshot } => {
+                snapshot.chamber == crate::domain::model::HarnessChamber::Gathering
+            }
             _ => true,
         }
     }
@@ -4021,7 +4053,7 @@ mod tests {
 
         app.handle_message(hunt_event(75921, 38318, 332391, started));
         app.handle_message(governor_event(75921, 38318, 332391, started));
-        assert_eq!(app.rows.len(), rows_before + 2);
+        assert_eq!(app.rows.len(), rows_before + 1);
 
         app.handle_message(hunt_event(
             75922,
@@ -4036,7 +4068,7 @@ mod tests {
             started + Duration::from_millis(250),
         ));
 
-        assert_eq!(app.rows.len(), rows_before + 2);
+        assert_eq!(app.rows.len(), rows_before + 1);
 
         app.handle_message(hunt_event(
             75925,
@@ -4051,7 +4083,7 @@ mod tests {
             started + Duration::from_millis(1500),
         ));
 
-        assert_eq!(app.rows.len(), rows_before + 3);
+        assert_eq!(app.rows.len(), rows_before + 2);
         assert_eq!(app.rows[rows_before].header, "• Hunting sample (Indexing)");
         assert!(
             app.rows[rows_before]
@@ -4069,9 +4101,6 @@ mod tests {
             "• Hunting (Indexing) — 1m 50s (eta 0ms) strategy=bm25"
         );
         assert!(app.rows[rows_before + 1].content.contains("75925/75934"));
-        assert_eq!(app.rows[rows_before + 2].header, "• Governor: gathering");
-        assert!(app.rows[rows_before + 2].content.contains("75925/75934"));
-        assert!(app.rows[rows_before + 2].content.contains("watch=stalled"));
     }
 
     #[test]
@@ -5592,6 +5621,148 @@ mod tests {
                 .count(),
             0,
             "tool output should remain the only visible row for that stream"
+        );
+    }
+
+    #[test]
+    fn tooling_harness_rows_do_not_spawn_shadow_in_flight_rows_after_tool_completion() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::ToolFinished {
+                call_id: "tool-1".to_string(),
+                tool_name: "inspect".to_string(),
+                summary: "inspection completed".to_string(),
+            },
+            occurred_at: Instant::now() - Duration::from_secs(3),
+            work_id: None,
+        });
+        let rows_after_completion = app.rows.len();
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::HarnessState {
+                snapshot: crate::domain::model::HarnessSnapshot::active(
+                    crate::domain::model::HarnessChamber::Tooling,
+                )
+                .with_detail("inspect: inspection completed".to_string()),
+            },
+            occurred_at: Instant::now() - Duration::from_secs(3),
+            work_id: None,
+        });
+
+        app.tick();
+
+        assert_eq!(app.rows.len(), rows_after_completion);
+        assert_eq!(
+            app.rows
+                .iter()
+                .filter(|row| row.kind == TranscriptRowKind::InFlightEvent)
+                .count(),
+            0,
+            "tooling harness snapshots should not resurrect a duplicate inspect in-flight row"
+        );
+    }
+
+    #[test]
+    fn planner_owned_inspect_calls_do_not_repeat_matching_step_rows() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::PlannerStepProgress {
+                step_number: 1,
+                step_limit: 12,
+                action: "inspect `git status --short`".to_string(),
+                query: Some("git status --short".to_string()),
+                evidence_count: 0,
+            },
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+        let rows_after_step = app.rows.len();
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::ToolCalled {
+                call_id: "tool-1".to_string(),
+                tool_name: "inspect".to_string(),
+                invocation: "git status --short".to_string(),
+            },
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+
+        assert_eq!(app.rows.len(), rows_after_step);
+        assert_eq!(
+            app.rows.last().map(|row| row.header.as_str()),
+            Some("• Step 1/12: inspect `git status --short` — git status --short"),
+            "matching inspect tool calls should stay folded into the planner step row"
+        );
+    }
+
+    #[test]
+    fn governor_rows_do_not_pace_promote_into_default_streams() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            0,
+        );
+        app.busy = true;
+        app.busy_phase = BusyPhase::Thinking;
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::Fallback {
+                stage: "premise-challenge".to_string(),
+                reason: "Reviewed `inspect `git status --short`` and kept the same action."
+                    .to_string(),
+            },
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+        let rows_after_fallback = app.rows.len();
+
+        app.handle_message(UiMessage::TurnEvent {
+            event: TurnEvent::HarnessState {
+                snapshot: crate::domain::model::HarnessSnapshot::intervening(
+                    crate::domain::model::HarnessChamber::Governor,
+                    "premise-challenge: kept the same action",
+                ),
+            },
+            occurred_at: Instant::now() + Duration::from_secs(10),
+            work_id: None,
+        });
+
+        assert_eq!(app.rows.len(), rows_after_fallback);
+        assert!(
+            app.rows
+                .iter()
+                .all(|row| !row.header.starts_with("• Governor:")),
+            "governor state should not echo a visible fallback in the default stream"
         );
     }
 

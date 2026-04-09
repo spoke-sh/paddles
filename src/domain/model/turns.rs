@@ -285,6 +285,7 @@ impl TurnEvent {
             self,
             Self::IntentClassified { .. }
                 | Self::RouteSelected { .. }
+                | Self::HarnessState { .. }
                 | Self::SynthesisReady { .. }
         )
     }
@@ -511,5 +512,14 @@ mod tests {
         assert!(direct_answer.is_visible_at_verbosity(1));
         assert!(grounded_answer.is_visible_at_verbosity(0));
         assert!(!direct_answer.allows_pace_promotion());
+    }
+
+    #[test]
+    fn harness_state_does_not_allow_pace_promotion() {
+        let event = TurnEvent::HarnessState {
+            snapshot: HarnessSnapshot::intervening(HarnessChamber::Governor, "fallback"),
+        };
+
+        assert!(!event.allows_pace_promotion());
     }
 }

@@ -219,6 +219,9 @@ Lower-verbosity sessions intentionally keep direct-response bookkeeping terse.
 For casual turns, the first planner step remains visible, but route
 classification, route-selection bookkeeping, and "synthesized direct answer"
 status rows stay behind higher verbosity tiers.
+The default TUI stream also folds matching planner-owned `inspect` calls into
+their planner-step row and suppresses duplicate tooling/governor shadow rows
+when the underlying tool output or fallback is already visible.
 
 ### Verbosity Levels
 
