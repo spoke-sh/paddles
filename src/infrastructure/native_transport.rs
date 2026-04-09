@@ -126,6 +126,43 @@ pub fn resolve_bind_target(
     }
 }
 
+pub fn resolve_shared_web_bind_target(
+    http_request_response: &NativeTransportConfiguration,
+    server_sent_events: &NativeTransportConfiguration,
+    fallback_bind_target: &str,
+) -> Result<String, String> {
+    let http_target = http_request_response.bind_target.as_deref();
+    let sse_target = server_sent_events.bind_target.as_deref();
+
+    if http_request_response.enabled
+        && server_sent_events.enabled
+        && let (Some(http_target), Some(sse_target)) = (http_target, sse_target)
+        && http_target != sse_target
+    {
+        return Err(format!(
+            "{} and {} must share the same bind_target when both transports are enabled",
+            http_request_response.transport.label(),
+            server_sent_events.transport.label()
+        ));
+    }
+
+    if server_sent_events.enabled {
+        return Ok(resolve_bind_target(
+            server_sent_events,
+            &resolve_bind_target(http_request_response, fallback_bind_target),
+        ));
+    }
+
+    if http_request_response.enabled {
+        return Ok(resolve_bind_target(
+            http_request_response,
+            fallback_bind_target,
+        ));
+    }
+
+    Ok(fallback_bind_target.to_string())
+}
+
 pub fn record_binding_started(
     registry: &NativeTransportRegistry,
     configuration: &NativeTransportConfiguration,
@@ -251,5 +288,43 @@ mod tests {
             diagnostic.last_error.as_deref(),
             Some("address already in use")
         );
+    }
+
+    #[test]
+    fn resolve_shared_web_bind_target_uses_sse_target_when_http_is_disabled() {
+        let http = NativeTransportConfiguration::for_kind(NativeTransportKind::HttpRequestResponse);
+        let sse = NativeTransportConfiguration {
+            transport: NativeTransportKind::ServerSentEvents,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4200".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+
+        let bind_target =
+            resolve_shared_web_bind_target(&http, &sse, "0.0.0.0:3000").expect("bind target");
+
+        assert_eq!(bind_target, "127.0.0.1:4200");
+    }
+
+    #[test]
+    fn resolve_shared_web_bind_target_rejects_conflicting_http_and_sse_targets() {
+        let http = NativeTransportConfiguration {
+            transport: NativeTransportKind::HttpRequestResponse,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+        let sse = NativeTransportConfiguration {
+            transport: NativeTransportKind::ServerSentEvents,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4200".to_string()),
+            auth: NativeTransportAuth::default(),
+        };
+
+        let error = resolve_shared_web_bind_target(&http, &sse, "0.0.0.0:3000")
+            .expect_err("conflicting authored bind targets should fail closed");
+
+        assert!(error.contains("http_request_response"));
+        assert!(error.contains("server_sent_events"));
     }
 }
