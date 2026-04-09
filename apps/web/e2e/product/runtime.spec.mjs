@@ -46,6 +46,19 @@ test('externally injected turns flow live through chat, transit, manifold, and s
   await expect(page.getByText('Temporal gate field')).toBeVisible();
   await expect(page.getByText('Timeline')).toHaveCount(0);
   await expect(page.getByText('Gate Sources')).toHaveCount(0);
+  await expect(
+    page.getByRole('dialog', { name: 'Selected steering point details' })
+  ).toBeVisible();
+  await page.locator('[data-testid="manifold-spacefield-viewport"]').click({
+    position: { x: 80, y: 80 },
+  });
+  await expect(
+    page.getByRole('dialog', { name: 'Selected steering point details' })
+  ).toHaveCount(0);
+  await page.locator('.manifold-force-point').first().click();
+  await expect(
+    page.getByRole('dialog', { name: 'Selected steering point details' })
+  ).toBeVisible();
 
   await page.reload();
   await expect(page.locator('.manifold-force-point').first()).toBeVisible();

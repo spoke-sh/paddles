@@ -34,6 +34,7 @@ describe('ManifoldRoute', () => {
     expect(document.querySelector('.manifold-readout')).toBeNull();
     expect(screen.queryByText('Timeline')).not.toBeInTheDocument();
     expect(screen.queryByText('Gate Sources')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gate family')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Paddles Runtime')).not.toBeInTheDocument();
   });
 
@@ -44,6 +45,86 @@ describe('ManifoldRoute', () => {
     expect(document.querySelector('.manifold-playback-banner')).toBeNull();
     expect(document.querySelector('.manifold-empty-state')).toBeNull();
     expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
+    expect(document.querySelector('.manifold-stage-timeline')).toBeNull();
+    expect(document.querySelector('.manifold-spacefield__scrubber')).not.toBeNull();
+    expect(document.getElementById('manifold-time-scrubber')).not.toBeNull();
+    expect(document.querySelectorAll('.manifold-spacefield__scrubber-frame')).toHaveLength(1);
+  });
+
+  it('scrubs manifold frames from the bottom filmstrip slider', async () => {
+    const multiFrameProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      manifold: {
+        ...bootstrapProjection.manifold,
+        turns: [
+          {
+            ...bootstrapProjection.manifold.turns[0],
+            frames: [
+              ...bootstrapProjection.manifold.turns[0].frames,
+              {
+                ...bootstrapProjection.manifold.turns[0].frames[0],
+                record_id: 'record-3',
+                sequence: 3,
+                anchor: {
+                  id: 'planner-step:record-3',
+                  kind: 'planner_step',
+                  label: 'apply focused manifold edit',
+                },
+                active_signals: [
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].active_signals[0],
+                    snapshot_record_id: 'record-3',
+                    summary: 'Containment held the selected manifold target steady.',
+                    kind: 'containment_pressure',
+                    gate: 'containment',
+                    phase: 'holding',
+                    magnitude_percent: 74,
+                    level: 'high',
+                    anchor: {
+                      id: 'planner-step:record-3',
+                      kind: 'planner_step',
+                      label: 'apply focused manifold edit',
+                    },
+                  },
+                ],
+                gates: [
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].gates[0],
+                    gate: 'containment',
+                    label: 'containment gate',
+                    dominant_signal_kind: 'containment_pressure',
+                    signal_kinds: ['containment_pressure'],
+                    dominant_record_id: 'record-3',
+                    phase: 'holding',
+                    magnitude_percent: 74,
+                    level: 'high',
+                    anchor: {
+                      id: 'planner-step:record-3',
+                      kind: 'planner_step',
+                      label: 'apply focused manifold edit',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    stubRuntimeFetch({ projection: multiFrameProjection });
+    renderAtPath('/manifold');
+
+    expect(await screen.findByText('Temporal gate field')).toBeInTheDocument();
+    expect(document.querySelectorAll('.manifold-spacefield__scrubber-frame')).toHaveLength(2);
+
+    const secondFrame = await screen.findByRole('button', {
+      name: /Frame 2: apply focused manifold edit/i,
+    });
+    fireEvent.click(secondFrame);
+
+    expect(await screen.findByText('Containment held the selected manifold target steady.')).toBeInTheDocument();
+    expect(document.getElementById('manifold-frame-meta')).toHaveTextContent('Frame 2 / 2');
   });
 
   it('selects manifold turns from transcript messages instead of an in-stage dropdown', async () => {
@@ -182,7 +263,9 @@ describe('ManifoldRoute', () => {
     expect(
       await screen.findByText('Containment held the authored target steady.')
     ).toBeInTheDocument();
-    expect(document.querySelectorAll('.manifold-force-point')).toHaveLength(2);
+    await waitFor(() =>
+      expect(document.querySelectorAll('.manifold-force-point')).toHaveLength(2)
+    );
 
     const olderTurnMessage = screen.getByText('CI is failing. Can you debug it?').closest('.msg');
     expect(olderTurnMessage).not.toBeNull();
@@ -363,6 +446,20 @@ describe('ManifoldRoute', () => {
     expect(
       await screen.findByText('deterministic ranking selected a single authored target')
     ).toBeInTheDocument();
+
+    const viewport = await screen.findByTestId('manifold-spacefield-viewport');
+    fireEvent.mouseDown(viewport, { button: 0, clientX: 80, clientY: 80 });
+    fireEvent.mouseUp(viewport, { button: 0, clientX: 80, clientY: 80 });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Selected steering point details' })).toBeNull()
+    );
+    expect(screen.queryByText('Resolved target')).toBeNull();
+
+    const convergencePoint = await screen.findByRole('button', {
+      name: /Convergence gate, frame 1, 79%/i,
+    });
+    fireEvent.click(convergencePoint);
+    expect(await screen.findByText('Resolved target')).toBeInTheDocument();
   });
 
   it('groups same-frame steering points into a piano key slice', async () => {
@@ -436,6 +533,69 @@ describe('ManifoldRoute', () => {
     expect(
       await screen.findByText('Candidate file evidence accumulated around the authored target.')
     ).toBeInTheDocument();
+  });
+
+  it('selects steering points even when the gate does not expose a dominant record id', async () => {
+    const nullRecordProjection: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      manifold: {
+        ...bootstrapProjection.manifold,
+        turns: [
+          {
+            ...bootstrapProjection.manifold.turns[0],
+            frames: [
+              {
+                ...bootstrapProjection.manifold.turns[0].frames[0],
+                active_signals: [
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].active_signals[0],
+                    snapshot_record_id: 'record-2-convergence',
+                    summary: 'Action bias strengthened after local evidence.',
+                  },
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].active_signals[0],
+                    snapshot_record_id: 'record-2-evidence',
+                    kind: 'candidate_file_evidence',
+                    gate: 'evidence',
+                    summary: 'Candidate file evidence accumulated around the authored target.',
+                    magnitude_percent: 48,
+                  },
+                ],
+                gates: [
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].gates[0],
+                    dominant_record_id: 'record-2-convergence',
+                  },
+                  {
+                    ...bootstrapProjection.manifold.turns[0].frames[0].gates[0],
+                    gate: 'evidence',
+                    label: 'evidence gate',
+                    dominant_signal_kind: 'candidate_file_evidence',
+                    signal_kinds: ['candidate_file_evidence'],
+                    dominant_record_id: null,
+                    magnitude_percent: 48,
+                    level: 'medium',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    stubRuntimeFetch({ projection: nullRecordProjection });
+    renderAtPath('/manifold');
+
+    const evidencePoint = await screen.findByRole('button', {
+      name: /Evidence gate, frame 1, 48%/i,
+    });
+    fireEvent.click(evidencePoint);
+
+    expect(
+      await screen.findByText('Candidate file evidence accumulated around the authored target.')
+    ).toBeInTheDocument();
+    expect(await screen.findByText('Evidence gate')).toBeInTheDocument();
   });
 
   it('supports mouse pan tilt and zoom on the manifold camera', async () => {

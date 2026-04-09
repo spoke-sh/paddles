@@ -23,6 +23,7 @@ export function ManifoldRoute() {
           gateField={playback.gateField}
           playing={playback.playing}
           selectedGate={playback.selectedGate}
+          selectedPointKey={playback.selectedPointKey}
           selectedResolverOutcome={playback.selectedResolverOutcome}
           selectedSignal={playback.selectedSignal}
           selectedSourceRecordId={playback.selectedSourceRecordId}
@@ -30,6 +31,7 @@ export function ManifoldRoute() {
           totalFrames={playback.totalFrames}
           turnsCount={turns.length}
           onBeginCameraDrag={camera.beginCameraDrag}
+          onClearSelection={playback.clearSelection}
           onFrameChange={playback.selectFrame}
           onPointSelect={playback.selectPoint}
           onReplay={playback.replay}

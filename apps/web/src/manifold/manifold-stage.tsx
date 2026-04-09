@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+
 import {
   STEERING_GATE_COLORS,
   STEERING_GATE_ORDER,
@@ -25,6 +27,7 @@ interface ManifoldStageProps {
   gateField: { points: ManifoldForcePoint[]; links: ManifoldForceLink[]; slices: ManifoldForceSlice[] };
   playing: boolean;
   selectedGate: (ManifoldFrame['gates'][number]) | null;
+  selectedPointKey: string | null;
   selectedResolverOutcome: ReturnType<typeof resolverOutcomeTitle> extends string
     ? ReturnType<typeof import('../runtime-helpers').resolverSignalDetails>
     : never;
@@ -34,8 +37,9 @@ interface ManifoldStageProps {
   totalFrames: number;
   turnsCount: number;
   onBeginCameraDrag: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onClearSelection: () => void;
   onFrameChange: (frameIndex: number) => void;
-  onPointSelect: (frameIndex: number, recordId: string | null) => void;
+  onPointSelect: (point: ManifoldForcePoint) => void;
   onReplay: () => void;
   onResetView: () => void;
   onTogglePlay: () => void;
@@ -51,6 +55,7 @@ export function ManifoldStage({
   gateField,
   playing,
   selectedGate,
+  selectedPointKey,
   selectedResolverOutcome,
   selectedSignal,
   selectedSourceRecordId,
@@ -58,6 +63,7 @@ export function ManifoldStage({
   totalFrames,
   turnsCount,
   onBeginCameraDrag,
+  onClearSelection,
   onFrameChange,
   onPointSelect,
   onReplay,
@@ -65,6 +71,7 @@ export function ManifoldStage({
   onTogglePlay,
   onViewportWheel,
 }: ManifoldStageProps) {
+  const backgroundPressRef = useRef<{ x: number; y: number } | null>(null);
   const activeSourceRecordId = selectedSourceRecordId || selectedSignal?.snapshot_record_id || null;
   const selectedSlice =
     activeSourceRecordId == null
@@ -73,6 +80,31 @@ export function ManifoldStage({
           (slice) =>
             slice.turnId === currentTurn?.turn_id && slice.frameIndex === effectiveFrameIndex
         ) || null;
+
+  function handleViewportMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+    if (event.button === 0 && !event.altKey && !event.shiftKey) {
+      backgroundPressRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+      };
+    } else {
+      backgroundPressRef.current = null;
+    }
+    onBeginCameraDrag(event);
+  }
+
+  function handleViewportMouseUp(event: React.MouseEvent<HTMLDivElement>) {
+    const backgroundPress = backgroundPressRef.current;
+    backgroundPressRef.current = null;
+    if (!backgroundPress || event.button !== 0) {
+      return;
+    }
+    const dx = Math.abs(event.clientX - backgroundPress.x);
+    const dy = Math.abs(event.clientY - backgroundPress.y);
+    if (dx <= 4 && dy <= 4) {
+      onClearSelection();
+    }
+  }
 
   return (
     <section className="manifold-stage">
@@ -114,19 +146,6 @@ export function ManifoldStage({
           </button>
         </div>
       </div>
-      <div className="manifold-stage-timeline">
-        <input
-          id="manifold-time-scrubber"
-          max={Math.max(0, (currentTurn?.frames.length || 1) - 1)}
-          min="0"
-          onChange={(event) => onFrameChange(Number(event.target.value))}
-          type="range"
-          value={effectiveFrameIndex}
-        />
-        <div className="manifold-stage-frame-meta" id="manifold-frame-meta">
-          Frame {currentTurn ? effectiveFrameIndex + 1 : 0} / {currentTurn?.frames.length || 0}
-        </div>
-      </div>
       <div className="manifold-canvas" id="manifold-canvas">
         {!turnsCount ? (
           <div className="manifold-empty-state">
@@ -151,13 +170,11 @@ export function ManifoldStage({
                 }`}
                 data-testid="manifold-spacefield-viewport"
                 onDoubleClick={onResetView}
-                onMouseDown={onBeginCameraDrag}
+                onMouseDown={handleViewportMouseDown}
+                onMouseUp={handleViewportMouseUp}
                 onWheel={onViewportWheel}
               >
                 <div className="manifold-spacefield__axes">
-                  <div className="manifold-spacefield__axis manifold-spacefield__axis--gate">
-                    Gate family
-                  </div>
                   <div className="manifold-spacefield__axis manifold-spacefield__axis--time">
                     Time
                   </div>
@@ -251,7 +268,10 @@ export function ManifoldStage({
                   {gateField.points.map((point) => {
                     const isCurrent =
                       point.turnId === currentTurn?.turn_id && point.frameIndex === effectiveFrameIndex;
-                    const isSelected = point.dominantRecordId === activeSourceRecordId;
+                    const isSelected =
+                      selectedPointKey != null
+                        ? point.key === selectedPointKey
+                        : point.dominantRecordId === activeSourceRecordId;
                     const isInteractive = point.turnId === currentTurn?.turn_id;
                     return (
                       <button
@@ -263,9 +283,10 @@ export function ManifoldStage({
                         disabled={!isInteractive}
                         key={point.key}
                         onMouseDown={(event) => event.stopPropagation()}
-                        onClick={() => {
+                        onClick={(event) => {
+                          event.stopPropagation();
                           if (isInteractive) {
-                            onPointSelect(point.frameIndex, point.dominantRecordId);
+                            onPointSelect(point);
                           }
                         }}
                         style={{
@@ -293,7 +314,13 @@ export function ManifoldStage({
                   })}
                 </div>
                 {selectedSignal ? (
-                  <div className="manifold-force-popup" role="dialog" aria-label="Selected steering point details">
+                  <div
+                    className="manifold-force-popup"
+                    role="dialog"
+                    aria-label="Selected steering point details"
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                  >
                     <div className="manifold-force-popup__head">
                       <div>
                         <div className="manifold-force-popup__eyebrow">
@@ -350,6 +377,50 @@ export function ManifoldStage({
                     </div>
                   </div>
                 ) : null}
+                <div
+                  className="manifold-spacefield__scrubber"
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <div className="manifold-spacefield__scrubber-meta">
+                    <span>Temporal crop</span>
+                    <span id="manifold-frame-meta">
+                      Frame {currentTurn ? effectiveFrameIndex + 1 : 0} /{' '}
+                      {currentTurn?.frames.length || 0}
+                    </span>
+                  </div>
+                  <div className="manifold-spacefield__scrubber-filmstrip">
+                    {(currentTurn?.frames || []).map((frame, index) => {
+                      const isActive = index === effectiveFrameIndex;
+                      return (
+                        <button
+                          aria-label={`Frame ${index + 1}: ${manifoldAnchorLabel(frame.anchor)}`}
+                          className={`manifold-spacefield__scrubber-frame${
+                            isActive ? ' is-active' : ''
+                          }`}
+                          key={frame.record_id}
+                          onClick={() => onFrameChange(index)}
+                          type="button"
+                        >
+                          <span className="manifold-spacefield__scrubber-frame-index">
+                            {index + 1}
+                          </span>
+                          <span className="manifold-spacefield__scrubber-frame-label">
+                            {manifoldAnchorLabel(frame.anchor)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    id="manifold-time-scrubber"
+                    max={Math.max(0, (currentTurn?.frames.length || 1) - 1)}
+                    min="0"
+                    onChange={(event) => onFrameChange(Number(event.target.value))}
+                    type="range"
+                    value={effectiveFrameIndex}
+                  />
+                </div>
               </div>
             </div>
           </div>

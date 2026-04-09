@@ -40,5 +40,7 @@ describe('runtime stylesheet partition', () => {
     expect(manifoldCss).toContain('.manifold-stage {\n  flex: 1;');
     expect(manifoldCss).toContain('.manifold-canvas {\n  flex: 1;');
     expect(manifoldCss).toContain('.manifold-spacefield__viewport {\n  position: relative;\n  min-height: 0;\n  height: 100%;');
+    expect(manifoldCss).toContain('padding: 18px 18px 122px 18px;');
+    expect(manifoldCss).not.toContain('.manifold-spacefield__axis--gate');
   });
 });
