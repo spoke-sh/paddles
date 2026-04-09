@@ -1296,6 +1296,27 @@ fn fallback_signal_details(
         );
     }
 
+    if stage == "premise-challenge" {
+        return (
+            "medium",
+            56,
+            vec![
+                TraceSignalContribution {
+                    source: "premise_challenge".to_string(),
+                    share_percent: 60,
+                    rationale: reason.to_string(),
+                },
+                TraceSignalContribution {
+                    source: "controller_policy".to_string(),
+                    share_percent: 40,
+                    rationale:
+                        "The controller forced a premise review before allowing another evidence probe."
+                            .to_string(),
+                },
+            ],
+        );
+    }
+
     (
         "medium",
         56,
@@ -1313,6 +1334,23 @@ fn fallback_signal_details(
             },
         ],
     )
+}
+
+fn format_steering_review_fallback_reason(
+    decision: &RecursivePlannerDecision,
+    reviewed: &RecursivePlannerDecision,
+) -> String {
+    let original_summary = decision.action.summary();
+    let reviewed_summary = reviewed.action.summary();
+    if original_summary == reviewed_summary {
+        format!(
+            "Reviewed `{original_summary}` and kept the same action after judging the current sources."
+        )
+    } else {
+        format!(
+            "Replaced `{original_summary}` with `{reviewed_summary}` after judging the current sources."
+        )
+    }
 }
 
 fn entity_resolution_status_from_reason(reason: &str) -> &'static str {
@@ -5269,11 +5307,7 @@ async fn review_decision_under_signals(
         let stage = steering_review_stage(&steering_notes, &reviewed);
         trace.emit(TurnEvent::Fallback {
             stage: stage.to_string(),
-            reason: format!(
-                "{stage} replaced `{}` with `{}` after judging the current sources",
-                decision.action.summary(),
-                reviewed.action.summary()
-            ),
+            reason: format_steering_review_fallback_reason(&decision, &reviewed),
         });
     }
 
@@ -7955,6 +7989,12 @@ mod tests {
             reason: "planner response could not be parsed".to_string(),
         });
         trace.emit(TurnEvent::Fallback {
+            stage: "premise-challenge".to_string(),
+            reason:
+                "Reviewed `inspect `gh run list --limit 10`` and kept the same action after judging the current sources."
+                    .to_string(),
+        });
+        trace.emit(TurnEvent::Fallback {
             stage: "entity-resolution".to_string(),
             reason: "deterministic entity resolution remained ambiguous; safe workspace mutation is blocked until the target is narrowed. Candidates: src/application/mod.rs, src/domain/model/turns.rs. two authored files remained tied".to_string(),
         });
@@ -8024,6 +8064,30 @@ mod tests {
             matches!(
                 payload,
                 Some(serde_json::Value::Object(ref details))
+                    if details.get("stage").and_then(serde_json::Value::as_str)
+                        == Some("premise-challenge")
+                        && snapshot
+                            .contributions
+                            .iter()
+                            .any(|item| item.source == "premise_challenge")
+                        && snapshot
+                            .contributions
+                            .iter()
+                            .all(|item| item.source != "provider_or_parser")
+            )
+        }));
+        assert!(signal_snapshots.iter().any(|snapshot| {
+            if snapshot.kind != TraceSignalKind::Fallback {
+                return false;
+            }
+            let payload = snapshot
+                .artifact
+                .inline_content
+                .as_deref()
+                .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok());
+            matches!(
+                payload,
+                Some(serde_json::Value::Object(ref details))
                     if details.get("stage").and_then(serde_json::Value::as_str) == Some("entity-resolution")
                         && details.get("status").and_then(serde_json::Value::as_str) == Some("ambiguous")
             )
@@ -8054,10 +8118,34 @@ mod tests {
                 TraceSignalKind::ActionBias,
                 TraceSignalKind::Fallback,
                 TraceSignalKind::Fallback,
+                TraceSignalKind::Fallback,
                 TraceSignalKind::CompactionCue,
                 TraceSignalKind::BudgetBoundary,
             ]
         );
+    }
+
+    #[test]
+    fn premise_challenge_fallback_reason_keeps_noop_review_readable() {
+        let decision = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Inspect {
+                    command: "gh run list --limit 10".to_string(),
+                },
+            },
+            rationale: "inspect recent CI runs".to_string(),
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: None,
+        };
+
+        let reason = super::format_steering_review_fallback_reason(&decision, &decision);
+
+        assert_eq!(
+            reason,
+            "Reviewed `inspect `gh run list --limit 10`` and kept the same action after judging the current sources."
+        );
+        assert!(!reason.contains("replaced"));
     }
 
     #[test]
