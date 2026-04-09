@@ -24,6 +24,7 @@ export function useTraceBoard(graph: ConversationTraceGraph | null) {
   });
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [pathD, setPathD] = useState('');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const panRef = useRef<{
     dragging: boolean;
     startX: number;
@@ -76,6 +77,13 @@ export function useTraceBoard(graph: ConversationTraceGraph | null) {
   const branchLabels = Object.fromEntries(
     (graph?.branches || []).map((branch) => [branch.id, branch.label])
   );
+  const selectedNode = sortedNodes.find((node) => node.id === selectedNodeId) || null;
+
+  useEffect(() => {
+    if (selectedNodeId && !sortedNodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(null);
+    }
+  }, [selectedNodeId, sortedNodes]);
 
   useEffect(() => {
     const board = boardRef.current;
@@ -161,6 +169,14 @@ export function useTraceBoard(graph: ConversationTraceGraph | null) {
     }));
   }
 
+  function selectNode(nodeId: string) {
+    setSelectedNodeId(nodeId);
+  }
+
+  function clearSelectedNode() {
+    setSelectedNodeId(null);
+  }
+
   return {
     boardRef,
     branchLabels,
@@ -172,12 +188,15 @@ export function useTraceBoard(graph: ConversationTraceGraph | null) {
     pan,
     pathD,
     rows,
+    selectedNode,
     scope,
     sortedNodes,
     visibleNodes,
     zoom,
+    clearSelectedNode,
     onBoardMouseDown,
     onBoardWheel,
+    selectNode,
     setScope,
     toggleFamily,
   };

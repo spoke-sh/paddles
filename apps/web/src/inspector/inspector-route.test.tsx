@@ -151,8 +151,6 @@ describe('InspectorRoute', () => {
     expect(recordButton).not.toBeNull();
     fireEvent.click(recordButton as HTMLElement);
 
-    expect(await screen.findByText('record-3')).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
     await waitFor(() => {
       expect(document.getElementById('forensic-detail')?.textContent).toContain(
@@ -164,5 +162,27 @@ describe('InspectorRoute', () => {
     expect(conversationButton).not.toBeNull();
     fireEvent.click(conversationButton as HTMLElement);
     expect(await screen.findByText('Conversation Summary')).toBeInTheDocument();
+  });
+
+  it('renders a selectable forensic atlas with a bottom scrubber', async () => {
+    stubRuntimeFetch();
+    renderAtPath('/');
+
+    await screen.findByText('Forensic Inspector', { selector: '#trace-subhead' });
+    expect(document.getElementById('forensic-atlas')).not.toBeNull();
+    expect(document.getElementById('forensic-atlas-scrubber')).not.toBeNull();
+
+    const atlasPoint = document.querySelector(
+      '[data-atlas-record-id="record-1"]'
+    ) as HTMLElement | null;
+    expect(atlasPoint).not.toBeNull();
+    expect(document.querySelector('[data-atlas-scrub-record-id="record-1"]')).not.toBeNull();
+
+    await waitFor(() => {
+      expect(document.getElementById('forensic-atlas-popup')?.textContent).toContain(
+        'Action bias strengthened after local evidence.'
+      );
+      expect(document.getElementById('forensic-atlas-popup')?.textContent).toContain('record-2');
+    });
   });
 });

@@ -18,9 +18,15 @@
 }
 .forensic-overview {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.88fr);
   gap: 12px;
-  min-height: 146px;
+  min-height: 320px;
+}
+.forensic-overview-sidebar {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
 }
 .forensic-overview-card {
   position: relative;
@@ -37,6 +43,22 @@
     0 16px 28px rgba(103, 118, 132, 0.12);
   overflow: hidden;
 }
+.forensic-atlas-card {
+  position: relative;
+  min-height: 0;
+  padding: 14px 16px 16px;
+  border-radius: 24px;
+  border: 1px solid rgba(86, 104, 118, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(45, 144, 200, 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,0.84), rgba(241, 246, 249, 0.36)),
+    linear-gradient(155deg, rgba(227, 235, 240, 0.98), rgba(205, 216, 224, 0.94));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    inset -2px -2px 0 rgba(106, 123, 137, 0.08),
+    0 18px 30px rgba(103, 118, 132, 0.12);
+  overflow: hidden;
+}
 .forensic-card-title {
   font-size: 10px;
   font-weight: 700;
@@ -44,6 +66,201 @@
   text-transform: uppercase;
   color: #607180;
   margin-bottom: 12px;
+}
+.forensic-atlas-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+.forensic-atlas-subhead {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #5f717f;
+}
+.forensic-atlas-metrics {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: #576977;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.forensic-atlas-stage {
+  position: relative;
+  min-height: 0;
+  height: 258px;
+  margin-top: 14px;
+  border-radius: 22px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.02)),
+    linear-gradient(180deg, rgba(192, 203, 212, 0.94), rgba(171, 184, 194, 0.96));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.72),
+    inset -2px -2px 0 rgba(98, 117, 132, 0.08);
+}
+.forensic-atlas-lane {
+  position: absolute;
+  left: 10%;
+  right: 3.5%;
+  top: calc(10% + var(--atlas-lane-index) * 18%);
+  height: 12%;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--atlas-lane-color) 20%, rgba(255,255,255,0.42)), rgba(255,255,255,0.14)),
+    rgba(240, 245, 248, 0.24);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.62),
+    inset -1px -1px 0 rgba(96, 111, 124, 0.08);
+}
+.forensic-atlas-lane__label {
+  position: absolute;
+  right: calc(100% + 14px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #526473;
+  white-space: nowrap;
+}
+.forensic-atlas-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.forensic-atlas-overlay__glow {
+  fill: none;
+  stroke: rgba(45, 144, 200, 0.18);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.forensic-atlas-overlay__line {
+  fill: none;
+  stroke: rgba(27, 101, 148, 0.9);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 3 2;
+}
+.forensic-atlas-point {
+  position: absolute;
+  left: var(--atlas-point-x);
+  top: var(--atlas-point-y);
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.85), rgba(255,255,255,0) 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.36), rgba(255,255,255,0.04)),
+    var(--atlas-point-color, #2d90c8);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.88),
+    0 12px 20px rgba(43, 56, 68, 0.16);
+}
+.forensic-atlas-point::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: inherit;
+  border: 1px solid color-mix(in srgb, var(--atlas-point-color) 54%, rgba(255,255,255,0.62));
+  opacity: 0;
+  transform: scale(0.9);
+}
+.forensic-atlas-point:hover::after,
+.forensic-atlas-point.is-selected::after {
+  opacity: 1;
+  transform: scale(1);
+}
+.forensic-atlas-popup {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  width: min(280px, calc(100% - 32px));
+  padding: 14px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.88), rgba(242, 246, 248, 0.8)),
+    rgba(231, 238, 242, 0.94);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    inset -1px -1px 0 rgba(100, 117, 131, 0.08),
+    0 16px 24px rgba(92, 107, 120, 0.14);
+}
+.forensic-atlas-popup__title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #223441;
+}
+.forensic-atlas-popup__meta {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #5f717f;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.forensic-atlas-popup__record-id {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #4e6271;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.forensic-atlas-popup__body {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #31424f;
+}
+.forensic-atlas-scrubber {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-top: 12px;
+  padding-bottom: 2px;
+}
+.forensic-atlas-scrubber__chip {
+  border: 0;
+  min-width: 136px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  text-align: left;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(236, 242, 246, 0.56));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.8),
+    inset -1px -1px 0 rgba(109, 125, 139, 0.08);
+  color: #334652;
+}
+.forensic-atlas-scrubber__chip span {
+  display: block;
+  font-size: 10px;
+  color: #607180;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.forensic-atlas-scrubber__chip strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.forensic-atlas-scrubber__chip.is-active {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.86), rgba(225, 236, 243, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.86),
+    0 10px 18px rgba(92, 109, 123, 0.14);
 }
 .forensic-topology {
   width: 100%;
@@ -635,6 +852,9 @@
   .forensic-shell,
   .forensic-main {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .forensic-overview-sidebar {
+    grid-template-rows: repeat(2, minmax(0, auto));
   }
   .forensic-overview {
     min-height: 0;

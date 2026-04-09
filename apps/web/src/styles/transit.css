@@ -86,6 +86,118 @@
     inset -2px -2px 0 rgba(98, 117, 132, 0.08),
     inset 0 24px 38px rgba(255,255,255,0.06);
 }
+.trace-observatory {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.86), rgba(240, 245, 248, 0.72)),
+    rgba(224, 233, 238, 0.92);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    inset -1px -1px 0 rgba(100, 117, 131, 0.08),
+    0 14px 20px rgba(88, 104, 118, 0.12);
+  backdrop-filter: blur(12px);
+}
+.trace-observatory__eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #607180;
+}
+.trace-observatory__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1f3441;
+}
+.trace-observatory__meta {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #586b79;
+  font-family: var(--trace-mono-family);
+}
+.trace-observatory__popup {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(104, 120, 134, 0.12);
+}
+.trace-observatory__popup-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trace-observatory__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #41515f;
+  background: rgba(247, 250, 252, 0.84);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.74),
+    inset -1px -1px 0 rgba(112, 128, 141, 0.08);
+}
+.trace-observatory__popup-detail {
+  font-size: 12px;
+  line-height: 1.58;
+  color: #243744;
+}
+.trace-step-scrubber {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-top: 14px;
+  padding: 10px 2px 2px;
+}
+.trace-step-scrubber__chip {
+  border: 0;
+  min-width: 128px;
+  padding: 9px 11px 10px;
+  border-radius: 16px;
+  cursor: pointer;
+  text-align: left;
+  color: #2f4451;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(234, 240, 244, 0.64));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.84),
+    inset -1px -1px 0 rgba(108, 123, 136, 0.08);
+}
+.trace-step-scrubber__chip span {
+  display: block;
+  font-size: 10px;
+  color: #607180;
+  font-family: var(--trace-mono-family);
+}
+.trace-step-scrubber__chip strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.trace-step-scrubber__chip.is-active {
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.86),
+    0 12px 20px rgba(91, 107, 121, 0.14);
+  outline: 2px solid color-mix(in srgb, var(--trace-node-chip, #2d90c8) 42%, rgba(255,255,255,0.7));
+}
+.trace-step-scrubber__chip.is-muted {
+  opacity: 0.62;
+  filter: saturate(0.72);
+}
 .trace-board.is-panning {
   cursor: grabbing;
   user-select: none;
@@ -167,7 +279,8 @@
   --node-tilt-y: -3deg;
 }
 .trace-node:hover,
-.trace-node:focus-within {
+.trace-node:focus-within,
+.trace-node.is-selected {
   z-index: 30;
 }
 .trace-node::before {
@@ -249,6 +362,15 @@
     inset -3px -4px 12px rgba(152, 169, 184, 0.14),
     -10px -10px 20px rgba(255,255,255,0.78),
     calc(var(--node-shadow-x) + 4px) calc(var(--node-shadow-y) + 6px) calc(var(--node-shadow-blur) + 8px) rgba(var(--node-shadow-color), calc(var(--node-shadow-alpha) + 0.08));
+  border-color: var(--node-color);
+}
+.trace-node.is-selected .trace-node__hex {
+  transform: perspective(320px) rotateX(calc(var(--node-tilt-x) + 1deg)) rotateY(var(--node-tilt-y)) translateY(calc(var(--node-raise) - 8px)) scale(1.03);
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.92),
+    inset -3px -4px 12px rgba(152, 169, 184, 0.14),
+    -10px -10px 20px rgba(255,255,255,0.78),
+    calc(var(--node-shadow-x) + 4px) calc(var(--node-shadow-y) + 7px) calc(var(--node-shadow-blur) + 10px) rgba(var(--node-shadow-color), calc(var(--node-shadow-alpha) + 0.12));
   border-color: var(--node-color);
 }
 .trace-node:hover::after {
@@ -436,4 +558,3 @@
   font-family: var(--trace-mono-family);
 }
 .trace-empty { color: var(--muted); font-size: 12px; font-style: italic; }
-

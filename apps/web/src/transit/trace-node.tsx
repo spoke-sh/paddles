@@ -13,7 +13,9 @@ interface TraceNodeProps {
   rowIndex: number;
   rowLength: number;
   rowsLength: number;
+  selected: boolean;
   visibleNodeCount: number;
+  onSelectNode: (nodeId: string) => void;
 }
 
 export function TraceNode({
@@ -24,7 +26,9 @@ export function TraceNode({
   rowIndex,
   rowLength,
   rowsLength,
+  selected,
   visibleNodeCount,
+  onSelectNode,
 }: TraceNodeProps) {
   const recencyIndex = visibleNodeCount - (rowIndex * rowLength + nodeIndex) - 1;
   const recencyRatio =
@@ -37,8 +41,26 @@ export function TraceNode({
 
   return (
     <div
-      className={`trace-node${recencyIndex === 0 ? ' trace-node--latest' : ''} trace-node--${direction}`}
+      aria-label={`step ${node.sequence} ${node.label}`}
+      className={`trace-node${recencyIndex === 0 ? ' trace-node--latest' : ''}${
+        selected ? ' is-selected' : ''
+      } trace-node--${direction}`}
+      data-trace-node-id={node.id}
       key={node.id}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelectNode(node.id);
+      }}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelectNode(node.id);
+        }
+      }}
+      role="button"
       style={
         {
           ['--node-color' as string]: KIND_COLORS[node.kind] || '#8b949e',
@@ -56,6 +78,7 @@ export function TraceNode({
           ['--node-specular-alpha' as string]: `${(0.68 + depth * 0.2).toFixed(3)}`,
         } as React.CSSProperties
       }
+      tabIndex={0}
     >
       <div className="trace-node__hex">
         <div className="trace-node__sequence">step {node.sequence}</div>

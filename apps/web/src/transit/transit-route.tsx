@@ -29,9 +29,14 @@ export function TransitRoute() {
         pan={traceBoard.pan}
         pathD={traceBoard.pathD}
         rows={traceBoard.rows}
+        selectedNode={traceBoard.selectedNode}
+        sortedNodes={traceBoard.sortedNodes}
         visibleNodeCount={traceBoard.visibleNodes.length}
+        visibleNodes={traceBoard.visibleNodes}
         zoom={traceBoard.zoom}
+        onClearSelection={traceBoard.clearSelectedNode}
         onMouseDown={traceBoard.onBoardMouseDown}
+        onSelectNode={traceBoard.selectNode}
         onWheel={traceBoard.onBoardWheel}
       />
       <div

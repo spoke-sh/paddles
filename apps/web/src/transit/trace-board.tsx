@@ -1,4 +1,5 @@
 import type { ConversationTraceGraphNode } from '../runtime-types';
+import { TransitObservatory } from './transit-observatory';
 import { TraceNode } from './trace-node';
 
 interface TraceBoardProps {
@@ -10,9 +11,14 @@ interface TraceBoardProps {
   pan: { x: number; y: number };
   pathD: string;
   rows: ConversationTraceGraphNode[][];
+  selectedNode: ConversationTraceGraphNode | null;
+  sortedNodes: ConversationTraceGraphNode[];
   visibleNodeCount: number;
+  visibleNodes: ConversationTraceGraphNode[];
   zoom: number;
+  onClearSelection: () => void;
   onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onSelectNode: (nodeId: string) => void;
   onWheel: (event: React.WheelEvent<HTMLDivElement>) => void;
 }
 
@@ -25,9 +31,14 @@ export function TraceBoard({
   pan,
   pathD,
   rows,
+  selectedNode,
+  sortedNodes,
   visibleNodeCount,
+  visibleNodes,
   zoom,
+  onClearSelection,
   onMouseDown,
+  onSelectNode,
   onWheel,
 }: TraceBoardProps) {
   return (
@@ -35,7 +46,12 @@ export function TraceBoard({
       className="trace-board"
       data-detail-level={detailLevel}
       id="trace-board"
-      onMouseDown={onMouseDown}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClearSelection();
+        }
+        onMouseDown(event);
+      }}
       onWheel={onWheel}
       ref={boardRef}
       style={
@@ -50,6 +66,13 @@ export function TraceBoard({
     >
       {visibleNodeCount ? (
         <div className="trace-canvas" ref={canvasRef}>
+          <TransitObservatory
+            allNodes={sortedNodes}
+            branchLabels={branchLabels}
+            onSelectNode={onSelectNode}
+            selectedNode={selectedNode}
+            visibleNodes={visibleNodes}
+          />
           <svg aria-hidden="true" className="trace-overlay" id="trace-overlay">
             <path className="trace-overlay__glow" d={pathD} id="trace-overlay-glow" />
             <path className="trace-overlay__trench" d={pathD} id="trace-overlay-trench" />
@@ -67,7 +90,9 @@ export function TraceBoard({
                   rowIndex={rowIndex}
                   rowLength={row.length}
                   rowsLength={rows.length}
+                  selected={selectedNode?.id === node.id}
                   visibleNodeCount={visibleNodeCount}
+                  onSelectNode={onSelectNode}
                 />
               ))}
             </div>

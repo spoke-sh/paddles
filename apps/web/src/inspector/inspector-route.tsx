@@ -44,6 +44,7 @@ export function InspectorRoute() {
         signalRecords={signalRecords}
         strongestSignalValue={strongestSignalValue}
         turns={turns}
+        onSelectRecord={selectRecord}
       />
 
       <div className="forensic-shell">
