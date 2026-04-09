@@ -29,7 +29,10 @@ use paddles::infrastructure::config::{
 };
 use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
-use paddles::infrastructure::native_transport::NativeTransportRegistry;
+use paddles::infrastructure::native_transport::{
+    NativeTransportRegistry, record_binding_started, record_bound_transport,
+    record_transport_failure, resolve_bind_target,
+};
 use paddles::infrastructure::providers::ModelProvider;
 use paddles::infrastructure::rendering::RenderCapability;
 use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
@@ -475,9 +478,10 @@ async fn main() -> Result<()> {
         trace_recorder.clone(),
     ));
     service.set_conversation_history_store(conversation_history_store);
-    service.set_native_transport_registry(Arc::new(NativeTransportRegistry::new(
+    let native_transport_registry = Arc::new(NativeTransportRegistry::new(
         config.native_transports.clone(),
-    )));
+    ));
+    service.set_native_transport_registry(Arc::clone(&native_transport_registry));
     service.set_verbose(verbose);
 
     // Boot sequence
@@ -532,8 +536,27 @@ async fn main() -> Result<()> {
     let (web_router, web_observer) =
         paddles::infrastructure::web::router(Arc::clone(&service), trace_recorder);
     service.register_event_observer(web_observer);
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{requested_port}")).await?;
+    let http_transport = &config.native_transports.http_request_response;
+    let default_bind_target = format!("0.0.0.0:{requested_port}");
+    let resolved_bind_target = resolve_bind_target(http_transport, &default_bind_target);
+    record_binding_started(&native_transport_registry, http_transport);
+    let listener = match tokio::net::TcpListener::bind(&resolved_bind_target).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            record_transport_failure(
+                &native_transport_registry,
+                http_transport,
+                error.to_string(),
+            );
+            return Err(error.into());
+        }
+    };
     let web_server_addr = listener.local_addr()?;
+    record_bound_transport(
+        &native_transport_registry,
+        http_transport,
+        &web_server_addr.to_string(),
+    );
     if verbose >= 3 {
         println!(
             "[BOOT] HTTP API server listening on {}.",

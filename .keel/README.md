@@ -324,7 +324,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Define Shared Native Transport Model](epics/VGKnsYg1z/voyages/VGKoF0hsS/) | done |
-| [Deliver HTTP And SSE Transports](epics/VGKnsYg1z/voyages/VGKoF1Stc/) | planned |
+| [Deliver HTTP And SSE Transports](epics/VGKnsYg1z/voyages/VGKoF1Stc/) | in-progress |
 | [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)

@@ -1992,6 +1992,58 @@ mod tests {
         ));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn health_route_reports_ready_http_request_response_transport() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let http_transport = crate::domain::model::NativeTransportConfiguration {
+            transport: crate::domain::model::NativeTransportKind::HttpRequestResponse,
+            enabled: true,
+            bind_target: Some("127.0.0.1:4100".to_string()),
+            auth: crate::domain::model::NativeTransportAuth::default(),
+        };
+        let registry = Arc::new(
+            crate::infrastructure::native_transport::NativeTransportRegistry::new(
+                crate::domain::model::NativeTransportConfigurations {
+                    http_request_response: http_transport.clone(),
+                    ..crate::domain::model::NativeTransportConfigurations::default()
+                },
+            ),
+        );
+        crate::infrastructure::native_transport::record_binding_started(&registry, &http_transport);
+        crate::infrastructure::native_transport::record_bound_transport(
+            &registry,
+            &http_transport,
+            "127.0.0.1:4100",
+        );
+        service.set_native_transport_registry(registry);
+        let state = Arc::new(AppState {
+            service,
+            trace_recorder: recorder,
+            event_tx: broadcast::channel(8).0,
+            transcript_tx: broadcast::channel(8).0,
+            forensic_tx: broadcast::channel(8).0,
+            projection_tx: broadcast::channel(8).0,
+        });
+
+        let Json(response) = super::health(State(state)).await;
+
+        let http = response
+            .native_transports
+            .into_iter()
+            .find(|transport| {
+                transport.transport
+                    == crate::domain::model::NativeTransportKind::HttpRequestResponse
+            })
+            .expect("http transport");
+        assert_eq!(
+            http.phase,
+            crate::domain::model::NativeTransportPhase::Ready
+        );
+        assert_eq!(http.bind_target.as_deref(), Some("127.0.0.1:4100"));
+    }
+
     #[test]
     fn transit_trace_html_supports_wheel_zoom() {
         let html = include_str!("index.html");
