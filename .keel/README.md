@@ -317,7 +317,7 @@
 |--------|--------|
 | [Define Narrative Machine Model And Shared Projection](epics/VGGIor3dC/voyages/VGGIqsj2g/) | done |
 | [Build Turn Machine Stage For Transit](epics/VGGIor3dC/voyages/VGGIqtM2e/) | done |
-| [Simplify Forensic Inspector Around Machine Narrative](epics/VGGIor3dC/voyages/VGGIqts2y/) | planned |
+| [Simplify Forensic Inspector Around Machine Narrative](epics/VGGIor3dC/voyages/VGGIqts2y/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

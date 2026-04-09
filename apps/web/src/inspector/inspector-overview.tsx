@@ -5,52 +5,51 @@ import {
   signalKindLabel,
   sourceColor,
 } from '../runtime-helpers';
-import type { ForensicRecordProjection, ForensicTurnProjection } from '../runtime-types';
+import type { ForensicRecordProjection } from '../runtime-types';
+import type {
+  MachineMomentProjection,
+  MachineTurnProjection,
+} from '../trace-machine/machine-projection';
 import { InspectorAtlas } from './inspector-atlas';
 import { comparisonSnippet, comparisonTitle } from './forensic-selectors';
-import type { FocusState, InspectorDetailMode } from './use-inspector-selection';
 
 interface InspectorOverviewProps {
   baseline: ForensicRecordProjection | null;
   comparisonRecord: ForensicRecordProjection | null;
   contributions: Array<{ label: string; percent: number; rationale?: string }>;
-  currentTurn: ForensicTurnProjection | null;
-  detailMode: InspectorDetailMode;
-  focus: FocusState;
-  signalRecords: ForensicRecordProjection[];
+  currentMoment: MachineMomentProjection | null;
+  currentTurn: MachineTurnProjection | null;
   strongestSignalValue: Record<string, unknown> | null;
-  turns: ForensicTurnProjection[];
-  onSelectRecord: (recordId: string) => void;
+  turns: MachineTurnProjection[];
+  onSelectMoment: (momentId: string) => void;
 }
 
 export function InspectorOverview({
   baseline,
   comparisonRecord,
   contributions,
+  currentMoment,
   currentTurn,
-  detailMode,
-  focus,
-  signalRecords,
   strongestSignalValue,
   turns,
-  onSelectRecord,
+  onSelectMoment,
 }: InspectorOverviewProps) {
   return (
     <div className="forensic-overview" id="forensic-overview">
       <InspectorAtlas
-        comparisonRecord={comparisonRecord}
+        currentMoment={currentMoment}
         currentTurn={currentTurn}
         turns={turns}
-        onSelectRecord={onSelectRecord}
+        onSelectMoment={onSelectMoment}
       />
 
       <div className="forensic-overview-sidebar">
         <section className="forensic-overview-card" id="forensic-signal-overview">
-          {!signalRecords.length || !strongestSignalValue ? (
+          {!strongestSignalValue ? (
             <>
               <div className="forensic-card-title">Steering Signals</div>
               <div className="forensic-empty">
-                No steering signals were recorded for the current lineage selection.
+                No steering signals were recorded for the selected machine moment.
               </div>
             </>
           ) : (
@@ -81,11 +80,11 @@ export function InspectorOverview({
                 <div className="forensic-signal-summary">
                   <div className="forensic-signal-summary-row">
                     <strong>{signalKindLabel(String(strongestSignalValue.kind || 'signal'))}</strong>
-                    <span>{signalRecords.length} snapshots</span>
+                    <span>{currentMoment?.label || 'moment'}</span>
                   </div>
                   <div className="forensic-signal-summary-row">
-                    <strong>Scope</strong>
-                    <span>{focus.kind === 'all' ? 'all records' : focus.kind.replace('_', ' ')}</span>
+                    <strong>Moment</strong>
+                    <span>{currentMoment?.headline || 'Awaiting a selected machine part'}</span>
                   </div>
                   <div className="forensic-contribs forensic-contribs--stacked">
                     {contributions.slice(0, 5).map((contribution) => (
@@ -112,11 +111,12 @@ export function InspectorOverview({
           <div className="forensic-card-title">Shadow Baseline</div>
           {!comparisonRecord ? (
             <div className="forensic-empty">
-              Select a lineage artifact to compare it with the previous artifact in lineage.
+              Select a machine moment with linked forensic evidence to compare it with the prior
+              artifact in lineage.
             </div>
           ) : !baseline ? (
             <div className="forensic-empty">
-              No previous artifact in lineage was available for this selection yet.
+              No previous artifact in lineage was available for this moment yet.
             </div>
           ) : (
             <div className="forensic-shadow-compare">
@@ -127,7 +127,7 @@ export function InspectorOverview({
                 </div>
                 <div className="forensic-shadow-pane-meta">{recordMeta(comparisonRecord)}</div>
                 <div className="forensic-shadow-pane-snippet">
-                  {comparisonSnippet(comparisonRecord, detailMode)}
+                  {comparisonSnippet(comparisonRecord, 'rendered')}
                 </div>
               </div>
               <div className="forensic-shadow-pane is-baseline">
@@ -135,7 +135,7 @@ export function InspectorOverview({
                 <div className="forensic-shadow-pane-title">{comparisonTitle(baseline)}</div>
                 <div className="forensic-shadow-pane-meta">{recordMeta(baseline)}</div>
                 <div className="forensic-shadow-pane-snippet">
-                  {comparisonSnippet(baseline, detailMode)}
+                  {comparisonSnippet(baseline, 'rendered')}
                 </div>
               </div>
             </div>

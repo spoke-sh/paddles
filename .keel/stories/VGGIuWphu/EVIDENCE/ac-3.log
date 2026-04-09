@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-08T21:29:12.603543920-07:00
+mode: manual
+---
+Understanding a turn no longer requires conversation/turn/record mode switches; the default path stays on the machine atlas until internals are explicitly opened.

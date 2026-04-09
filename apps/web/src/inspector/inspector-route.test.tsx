@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ConversationProjectionSnapshot } from '../runtime-types';
@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('InspectorRoute', () => {
-  it('preserves inspector focus, record selection, and detail toggles', async () => {
+  it('collapses forensic selection to turns, moments, and an explicit internals path', async () => {
     const inspectorProjection: ConversationProjectionSnapshot = {
       ...bootstrapProjection,
       forensics: {
@@ -128,40 +128,34 @@ describe('InspectorRoute', () => {
     renderAtPath('/');
 
     await screen.findByText('Forensic Inspector', { selector: '#trace-subhead' });
-    const forensicNav = document.getElementById('forensic-nav');
-    expect(forensicNav).not.toBeNull();
+    expect(document.getElementById('forensic-nav')).toBeNull();
+    expect(document.getElementById('forensic-turn-scrubber')).not.toBeNull();
+    expect(document.getElementById('forensic-internals-toggle')).not.toBeNull();
+    expect(document.getElementById('forensic-machine-summary')).not.toBeNull();
+    expect(document.getElementById('forensic-internals-shell')).toBeNull();
+    expect(screen.queryByText('All records')).not.toBeInTheDocument();
+    expect(document.getElementById('forensic-conversation-button')).toBeNull();
 
-    fireEvent.click(
-      within(forensicNav as HTMLElement).getByRole('button', {
-        name: /read apps\/web\/src\/runtime-app\.tsx/i,
-      })
-    );
+    const momentScrubber = document.querySelector(
+      '[data-atlas-scrub-moment-id="task-123.turn-0001.moment-0004"]'
+    ) as HTMLButtonElement | null;
+    expect(momentScrubber).not.toBeNull();
+    fireEvent.click(momentScrubber as HTMLButtonElement);
 
-    expect(
-      await screen.findByText(/Current focus:\s*planner_step planner-step:record-2/i)
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      within(forensicNav as HTMLElement).getByRole('button', {
-        name: /All records/i,
-      })
-    );
-
-    const recordButton = document.querySelector('[data-record-id="record-3"]');
-    expect(recordButton).not.toBeNull();
-    fireEvent.click(recordButton as HTMLElement);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Raw' }));
     await waitFor(() => {
-      expect(document.getElementById('forensic-detail')?.textContent).toContain(
-        'inspect runtime route'
-      );
+      expect(document.getElementById('forensic-machine-summary')?.textContent).toContain('Force');
     });
+    expect(document.getElementById('forensic-machine-summary')?.textContent).toContain('record-4');
 
-    const conversationButton = document.getElementById('forensic-conversation-button');
-    expect(conversationButton).not.toBeNull();
-    fireEvent.click(conversationButton as HTMLElement);
-    expect(await screen.findByText('Conversation Summary')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /show internals/i,
+      })
+    );
+    await waitFor(() => {
+      expect(document.getElementById('forensic-internals-shell')).not.toBeNull();
+    });
+    expect(document.getElementById('forensic-detail')?.textContent).toContain('record-4');
   });
 
   it('renders a selectable forensic atlas with a bottom scrubber', async () => {
@@ -173,10 +167,12 @@ describe('InspectorRoute', () => {
     expect(document.getElementById('forensic-atlas-scrubber')).not.toBeNull();
 
     const atlasPoint = document.querySelector(
-      '[data-atlas-record-id="record-1"]'
+      '[data-atlas-moment-id="task-123.turn-0001.moment-0001"]'
     ) as HTMLElement | null;
     expect(atlasPoint).not.toBeNull();
-    expect(document.querySelector('[data-atlas-scrub-record-id="record-1"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-atlas-scrub-moment-id="task-123.turn-0001.moment-0001"]')
+    ).not.toBeNull();
 
     await waitFor(() => {
       expect(document.getElementById('forensic-atlas-popup')?.textContent).toContain(

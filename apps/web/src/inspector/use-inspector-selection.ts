@@ -1,15 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   aggregateSignalContributions,
   kindEntry,
-  latestRecordForTurn,
-  modelCallsForTurn,
-  plannerStepsForTurn,
-  recordsForTurn,
+  primaryArtifact,
+  rawRecordBody,
+  recordSummary,
+  renderedRecordBody,
   strongestSignalSnapshot,
 } from '../runtime-helpers';
-import type { ForensicRecordProjection, ForensicTurnProjection } from '../runtime-types';
+import type { ConversationProjectionSnapshot, ForensicRecordProjection } from '../runtime-types';
+import { DEFAULT_MACHINE_SELECTION } from '../trace-machine/machine-model';
+import {
+  projectConversationMachine,
+  type MachineMomentProjection,
+  type MachineTurnProjection,
+} from '../trace-machine/machine-projection';
+import { previousArtifactBaseline } from './forensic-selectors';
 
 export type FocusState = {
   kind: 'all' | 'model_call' | 'planner_step';
@@ -34,111 +41,135 @@ export interface InspectorModelCall {
   summary: string;
 }
 
-export function useInspectorSelection(turns: ForensicTurnProjection[]) {
-  const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
-  const [selectionMode, setSelectionMode] =
-    useState<InspectorSelectionMode>('record');
-  const [detailMode, setDetailMode] =
-    useState<InspectorDetailMode>('rendered');
-  const [focus, setFocus] = useState<FocusState>({ kind: 'all', id: null });
+function latestTurn<T extends { turnId: string }>(turns: T[]) {
+  return turns[turns.length - 1] || null;
+}
 
+function latestMoment(turn: MachineTurnProjection | null) {
+  return turn?.moments[turn.moments.length - 1] || null;
+}
+
+function primaryRecordForMoment(
+  records: ForensicRecordProjection[],
+  moment: MachineMomentProjection | null
+) {
+  if (!moment) {
+    return records[records.length - 1] || null;
+  }
+  const linkedRecordIds = new Set(moment.raw.forensicRecordIds);
+  return (
+    records.find((record) => record.record.record_id === moment.raw.primaryForensicRecordId) ||
+    records.find((record) => linkedRecordIds.has(record.record.record_id)) ||
+    null
+  );
+}
+
+export function useInspectorSelection(projection: ConversationProjectionSnapshot | null) {
+  const machine = useMemo(
+    () => (projection ? projectConversationMachine(projection) : null),
+    [projection]
+  );
+  const turns = projection?.forensics.turns || [];
+  const machineTurns = machine?.turns || [];
+  const [selection, setSelection] = useState(DEFAULT_MACHINE_SELECTION);
+
+  const currentMachineTurn =
+    machineTurns.find((turn) => turn.turnId === selection.selectedTurnId) || latestTurn(machineTurns);
   const currentTurn =
-    turns.find((turn) => turn.turn_id === selectedTurnId) ||
-    turns[turns.length - 1] ||
-    null;
-  const records = recordsForTurn(currentTurn, focus);
-  const currentRecord =
-    selectionMode === 'record'
-      ? records.find((record) => record.record.record_id === selectedRecordId) ||
-        records[records.length - 1] ||
-        null
-      : null;
-  const modelCalls = modelCallsForTurn(currentTurn);
-  const plannerSteps = plannerStepsForTurn(currentTurn);
-  const signalRecords = currentTurn
-    ? currentTurn.records.filter((record) => kindEntry(record).key === 'SignalSnapshot')
-    : [];
+    turns.find((turn) => turn.turn_id === currentMachineTurn?.turnId) || turns[turns.length - 1] || null;
+  const currentMoment =
+    currentMachineTurn?.moments.find((moment) => moment.momentId === selection.selectedMomentId) ||
+    latestMoment(currentMachineTurn);
+  const currentRecord = primaryRecordForMoment(currentTurn?.records || [], currentMoment);
+  const linkedRecordIds = new Set(currentMoment?.raw.forensicRecordIds || []);
+  const linkedRecords =
+    currentTurn?.records.filter((record) => linkedRecordIds.has(record.record.record_id)) || [];
+  const signalRecords = linkedRecords.filter((record) => kindEntry(record).key === 'SignalSnapshot');
   const strongestSignal = strongestSignalSnapshot(signalRecords);
   const strongestSignalValue = strongestSignal ? kindEntry(strongestSignal).value : null;
   const contributions = aggregateSignalContributions(signalRecords);
-  const comparisonRecord = currentRecord || latestRecordForTurn(currentTurn, focus);
-
-  useEffect(() => {
-    if (!turns.length) {
-      setSelectedTurnId(null);
-      setSelectedRecordId(null);
-      return;
-    }
-    if (!selectedTurnId || !turns.some((turn) => turn.turn_id === selectedTurnId)) {
-      const lastTurn = turns[turns.length - 1];
-      setSelectedTurnId(lastTurn.turn_id);
-      if (lastTurn.records.length) {
-        setSelectedRecordId(lastTurn.records[lastTurn.records.length - 1].record.record_id);
+  const baseline = previousArtifactBaseline(currentTurn, currentRecord);
+  const currentArtifact = currentRecord ? primaryArtifact(currentRecord) : null;
+  const currentPayload = currentRecord
+    ? {
+        raw: rawRecordBody(currentRecord),
+        rendered: renderedRecordBody(currentRecord),
       }
-    }
-  }, [selectedTurnId, turns]);
+    : null;
 
   useEffect(() => {
-    if (selectionMode !== 'record') {
+    if (!machineTurns.length) {
+      setSelection(DEFAULT_MACHINE_SELECTION);
       return;
     }
-    if (records.length && !records.some((record) => record.record.record_id === selectedRecordId)) {
-      setSelectedRecordId(records[records.length - 1].record.record_id);
-    }
-  }, [records, selectedRecordId, selectionMode]);
 
-  function selectConversation() {
-    setSelectionMode('conversation');
-  }
+    const nextTurn = currentMachineTurn || latestTurn(machineTurns);
+    const nextMoment = currentMoment || latestMoment(nextTurn);
+
+    if (
+      selection.selectedTurnId !== nextTurn?.turnId ||
+      selection.selectedMomentId !== nextMoment?.momentId
+    ) {
+      setSelection((previous) => ({
+        ...previous,
+        selectedTurnId: nextTurn?.turnId || null,
+        selectedMomentId: nextMoment?.momentId || null,
+      }));
+    }
+  }, [
+    currentMachineTurn,
+    currentMoment,
+    machineTurns,
+    selection.selectedMomentId,
+    selection.selectedTurnId,
+  ]);
 
   function selectTurn(turnId: string) {
-    const turn = turns.find((candidate) => candidate.turn_id === turnId);
-    setSelectedTurnId(turnId);
-    setSelectedRecordId(turn?.records[turn.records.length - 1]?.record.record_id || null);
-    setSelectionMode('turn');
-    setFocus({ kind: 'all', id: null });
+    const turn = machineTurns.find((candidate) => candidate.turnId === turnId) || null;
+    setSelection((previous) => ({
+      ...previous,
+      selectedTurnId: turn?.turnId || null,
+      selectedMomentId: latestMoment(turn)?.momentId || null,
+    }));
   }
 
-  function focusAllRecords() {
-    setFocus({ kind: 'all', id: null });
-    setSelectionMode('turn');
+  function selectMoment(momentId: string) {
+    setSelection((previous) => ({
+      ...previous,
+      selectedMomentId: momentId,
+    }));
   }
 
-  function focusModelCall(modelCallId: string) {
-    setFocus({ kind: 'model_call', id: modelCallId });
-    setSelectionMode('turn');
-  }
-
-  function focusPlannerStep(plannerStepId: string) {
-    setFocus({ kind: 'planner_step', id: plannerStepId });
-    setSelectionMode('turn');
-  }
-
-  function selectRecord(recordId: string) {
-    setSelectionMode('record');
-    setSelectedRecordId(recordId);
+  function toggleInternals() {
+    setSelection((previous) => ({
+      ...previous,
+      showInternals: !previous.showInternals,
+    }));
   }
 
   return {
-    comparisonRecord,
+    baseline,
     contributions,
+    currentArtifact,
+    currentMachineTurn,
+    currentMoment,
+    currentPayload,
     currentRecord,
     currentTurn,
-    detailMode,
-    focus,
-    modelCalls,
-    plannerSteps,
-    records,
-    selectionMode,
-    signalRecords,
+    linkedRecords,
+    machineTurns,
+    showInternals: selection.showInternals,
     strongestSignalValue,
-    setDetailMode,
-    focusAllRecords,
-    focusModelCall,
-    focusPlannerStep,
-    selectConversation,
-    selectRecord,
+    taskId: machine?.taskId || projection?.task_id || null,
+    toggleInternals,
+    turns,
+    selectMoment,
     selectTurn,
   };
+}
+
+export type InspectorSelectionState = ReturnType<typeof useInspectorSelection>;
+
+export function linkedRecordHeadline(record: ForensicRecordProjection | null) {
+  return record ? recordSummary(record) : 'Awaiting a linked forensic record';
 }

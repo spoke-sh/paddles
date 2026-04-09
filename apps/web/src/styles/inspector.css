@@ -519,6 +519,127 @@
 .forensic-shadow-delta.is-negative {
   color: #17956c;
 }
+.forensic-machine-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.forensic-turn-scrubber {
+  display: flex;
+  flex: 1;
+  min-width: min(100%, 320px);
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.forensic-turn-scrubber__chip,
+.forensic-internals-toggle {
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.8), rgba(237, 243, 247, 0.52));
+  color: #233543;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.78),
+    inset -1px -1px 0 rgba(112, 128, 141, 0.08),
+    0 8px 16px rgba(110, 124, 138, 0.1);
+}
+.forensic-turn-scrubber__chip {
+  min-width: 176px;
+  padding: 10px 12px;
+  text-align: left;
+}
+.forensic-turn-scrubber__chip span {
+  display: block;
+  font-size: 10px;
+  color: #607180;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+.forensic-turn-scrubber__chip strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.forensic-turn-scrubber__chip.is-active,
+.forensic-internals-toggle.is-active {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.82), rgba(232, 241, 247, 0.58)),
+    linear-gradient(135deg, rgba(45, 144, 200, 0.14), rgba(255,255,255,0.18));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    0 12px 22px rgba(77, 114, 147, 0.18);
+  outline: 2px solid rgba(45, 144, 200, 0.18);
+}
+.forensic-internals-toggle {
+  padding: 11px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.forensic-machine-summary,
+.forensic-internals-shell {
+  min-height: 0;
+  border-radius: 22px;
+  border: 1px solid rgba(90, 108, 121, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.76), rgba(241, 246, 249, 0.28)),
+    linear-gradient(160deg, rgba(229, 237, 242, 0.96), rgba(209, 219, 227, 0.92));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.82),
+    inset -2px -2px 0 rgba(104, 121, 135, 0.08),
+    0 18px 28px rgba(102, 118, 132, 0.12);
+}
+.forensic-machine-summary {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+}
+.forensic-detail-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.forensic-machine-summary__title {
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 800;
+  color: #223441;
+}
+.forensic-machine-summary__body {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #31424f;
+}
+.forensic-machine-summary__note {
+  font-size: 11px;
+  line-height: 1.55;
+  color: #526473;
+  font-family: ui-monospace, "SFMono-Regular", "SF Mono", "IBM Plex Mono", monospace;
+}
+.forensic-internals-shell {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.forensic-internals-shell__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.forensic-internals-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+  gap: 14px;
+  min-height: 0;
+}
 .forensic-shell {
   flex: 1;
   min-height: 0;
@@ -850,7 +971,8 @@
 @media (max-width: 960px) {
   .forensic-overview,
   .forensic-shell,
-  .forensic-main {
+  .forensic-main,
+  .forensic-internals-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .forensic-overview-sidebar {
