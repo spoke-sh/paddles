@@ -10,6 +10,7 @@ use crate::domain::model::{
     TurnTraceId, project_runtime_event,
 };
 use crate::domain::ports::TraceRecorder;
+use crate::infrastructure::transport_mediator::TransportToolMediator;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{
@@ -39,6 +40,7 @@ struct AppState {
     service: Arc<MechSuitService>,
     trace_recorder: Arc<dyn TraceRecorder>,
     native_transport_configurations: NativeTransportConfigurations,
+    transport_mediator: Arc<TransportToolMediator>,
     websocket_connection_counter: AtomicU64,
     event_tx: broadcast::Sender<(String, TurnEvent)>,
     transcript_tx: broadcast::Sender<ConversationTranscriptUpdate>,
@@ -221,6 +223,7 @@ pub fn router(
     service: Arc<MechSuitService>,
     trace_recorder: Arc<dyn TraceRecorder>,
     native_transport_configurations: NativeTransportConfigurations,
+    transport_mediator: Arc<TransportToolMediator>,
 ) -> (Router, Arc<dyn TurnEventSink>) {
     let (event_tx, _) = broadcast::channel::<(String, TurnEvent)>(256);
     let (transcript_tx, _) = broadcast::channel::<ConversationTranscriptUpdate>(256);
@@ -254,6 +257,7 @@ pub fn router(
         service,
         trace_recorder,
         native_transport_configurations,
+        transport_mediator,
         websocket_connection_counter: AtomicU64::new(1),
         event_tx,
         transcript_tx,
@@ -537,7 +541,10 @@ fn authorize_native_transport(
                     .record_failure(transport, error);
                 return Err(StatusCode::INTERNAL_SERVER_ERROR);
             };
-            let Ok(expected_token) = std::env::var(token_env) else {
+            let Ok(expected_token) = state
+                .transport_mediator
+                .resolve_transport_bearer_token(transport, token_env)
+            else {
                 let error = format!(
                     "{transport_label} transport bearer token env `{token_env}` is not set"
                 );
@@ -1181,6 +1188,7 @@ mod tests {
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
     use crate::infrastructure::providers::{ApiFormat, ModelProvider};
     use crate::infrastructure::rendering::RenderCapability;
+    use crate::infrastructure::transport_mediator::TransportToolMediator;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use axum::Json;
@@ -1239,11 +1247,17 @@ mod tests {
         let (event_tx, _) = broadcast::channel(8);
         let (transcript_tx, _) = broadcast::channel(8);
         let (forensic_tx, _) = broadcast::channel(8);
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(crate::infrastructure::credentials::CredentialStore::new()),
+            service.execution_hand_registry(),
+            &crate::domain::model::NativeTransportConfigurations::default(),
+        ));
         Arc::new(AppState {
             service,
             trace_recorder,
             native_transport_configurations:
                 crate::domain::model::NativeTransportConfigurations::default(),
+            transport_mediator,
             websocket_connection_counter: AtomicU64::new(1),
             event_tx,
             transcript_tx,
@@ -1352,7 +1366,17 @@ mod tests {
             ),
         );
         service.set_native_transport_registry(Arc::clone(&registry));
-        let (app, _observer) = super::router(service, recorder, configurations.clone());
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(crate::infrastructure::credentials::CredentialStore::new()),
+            service.execution_hand_registry(),
+            &configurations,
+        ));
+        let (app, _observer) = super::router(
+            service,
+            recorder,
+            configurations.clone(),
+            transport_mediator,
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind runtime server");
@@ -1420,7 +1444,17 @@ mod tests {
             ),
         );
         service.set_native_transport_registry(Arc::clone(&registry));
-        let (app, _observer) = super::router(service, recorder, configurations.clone());
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(crate::infrastructure::credentials::CredentialStore::new()),
+            service.execution_hand_registry(),
+            &configurations,
+        ));
+        let (app, _observer) = super::router(
+            service,
+            recorder,
+            configurations.clone(),
+            transport_mediator,
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind runtime server");
@@ -2182,10 +2216,18 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let transport_configurations =
+            crate::domain::model::NativeTransportConfigurations::default();
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(crate::infrastructure::credentials::CredentialStore::new()),
+            service.execution_hand_registry(),
+            &transport_configurations,
+        ));
         let (app, _observer) = super::router(
             service,
             recorder,
-            crate::domain::model::NativeTransportConfigurations::default(),
+            transport_configurations,
+            transport_mediator,
         );
 
         for route in ["/", "/manifold", "/transit"] {
@@ -2208,10 +2250,18 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let transport_configurations =
+            crate::domain::model::NativeTransportConfigurations::default();
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(crate::infrastructure::credentials::CredentialStore::new()),
+            service.execution_hand_registry(),
+            &transport_configurations,
+        ));
         let (app, _observer) = super::router(
             service,
             recorder,
-            crate::domain::model::NativeTransportConfigurations::default(),
+            transport_configurations,
+            transport_mediator,
         );
         let expected_shell = super::load_primary_shell_html();
 
@@ -2247,10 +2297,18 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let transport_configurations =
+            crate::domain::model::NativeTransportConfigurations::default();
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(crate::infrastructure::credentials::CredentialStore::new()),
+            service.execution_hand_registry(),
+            &transport_configurations,
+        ));
         let (app, _observer) = super::router(
             service,
             recorder,
-            crate::domain::model::NativeTransportConfigurations::default(),
+            transport_configurations,
+            transport_mediator,
         );
 
         for route in [
@@ -3163,6 +3221,60 @@ mod tests {
                 "transit transport rejected unauthorized session"
             );
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn missing_bearer_token_env_marks_transport_mediator_failed_in_runtime_diagnostics() {
+        unsafe {
+            std::env::remove_var("PADDLES_TEST_MISSING_TRANSPORT_TOKEN");
+        }
+        let handle = start_runtime_server_with_transports(
+            crate::domain::model::NativeTransportConfigurations {
+                transit: crate::domain::model::NativeTransportConfiguration {
+                    transport: crate::domain::model::NativeTransportKind::Transit,
+                    enabled: true,
+                    bind_target: None,
+                    auth: crate::domain::model::NativeTransportAuth {
+                        mode: crate::domain::model::NativeTransportAuthMode::BearerToken,
+                        token_env: Some("PADDLES_TEST_MISSING_TRANSPORT_TOKEN".to_string()),
+                    },
+                },
+                ..crate::domain::model::NativeTransportConfigurations::default()
+            },
+        )
+        .await;
+
+        let transit_response = reqwest::Client::new()
+            .post(handle.transit_url.clone())
+            .header("content-type", "application/transit+json")
+            .json(&json!({
+                "type": "turn_request",
+                "channel": "transit_exchange",
+                "prompt": "Hello from transit",
+            }))
+            .send()
+            .await
+            .expect("transit response");
+        assert_eq!(transit_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let health: serde_json::Value = reqwest::get(format!("{}/health", handle.base_url))
+            .await
+            .expect("health response")
+            .json()
+            .await
+            .expect("health json");
+
+        let transport_mediator = health["execution_hands"]
+            .as_array()
+            .expect("execution hands")
+            .iter()
+            .find(|diagnostic| diagnostic["hand"] == "transport_mediator")
+            .expect("transport mediator diagnostic");
+        assert_eq!(transport_mediator["phase"], "failed");
+        assert_eq!(
+            transport_mediator["last_error"],
+            "transit transport bearer token env `PADDLES_TEST_MISSING_TRANSPORT_TOKEN` is not set"
+        );
     }
 
     #[test]

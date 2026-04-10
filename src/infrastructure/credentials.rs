@@ -23,6 +23,7 @@ struct CredentialsManifest {
 
 /// Stores API keys in individual files under `~/.config/paddles/keys/`,
 /// indexed by `~/.config/paddles/credentials.toml`.
+#[derive(Debug)]
 pub struct CredentialStore {
     base_dir: PathBuf,
 }

@@ -310,6 +310,12 @@ known model catalog; providers with resolved credentials are marked enabled and
 providers without credentials are marked disabled. The local `sift` provider
 does not use API-key login.
 
+At runtime, those provider credentials and any native-transport bearer tokens
+are resolved through the shared `transport_mediator` hand instead of being read
+ad hoc from generated shell/tool execution paths. The mediator also strips
+known credential env vars from local terminal and workspace child processes
+before they spawn.
+
 Successful `/model` changes are written to the machine-managed runtime lane
 state file at `~/.local/state/paddles/runtime-lanes.toml`. That file preserves
 the last selected shared runtime model across restarts without mutating
@@ -463,6 +469,11 @@ surface rather than minting new state names for the same lifecycle transitions.
 `execution_hands` array beside `native_transports`, so operators can inspect
 the current workspace editor, terminal runner, and transport mediator posture
 from the same shared runtime surface they already use for transport readiness.
+
+When native transport auth cannot resolve its configured `token_env`, or when a
+required remote provider credential is missing, the `transport_mediator` hand
+records that failure directly in `execution_hands` while the matching transport
+or lane surfaces keep their own protocol-specific error detail.
 
 ### Experimental Context-1 Boundary
 

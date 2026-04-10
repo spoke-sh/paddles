@@ -22,7 +22,8 @@ use crate::infrastructure::rendering::{
     ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
 };
-use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
+use crate::infrastructure::terminal::run_background_terminal_command_with_runtime_mediator;
+use crate::infrastructure::transport_mediator::TransportToolMediator;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -84,6 +85,7 @@ async fn send_with_retry(
 pub struct HttpProviderAdapter {
     workspace_root: PathBuf,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
+    transport_mediator: Arc<TransportToolMediator>,
     client: reqwest::Client,
     provider_name: String,
     api_key: String,
@@ -150,6 +152,34 @@ impl HttpProviderAdapter {
         format: ApiFormat,
         render_capability: RenderCapability,
     ) -> Self {
+        let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
+            Arc::clone(&execution_hand_registry),
+        ));
+        Self::new_with_runtime_mediator(
+            workspace_root,
+            execution_hand_registry,
+            transport_mediator,
+            provider_name,
+            model_id,
+            api_key,
+            base_url,
+            format,
+            render_capability,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_runtime_mediator(
+        workspace_root: impl Into<PathBuf>,
+        execution_hand_registry: Arc<ExecutionHandRegistry>,
+        transport_mediator: Arc<TransportToolMediator>,
+        provider_name: impl Into<String>,
+        model_id: impl Into<String>,
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+        format: ApiFormat,
+        render_capability: RenderCapability,
+    ) -> Self {
         let provider_name = provider_name.into();
         let model_id = model_id.into();
         let capabilities =
@@ -157,6 +187,7 @@ impl HttpProviderAdapter {
         Self {
             workspace_root: workspace_root.into(),
             execution_hand_registry,
+            transport_mediator,
             client: reqwest::Client::new(),
             provider_name,
             api_key: api_key.into(),
@@ -1078,9 +1109,10 @@ Rules:
     }
 
     fn execute_local_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
-        let workspace_editor = LocalWorkspaceEditor::with_execution_hand_registry(
+        let workspace_editor = LocalWorkspaceEditor::with_runtime_mediator(
             self.workspace_root.clone(),
             Arc::clone(&self.execution_hand_registry),
+            Arc::clone(&self.transport_mediator),
         );
         match action {
             WorkspaceAction::Read { path } => {
@@ -1095,11 +1127,15 @@ Rules:
             }
             WorkspaceAction::ListFiles { pattern } => {
                 let pat = pattern.as_deref().unwrap_or("*");
-                let output = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(format!("find . -name '{pat}' -type f | head -100"))
-                    .current_dir(&self.workspace_root)
-                    .output()?;
+                let output = run_background_terminal_command_with_runtime_mediator(
+                    &self.workspace_root,
+                    &format!("find . -name '{pat}' -type f | head -100"),
+                    "list_files",
+                    "http-provider-list-files",
+                    &NullTurnEventSink,
+                    Arc::clone(&self.execution_hand_registry),
+                    Arc::clone(&self.transport_mediator),
+                )?;
                 Ok(WorkspaceActionResult {
                     name: "list_files".to_string(),
                     summary: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -1112,13 +1148,14 @@ Rules:
                 } else {
                     "shell"
                 };
-                let output = run_background_terminal_command_with_execution_hand_registry(
+                let output = run_background_terminal_command_with_runtime_mediator(
                     &self.workspace_root,
                     command,
                     tool_name,
                     "http-provider-workspace-action",
                     &NullTurnEventSink,
                     Arc::clone(&self.execution_hand_registry),
+                    Arc::clone(&self.transport_mediator),
                 )?;
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);

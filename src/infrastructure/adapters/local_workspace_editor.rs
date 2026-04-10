@@ -4,6 +4,7 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{ExecutionHand, WorkspaceActionResult, WorkspaceEditor};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+use crate::infrastructure::transport_mediator::TransportToolMediator;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
 use std::fs;
@@ -19,6 +20,7 @@ const MAX_EDITOR_OUTPUT_CHARS: usize = 12_000;
 pub struct LocalWorkspaceEditor {
     workspace_root: PathBuf,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
+    transport_mediator: Arc<TransportToolMediator>,
 }
 
 impl LocalWorkspaceEditor {
@@ -34,9 +36,21 @@ impl LocalWorkspaceEditor {
         workspace_root: impl Into<PathBuf>,
         execution_hand_registry: Arc<ExecutionHandRegistry>,
     ) -> Self {
+        let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
+            Arc::clone(&execution_hand_registry),
+        ));
+        Self::with_runtime_mediator(workspace_root, execution_hand_registry, transport_mediator)
+    }
+
+    pub fn with_runtime_mediator(
+        workspace_root: impl Into<PathBuf>,
+        execution_hand_registry: Arc<ExecutionHandRegistry>,
+        transport_mediator: Arc<TransportToolMediator>,
+    ) -> Self {
         Self {
             workspace_root: workspace_root.into(),
             execution_hand_registry,
+            transport_mediator,
         }
     }
 
@@ -74,6 +88,11 @@ impl LocalWorkspaceEditor {
             last_error,
         );
     }
+
+    fn protect_command_env(&self, command: &mut Command, purpose: &str) {
+        self.transport_mediator
+            .protect_command_env(command, purpose);
+    }
 }
 
 impl ExecutionHand for LocalWorkspaceEditor {
@@ -98,6 +117,7 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 .arg("diff")
                 .arg("--no-ext-diff")
                 .current_dir(&self.workspace_root);
+            self.protect_command_env(&mut command, "workspace diff command");
             if let Some(path) = path.filter(|path| !path.trim().is_empty()) {
                 let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
                 command
@@ -167,7 +187,8 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             fs::write(&resolved, content)
                 .with_context(|| format!("failed to write {}", resolved.display()))?;
             let rel = relative_path(&self.workspace_root, &resolved);
-            let applied_edit = build_applied_edit(&rel, &before, content)?;
+            let applied_edit =
+                build_applied_edit(&rel, &before, content, &self.transport_mediator)?;
             Ok(WorkspaceActionResult {
                 name: "write_file".to_string(),
                 summary: summarize_applied_edit("write_file", &applied_edit),
@@ -214,7 +235,8 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             fs::write(&resolved, &updated)
                 .with_context(|| format!("failed to write {}", resolved.display()))?;
             let rel = relative_path(&self.workspace_root, &resolved);
-            let applied_edit = build_applied_edit(&rel, &original, &updated)?;
+            let applied_edit =
+                build_applied_edit(&rel, &original, &updated, &self.transport_mediator)?;
             Ok(WorkspaceActionResult {
                 name: "replace_in_file".to_string(),
                 summary: summarize_applied_edit("replace_in_file", &applied_edit),
@@ -250,16 +272,17 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 ensure_authored_workspace_path(&path_policy, path)?;
             }
 
-            let mut child = Command::new("git")
+            let mut command = Command::new("git");
+            command
                 .arg("apply")
                 .arg("--whitespace=nowarn")
                 .arg("-")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .current_dir(&self.workspace_root)
-                .spawn()
-                .context("failed to spawn git apply")?;
+                .current_dir(&self.workspace_root);
+            self.protect_command_env(&mut command, "workspace apply_patch command");
+            let mut child = command.spawn().context("failed to spawn git apply")?;
 
             if let Some(stdin) = child.stdin.as_mut() {
                 stdin
@@ -334,8 +357,13 @@ fn trim_for_summary(input: &str, max_chars: usize) -> String {
     format!("{trimmed}...")
 }
 
-fn build_applied_edit(path: &str, before: &str, after: &str) -> Result<AppliedEdit> {
-    let diff = unified_diff(path, before, after)?;
+fn build_applied_edit(
+    path: &str,
+    before: &str,
+    after: &str,
+    transport_mediator: &TransportToolMediator,
+) -> Result<AppliedEdit> {
+    let diff = unified_diff(path, before, after, transport_mediator)?;
     let (insertions, deletions) = diff_change_counts(&diff);
     Ok(AppliedEdit {
         files: vec![path.to_string()],
@@ -373,7 +401,12 @@ fn summarize_applied_edit(tool_name: &str, edit: &AppliedEdit) -> String {
     trim_for_summary(&summary, MAX_EDITOR_OUTPUT_CHARS)
 }
 
-fn unified_diff(path: &str, before: &str, after: &str) -> Result<String> {
+fn unified_diff(
+    path: &str,
+    before: &str,
+    after: &str,
+    transport_mediator: &TransportToolMediator,
+) -> Result<String> {
     let temp_root = std::env::temp_dir().join(format!(
         "paddles-workspace-edit-{}-{}",
         std::process::id(),
@@ -389,16 +422,17 @@ fn unified_diff(path: &str, before: &str, after: &str) -> Result<String> {
         .with_context(|| format!("failed to write {}", after_path.display()))?;
 
     let command = format!("diff -u --label a/{path} --label b/{path} <before> <after>");
-    let output = Command::new("diff")
+    let mut command_runner = Command::new("diff");
+    command_runner
         .arg("-u")
         .arg("--label")
         .arg(format!("a/{path}"))
         .arg("--label")
         .arg(format!("b/{path}"))
         .arg(&before_path)
-        .arg(&after_path)
-        .output()
-        .context("failed to run diff")?;
+        .arg(&after_path);
+    transport_mediator.protect_command_env(&mut command_runner, "workspace unified diff command");
+    let output = command_runner.output().context("failed to run diff")?;
 
     let _ = fs::remove_dir_all(&temp_root);
 

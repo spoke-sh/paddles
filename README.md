@@ -189,6 +189,12 @@ transport readiness. Operators can inspect the shared workspace editor,
 background terminal runner, and transport mediator hand phases without digging
 through provider-specific logs.
 
+The `transport_mediator` is now the only runtime boundary that resolves remote
+provider API keys and native-transport bearer tokens. Local shell and
+workspace-diff/apply child processes have those credential env vars stripped
+before they spawn, so generated commands do not inherit authority they did not
+explicitly need.
+
 ### Native Transport Substrate
 
 Native transport delivery now starts from one shared substrate instead of one-off protocol adapters. The authored configuration layer names four transport slots:

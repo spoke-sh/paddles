@@ -11,6 +11,7 @@ pub mod runtime_preferences;
 pub mod sift_cache;
 pub mod step_timing;
 pub(crate) mod terminal;
+pub mod transport_mediator;
 pub mod web;
 pub(crate) mod workspace_entity_index;
 pub(crate) mod workspace_paths;

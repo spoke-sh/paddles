@@ -4,6 +4,7 @@ use crate::domain::model::{
 };
 use crate::domain::ports::ExecutionHand;
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+use crate::infrastructure::transport_mediator::TransportToolMediator;
 use anyhow::{Context, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -40,7 +41,31 @@ pub(crate) fn run_background_terminal_command_with_execution_hand_registry(
     event_sink: &dyn TurnEventSink,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
 ) -> Result<Output> {
+    let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
+        Arc::clone(&execution_hand_registry),
+    ));
+    run_background_terminal_command_with_runtime_mediator(
+        workspace_root,
+        command,
+        tool_name,
+        call_id,
+        event_sink,
+        execution_hand_registry,
+        transport_mediator,
+    )
+}
+
+pub(crate) fn run_background_terminal_command_with_runtime_mediator(
+    workspace_root: &Path,
+    command: &str,
+    tool_name: &str,
+    call_id: &str,
+    event_sink: &dyn TurnEventSink,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
+    transport_mediator: Arc<TransportToolMediator>,
+) -> Result<Output> {
     BackgroundTerminalRunner::with_execution_hand_registry(workspace_root, execution_hand_registry)
+        .with_transport_mediator(transport_mediator)
         .run(command, tool_name, call_id, event_sink)
 }
 
@@ -48,6 +73,7 @@ pub(crate) fn run_background_terminal_command_with_execution_hand_registry(
 struct BackgroundTerminalRunner {
     workspace_root: PathBuf,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
+    transport_mediator: Arc<TransportToolMediator>,
 }
 
 impl BackgroundTerminalRunner {
@@ -63,10 +89,19 @@ impl BackgroundTerminalRunner {
         workspace_root: impl Into<PathBuf>,
         execution_hand_registry: Arc<ExecutionHandRegistry>,
     ) -> Self {
+        let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
+            Arc::clone(&execution_hand_registry),
+        ));
         Self {
             workspace_root: workspace_root.into(),
             execution_hand_registry,
+            transport_mediator,
         }
+    }
+
+    fn with_transport_mediator(mut self, transport_mediator: Arc<TransportToolMediator>) -> Self {
+        self.transport_mediator = transport_mediator;
+        self
     }
 
     fn descriptor() -> ExecutionHandDescriptor {
@@ -118,15 +153,17 @@ impl BackgroundTerminalRunner {
         event_sink: &dyn TurnEventSink,
     ) -> Result<Output> {
         self.record_execution_started(command);
-        let mut child = match Command::new("sh")
+        let mut shell = Command::new("sh");
+        shell
             .arg("-lc")
             .arg(command)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .current_dir(&self.workspace_root)
-            .spawn()
-        {
+            .current_dir(&self.workspace_root);
+        self.transport_mediator
+            .protect_command_env(&mut shell, &format!("terminal command `{command}`"));
+        let mut child = match shell.spawn() {
             Ok(child) => child,
             Err(error) => {
                 self.execution_hand_registry.record_phase(
@@ -372,5 +409,35 @@ mod tests {
             Some(ExecutionHandOperation::Execute)
         );
         assert!(diagnostic.summary.contains("printf 'hello from terminal"));
+    }
+
+    #[test]
+    fn terminal_runner_does_not_forward_provider_or_transport_credentials_into_shells() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        let sink = RecordingTurnEventSink::default();
+
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "sk-live-secret");
+            std::env::set_var("PADDLES_HTTP_BEARER_TOKEN", "transport-secret");
+        }
+
+        let output = run_background_terminal_command_with_execution_hand_registry(
+            workspace.path(),
+            "printf '%s|%s' \"${OPENAI_API_KEY:-missing}\" \"${PADDLES_HTTP_BEARER_TOKEN:-missing}\"",
+            "inspect",
+            "call-2",
+            &sink,
+            Arc::clone(&registry),
+        )
+        .expect("terminal command output");
+
+        let rendered = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(rendered, "missing|missing");
+
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("PADDLES_HTTP_BEARER_TOKEN");
+        }
     }
 }

@@ -177,6 +177,12 @@ The internals path keeps raw record ids, trace ids, and payload content reachabl
 
 **`ExecutionHandBoundary`** names the local action surfaces the controller can trust to do work on its behalf. Workspace editing, background terminal execution, and credential-bearing transport mediation now share one lifecycle vocabulary: `described`, `provisioning`, `ready`, `executing`, `recovering`, `degraded`, and `failed`. Later adapters should record into that shared hand surface instead of inventing local readiness names.
 
+The `transport_mediator` hand is the structural credential boundary inside that
+family. Provider API-key resolution, native transport bearer-token checks, and
+credential stripping for local child processes all flow through that mediator
+instead of letting shell commands or generated patches inherit the ambient
+runtime environment.
+
 The shared runtime surfaces now expose that hand state directly. `GET /health`
 and `GET /session/shared/bootstrap` both publish the session hand diagnostics so
 operators can inspect workspace, terminal, and transport posture from the same

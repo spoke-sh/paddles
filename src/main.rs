@@ -35,6 +35,7 @@ use paddles::infrastructure::native_transport::{
 };
 use paddles::infrastructure::providers::{ApiFormat, ModelCapabilitySurface, ModelProvider};
 use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
+use paddles::infrastructure::transport_mediator::TransportToolMediator;
 
 /// The mech suit for the famous assistant, Paddles mate!
 #[derive(Parser)]
@@ -125,26 +126,12 @@ fn ensure_remote_provider_transport_support(provider: ModelProvider, model_id: &
 fn resolve_remote_provider_config(
     provider: ModelProvider,
     model_id: &str,
-    credential_store: &CredentialStore,
+    transport_mediator: &TransportToolMediator,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<(ApiFormat, String, String, ModelCapabilitySurface)> {
     ensure_remote_provider_transport_support(provider, model_id)?;
     let capability_surface = provider.capability_surface(model_id);
-
-    let resolved_api_key = credential_store.resolve_provider_api_key(provider);
-    if provider.auth_requirement()
-        == paddles::infrastructure::providers::ProviderAuthRequirement::RequiredApiKey
-        && resolved_api_key.value.is_empty()
-    {
-        let env_var = provider.credential_env_var().unwrap_or("PROVIDER_API_KEY");
-        bail!(
-            "provider `{}` is not authenticated; set `{}` or use `/login {}` before selecting `{}`",
-            provider.name(),
-            env_var,
-            provider.name(),
-            provider.qualified_model_label(model_id)
-        );
-    }
+    let api_key = transport_mediator.resolve_provider_api_key(provider, model_id)?;
 
     let api_format = capability_surface.http_format.ok_or_else(|| {
         anyhow::anyhow!(
@@ -159,25 +146,21 @@ fn resolve_remote_provider_config(
         .ok_or_else(|| {
             anyhow::anyhow!("provider `{}` does not define a base URL", provider.name())
         })?;
-    Ok((
-        api_format,
-        base_url,
-        resolved_api_key.value,
-        capability_surface,
-    ))
+    Ok((api_format, base_url, api_key, capability_surface))
 }
 
 fn build_synthesizer_engine(
     workspace: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
+    transport_mediator: Arc<TransportToolMediator>,
     lane: &PreparedModelLane,
-    credential_store: &CredentialStore,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn SynthesizerEngine>> {
     match lane.provider {
-        ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new_with_execution_hand_registry(
+        ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new_with_runtime_mediator(
             workspace.to_path_buf(),
             execution_hand_registry,
+            transport_mediator,
             &lane.model_id,
             lane.paths
                 .clone()
@@ -190,21 +173,20 @@ fn build_synthesizer_engine(
             let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
                 provider,
                 &lane.model_id,
-                credential_store,
+                transport_mediator.as_ref(),
                 provider_url_overrides,
             )?;
-            Ok(
-                Arc::new(HttpProviderAdapter::new_with_execution_hand_registry(
-                    workspace.to_path_buf(),
-                    execution_hand_registry,
-                    provider.name(),
-                    lane.model_id.clone(),
-                    api_key,
-                    base_url,
-                    format,
-                    capabilities.render_capability,
-                )) as Arc<dyn SynthesizerEngine>,
-            )
+            Ok(Arc::new(HttpProviderAdapter::new_with_runtime_mediator(
+                workspace.to_path_buf(),
+                execution_hand_registry,
+                transport_mediator,
+                provider.name(),
+                lane.model_id.clone(),
+                api_key,
+                base_url,
+                format,
+                capabilities.render_capability,
+            )) as Arc<dyn SynthesizerEngine>)
         }
     }
 }
@@ -212,15 +194,16 @@ fn build_synthesizer_engine(
 fn build_planner_engine(
     workspace: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
+    transport_mediator: Arc<TransportToolMediator>,
     lane: &PreparedModelLane,
-    credential_store: &CredentialStore,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn paddles::domain::ports::RecursivePlanner>> {
     match lane.provider {
         ModelProvider::Sift => {
-            let engine = Arc::new(SiftAgentAdapter::new_with_execution_hand_registry(
+            let engine = Arc::new(SiftAgentAdapter::new_with_runtime_mediator(
                 workspace.to_path_buf(),
                 execution_hand_registry,
+                transport_mediator,
                 &lane.model_id,
                 lane.paths.clone().ok_or_else(|| {
                     anyhow::anyhow!("local sift lane missing prepared model paths")
@@ -236,12 +219,13 @@ fn build_planner_engine(
             let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
                 provider,
                 &lane.model_id,
-                credential_store,
+                transport_mediator.as_ref(),
                 provider_url_overrides,
             )?;
-            let engine = Arc::new(HttpProviderAdapter::new_with_execution_hand_registry(
+            let engine = Arc::new(HttpProviderAdapter::new_with_runtime_mediator(
                 workspace.to_path_buf(),
                 execution_hand_registry,
+                transport_mediator,
                 provider.name(),
                 lane.model_id.clone(),
                 api_key,
@@ -395,31 +379,36 @@ async fn main() -> Result<()> {
     }
     let provider_url_overrides = Arc::new(provider_url_overrides);
 
-    let synth_credentials = Arc::clone(&credential_store);
     let synth_overrides = Arc::clone(&provider_url_overrides);
     let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+    let transport_mediator = Arc::new(TransportToolMediator::new(
+        Arc::clone(&credential_store),
+        Arc::clone(&execution_hand_registry),
+        &config.native_transports,
+    ));
     let synth_execution_hands = Arc::clone(&execution_hand_registry);
+    let synth_transport_mediator = Arc::clone(&transport_mediator);
     let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
         Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
             build_synthesizer_engine(
                 workspace,
                 Arc::clone(&synth_execution_hands),
+                Arc::clone(&synth_transport_mediator),
                 lane,
-                synth_credentials.as_ref(),
                 synth_overrides.as_ref(),
             )
         });
 
-    let planner_credentials = Arc::clone(&credential_store);
     let planner_overrides = Arc::clone(&provider_url_overrides);
     let planner_execution_hands = Arc::clone(&execution_hand_registry);
+    let planner_transport_mediator = Arc::clone(&transport_mediator);
     let planner_factory: Box<paddles::application::PlannerFactory> =
         Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
             build_planner_engine(
                 workspace,
                 Arc::clone(&planner_execution_hands),
+                Arc::clone(&planner_transport_mediator),
                 lane,
-                planner_credentials.as_ref(),
                 planner_overrides.as_ref(),
             )
         });
@@ -552,6 +541,7 @@ async fn main() -> Result<()> {
         Arc::clone(&service),
         trace_recorder,
         config.native_transports.clone(),
+        Arc::clone(&transport_mediator),
     );
     service.register_event_observer(web_observer);
     let http_transport = &config.native_transports.http_request_response;
