@@ -589,6 +589,7 @@ The runtime recorder boundary is independent of transcript rendering:
 
 - **Default runtime policy**: `noop` recorder — safe and local-first
 - **Available local adapters**: in-memory and embedded `transit-core`
+- **Shared session operations**: `wake`, full `replay`, `resume_from_checkpoint`, and deterministic `replay_slice`
 - **Growing edge**: a user-facing recorder-selection flag will land when the policy slice is ready
 
 This keeps the live runtime local-first and safe while the recorder policy matures.

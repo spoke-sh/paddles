@@ -34,7 +34,11 @@ pub use planning::{
     RefinementTrigger, RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use synthesis::{SynthesisHandoff, SynthesizerEngine, WorkspaceActionResult};
-pub use trace_recording::{NoopTraceRecorder, TraceRecorder, TraceRecorderCapability};
+pub use trace_recording::{
+    NoopTraceRecorder, TraceRecorder, TraceRecorderCapability, TraceReplaySlice,
+    TraceReplaySliceAnchor, TraceReplaySliceDirection, TraceReplaySliceRequest,
+    TraceSessionCheckpointCursor, TraceSessionWake,
+};
 pub use workspace_editing::WorkspaceEditor;
 
 /// Port for model discovery and acquisition.

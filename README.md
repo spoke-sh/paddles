@@ -273,6 +273,7 @@ The recursive harness runs as a bounded local-first runtime:
 - **Shared verbosity contract** — one resolved `0/1/2/3` verbosity level governs both the TUI transcript and the web event stream: `0` is the default operational view, `1` adds info-tier planner metadata, `2` adds debug-tier routing/capability detail, and `3` enables trace diagnostics
 - **Steering-signal control** — context strain and budget boundary remain controller-owned, while premise challenge and action bias now trigger recursive planner review passes over the current sources instead of hard-coded redirects
 - **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary with noop, in-memory, and embedded `transit-core` adapters
+- **Session wake and slice contract** — the recorder boundary now defines how a harness wakes a prior task, resumes from checkpoints, and interrogates deterministic replay slices without falling back to ad hoc prompt summaries
 - **Artifact envelopes** — prompts, tool I/O, evidence bundles, planner traces, and responses sit behind logical refs, ready for external storage when needed
 - **Threaded conversations** — interactive sessions keep one durable root task with model-driven steering-thread decisions, structured thread candidates, explicit merge-back records, and full replay views
 - **Four-tier context model** — context spans Inline, Transit, Sift, and Filesystem tiers with typed `ContextLocator` addressing and lazy cross-tier resolution through a `ContextResolver` port
@@ -292,6 +293,17 @@ A few areas are still maturing:
 - **Default recording policy** — embedded `transit-core` recording is available through the recorder boundary; the default runtime still uses noop until the policy slice lands
 - **Context-1 integration** — `context-1` remains an explicit experimental boundary, available for opt-in use
 - **Concurrent threading** — auto-threading is checkpoint-bounded and sequential today; true concurrent sibling generation is a future capability
+
+### Durable Session Operations
+
+The recorder boundary now names four storage-neutral session operations:
+
+- `wake(task_id)` returns the latest record position plus the available checkpoint cursors for that task
+- `replay(task_id)` returns the full ordered lineage for that task
+- `resume_from_checkpoint(task_id, checkpoint_id)` returns the forward replay slice anchored at the named checkpoint
+- `replay_slice(task_id, request)` returns a forward or backward slice anchored at a task root, turn, branch, record, checkpoint, or tail
+
+Those semantics are stable across recorder adapters. Today only embedded `transit-core` survives process restarts, but in-memory and transit recorders already agree on wake, replay, checkpoint resume, and selective slice behavior.
 
 ## Design Principles
 

@@ -345,9 +345,9 @@ mod tests {
     use crate::domain::model::{
         ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceCheckpointId,
         TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId,
-        TraceRecordKind, TraceTaskRoot, TurnTraceId,
+        TraceRecordKind, TraceTaskRoot, TraceTurnStarted, TurnTraceId,
     };
-    use crate::domain::ports::TraceRecorder;
+    use crate::domain::ports::{TraceRecorder, TraceReplaySliceAnchor, TraceReplaySliceRequest};
     use tempfile::tempdir;
 
     fn root_record(task: &str) -> TraceRecord {
@@ -371,6 +371,41 @@ mod tests {
                 interpretation: None,
                 planner_model: "qwen-1.5b".to_string(),
                 synthesizer_model: "qwen-1.5b".to_string(),
+            }),
+        }
+    }
+
+    fn turn_started_record(
+        task_id: &TaskTraceId,
+        turn_id: &TurnTraceId,
+        record_id: &str,
+        sequence: u64,
+        parent_record_id: &str,
+        content: &str,
+    ) -> TraceRecord {
+        TraceRecord {
+            record_id: TraceRecordId::new(record_id).expect("record id"),
+            sequence,
+            lineage: TraceLineage {
+                task_id: task_id.clone(),
+                turn_id: turn_id.clone(),
+                branch_id: None,
+                parent_record_id: Some(
+                    TraceRecordId::new(parent_record_id).expect("parent record id"),
+                ),
+            },
+            kind: TraceRecordKind::TurnStarted(TraceTurnStarted {
+                prompt: ArtifactEnvelope::text(
+                    TraceArtifactId::new(format!("artifact-{record_id}")).expect("artifact"),
+                    ArtifactKind::Prompt,
+                    format!("prompt {record_id}"),
+                    content,
+                    256,
+                ),
+                interpretation: None,
+                planner_model: "qwen-1.5b".to_string(),
+                synthesizer_model: "qwen-1.5b".to_string(),
+                thread: crate::domain::model::ConversationThreadRef::Mainline,
             }),
         }
     }
@@ -413,5 +448,128 @@ mod tests {
         recorder
             .verify_checkpoints(&task_id)
             .expect("verify checkpoints");
+    }
+
+    #[test]
+    fn wake_reports_latest_checkpoint_and_resume_cursor() {
+        let recorder = InMemoryTraceRecorder::default();
+        let task_id = TaskTraceId::new("task-wake").expect("task id");
+        let turn_one = TurnTraceId::new("task-wake.turn-0001").expect("turn");
+        let turn_two = TurnTraceId::new("task-wake.turn-0002").expect("turn");
+        recorder
+            .record(root_record("task-wake"))
+            .expect("record root");
+        recorder
+            .record(TraceRecord {
+                record_id: TraceRecordId::new("record-2").expect("record id"),
+                sequence: 2,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_one,
+                    branch_id: None,
+                    parent_record_id: Some(
+                        TraceRecordId::new("record-1").expect("parent record id"),
+                    ),
+                },
+                kind: TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                    checkpoint_id: TraceCheckpointId::new("checkpoint-1").expect("checkpoint id"),
+                    kind: TraceCheckpointKind::TurnCompleted,
+                    summary: "turn completed".to_string(),
+                    response: None,
+                    citations: Vec::new(),
+                    grounded: true,
+                }),
+            })
+            .expect("record checkpoint");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_two,
+                "record-3",
+                3,
+                "record-2",
+                "follow-up prompt",
+            ))
+            .expect("record next turn");
+
+        let wake = recorder.wake(&task_id).expect("wake");
+        assert_eq!(wake.task_id, task_id);
+        assert_eq!(
+            wake.latest_record_id,
+            Some(TraceRecordId::new("record-3").expect("record id"))
+        );
+        assert_eq!(wake.latest_sequence, Some(3));
+        assert_eq!(wake.checkpoints.len(), 1);
+        assert_eq!(
+            wake.checkpoints[0].resume_request,
+            TraceReplaySliceRequest::from_anchor(TraceReplaySliceAnchor::Checkpoint(
+                TraceCheckpointId::new("checkpoint-1").expect("checkpoint id")
+            ))
+        );
+    }
+
+    #[test]
+    fn replay_slice_selects_records_from_checkpoint_forward() {
+        let temp = tempdir().expect("tempdir");
+        let recorder = TransitTraceRecorder::open(temp.path()).expect("transit recorder");
+        let task_id = TaskTraceId::new("task-slice").expect("task id");
+        let turn_one = TurnTraceId::new("task-slice.turn-0001").expect("turn");
+        let turn_two = TurnTraceId::new("task-slice.turn-0002").expect("turn");
+        recorder
+            .record(root_record("task-slice"))
+            .expect("record root");
+        recorder
+            .record(TraceRecord {
+                record_id: TraceRecordId::new("record-2").expect("record id"),
+                sequence: 2,
+                lineage: TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_one,
+                    branch_id: None,
+                    parent_record_id: Some(
+                        TraceRecordId::new("record-1").expect("parent record id"),
+                    ),
+                },
+                kind: TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                    checkpoint_id: TraceCheckpointId::new("checkpoint-1").expect("checkpoint id"),
+                    kind: TraceCheckpointKind::TurnCompleted,
+                    summary: "turn completed".to_string(),
+                    response: None,
+                    citations: Vec::new(),
+                    grounded: true,
+                }),
+            })
+            .expect("record checkpoint");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_two,
+                "record-3",
+                3,
+                "record-2",
+                "second turn",
+            ))
+            .expect("record next turn");
+
+        let slice = recorder
+            .replay_slice(
+                &task_id,
+                &TraceReplaySliceRequest::from_anchor(TraceReplaySliceAnchor::Checkpoint(
+                    TraceCheckpointId::new("checkpoint-1").expect("checkpoint id"),
+                )),
+            )
+            .expect("slice");
+        let record_ids = slice
+            .records
+            .into_iter()
+            .map(|record| record.record_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            record_ids,
+            vec![
+                TraceRecordId::new("record-2").expect("record id"),
+                TraceRecordId::new("record-3").expect("record id"),
+            ]
+        );
     }
 }

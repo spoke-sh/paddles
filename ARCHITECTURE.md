@@ -483,12 +483,19 @@ The recorder path delivers storage-neutral trace durability:
 
 1. Runtime transitions produce typed `TraceRecord` values
 2. Transcript rendering flows through `TurnEventSink` as operator-facing projection
-3. Durable recording flows through `TraceRecorder` as the source of truth
+3. Durable recording and session wake/slice queries flow through `TraceRecorder` as the source of truth
 4. Noop and in-memory adapters preserve local safety and enable testing
-5. Embedded `transit-core` maps roots, branch heads, appends, replay, and checkpoints — all through the domain boundary, keeping transit types internal
+5. Embedded `transit-core` maps roots, branch heads, appends, replay, checkpoints, and checkpoint-backed resume slices — all through the domain boundary, keeping transit types internal
 6. Interactive thread split/merge records flow through the same recorder path, making thread structure part of the durable trace
 
 This design keeps the domain storage-neutral while providing lineage durable enough for replay, branch comparison, and graph-trace analysis.
+
+The durable session contract now names four higher-level operations that later harness layers can depend on without caring which recorder adapter is underneath:
+
+- `wake(task_id)` discovers the latest record position and known checkpoint cursors for a prior task
+- `replay(task_id)` reconstructs the full ordered lineage
+- `resume_from_checkpoint(task_id, checkpoint_id)` resumes from a named checkpoint via a forward replay slice
+- `replay_slice(task_id, request)` interrogates a deterministic forward or backward slice anchored at a task root, turn, branch, record, checkpoint, or tail
 
 ## Context Architecture
 
