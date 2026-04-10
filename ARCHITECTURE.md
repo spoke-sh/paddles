@@ -457,7 +457,7 @@ The runtime follows the backbone narrative from above:
 
 - **Sift-tier locator resolution** — typed `ContextLocator::Sift` values are emitted from retrieval today; direct Sift resolver wiring is still being finalized
 - **Automatic tier promotion/demotion** — content moves between tiers manually; automatic promotion policies are future work
-- **Default recorder policy** — embedded transit-core is available; the default runtime uses noop until the policy slice lands
+- **Persistent session spine** — embedded transit-core is now the default runtime recorder; bounded in-memory recording remains the local fallback when the persistent state path cannot be opened
 - **Context-1 integration** — available as an explicit experimental boundary for opt-in use
 
 ## Shared Native Transport Substrate
@@ -484,7 +484,7 @@ The recorder path delivers storage-neutral trace durability:
 1. Runtime transitions produce typed `TraceRecord` values
 2. Transcript rendering flows through `TurnEventSink` as operator-facing projection
 3. Durable recording and session wake/slice queries flow through `TraceRecorder` as the source of truth
-4. Noop and in-memory adapters preserve local safety and enable testing
+4. Embedded `transit-core` is the default runtime session spine, while in-memory recording remains the bounded fallback for tests and local failure recovery
 5. Embedded `transit-core` maps roots, branch heads, appends, replay, checkpoints, and checkpoint-backed resume slices — all through the domain boundary, keeping transit types internal
 6. Interactive thread split/merge records flow through the same recorder path, making thread structure part of the durable trace
 
@@ -496,6 +496,8 @@ The durable session contract now names four higher-level operations that later h
 - `replay(task_id)` reconstructs the full ordered lineage
 - `resume_from_checkpoint(task_id, checkpoint_id)` resumes from a named checkpoint via a forward replay slice
 - `replay_slice(task_id, request)` interrogates a deterministic forward or backward slice anchored at a task root, turn, branch, record, checkpoint, or tail
+
+When persistent transit state cannot be opened, the runtime degrades to the in-memory adapter instead of failing open into missing traces. That degraded posture is explicit through the recorder capability and boot diagnostics, so operators can tell when session durability is bounded to the current process.
 
 ## Context Architecture
 

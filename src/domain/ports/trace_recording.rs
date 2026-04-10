@@ -7,7 +7,8 @@ use std::any::Any;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TraceRecorderCapability {
-    Available,
+    Persistent { backend: String, location: String },
+    Ephemeral { backend: String, reason: String },
     Unsupported { reason: String },
 }
 
@@ -212,7 +213,9 @@ impl TraceRecorder for NoopTraceRecorder {
     }
 
     fn capability(&self) -> TraceRecorderCapability {
-        TraceRecorderCapability::Available
+        TraceRecorderCapability::Unsupported {
+            reason: "trace recording is disabled".to_string(),
+        }
     }
 
     fn record(&self, _record: TraceRecord) -> Result<()> {

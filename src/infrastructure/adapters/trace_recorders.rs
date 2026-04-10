@@ -4,20 +4,38 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{TraceRecorder, TraceRecorderCapability};
 use anyhow::{Context, Result, anyhow, ensure};
+use directories::ProjectDirs;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use transit_core::engine::{LocalEngine, LocalEngineConfig};
 use transit_core::kernel::{LineageMetadata, StreamId, StreamPosition};
 use transit_core::storage::LineageCheckpoint;
 
-#[derive(Default)]
 pub struct InMemoryTraceRecorder {
     records: Mutex<HashMap<TaskTraceId, Vec<TraceRecord>>>,
+    capability: TraceRecorderCapability,
+}
+
+impl Default for InMemoryTraceRecorder {
+    fn default() -> Self {
+        Self::new_ephemeral("in-memory session spine does not survive process restarts")
+    }
 }
 
 impl InMemoryTraceRecorder {
+    pub fn new_ephemeral(reason: impl Into<String>) -> Self {
+        Self {
+            records: Mutex::new(HashMap::new()),
+            capability: TraceRecorderCapability::Ephemeral {
+                backend: "in_memory".to_string(),
+                reason: reason.into(),
+            },
+        }
+    }
+
     pub fn len_for_task(&self, task_id: &TaskTraceId) -> usize {
         self.records
             .lock()
@@ -43,7 +61,7 @@ impl TraceRecorder for InMemoryTraceRecorder {
     }
 
     fn capability(&self) -> TraceRecorderCapability {
-        TraceRecorderCapability::Available
+        self.capability.clone()
     }
 
     fn record(&self, record: TraceRecord) -> Result<()> {
@@ -82,6 +100,7 @@ impl TraceRecorder for InMemoryTraceRecorder {
 
 #[derive(Clone)]
 pub struct TransitTraceRecorder {
+    pub(crate) data_dir: PathBuf,
     pub(crate) engine: Arc<LocalEngine>,
     pub(crate) state: Arc<Mutex<TransitRecorderState>>,
 }
@@ -106,9 +125,16 @@ pub(crate) struct TransitTaskState {
 
 impl TransitTraceRecorder {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
+        fs::create_dir_all(data_dir.as_ref()).with_context(|| {
+            format!(
+                "create recorder state directory {}",
+                data_dir.as_ref().display()
+            )
+        })?;
         let engine = LocalEngine::open(LocalEngineConfig::new(data_dir.as_ref()))
             .context("open embedded transit engine")?;
         Ok(Self {
+            data_dir: data_dir.as_ref().to_path_buf(),
             engine: Arc::new(engine),
             state: Arc::new(Mutex::new(TransitRecorderState::default())),
         })
@@ -256,7 +282,10 @@ impl TraceRecorder for TransitTraceRecorder {
     }
 
     fn capability(&self) -> TraceRecorderCapability {
-        TraceRecorderCapability::Available
+        TraceRecorderCapability::Persistent {
+            backend: "embedded_transit".to_string(),
+            location: self.data_dir.display().to_string(),
+        }
     }
 
     fn record(&self, record: TraceRecord) -> Result<()> {
@@ -339,15 +368,102 @@ impl TraceRecorder for TransitTraceRecorder {
     }
 }
 
+const TRACE_RECORDER_STATE_ROOT_DIR: &str = "trace-sessions";
+const TRACE_RECORDER_WORKSPACES_DIR: &str = "workspaces";
+
+pub fn default_trace_recorder_for_workspace(workspace_root: &Path) -> Arc<dyn TraceRecorder> {
+    let state_root = default_trace_recorder_state_root();
+    default_trace_recorder_for_workspace_under_root(workspace_root, &state_root)
+}
+
+pub(crate) fn default_trace_recorder_for_workspace_under_root(
+    workspace_root: &Path,
+    state_root: &Path,
+) -> Arc<dyn TraceRecorder> {
+    let workspace_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let data_dir = state_root
+        .join(TRACE_RECORDER_WORKSPACES_DIR)
+        .join(workspace_cache_leaf(&workspace_root));
+    match TransitTraceRecorder::open(&data_dir) {
+        Ok(recorder) => Arc::new(recorder),
+        Err(error) => Arc::new(InMemoryTraceRecorder::new_ephemeral(format!(
+            "embedded transit session spine unavailable at {}: {error}",
+            data_dir.display()
+        ))),
+    }
+}
+
+fn default_trace_recorder_state_root() -> PathBuf {
+    if let Some(project_dirs) = ProjectDirs::from("", "", "paddles")
+        && let Some(state_dir) = project_dirs.state_dir()
+    {
+        return state_dir.join(TRACE_RECORDER_STATE_ROOT_DIR);
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("state")
+            .join("paddles")
+            .join(TRACE_RECORDER_STATE_ROOT_DIR);
+    }
+
+    PathBuf::from(".paddles-state").join(TRACE_RECORDER_STATE_ROOT_DIR)
+}
+
+fn workspace_cache_leaf(workspace_root: &Path) -> String {
+    let workspace_name = workspace_root
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .map(sanitize_component)
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or_else(|| "workspace".to_string());
+    format!(
+        "{}-{:016x}",
+        workspace_name,
+        stable_workspace_hash(workspace_root)
+    )
+}
+
+fn sanitize_component(component: &str) -> String {
+    component
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn stable_workspace_hash(workspace_root: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    workspace_root.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{InMemoryTraceRecorder, TransitTraceRecorder};
+    use super::{
+        InMemoryTraceRecorder, TransitTraceRecorder,
+        default_trace_recorder_for_workspace_under_root,
+    };
     use crate::domain::model::{
         ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceCheckpointId,
         TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId,
         TraceRecordKind, TraceTaskRoot, TraceTurnStarted, TurnTraceId,
     };
-    use crate::domain::ports::{TraceRecorder, TraceReplaySliceAnchor, TraceReplaySliceRequest};
+    use crate::domain::ports::{
+        TraceRecorder, TraceRecorderCapability, TraceReplaySliceAnchor, TraceReplaySliceRequest,
+    };
+    use std::fs;
     use tempfile::tempdir;
 
     fn root_record(task: &str) -> TraceRecord {
@@ -571,5 +687,49 @@ mod tests {
                 TraceRecordId::new("record-3").expect("record id"),
             ]
         );
+    }
+
+    #[test]
+    fn default_trace_recorder_prefers_embedded_transit_session_spine() {
+        let workspace = tempdir().expect("workspace");
+        let state_root = tempdir().expect("state root");
+
+        let recorder =
+            default_trace_recorder_for_workspace_under_root(workspace.path(), state_root.path());
+
+        assert!(
+            recorder
+                .as_any()
+                .downcast_ref::<TransitTraceRecorder>()
+                .is_some()
+        );
+        assert!(matches!(
+            recorder.capability(),
+            TraceRecorderCapability::Persistent { .. }
+        ));
+    }
+
+    #[test]
+    fn default_trace_recorder_falls_back_to_in_memory_when_transit_state_is_unavailable() {
+        let workspace = tempdir().expect("workspace");
+        let state_root = tempdir().expect("state root");
+        let blocked_root = state_root.path().join("blocked-root");
+        fs::write(&blocked_root, "not a directory").expect("write blocked root");
+
+        let recorder =
+            default_trace_recorder_for_workspace_under_root(workspace.path(), &blocked_root);
+
+        assert!(
+            recorder
+                .as_any()
+                .downcast_ref::<InMemoryTraceRecorder>()
+                .is_some()
+        );
+        assert!(matches!(
+            recorder.capability(),
+            TraceRecorderCapability::Ephemeral { backend, reason }
+                if backend == "in_memory"
+                    && reason.contains("embedded transit session spine")
+        ));
     }
 }

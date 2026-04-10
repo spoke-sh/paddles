@@ -20,6 +20,7 @@ use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathere
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
 use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
+use paddles::infrastructure::adapters::trace_recorders::default_trace_recorder_for_workspace;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
@@ -465,9 +466,7 @@ async fn main() -> Result<()> {
             }
         },
     );
-    let trace_recorder = Arc::new(
-        paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder::default(),
-    );
+    let trace_recorder = default_trace_recorder_for_workspace(&root_path);
     let service = Arc::new(MechSuitService::with_trace_recorder(
         root_path,
         registry,
@@ -483,6 +482,18 @@ async fn main() -> Result<()> {
     ));
     service.set_native_transport_registry(Arc::clone(&native_transport_registry));
     service.set_verbose(verbose);
+
+    match service.trace_recorder_capability() {
+        paddles::domain::ports::TraceRecorderCapability::Persistent { .. } => {}
+        paddles::domain::ports::TraceRecorderCapability::Ephemeral { backend, reason } => {
+            eprintln!(
+                "[BOOT] Trace recorder degraded to {backend}; session durability is bounded: {reason}"
+            );
+        }
+        paddles::domain::ports::TraceRecorderCapability::Unsupported { reason } => {
+            eprintln!("[BOOT] Trace recorder disabled: {reason}");
+        }
+    }
 
     // Boot sequence
     if verbose >= 3 {

@@ -587,9 +587,10 @@ Successful exchanges return `application/transit+json` with a `turn_response` pa
 
 The runtime recorder boundary is independent of transcript rendering:
 
-- **Default runtime policy**: `noop` recorder — safe and local-first
-- **Available local adapters**: in-memory and embedded `transit-core`
+- **Default runtime policy**: embedded `transit-core` recorder rooted in machine-managed local state
+- **Available local adapters**: embedded `transit-core` and bounded in-memory fallback
 - **Shared session operations**: `wake`, full `replay`, `resume_from_checkpoint`, and deterministic `replay_slice`
+- **Fallback posture**: if the persistent session spine cannot open, Paddles degrades to in-memory recording and emits an explicit boot warning
 - **Growing edge**: a user-facing recorder-selection flag will land when the policy slice is ready
 
-This keeps the live runtime local-first and safe while the recorder policy matures.
+This keeps the live runtime local-first and safe while making durable session recording the normal path instead of optional metadata.

@@ -1,5 +1,7 @@
 use crate::infrastructure::adapters::TransitContextResolver;
-use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
+use crate::infrastructure::adapters::trace_recorders::{
+    TransitTraceRecorder, default_trace_recorder_for_workspace,
+};
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
@@ -32,12 +34,12 @@ use crate::domain::ports::{
     EvidenceBudget, EvidenceBundle, EvidenceItem, GathererCapability, GroundingRequirement,
     InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, ModelPaths, ModelRegistry, NoopTraceRecorder, NormalizedEntityHint,
-    OperatorMemory, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
-    RetrievalStrategy, RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest,
-    TraceRecorder, WorkspaceAction,
+    InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint, OperatorMemory,
+    PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
+    PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+    RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
+    TraceRecorderCapability, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -1905,14 +1907,15 @@ impl MechSuitService {
         planner_factory: Box<PlannerFactory>,
         gatherer_factory: Box<GathererFactory>,
     ) -> Self {
+        let workspace_root = workspace_root.into();
         Self::with_trace_recorder(
-            workspace_root,
+            workspace_root.clone(),
             registry,
             operator_memory,
             synthesizer_factory,
             planner_factory,
             gatherer_factory,
-            Arc::new(NoopTraceRecorder),
+            default_trace_recorder_for_workspace(&workspace_root),
         )
     }
 
@@ -1950,6 +1953,10 @@ impl MechSuitService {
 
     pub fn set_verbose(&self, level: u8) {
         self.verbose.store(level, Ordering::Relaxed);
+    }
+
+    pub fn trace_recorder_capability(&self) -> TraceRecorderCapability {
+        self.trace_recorder.capability()
     }
 
     pub fn verbose(&self) -> u8 {
@@ -7075,7 +7082,7 @@ mod tests {
         PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
         PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
         RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff, SynthesizerEngine,
-        ThreadDecisionRequest, TraceRecorder, WorkspaceAction,
+        ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, WorkspaceAction,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -7119,6 +7126,18 @@ mod tests {
             Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
             recorder,
         )
+    }
+
+    #[test]
+    fn service_new_uses_persistent_trace_recorder_posture_by_default() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+
+        assert!(matches!(
+            service.trace_recorder_capability(),
+            TraceRecorderCapability::Persistent { ref backend, .. }
+                if backend == "embedded_transit"
+        ));
     }
 
     #[derive(Default)]

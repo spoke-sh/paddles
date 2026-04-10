@@ -26,11 +26,11 @@ started_at: 2026-04-09T16:58:07
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Session Wake Slice And Checkpoint Contract](../../../../stories/VGLDQ7pnQ/README.md) | feat | done |
-| [Promote Embedded Transit Recorder To Default Session Spine](../../../../stories/VGLDQ8NnO/README.md) | feat | backlog |
+| [Promote Embedded Transit Recorder To Default Session Spine](../../../../stories/VGLDQ8NnO/README.md) | feat | done |
 | [Replace Provider Branching With Negotiated Capability Surface](../../../../stories/VGLDQ92nP/README.md) | feat | backlog |
 <!-- END GENERATED -->
