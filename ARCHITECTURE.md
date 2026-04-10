@@ -567,6 +567,18 @@ Adaptive harness work should not have to reinvent replay semantics on top of raw
 
 The application now uses the adaptive-replay slice as the first source for recent-turn handoff, falling back to persisted history and then synthesizer-local summaries only when the active session has no durable turn context yet.
 
+### Specialist Brains
+
+Specialist brains are optional bounded helpers, not alternate agent architectures. They receive the same `HarnessProfileSelection` and `query_session_context(...)` slice contract as the recursive planner and can only contribute runtime notes back into the planner request.
+
+That keeps three invariants intact:
+
+- the controller still owns the recursive loop and all stop/budget policy
+- specialist brains consume durable session slices instead of private ad-hoc memory paths
+- unsupported brains fail clearly for the active profile instead of silently mutating execution shape
+
+The first built-in specialist brain, `session-continuity-v1`, reviews recent durable turn summaries before recursive planning when `recursive-structured-v1` is active. When the active profile is downgraded to `prompt-envelope-safe-v1` or the session has no durable turn history yet, the planner receives an explicit unavailability note instead of hidden profile-specific branching.
+
 ### Compaction Planning Today
 
 The compaction interface is shaped for recursive self-assessment, but the current planner adapters do not yet fully earn that label. Today a `CompactionEngine` walks retained evidence and applies bounded keep/compact/discard heuristics while preserving addressable locators to the pruned content. The difference now is that those bounds are selected through the active harness profile instead of being left as implicit provider-shaped defaults. This keeps the working context tight without losing depth, but it is still more policy-driven than planner-judged.

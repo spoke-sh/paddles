@@ -4,6 +4,7 @@ mod entity_resolution;
 mod execution_hands;
 mod operator_memory;
 mod planning;
+mod specialist_brains;
 mod synthesis;
 mod trace_recording;
 mod workspace_editing;
@@ -34,6 +35,9 @@ pub use planning::{
     PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
     PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, RefinementPolicy,
     RefinementTrigger, RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
+};
+pub use specialist_brains::{
+    SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,
 };
 pub use synthesis::{SynthesisHandoff, SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{

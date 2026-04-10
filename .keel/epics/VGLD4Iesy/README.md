@@ -22,10 +22,10 @@ mission: VGLD3Xecz
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 voyages complete, 8/9 stories done
+**Progress:** 3/3 voyages complete, 9/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Define Durable Session And Capability Interfaces](voyages/VGLDMuE5W/) | done | 3/3 |
 | [Decouple Brain From Hands In The Local Runtime](voyages/VGLDMuu5X/) | done | 3/3 |
-| [Add Adaptive Harness Profiles And Specialist Brains](voyages/VGLDMvU4i/) | in-progress | 2/3 |
+| [Add Adaptive Harness Profiles And Specialist Brains](voyages/VGLDMvU4i/) | done | 3/3 |
 <!-- END GENERATED -->

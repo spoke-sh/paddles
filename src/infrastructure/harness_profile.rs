@@ -59,6 +59,7 @@ pub struct HarnessProfile {
     pub steering: HarnessSteeringPolicy,
     pub compaction: HarnessCompactionPolicy,
     pub recovery: HarnessRecoveryPolicy,
+    pub specialist_brain_ids: &'static [&'static str],
 }
 
 impl HarnessProfile {
@@ -125,6 +126,10 @@ impl HarnessProfileSelection {
     pub fn active_compaction_budget(&self) -> CompactionBudget {
         self.active.compaction.budget.clone()
     }
+
+    pub fn active_specialist_brain_ids(&self) -> &'static [&'static str] {
+        self.active.specialist_brain_ids
+    }
 }
 
 fn recursive_structured_v1() -> HarnessProfile {
@@ -145,6 +150,7 @@ fn recursive_structured_v1() -> HarnessProfile {
             mode: "structured-retry",
             invalid_reply_retries: 1,
         },
+        specialist_brain_ids: &["session-continuity-v1"],
     }
 }
 
@@ -166,6 +172,7 @@ fn prompt_envelope_safe_v1() -> HarnessProfile {
             mode: "prompt-envelope-retry",
             invalid_reply_retries: 2,
         },
+        specialist_brain_ids: &["session-continuity-v1"],
     }
 }
 

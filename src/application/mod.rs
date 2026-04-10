@@ -9,6 +9,7 @@ use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::harness_profile::HarnessProfileSelection;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
+use crate::infrastructure::specialist_brains::SpecialistBrainRegistry;
 use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
@@ -41,8 +42,9 @@ use crate::domain::ports::{
     PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
     PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
     RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-    RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
-    TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
+    RetrieverOption, SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine,
+    ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery,
+    WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -98,6 +100,7 @@ pub struct MechSuitService {
     conversation_history_store: Mutex<Option<Arc<ConversationHistoryStore>>>,
     execution_hand_registry: Mutex<Arc<ExecutionHandRegistry>>,
     native_transport_registry: Mutex<Arc<NativeTransportRegistry>>,
+    specialist_brain_registry: Mutex<Arc<SpecialistBrainRegistry>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -265,6 +268,7 @@ struct PlannerLoopContext {
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
+    specialist_runtime_notes: Vec<String>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
     grounding: Option<GroundingRequirement>,
@@ -1974,6 +1978,7 @@ impl MechSuitService {
             conversation_history_store: Mutex::new(None),
             execution_hand_registry: Mutex::new(Arc::new(ExecutionHandRegistry::default())),
             native_transport_registry: Mutex::new(Arc::new(NativeTransportRegistry::default())),
+            specialist_brain_registry: Mutex::new(Arc::new(SpecialistBrainRegistry::new())),
         }
     }
 
@@ -2034,6 +2039,22 @@ impl MechSuitService {
 
     pub fn native_transport_diagnostics(&self) -> Vec<NativeTransportDiagnostic> {
         self.native_transport_registry().diagnostics()
+    }
+
+    pub fn set_specialist_brain_registry(&self, registry: Arc<SpecialistBrainRegistry>) {
+        *self
+            .specialist_brain_registry
+            .lock()
+            .expect("specialist brain registry lock") = registry;
+    }
+
+    pub fn specialist_brain_registry(&self) -> Arc<SpecialistBrainRegistry> {
+        Arc::clone(
+            &self
+                .specialist_brain_registry
+                .lock()
+                .expect("specialist brain registry lock"),
+        )
     }
 
     pub fn prompt_history(&self) -> Result<Vec<String>> {
@@ -2205,6 +2226,33 @@ impl MechSuitService {
         query: TraceSessionContextQuery,
     ) -> Result<crate::domain::ports::TraceSessionContextSlice> {
         self.trace_recorder.query_session_context(task_id, &query)
+    }
+
+    fn specialist_runtime_notes(
+        &self,
+        prompt: &str,
+        session: &ConversationSession,
+        prepared: &PreparedRuntimeLanes,
+    ) -> Vec<String> {
+        let Ok(session_context) = self.query_session_context_slice(
+            &session.task_id(),
+            TraceSessionContextQuery::AdaptiveReplay { turn_limit: 4 },
+        ) else {
+            return vec![
+                "Specialist brains unavailable: adaptive session context could not be queried."
+                    .to_string(),
+            ];
+        };
+        let profile = prepared.harness_profile();
+        self.specialist_brain_registry().runtime_notes(
+            &profile,
+            &SpecialistBrainRequest {
+                user_prompt: prompt.to_string(),
+                workspace_root: self.workspace_root.clone(),
+                active_profile_id: profile.active_profile_id().to_string(),
+                session_context,
+            },
+        )
     }
 
     fn persist_prompt_history(&self, prompt: &str) {
@@ -2629,6 +2677,7 @@ impl MechSuitService {
         });
 
         let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
+        let specialist_runtime_notes = self.specialist_runtime_notes(prompt, &session, &prepared);
         let recent_thread_summary = session.recent_thread_summary(&active_thread);
         let request = PlannerRequest::new(
             prompt,
@@ -2638,7 +2687,10 @@ impl MechSuitService {
         )
         .with_recent_turns(recent_turns.clone())
         .with_recent_thread_summary(recent_thread_summary.clone())
-        .with_runtime_notes(planner_runtime_notes_for_gatherer(gatherer.as_ref()))
+        .with_runtime_notes(planner_runtime_notes(
+            gatherer.as_ref(),
+            &specialist_runtime_notes,
+        ))
         .with_entity_resolver(Arc::clone(&self.entity_resolver));
 
         let execution_plan = match planner_capability {
@@ -2784,6 +2836,7 @@ impl MechSuitService {
                         interpretation: interpretation.clone(),
                         recent_turns,
                         recent_thread_summary: recent_thread_summary.clone(),
+                        specialist_runtime_notes,
                         instruction_frame: execution_plan.instruction_frame.clone(),
                         initial_edit: execution_plan.initial_edit.clone(),
                         grounding: execution_plan.grounding.clone(),
@@ -3173,8 +3226,9 @@ impl MechSuitService {
                 )
                 .with_recent_turns(context.recent_turns.clone())
                 .with_recent_thread_summary(context.recent_thread_summary.clone())
-                .with_runtime_notes(planner_runtime_notes_for_gatherer(
+                .with_runtime_notes(planner_runtime_notes(
                     context.gatherer.as_ref(),
+                    &context.specialist_runtime_notes,
                 ))
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone())
@@ -4959,9 +5013,13 @@ fn gatherer_readiness_label(capability: &GathererCapability) -> &'static str {
     }
 }
 
-fn planner_runtime_notes_for_gatherer(gatherer: Option<&Arc<dyn ContextGatherer>>) -> Vec<String> {
+fn planner_runtime_notes(
+    gatherer: Option<&Arc<dyn ContextGatherer>>,
+    specialist_notes: &[String],
+) -> Vec<String> {
+    let mut notes = specialist_notes.to_vec();
     let Some(gatherer) = gatherer else {
-        return Vec::new();
+        return notes;
     };
 
     let lexical = gatherer.capability_for_planning(
@@ -4974,7 +5032,7 @@ fn planner_runtime_notes_for_gatherer(gatherer: Option<&Arc<dyn ContextGatherer>
     if matches!(lexical, GathererCapability::Available)
         && matches!(vector, GathererCapability::Available)
     {
-        return Vec::new();
+        return notes;
     }
 
     let guidance = match (&lexical, &vector) {
@@ -4996,12 +5054,13 @@ fn planner_runtime_notes_for_gatherer(gatherer: Option<&Arc<dyn ContextGatherer>
         }
     };
 
-    vec![format!(
+    notes.push(format!(
         "Workspace retrieval readiness: bm25={}, vector={}. {}",
         gatherer_readiness_label(&lexical),
         gatherer_readiness_label(&vector),
         guidance
-    )]
+    ));
+    notes
 }
 
 fn format_planner_capability(capability: &PlannerCapability) -> String {
@@ -5628,8 +5687,9 @@ async fn review_decision_under_signals(
     )
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
-    .with_runtime_notes(planner_runtime_notes_for_gatherer(
+    .with_runtime_notes(planner_runtime_notes(
         context.gatherer.as_ref(),
+        &context.specialist_runtime_notes,
     ))
     .with_loop_state(review_loop_state)
     .with_resolver(context.resolver.clone())
@@ -7182,6 +7242,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
 
     fn test_service(workspace: &Path) -> MechSuitService {
@@ -7651,6 +7712,7 @@ mod tests {
             interpretation: InterpretationContext::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
+            specialist_runtime_notes: Vec::new(),
             instruction_frame: super::instruction_frame_from_initial_edit(&initial_edit),
             initial_edit,
             grounding: None,
@@ -13641,6 +13703,135 @@ mod tests {
             note.contains("Workspace retrieval readiness")
                 && note.contains("bm25=warming")
                 && note.contains("vector=warming")
+        }));
+    }
+
+    #[test]
+    fn planner_requests_include_specialist_brain_runtime_notes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        record_completed_turn(
+            recorder.as_ref(),
+            &session.task_id(),
+            "task-root",
+            None,
+            1,
+            "fresh prompt",
+            Some("fresh reply"),
+        );
+        service.trace_counter.store(3, Ordering::Relaxed);
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: None,
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: None,
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "answer directly".to_string(),
+                answer: Some("direct answer".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+            Vec::new(),
+            Arc::clone(&recorded_requests),
+        ));
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+                gatherer: None,
+            });
+            service
+                .process_prompt("What changed?")
+                .await
+                .expect("process prompt");
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        let request = requests.first().expect("initial planner request");
+        assert!(request.runtime_notes.iter().any(|note| {
+            note.contains("session-continuity-v1")
+                && note.contains("reviewed 1 durable turn summary")
+        }));
+    }
+
+    #[test]
+    fn planner_requests_include_specialist_brain_fallback_for_prompt_envelope_safe_profiles() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Anthropic,
+                model_id: "claude-sonnet-4-20250514".to_string(),
+                paths: None,
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "qwen-1.5b".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "answer directly".to_string(),
+                answer: Some("direct answer".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+            Vec::new(),
+            Arc::clone(&recorded_requests),
+        ));
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+                gatherer: None,
+            });
+            service
+                .process_prompt("What changed?")
+                .await
+                .expect("process prompt");
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        let request = requests.first().expect("initial planner request");
+        assert!(request.runtime_notes.iter().any(|note| {
+            note.contains("session-continuity-v1")
+                && note.contains("unavailable")
+                && note.contains("prompt-envelope-safe-v1")
         }));
     }
 

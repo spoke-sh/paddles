@@ -203,8 +203,15 @@ The active profile owns:
 - refinement policy for steering reviews
 - bounded compaction budget
 - recovery mode metadata for invalid model replies
+- active specialist-brain ids that may contribute bounded runtime notes
 
 The selected profile and any downgrade reason are recorded on turn-start traces and reused in planner/gatherer metadata as the `profile` field.
+
+Current specialist-brain contract:
+
+- `session-continuity-v1` is registered under both profiles so the planner contract stays stable across models
+- the brain only activates when `recursive-structured-v1` is active and the session exposes durable turn summaries through `query_session_context(...)`
+- unsupported profiles or empty session history produce an explicit runtime note rather than silently bypassing the recursive planner loop
 
 Current local model guidance on an 8 GB CUDA card:
 

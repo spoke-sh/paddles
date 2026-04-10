@@ -327,13 +327,13 @@
 | [Deliver HTTP And SSE Transports](epics/VGKnsYg1z/voyages/VGKoF1Stc/) | done |
 | [Deliver WebSocket And Transit Transports](epics/VGKnsYg1z/voyages/VGKoF1utS/) | done |
 
-### [Decouple Harness Interfaces From Model Assumptions](epics/VGLD4Iesy/) (active)
+### [Decouple Harness Interfaces From Model Assumptions](epics/VGLD4Iesy/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Define Durable Session And Capability Interfaces](epics/VGLD4Iesy/voyages/VGLDMuE5W/) | done |
 | [Decouple Brain From Hands In The Local Runtime](epics/VGLD4Iesy/voyages/VGLDMuu5X/) | done |
-| [Add Adaptive Harness Profiles And Specialist Brains](epics/VGLD4Iesy/voyages/VGLDMvU4i/) | in-progress |
+| [Add Adaptive Harness Profiles And Specialist Brains](epics/VGLD4Iesy/voyages/VGLDMvU4i/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

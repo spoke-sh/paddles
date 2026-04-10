@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VGLDMvU4i
-status: in-progress
+status: done
 epic: VGLD4Iesy
 created_at: 2026-04-09T16:55:17
 # authored
@@ -22,16 +22,18 @@ started_at: 2026-04-09T18:16:31
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Harness Profile Model For Steering And Compaction](../../../../stories/VGLDQBFqJ/README.md) | feat | done |
 | [Expose Session-Queryable Context Slices For Adaptive Replay](../../../../stories/VGLDQBYqH/README.md) | feat | done |
-| [Model Optional Specialist Brains Without Breaking The Recursive Planner](../../../../stories/VGLDQCIrB/README.md) | feat | backlog |
+| [Model Optional Specialist Brains Without Breaking The Recursive Planner](../../../../stories/VGLDQCIrB/README.md) | feat | done |
 <!-- END GENERATED -->
