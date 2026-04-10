@@ -1,6 +1,7 @@
 mod context_gathering;
 mod context_resolution;
 mod entity_resolution;
+mod execution_hands;
 mod operator_memory;
 mod planning;
 mod synthesis;
@@ -22,6 +23,7 @@ pub use entity_resolution::{
     EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
     EntityResolver, NormalizedEntityHint,
 };
+pub use execution_hands::ExecutionHand;
 pub use operator_memory::OperatorMemory;
 pub use planning::{
     CompactionPlan, CompactionRequest, GroundingDomain, GroundingRequirement, GuidanceCategory,

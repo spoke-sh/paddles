@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGLDMuu5X
-status: planned
+status: in-progress
 epic: VGLD4Iesy
 created_at: 2026-04-09T16:55:17
 # authored
 title: Decouple Brain From Hands In The Local Runtime
 index: 2
 updated_at: 2026-04-09T16:58:07
+started_at: 2026-04-09T17:25:49
 ---
 
 # Decouple Brain From Hands In The Local Runtime
@@ -26,11 +27,11 @@ updated_at: 2026-04-09T16:58:07
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Shared Hand Lifecycle And Diagnostics Surface](../../../../stories/VGLDQ9Zoe/README.md) | feat | backlog |
+| [Define Shared Hand Lifecycle And Diagnostics Surface](../../../../stories/VGLDQ9Zoe/README.md) | feat | done |
 | [Adapt Workspace And Terminal Execution To Hand Contracts](../../../../stories/VGLDQAMpx/README.md) | feat | backlog |
 | [Isolate Credentials Behind Transport And Tool Mediators](../../../../stories/VGLDQApqs/README.md) | feat | backlog |
 <!-- END GENERATED -->

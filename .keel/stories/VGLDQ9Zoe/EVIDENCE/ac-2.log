@@ -1,0 +1,73 @@
+src/infrastructure/execution_hand.rs:73:    pub fn record_ready(&self, hand: ExecutionHandKind, summary: impl Into<String>) {
+src/infrastructure/execution_hand.rs:83:    pub fn record_executing(&self, hand: ExecutionHandKind, summary: impl Into<String>) {
+src/infrastructure/execution_hand.rs:93:    pub fn record_recovering(&self, hand: ExecutionHandKind, summary: impl Into<String>) {
+src/infrastructure/execution_hand.rs:103:    pub fn record_degraded(&self, hand: ExecutionHandKind, error: impl Into<String>) {
+src/infrastructure/execution_hand.rs:114:    pub fn record_failed(&self, hand: ExecutionHandKind, error: impl Into<String>) {
+src/infrastructure/execution_hand.rs:155:        registry.record_ready(
+src/infrastructure/execution_hand.rs:159:        registry.record_executing(
+src/infrastructure/execution_hand.rs:161:            "terminal runner executing planner-owned shell command",
+src/infrastructure/execution_hand.rs:163:        registry.record_recovering(
+src/infrastructure/execution_hand.rs:165:            "terminal runner recovering after shell spawn failure",
+src/infrastructure/execution_hand.rs:167:        registry.record_degraded(
+src/infrastructure/execution_hand.rs:169:            "terminal runner degraded after repeated spawn failures",
+src/infrastructure/execution_hand.rs:182:            Some("terminal runner degraded after repeated spawn failures")
+CONFIGURATION.md:224:when the underlying tool output or fallback is already visible.
+CONFIGURATION.md:262:lands. After `git status` and `git diff` have already been inspected,
+CONFIGURATION.md:439:- `workspace_editor` — authored workspace mutation boundary
+CONFIGURATION.md:440:- `terminal_runner` — background shell execution boundary
+CONFIGURATION.md:441:- `transport_mediator` — credential-bearing transport and tool mediation boundary
+CONFIGURATION.md:445:- `described`
+CONFIGURATION.md:446:- `provisioning`
+CONFIGURATION.md:447:- `ready`
+CONFIGURATION.md:448:- `executing`
+CONFIGURATION.md:449:- `recovering`
+CONFIGURATION.md:450:- `degraded`
+CONFIGURATION.md:451:- `failed`
+CONFIGURATION.md:473:- Without `--context1-harness-ready`, the adapter reports `harness-required`
+CONFIGURATION.md:475:- With `--context1-harness-ready`, the adapter boundary reports the current
+CONFIGURATION.md:564:- `phase` — one of `disabled`, `configured`, `binding`, `ready`, `degraded`, or `failed`
+CONFIGURATION.md:590:| `phase = ready` | The listener is active and the transport is available on the shared web surface |
+CONFIGURATION.md:591:| `phase = failed` with `last_error` | Startup or runtime rejected the transport; inspect the error before retrying |
+CONFIGURATION.md:596:- If `phase = ready`, expect both transports to report the actual shared listener address in `bind_target`.
+CONFIGURATION.md:606:- `phase = ready` means the listener is available for upgrades
+CONFIGURATION.md:610:The current adapter sends a `session_ready` frame when the socket upgrades, records the negotiated `connection_id` under the shared `session` diagnostic, and degrades the transport with `last_error` if the client sends a non-text prompt frame.
+CONFIGURATION.md:619:- `phase = ready` means the shared listener is available for Transit exchanges
+CONFIGURATION.md:644:- **Growing edge**: a user-facing recorder-selection flag will land when the policy slice is ready
+src/domain/model/execution_hand.rs:20:            Self::WorkspaceEditor => "workspace_editor",
+src/domain/model/execution_hand.rs:21:            Self::TerminalRunner => "terminal_runner",
+src/domain/model/execution_hand.rs:22:            Self::TransportMediator => "transport_mediator",
+src/domain/model/execution_hand.rs:95:            Self::Described => "described",
+src/domain/model/execution_hand.rs:96:            Self::Provisioning => "provisioning",
+src/domain/model/execution_hand.rs:97:            Self::Ready => "ready",
+src/domain/model/execution_hand.rs:98:            Self::Executing => "executing",
+src/domain/model/execution_hand.rs:99:            Self::Recovering => "recovering",
+src/domain/model/execution_hand.rs:100:            Self::Degraded => "degraded",
+src/domain/model/execution_hand.rs:101:            Self::Failed => "failed",
+src/domain/model/execution_hand.rs:195:            ["workspace_editor", "terminal_runner", "transport_mediator"]
+src/domain/model/execution_hand.rs:220:                "described",
+src/domain/model/execution_hand.rs:221:                "provisioning",
+src/domain/model/execution_hand.rs:222:                "ready",
+src/domain/model/execution_hand.rs:223:                "executing",
+src/domain/model/execution_hand.rs:224:                "recovering",
+src/domain/model/execution_hand.rs:225:                "degraded",
+src/domain/model/execution_hand.rs:226:                "failed",
+ARCHITECTURE.md:18:By the time the planner sees the prompt, it already knows the operator's priorities, the project's conventions, and the tools at its disposal.
+ARCHITECTURE.md:112:- rich browser-ready response with navigation affordances
+ARCHITECTURE.md:178:**`ExecutionHandBoundary`** names the local action surfaces the controller can trust to do work on its behalf. Workspace editing, background terminal execution, and credential-bearing transport mediation now share one lifecycle vocabulary: `described`, `provisioning`, `ready`, `executing`, `recovering`, `degraded`, and `failed`. Later adapters should record into that shared hand surface instead of inventing local readiness names.
+ARCHITECTURE.md:216:    F -->|"ready"| G
+ARCHITECTURE.md:228:Pressure in Paddles is a controller layer, not a loose metaphor. The runtime uses it to decide when the loop should keep investigating, when it should compress context, and when the evidence already justifies stopping.
+ARCHITECTURE.md:260:| **Context strain** | Truncated memory, artifacts, thread summaries, or evidence-budget loss | Warns that the assembled context is degraded | `TurnEvent::ContextStrain`, `TraceSignalKind::ContextStrain` |
+ARCHITECTURE.md:275:This steering signal is observational. It tells the operator and the trace that the current answer may be operating with a degraded working set.
+ARCHITECTURE.md:293:This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
+ARCHITECTURE.md:299:Once both `git status` and `git diff` are already on the board, action-bias
+ARCHITECTURE.md:347:- **Containment** — whether the controller is compressing, recovering, or enforcing a boundary
+ARCHITECTURE.md:446:| **Execution Hand Contract** | [src/domain/model/execution_hand.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/execution_hand.rs) | Shared hand kind, authority, operation, phase, and diagnostics vocabulary |
+ARCHITECTURE.md:447:| **Execution Hand Registry** | [src/infrastructure/execution_hand.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/execution_hand.rs) | `ExecutionHandRegistry` — session-scoped lifecycle and diagnostics state for local execution boundaries |
+ARCHITECTURE.md:512:When persistent transit state cannot be opened, the runtime degrades to the in-memory adapter instead of failing open into missing traces. That degraded posture is explicit through the recorder capability and boot diagnostics, so operators can tell when session durability is bounded to the current process.
+README.md:80:    Evidence -->|"ready"| Synth
+README.md:142:- **Context strain** reports degraded assembled context when memory, retained artifacts, thread summaries, or evidence budgets are truncated.
+README.md:211:Operators should inspect those diagnostics through `GET /health` or `GET /session/shared/bootstrap` before they reason about protocol-specific behavior. When HTTP request/response, SSE, WebSocket, and Transit are enabled together, they must converge on the same `bind_target` because the runtime serves them through one shared listener. WebSocket now records negotiated session identity through `session_ready` plus a shared `connection_id`, while Transit uses `POST /native-transports/transit` with `application/transit+json` payloads and returns explicit `turn_response` or `transport_error` frames under the same diagnostics contract.
+README.md:269:- **Guidance-aware fallbacks** — fallback selection draws on command hints and decision procedures from foundational docs, and halts recursion when a procedure step has already resolved the request
+README.md:277:- **Artifact envelopes** — prompts, tool I/O, evidence bundles, planner traces, and responses sit behind logical refs, ready for external storage when needed
+README.md:306:Those semantics are stable across recorder adapters. Embedded `transit-core` is now the default session spine and persists under machine-managed local state. When that persistent path cannot be opened, Paddles falls back to in-memory recording with the same wake/replay/slice contract and an explicit degraded-session warning.
+README.md:317:- **Hands stay explicit.** Workspace editing, background terminal execution, and credential-bearing transport mediation share one execution-hand lifecycle instead of inventing adapter-local state names.

@@ -2,6 +2,7 @@ use anyhow::Result;
 
 pub mod compaction;
 pub mod context_quality;
+pub mod execution_hand;
 pub mod forensics;
 pub mod generative;
 pub mod harness;
@@ -19,6 +20,10 @@ pub mod transcript;
 pub mod turns;
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use context_quality::{ContextStrain, StrainFactor, StrainLevel, StrainTracker};
+pub use execution_hand::{
+    ExecutionHandAuthority, ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind,
+    ExecutionHandOperation, ExecutionHandPhase, default_local_execution_hand_descriptors,
+};
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,

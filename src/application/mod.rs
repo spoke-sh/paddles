@@ -5,6 +5,7 @@ use crate::infrastructure::adapters::trace_recorders::{
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
+use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::terminal::run_background_terminal_command;
@@ -16,17 +17,18 @@ use crate::domain::model::{
     CompactionPlan, ConversationForensicProjection, ConversationForensicUpdate,
     ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
     ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ForensicArtifactCapture,
-    ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
-    NativeTransportDiagnostic, PlanChecklistItem, PlanChecklistItemStatus, ResponseMode,
-    SteeringGateKind, SteeringGatePhase, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate,
-    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
-    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
-    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
-    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
-    TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ConversationTranscript, ConversationTranscriptUpdate, ExecutionHandDiagnostic,
+    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
+    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
+    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge,
+    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -93,6 +95,7 @@ pub struct MechSuitService {
     sessions: Mutex<HashMap<String, ConversationSession>>,
     shared_session_id: Mutex<Option<String>>,
     conversation_history_store: Mutex<Option<Arc<ConversationHistoryStore>>>,
+    execution_hand_registry: Mutex<Arc<ExecutionHandRegistry>>,
     native_transport_registry: Mutex<Arc<NativeTransportRegistry>>,
 }
 
@@ -1947,6 +1950,7 @@ impl MechSuitService {
             sessions: Mutex::new(HashMap::new()),
             shared_session_id: Mutex::new(None),
             conversation_history_store: Mutex::new(None),
+            execution_hand_registry: Mutex::new(Arc::new(ExecutionHandRegistry::default())),
             native_transport_registry: Mutex::new(Arc::new(NativeTransportRegistry::default())),
         }
     }
@@ -1968,6 +1972,26 @@ impl MechSuitService {
             .conversation_history_store
             .lock()
             .expect("conversation history store lock") = Some(store);
+    }
+
+    pub fn set_execution_hand_registry(&self, registry: Arc<ExecutionHandRegistry>) {
+        *self
+            .execution_hand_registry
+            .lock()
+            .expect("execution hand registry lock") = registry;
+    }
+
+    pub fn execution_hand_registry(&self) -> Arc<ExecutionHandRegistry> {
+        Arc::clone(
+            &self
+                .execution_hand_registry
+                .lock()
+                .expect("execution hand registry lock"),
+        )
+    }
+
+    pub fn execution_hand_diagnostics(&self) -> Vec<ExecutionHandDiagnostic> {
+        self.execution_hand_registry().diagnostics()
     }
 
     pub fn set_native_transport_registry(&self, registry: Arc<NativeTransportRegistry>) {
@@ -7066,11 +7090,12 @@ mod tests {
     use crate::domain::model::{AuthoredResponse, CompactionPlan, CompactionRequest, ResponseMode};
     use crate::domain::model::{
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
-        ConversationTranscriptUpdate, ForensicArtifactCapture, ForensicLifecycle,
-        ForensicTraceSink, ForensicUpdateSink, StrainFactor, TaskTraceId, ThreadDecision,
-        ThreadDecisionId, ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation,
-        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
-        TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+        ConversationTranscriptUpdate, ExecutionHandAuthority, ExecutionHandKind,
+        ExecutionHandPhase, ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink,
+        ForensicUpdateSink, StrainFactor, TaskTraceId, ThreadDecision, ThreadDecisionId,
+        ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation, TraceModelExchangeCategory,
+        TraceModelExchangeLane, TraceModelExchangePhase, TraceRecordKind, TraceSignalKind,
+        TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EntityLookupMode,
@@ -7138,6 +7163,31 @@ mod tests {
             TraceRecorderCapability::Persistent { ref backend, .. }
                 if backend == "embedded_transit"
         ));
+    }
+
+    #[test]
+    fn service_new_exposes_default_execution_hand_diagnostics_surface() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+
+        let diagnostics = service.execution_hand_diagnostics();
+
+        assert_eq!(diagnostics.len(), 3);
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.hand == ExecutionHandKind::WorkspaceEditor
+                && diagnostic.phase == ExecutionHandPhase::Described
+                && diagnostic.authority == ExecutionHandAuthority::WorkspaceScoped
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.hand == ExecutionHandKind::TerminalRunner
+                && diagnostic.phase == ExecutionHandPhase::Described
+                && diagnostic.authority == ExecutionHandAuthority::WorkspaceScoped
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.hand == ExecutionHandKind::TransportMediator
+                && diagnostic.phase == ExecutionHandPhase::Described
+                && diagnostic.authority == ExecutionHandAuthority::CredentialMediated
+        }));
     }
 
     #[derive(Default)]

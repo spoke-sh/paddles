@@ -430,6 +430,35 @@ The supported Inception boundary is now:
 - Optional native capabilities: provider-specific streaming/diffusion behavior remains a follow-on slice.
 - Operator expectation: Inception is usable today for planner or synthesizer lanes without changing local workspace edit semantics.
 
+### Shared Execution Hands
+
+Paddles now names its local execution surfaces through one shared execution-hand
+contract instead of leaving each adapter to invent local lifecycle labels. The
+default session hand registry exposes three hands:
+
+- `workspace_editor` — authored workspace mutation boundary
+- `terminal_runner` — background shell execution boundary
+- `transport_mediator` — credential-bearing transport and tool mediation boundary
+
+Each hand reports the same lifecycle phases:
+
+- `described`
+- `provisioning`
+- `ready`
+- `executing`
+- `recovering`
+- `degraded`
+- `failed`
+
+Each hand also carries a stable authority label:
+
+- `workspace_scoped` for local repo-bound execution surfaces
+- `credential_mediated` for boundaries that own external credentials or live transport state
+
+That vocabulary is session-scoped and provider-agnostic. Later workspace,
+terminal, and transport adapters should update the shared hand diagnostics
+surface rather than minting new state names for the same lifecycle transitions.
+
 ### Experimental Context-1 Boundary
 
 `context-1` is exposed as an explicit experimental gatherer provider, not as a

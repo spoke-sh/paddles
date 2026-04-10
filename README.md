@@ -314,6 +314,7 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 - **Separation of concerns.** Planner and synthesizer are distinct roles, potentially using different models optimized for their respective workloads.
 - **Context over hardcoding.** Keel, project artifacts, and board state flow through memory, search, and tool outputs — the harness stays general-purpose.
 - **Local-first by default.** The core loop runs on local models. Heavier planner lanes are opt-in and degrade gracefully.
+- **Hands stay explicit.** Workspace editing, background terminal execution, and credential-bearing transport mediation share one execution-hand lifecycle instead of inventing adapter-local state names.
 - **Visible execution.** Every recursive step is surfaced to the operator. The harness shows its work because transparency builds trust.
 
 ## Current Runtime Lanes

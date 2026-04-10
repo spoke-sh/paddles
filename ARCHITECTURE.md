@@ -175,6 +175,8 @@ The internals path keeps raw record ids, trace ids, and payload content reachabl
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
+**`ExecutionHandBoundary`** names the local action surfaces the controller can trust to do work on its behalf. Workspace editing, background terminal execution, and credential-bearing transport mediation now share one lifecycle vocabulary: `described`, `provisioning`, `ready`, `executing`, `recovering`, `degraded`, and `failed`. Later adapters should record into that shared hand surface instead of inventing local readiness names.
+
 **`ConversationThreadLayer`** maintains one durable conversation root across interactive sessions. Steering prompts become structured thread candidates, classified by a model into continuation, child-thread, or merge-back decisions — preserving full lineage for replay and analysis.
 
 ## Why This Shape Works
@@ -441,6 +443,8 @@ The target architecture is implemented across these modules:
 | **Trace Contract** | [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs) | Stable task/turn/record/branch/checkpoint ids |
 | **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
 | **Recorder Adapters** | [src/infrastructure/adapters/trace_recorders.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/trace_recorders.rs) | Noop, in-memory, embedded transit-core |
+| **Execution Hand Contract** | [src/domain/model/execution_hand.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/execution_hand.rs) | Shared hand kind, authority, operation, phase, and diagnostics vocabulary |
+| **Execution Hand Registry** | [src/infrastructure/execution_hand.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/execution_hand.rs) | `ExecutionHandRegistry` — session-scoped lifecycle and diagnostics state for local execution boundaries |
 | **Native Transport Substrate** | [src/domain/model/native_transport.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/native_transport.rs) | Shared lifecycle, auth, capability, and diagnostics vocabulary for HTTP, SSE, WebSocket, and Transit |
 | **Native Transport Registry** | [src/infrastructure/native_transport.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/native_transport.rs) | `NativeTransportRegistry` — shared transport diagnostics state and lifecycle recording |
 | **Thread Replay** | [src/domain/model/threading.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/threading.rs) | Replay/projection layer for conversation traces |
@@ -458,7 +462,8 @@ The runtime follows the backbone narrative from above:
 2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode, strategy, and optional structural fuzzy retriever overrides into the gatherer boundary. The `sift-direct` gatherer executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second planner.
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
 4. **Context quality** — a `StrainTracker` accumulates truncation events during context assembly and emits `ContextStrain` as a turn event when strain is non-nominal.
-5. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
+5. **Execution hands** — `MechSuitService` owns a session-scoped execution-hand registry so workspace, terminal, and transport surfaces can report one stable lifecycle/diagnostics contract before their concrete adapters are swapped or generalized.
+6. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
 
 ### Growing Edges
 
