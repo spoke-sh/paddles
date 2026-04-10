@@ -12,6 +12,7 @@ use crate::domain::ports::{
     WorkspaceActionResult, WorkspaceEditor,
 };
 use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
+use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
     ApiFormat, ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability,
     ProviderTransportSupport,
@@ -21,7 +22,7 @@ use crate::infrastructure::rendering::{
     ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
 };
-use crate::infrastructure::terminal::run_background_terminal_command;
+use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -82,6 +83,7 @@ async fn send_with_retry(
 /// HTTP-based model provider implementing SynthesizerEngine.
 pub struct HttpProviderAdapter {
     workspace_root: PathBuf,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
     client: reqwest::Client,
     provider_name: String,
     api_key: String,
@@ -125,12 +127,36 @@ impl HttpProviderAdapter {
         format: ApiFormat,
         render_capability: RenderCapability,
     ) -> Self {
+        Self::new_with_execution_hand_registry(
+            workspace_root,
+            Arc::new(ExecutionHandRegistry::default()),
+            provider_name,
+            model_id,
+            api_key,
+            base_url,
+            format,
+            render_capability,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_execution_hand_registry(
+        workspace_root: impl Into<PathBuf>,
+        execution_hand_registry: Arc<ExecutionHandRegistry>,
+        provider_name: impl Into<String>,
+        model_id: impl Into<String>,
+        api_key: impl Into<String>,
+        base_url: impl Into<String>,
+        format: ApiFormat,
+        render_capability: RenderCapability,
+    ) -> Self {
         let provider_name = provider_name.into();
         let model_id = model_id.into();
         let capabilities =
             negotiated_capability_surface(&provider_name, &model_id, format, render_capability);
         Self {
             workspace_root: workspace_root.into(),
+            execution_hand_registry,
             client: reqwest::Client::new(),
             provider_name,
             api_key: api_key.into(),
@@ -1052,7 +1078,10 @@ Rules:
     }
 
     fn execute_local_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
-        let workspace_editor = LocalWorkspaceEditor::new(self.workspace_root.clone());
+        let workspace_editor = LocalWorkspaceEditor::with_execution_hand_registry(
+            self.workspace_root.clone(),
+            Arc::clone(&self.execution_hand_registry),
+        );
         match action {
             WorkspaceAction::Read { path } => {
                 let full = self.workspace_root.join(path);
@@ -1083,12 +1112,13 @@ Rules:
                 } else {
                     "shell"
                 };
-                let output = run_background_terminal_command(
+                let output = run_background_terminal_command_with_execution_hand_registry(
                     &self.workspace_root,
                     command,
                     tool_name,
                     "http-provider-workspace-action",
                     &NullTurnEventSink,
+                    Arc::clone(&self.execution_hand_registry),
                 )?;
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);

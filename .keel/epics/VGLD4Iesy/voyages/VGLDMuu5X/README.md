@@ -27,11 +27,11 @@ started_at: 2026-04-09T17:25:49
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Shared Hand Lifecycle And Diagnostics Surface](../../../../stories/VGLDQ9Zoe/README.md) | feat | done |
-| [Adapt Workspace And Terminal Execution To Hand Contracts](../../../../stories/VGLDQAMpx/README.md) | feat | backlog |
+| [Adapt Workspace And Terminal Execution To Hand Contracts](../../../../stories/VGLDQAMpx/README.md) | feat | done |
 | [Isolate Credentials Behind Transport And Tool Mediators](../../../../stories/VGLDQApqs/README.md) | feat | backlog |
 <!-- END GENERATED -->

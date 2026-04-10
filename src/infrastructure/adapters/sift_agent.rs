@@ -16,6 +16,7 @@ use crate::domain::ports::{
     RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
     ThreadDecisionRequest, WorkspaceAction, WorkspaceEditor,
 };
+use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::rendering::{
     RenderCapability, ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
@@ -23,7 +24,7 @@ use crate::infrastructure::rendering::{
 use crate::infrastructure::sift_cache::{
     default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
 };
-use crate::infrastructure::terminal::run_background_terminal_command;
+use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
 use candle_core::{DType, Device, Tensor};
@@ -82,6 +83,7 @@ struct PreparedQwenModel {
 
 pub struct SiftAgentAdapter {
     workspace_root: PathBuf,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
     model_id: String,
     sift: Sift,
     conversation_factory: Box<dyn ConversationFactory>,
@@ -1109,6 +1111,22 @@ impl SiftAgentAdapter {
         model_paths: ModelPaths,
         render_capability: RenderCapability,
     ) -> Result<Self> {
+        Self::new_with_execution_hand_registry(
+            workspace_root,
+            Arc::new(ExecutionHandRegistry::default()),
+            model_id,
+            model_paths,
+            render_capability,
+        )
+    }
+
+    pub fn new_with_execution_hand_registry(
+        workspace_root: impl Into<PathBuf>,
+        execution_hand_registry: Arc<ExecutionHandRegistry>,
+        model_id: &str,
+        model_paths: ModelPaths,
+        render_capability: RenderCapability,
+    ) -> Result<Self> {
         let workspace_root = workspace_root.into();
         let model = ReusableQwenConversationFactory::load(PreparedQwenModel::from_paths(
             model_id,
@@ -1116,6 +1134,7 @@ impl SiftAgentAdapter {
         )?)?;
         Ok(Self::from_factory(
             workspace_root,
+            execution_hand_registry,
             model_id,
             Box::new(model),
             render_capability,
@@ -1124,6 +1143,7 @@ impl SiftAgentAdapter {
 
     fn from_factory(
         workspace_root: PathBuf,
+        execution_hand_registry: Arc<ExecutionHandRegistry>,
         model_id: &str,
         conversation_factory: Box<dyn ConversationFactory>,
         render_capability: RenderCapability,
@@ -1144,6 +1164,7 @@ impl SiftAgentAdapter {
 
         Self {
             workspace_root: workspace_root.clone(),
+            execution_hand_registry,
             model_id: model_id.to_string(),
             sift: Sift::builder()
                 .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
@@ -1170,6 +1191,7 @@ impl SiftAgentAdapter {
     ) -> Self {
         Self::from_factory(
             workspace_root.into(),
+            Arc::new(ExecutionHandRegistry::default()),
             model_id,
             Box::new(StaticConversationFactory::new(vec![conversation])),
             RenderCapability::PromptEnvelope,
@@ -1184,6 +1206,7 @@ impl SiftAgentAdapter {
     ) -> Self {
         Self::from_factory(
             workspace_root.into(),
+            Arc::new(ExecutionHandRegistry::default()),
             model_id,
             Box::new(StaticConversationFactory::new(conversations)),
             RenderCapability::PromptEnvelope,
@@ -2155,8 +2178,11 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::WriteFile { path, content } => {
-                let result = LocalWorkspaceEditor::new(self.workspace_root.clone())
-                    .write_file(path, content)?;
+                let result = LocalWorkspaceEditor::with_execution_hand_registry(
+                    self.workspace_root.clone(),
+                    Arc::clone(&self.execution_hand_registry),
+                )
+                .write_file(path, content)?;
                 Ok(ToolResult {
                     name: "write_file",
                     summary: result.summary,
@@ -2170,8 +2196,11 @@ impl SiftAgentAdapter {
                 new,
                 replace_all,
             } => {
-                let result = LocalWorkspaceEditor::new(self.workspace_root.clone())
-                    .replace_in_file(path, old, new, *replace_all)?;
+                let result = LocalWorkspaceEditor::with_execution_hand_registry(
+                    self.workspace_root.clone(),
+                    Arc::clone(&self.execution_hand_registry),
+                )
+                .replace_in_file(path, old, new, *replace_all)?;
                 Ok(ToolResult {
                     name: "replace_in_file",
                     summary: result.summary,
@@ -2180,12 +2209,13 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::Shell { command } => {
-                let output = run_background_terminal_command(
+                let output = run_background_terminal_command_with_execution_hand_registry(
                     &self.workspace_root,
                     command,
                     "shell",
                     call_id,
                     event_sink,
+                    Arc::clone(&self.execution_hand_registry),
                 )
                 .with_context(|| format!("failed to execute shell command `{command}`"))?;
                 let summary = format_command_summary("Shell command", command, &output);
@@ -2200,8 +2230,11 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::Diff { path } => {
-                let result =
-                    LocalWorkspaceEditor::new(self.workspace_root.clone()).diff(path.as_deref())?;
+                let result = LocalWorkspaceEditor::with_execution_hand_registry(
+                    self.workspace_root.clone(),
+                    Arc::clone(&self.execution_hand_registry),
+                )
+                .diff(path.as_deref())?;
                 Ok(ToolResult {
                     name: "diff",
                     summary: result.summary,
@@ -2210,8 +2243,11 @@ impl SiftAgentAdapter {
                 })
             }
             ToolCall::ApplyPatch { patch } => {
-                let result =
-                    LocalWorkspaceEditor::new(self.workspace_root.clone()).apply_patch(patch)?;
+                let result = LocalWorkspaceEditor::with_execution_hand_registry(
+                    self.workspace_root.clone(),
+                    Arc::clone(&self.execution_hand_registry),
+                )
+                .apply_patch(patch)?;
                 Ok(ToolResult {
                     name: "apply_patch",
                     summary: result.summary,
@@ -7276,6 +7312,7 @@ mod tests {
 
         let adapter = SiftAgentAdapter::from_factory(
             workspace_root,
+            Arc::new(ExecutionHandRegistry::default()),
             "qwen-1.5b",
             Box::new(StaticConversationFactory::new(Vec::new())),
             crate::infrastructure::rendering::RenderCapability::resolve("openai", "gpt-4o"),

@@ -2,11 +2,12 @@ use crate::application::MechSuitService;
 use crate::domain::model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
-    ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
-    ManifoldTurnProjection, NativeTransportConfigurations, NativeTransportDiagnostic,
-    NativeTransportKind, NativeTransportSessionIdentity, RuntimeEventPresentation, TaskTraceId,
-    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnTraceId, project_runtime_event,
+    ConversationTranscript, ConversationTranscriptUpdate, ExecutionHandDiagnostic,
+    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
+    ManifoldFrame, ManifoldTurnProjection, NativeTransportConfigurations,
+    NativeTransportDiagnostic, NativeTransportKind, NativeTransportSessionIdentity,
+    RuntimeEventPresentation, TaskTraceId, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+    TurnTraceId, project_runtime_event,
 };
 use crate::domain::ports::TraceRecorder;
 use axum::Router;
@@ -64,6 +65,7 @@ struct ProjectionTurnEventResponse {
 #[derive(Serialize)]
 struct HealthResponse {
     status: &'static str,
+    execution_hands: Vec<ExecutionHandDiagnostic>,
     native_transports: Vec<NativeTransportDiagnostic>,
 }
 
@@ -77,6 +79,7 @@ struct ConversationBootstrapResponse {
     session_id: String,
     projection: ConversationProjectionSnapshot,
     prompt_history: Vec<String>,
+    execution_hands: Vec<ExecutionHandDiagnostic>,
     native_transports: Vec<NativeTransportDiagnostic>,
 }
 
@@ -454,6 +457,7 @@ async fn primary_frontend_favicon() -> Result<Response, axum::http::StatusCode> 
 async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
+        execution_hands: state.service.execution_hand_diagnostics(),
         native_transports: state.service.native_transport_diagnostics(),
     })
 }
@@ -474,12 +478,14 @@ async fn shared_conversation_bootstrap(
         .replay_conversation_projection(&task_id)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     let prompt_history = state.service.prompt_history().unwrap_or_default();
+    let execution_hands = state.service.execution_hand_diagnostics();
     let native_transports = state.service.native_transport_diagnostics();
 
     Ok(Json(ConversationBootstrapResponse {
         session_id: task_id.as_str().to_string(),
         projection,
         prompt_history,
+        execution_hands,
         native_transports,
     }))
 }
@@ -2463,7 +2469,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn shared_bootstrap_route_returns_shared_session_projection() {
+    async fn shared_bootstrap_route_returns_shared_session_projection_and_execution_hand_diagnostics()
+     {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
@@ -2486,6 +2493,7 @@ mod tests {
             session_id,
             projection,
             prompt_history,
+            execution_hands,
             native_transports,
         }) = super::shared_conversation_bootstrap(State(state))
             .await
@@ -2501,6 +2509,7 @@ mod tests {
             prompt_history,
             vec!["first prompt".to_string(), "second prompt".to_string()]
         );
+        assert_eq!(execution_hands.len(), 3);
         assert_eq!(native_transports.len(), 4);
         assert_eq!(
             native_transports[0].phase,
@@ -2509,7 +2518,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn health_route_reports_native_transport_diagnostics() {
+    async fn health_route_reports_execution_hand_and_native_transport_diagnostics() {
         let workspace = tempfile::tempdir().expect("workspace");
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
@@ -2518,6 +2527,7 @@ mod tests {
         let Json(response) = super::health(State(state)).await;
 
         assert_eq!(response.status, "ok");
+        assert_eq!(response.execution_hands.len(), 3);
         assert_eq!(response.native_transports.len(), 4);
         assert!(response.native_transports.iter().all(
             |transport| transport.phase == crate::domain::model::NativeTransportPhase::Disabled

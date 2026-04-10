@@ -1,11 +1,16 @@
-use crate::domain::model::AppliedEdit;
-use crate::domain::ports::{WorkspaceActionResult, WorkspaceEditor};
+use crate::domain::model::{
+    AppliedEdit, ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind,
+    ExecutionHandOperation, ExecutionHandPhase,
+};
+use crate::domain::ports::{ExecutionHand, WorkspaceActionResult, WorkspaceEditor};
+use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_EDITOR_OUTPUT_CHARS: usize = 12_000;
@@ -13,77 +18,177 @@ const MAX_EDITOR_OUTPUT_CHARS: usize = 12_000;
 #[derive(Clone, Debug)]
 pub struct LocalWorkspaceEditor {
     workspace_root: PathBuf,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
 }
 
 impl LocalWorkspaceEditor {
+    #[allow(dead_code)]
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+        Self::with_execution_hand_registry(
+            workspace_root,
+            Arc::new(ExecutionHandRegistry::default()),
+        )
+    }
+
+    pub fn with_execution_hand_registry(
+        workspace_root: impl Into<PathBuf>,
+        execution_hand_registry: Arc<ExecutionHandRegistry>,
+    ) -> Self {
         Self {
             workspace_root: workspace_root.into(),
+            execution_hand_registry,
         }
+    }
+
+    fn descriptor() -> ExecutionHandDescriptor {
+        ExecutionHandDescriptor::new(
+            ExecutionHandKind::WorkspaceEditor,
+            ExecutionHandKind::WorkspaceEditor.default_authority(),
+            ExecutionHandKind::WorkspaceEditor.default_summary(),
+            vec![
+                ExecutionHandOperation::Describe,
+                ExecutionHandOperation::Provision,
+                ExecutionHandOperation::Execute,
+                ExecutionHandOperation::Recover,
+                ExecutionHandOperation::Degrade,
+            ],
+        )
+    }
+
+    fn record_execution_started(&self, summary: impl Into<String>) {
+        self.execution_hand_registry.record_phase(
+            ExecutionHandKind::WorkspaceEditor,
+            ExecutionHandPhase::Executing,
+            ExecutionHandOperation::Execute,
+            summary,
+            None,
+        );
+    }
+
+    fn record_execution_finished(&self, summary: impl Into<String>, last_error: Option<String>) {
+        self.execution_hand_registry.record_phase(
+            ExecutionHandKind::WorkspaceEditor,
+            ExecutionHandPhase::Ready,
+            ExecutionHandOperation::Execute,
+            summary,
+            last_error,
+        );
+    }
+}
+
+impl ExecutionHand for LocalWorkspaceEditor {
+    fn describe(&self) -> ExecutionHandDescriptor {
+        Self::descriptor()
+    }
+
+    fn diagnostic(&self) -> ExecutionHandDiagnostic {
+        self.execution_hand_registry
+            .diagnostic(ExecutionHandKind::WorkspaceEditor)
+            .unwrap_or_else(|| ExecutionHandDiagnostic::from_descriptor(&self.describe()))
     }
 }
 
 impl WorkspaceEditor for LocalWorkspaceEditor {
     fn diff(&self, path: Option<&str>) -> Result<WorkspaceActionResult> {
+        let target = path.unwrap_or(".").trim();
+        self.record_execution_started(format!("workspace editor diffing {target}"));
         let mut command = Command::new("git");
-        command
-            .arg("diff")
-            .arg("--no-ext-diff")
-            .current_dir(&self.workspace_root);
-        if let Some(path) = path.filter(|path| !path.trim().is_empty()) {
-            let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
+        let result = (|| {
             command
-                .arg("--")
-                .arg(relative_path(&self.workspace_root, &resolved));
-        }
-        let output = command.output().context("failed to run git diff")?;
-        if !output.status.success() {
-            bail!(
-                "{}",
-                format_command_summary("git diff", "git diff --no-ext-diff", &output)
-            );
-        }
+                .arg("diff")
+                .arg("--no-ext-diff")
+                .current_dir(&self.workspace_root);
+            if let Some(path) = path.filter(|path| !path.trim().is_empty()) {
+                let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
+                command
+                    .arg("--")
+                    .arg(relative_path(&self.workspace_root, &resolved));
+            }
+            let output = command.output().context("failed to run git diff")?;
+            if !output.status.success() {
+                bail!(
+                    "{}",
+                    format_command_summary("git diff", "git diff --no-ext-diff", &output)
+                );
+            }
 
-        let diff = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let summary = if diff.is_empty() && stderr.is_empty() {
-            "No diff output.".to_string()
-        } else {
-            format!(
-                "Diff output:\n{}\n{}",
-                trim_for_summary(&diff, MAX_EDITOR_OUTPUT_CHARS),
-                trim_for_summary(&stderr, MAX_EDITOR_OUTPUT_CHARS / 2)
-            )
-        };
-        Ok(WorkspaceActionResult {
-            name: "diff".to_string(),
-            summary,
-            applied_edit: None,
-        })
+            let diff = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let summary = if diff.is_empty() && stderr.is_empty() {
+                "No diff output.".to_string()
+            } else {
+                format!(
+                    "Diff output:\n{}\n{}",
+                    trim_for_summary(&diff, MAX_EDITOR_OUTPUT_CHARS),
+                    trim_for_summary(&stderr, MAX_EDITOR_OUTPUT_CHARS / 2)
+                )
+            };
+            Ok(WorkspaceActionResult {
+                name: "diff".to_string(),
+                summary,
+                applied_edit: None,
+            })
+        })();
+        match &result {
+            Ok(outcome) => {
+                self.record_execution_finished(
+                    format!(
+                        "workspace editor completed diff for {target}: {}",
+                        outcome.name
+                    ),
+                    None,
+                );
+            }
+            Err(error) => {
+                self.record_execution_finished(
+                    format!("workspace editor diff for {target} failed"),
+                    Some(error.to_string()),
+                );
+            }
+        }
+        result
     }
 
     fn write_file(&self, path: &str, content: &str) -> Result<WorkspaceActionResult> {
-        let resolved = resolve_workspace_path(&self.workspace_root, path, true)?;
-        let before = if resolved.exists() {
-            fs::read_to_string(&resolved)
-                .with_context(|| format!("failed to read {}", resolved.display()))?
-        } else {
-            String::new()
-        };
-        if let Some(parent) = resolved.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create parent directory {}", parent.display())
-            })?;
+        self.record_execution_started(format!("workspace editor writing {path}"));
+        let result: Result<WorkspaceActionResult> = (|| {
+            let resolved = resolve_workspace_path(&self.workspace_root, path, true)?;
+            let before = if resolved.exists() {
+                fs::read_to_string(&resolved)
+                    .with_context(|| format!("failed to read {}", resolved.display()))?
+            } else {
+                String::new()
+            };
+            if let Some(parent) = resolved.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create parent directory {}", parent.display())
+                })?;
+            }
+            fs::write(&resolved, content)
+                .with_context(|| format!("failed to write {}", resolved.display()))?;
+            let rel = relative_path(&self.workspace_root, &resolved);
+            let applied_edit = build_applied_edit(&rel, &before, content)?;
+            Ok(WorkspaceActionResult {
+                name: "write_file".to_string(),
+                summary: summarize_applied_edit("write_file", &applied_edit),
+                applied_edit: Some(applied_edit),
+            })
+        })();
+        match &result {
+            Ok(_) => {
+                self.record_execution_finished(
+                    format!("workspace editor completed write_file for {path}"),
+                    None,
+                );
+            }
+            Err(error) => {
+                self.record_execution_finished(
+                    format!("workspace editor write_file for {path} failed"),
+                    Some(error.to_string()),
+                );
+            }
         }
-        fs::write(&resolved, content)
-            .with_context(|| format!("failed to write {}", resolved.display()))?;
-        let rel = relative_path(&self.workspace_root, &resolved);
-        let applied_edit = build_applied_edit(&rel, &before, content)?;
-        Ok(WorkspaceActionResult {
-            name: "write_file".to_string(),
-            summary: summarize_applied_edit("write_file", &applied_edit),
-            applied_edit: Some(applied_edit),
-        })
+        result
     }
 
     fn replace_in_file(
@@ -93,69 +198,102 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
         new: &str,
         replace_all: bool,
     ) -> Result<WorkspaceActionResult> {
-        let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
-        let original = fs::read_to_string(&resolved)
-            .with_context(|| format!("failed to read {}", resolved.display()))?;
-        if !original.contains(old) {
-            bail!("pattern not found in {}", resolved.display());
+        self.record_execution_started(format!("workspace editor replacing in {path}"));
+        let result: Result<WorkspaceActionResult> = (|| {
+            let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
+            let original = fs::read_to_string(&resolved)
+                .with_context(|| format!("failed to read {}", resolved.display()))?;
+            if !original.contains(old) {
+                bail!("pattern not found in {}", resolved.display());
+            }
+            let updated = if replace_all {
+                original.replace(old, new)
+            } else {
+                original.replacen(old, new, 1)
+            };
+            fs::write(&resolved, &updated)
+                .with_context(|| format!("failed to write {}", resolved.display()))?;
+            let rel = relative_path(&self.workspace_root, &resolved);
+            let applied_edit = build_applied_edit(&rel, &original, &updated)?;
+            Ok(WorkspaceActionResult {
+                name: "replace_in_file".to_string(),
+                summary: summarize_applied_edit("replace_in_file", &applied_edit),
+                applied_edit: Some(applied_edit),
+            })
+        })();
+        match &result {
+            Ok(_) => {
+                self.record_execution_finished(
+                    format!("workspace editor completed replace_in_file for {path}"),
+                    None,
+                );
+            }
+            Err(error) => {
+                self.record_execution_finished(
+                    format!("workspace editor replace_in_file for {path} failed"),
+                    Some(error.to_string()),
+                );
+            }
         }
-        let updated = if replace_all {
-            original.replace(old, new)
-        } else {
-            original.replacen(old, new, 1)
-        };
-        fs::write(&resolved, &updated)
-            .with_context(|| format!("failed to write {}", resolved.display()))?;
-        let rel = relative_path(&self.workspace_root, &resolved);
-        let applied_edit = build_applied_edit(&rel, &original, &updated)?;
-        Ok(WorkspaceActionResult {
-            name: "replace_in_file".to_string(),
-            summary: summarize_applied_edit("replace_in_file", &applied_edit),
-            applied_edit: Some(applied_edit),
-        })
+        result
     }
 
     fn apply_patch(&self, patch: &str) -> Result<WorkspaceActionResult> {
-        let patch_paths = extract_diff_paths(patch);
-        if patch_paths.is_empty() {
-            bail!("patch does not target an authored workspace file");
-        }
-        let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
-        for path in &patch_paths {
-            ensure_authored_workspace_path(&path_policy, path)?;
-        }
+        self.record_execution_started("workspace editor applying patch");
+        let result: Result<WorkspaceActionResult> = (|| {
+            let patch_paths = extract_diff_paths(patch);
+            if patch_paths.is_empty() {
+                bail!("patch does not target an authored workspace file");
+            }
+            let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
+            for path in &patch_paths {
+                ensure_authored_workspace_path(&path_policy, path)?;
+            }
 
-        let mut child = Command::new("git")
-            .arg("apply")
-            .arg("--whitespace=nowarn")
-            .arg("-")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .current_dir(&self.workspace_root)
-            .spawn()
-            .context("failed to spawn git apply")?;
+            let mut child = Command::new("git")
+                .arg("apply")
+                .arg("--whitespace=nowarn")
+                .arg("-")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .current_dir(&self.workspace_root)
+                .spawn()
+                .context("failed to spawn git apply")?;
 
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin
-                .write_all(patch.as_bytes())
-                .context("failed to write patch to git apply")?;
-        }
+            if let Some(stdin) = child.stdin.as_mut() {
+                stdin
+                    .write_all(patch.as_bytes())
+                    .context("failed to write patch to git apply")?;
+            }
 
-        let output = child
-            .wait_with_output()
-            .context("failed to wait for git apply")?;
-        let summary =
-            summarize_apply_patch_result(patch, "git apply --whitespace=nowarn -", &output);
-        if !output.status.success() {
-            bail!("{summary}");
+            let output = child
+                .wait_with_output()
+                .context("failed to wait for git apply")?;
+            let summary =
+                summarize_apply_patch_result(patch, "git apply --whitespace=nowarn -", &output);
+            if !output.status.success() {
+                bail!("{summary}");
+            }
+            let applied_edit = build_patch_applied_edit(patch);
+            Ok(WorkspaceActionResult {
+                name: "apply_patch".to_string(),
+                summary: summarize_applied_edit("apply_patch", &applied_edit),
+                applied_edit: Some(applied_edit),
+            })
+        })();
+        match &result {
+            Ok(_) => {
+                self.record_execution_finished("workspace editor completed apply_patch", None);
+            }
+            Err(error) => {
+                self.record_execution_finished(
+                    "workspace editor apply_patch failed",
+                    Some(error.to_string()),
+                );
+            }
         }
-        let applied_edit = build_patch_applied_edit(patch);
-        Ok(WorkspaceActionResult {
-            name: "apply_patch".to_string(),
-            summary: summarize_applied_edit("apply_patch", &applied_edit),
-            applied_edit: Some(applied_edit),
-        })
+        result
     }
 }
 
@@ -410,8 +548,11 @@ fn relative_path(workspace_root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::LocalWorkspaceEditor;
-    use crate::domain::ports::WorkspaceEditor;
+    use crate::domain::model::{ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase};
+    use crate::domain::ports::{ExecutionHand, WorkspaceEditor};
+    use crate::infrastructure::execution_hand::ExecutionHandRegistry;
     use std::fs;
+    use std::sync::Arc;
 
     #[test]
     fn edit_actions_return_structured_applied_edit_artifacts() {
@@ -532,5 +673,33 @@ mod tests {
                 .to_string()
                 .contains("outside the authored workspace boundary")
         );
+    }
+
+    #[test]
+    fn workspace_editor_reports_hand_execution_diagnostics_after_successful_write() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        let editor = LocalWorkspaceEditor::with_execution_hand_registry(
+            workspace.path(),
+            Arc::clone(&registry),
+        );
+
+        editor
+            .write_file("notes.txt", "alpha\n")
+            .expect("write_file result");
+
+        let diagnostic = editor.diagnostic();
+        assert_eq!(diagnostic.hand, ExecutionHandKind::WorkspaceEditor);
+        assert_eq!(diagnostic.phase, ExecutionHandPhase::Ready);
+        assert_eq!(
+            diagnostic.last_operation,
+            Some(ExecutionHandOperation::Execute)
+        );
+        assert!(diagnostic.summary.contains("write_file"));
+
+        let registry_diagnostic = registry
+            .diagnostic(ExecutionHandKind::WorkspaceEditor)
+            .expect("workspace editor diagnostic");
+        assert_eq!(registry_diagnostic, diagnostic);
     }
 }

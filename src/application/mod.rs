@@ -8,7 +8,7 @@ use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
-use crate::infrastructure::terminal::run_background_terminal_command;
+use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
 
@@ -3229,6 +3229,7 @@ impl MechSuitService {
                             });
                             match run_planner_inspect_command(
                                 &self.workspace_root,
+                                self.execution_hand_registry(),
                                 command,
                                 &call_id,
                                 trace.as_ref(),
@@ -3274,6 +3275,7 @@ impl MechSuitService {
                         });
                         match run_planner_shell_command(
                             &self.workspace_root,
+                            self.execution_hand_registry(),
                             command,
                             &call_id,
                             trace.as_ref(),
@@ -6742,13 +6744,20 @@ fn append_evidence_item(target: &mut Vec<EvidenceItem>, item: EvidenceItem, limi
 
 fn run_planner_inspect_command(
     workspace_root: &Path,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
     command: &str,
     call_id: &str,
     event_sink: &dyn TurnEventSink,
 ) -> Result<String> {
     validate_inspect_command(command)?;
-    let output =
-        run_background_terminal_command(workspace_root, command, "inspect", call_id, event_sink)?;
+    let output = run_background_terminal_command_with_execution_hand_registry(
+        workspace_root,
+        command,
+        "inspect",
+        call_id,
+        event_sink,
+        execution_hand_registry,
+    )?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let rendered = if stderr.trim().is_empty() {
@@ -6762,12 +6771,19 @@ fn run_planner_inspect_command(
 
 fn run_planner_shell_command(
     workspace_root: &Path,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
     command: &str,
     call_id: &str,
     event_sink: &dyn TurnEventSink,
 ) -> Result<String> {
-    let output =
-        run_background_terminal_command(workspace_root, command, "shell", call_id, event_sink)?;
+    let output = run_background_terminal_command_with_execution_hand_registry(
+        workspace_root,
+        command,
+        "shell",
+        call_id,
+        event_sink,
+        execution_hand_registry,
+    )?;
     let summary = format_command_output_summary(command, &output);
     if !output.status.success() {
         anyhow::bail!("{summary}");

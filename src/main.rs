@@ -28,6 +28,7 @@ use paddles::infrastructure::config::{
 };
 use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
+use paddles::infrastructure::execution_hand::ExecutionHandRegistry;
 use paddles::infrastructure::native_transport::{
     NativeTransportRegistry, record_binding_started, record_bound_transport,
     record_transport_failure, resolve_shared_web_bind_target,
@@ -168,13 +169,15 @@ fn resolve_remote_provider_config(
 
 fn build_synthesizer_engine(
     workspace: &Path,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
     lane: &PreparedModelLane,
     credential_store: &CredentialStore,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn SynthesizerEngine>> {
     match lane.provider {
-        ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new(
+        ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new_with_execution_hand_registry(
             workspace.to_path_buf(),
+            execution_hand_registry,
             &lane.model_id,
             lane.paths
                 .clone()
@@ -190,29 +193,34 @@ fn build_synthesizer_engine(
                 credential_store,
                 provider_url_overrides,
             )?;
-            Ok(Arc::new(HttpProviderAdapter::new(
-                workspace.to_path_buf(),
-                provider.name(),
-                lane.model_id.clone(),
-                api_key,
-                base_url,
-                format,
-                capabilities.render_capability,
-            )) as Arc<dyn SynthesizerEngine>)
+            Ok(
+                Arc::new(HttpProviderAdapter::new_with_execution_hand_registry(
+                    workspace.to_path_buf(),
+                    execution_hand_registry,
+                    provider.name(),
+                    lane.model_id.clone(),
+                    api_key,
+                    base_url,
+                    format,
+                    capabilities.render_capability,
+                )) as Arc<dyn SynthesizerEngine>,
+            )
         }
     }
 }
 
 fn build_planner_engine(
     workspace: &Path,
+    execution_hand_registry: Arc<ExecutionHandRegistry>,
     lane: &PreparedModelLane,
     credential_store: &CredentialStore,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn paddles::domain::ports::RecursivePlanner>> {
     match lane.provider {
         ModelProvider::Sift => {
-            let engine = Arc::new(SiftAgentAdapter::new(
+            let engine = Arc::new(SiftAgentAdapter::new_with_execution_hand_registry(
                 workspace.to_path_buf(),
+                execution_hand_registry,
                 &lane.model_id,
                 lane.paths.clone().ok_or_else(|| {
                     anyhow::anyhow!("local sift lane missing prepared model paths")
@@ -231,8 +239,9 @@ fn build_planner_engine(
                 credential_store,
                 provider_url_overrides,
             )?;
-            let engine = Arc::new(HttpProviderAdapter::new(
+            let engine = Arc::new(HttpProviderAdapter::new_with_execution_hand_registry(
                 workspace.to_path_buf(),
+                execution_hand_registry,
                 provider.name(),
                 lane.model_id.clone(),
                 api_key,
@@ -388,10 +397,13 @@ async fn main() -> Result<()> {
 
     let synth_credentials = Arc::clone(&credential_store);
     let synth_overrides = Arc::clone(&provider_url_overrides);
+    let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+    let synth_execution_hands = Arc::clone(&execution_hand_registry);
     let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
         Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
             build_synthesizer_engine(
                 workspace,
+                Arc::clone(&synth_execution_hands),
                 lane,
                 synth_credentials.as_ref(),
                 synth_overrides.as_ref(),
@@ -400,10 +412,12 @@ async fn main() -> Result<()> {
 
     let planner_credentials = Arc::clone(&credential_store);
     let planner_overrides = Arc::clone(&provider_url_overrides);
+    let planner_execution_hands = Arc::clone(&execution_hand_registry);
     let planner_factory: Box<paddles::application::PlannerFactory> =
         Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
             build_planner_engine(
                 workspace,
+                Arc::clone(&planner_execution_hands),
                 lane,
                 planner_credentials.as_ref(),
                 planner_overrides.as_ref(),
@@ -465,6 +479,7 @@ async fn main() -> Result<()> {
         gatherer_factory,
         trace_recorder.clone(),
     ));
+    service.set_execution_hand_registry(Arc::clone(&execution_hand_registry));
     service.set_conversation_history_store(conversation_history_store);
     let native_transport_registry = Arc::new(NativeTransportRegistry::new(
         config.native_transports.clone(),

@@ -459,6 +459,11 @@ That vocabulary is session-scoped and provider-agnostic. Later workspace,
 terminal, and transport adapters should update the shared hand diagnostics
 surface rather than minting new state names for the same lifecycle transitions.
 
+`GET /health` and `GET /session/shared/bootstrap` both expose this
+`execution_hands` array beside `native_transports`, so operators can inspect
+the current workspace editor, terminal runner, and transport mediator posture
+from the same shared runtime surface they already use for transport readiness.
+
 ### Experimental Context-1 Boundary
 
 `context-1` is exposed as an explicit experimental gatherer provider, not as a

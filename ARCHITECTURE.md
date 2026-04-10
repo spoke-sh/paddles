@@ -177,6 +177,11 @@ The internals path keeps raw record ids, trace ids, and payload content reachabl
 
 **`ExecutionHandBoundary`** names the local action surfaces the controller can trust to do work on its behalf. Workspace editing, background terminal execution, and credential-bearing transport mediation now share one lifecycle vocabulary: `described`, `provisioning`, `ready`, `executing`, `recovering`, `degraded`, and `failed`. Later adapters should record into that shared hand surface instead of inventing local readiness names.
 
+The shared runtime surfaces now expose that hand state directly. `GET /health`
+and `GET /session/shared/bootstrap` both publish the session hand diagnostics so
+operators can inspect workspace, terminal, and transport posture from the same
+entry points they already use for recorder and transport health.
+
 **`ConversationThreadLayer`** maintains one durable conversation root across interactive sessions. Steering prompts become structured thread candidates, classified by a model into continuation, child-thread, or merge-back decisions — preserving full lineage for replay and analysis.
 
 ## Why This Shape Works
