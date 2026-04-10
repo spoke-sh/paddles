@@ -670,8 +670,16 @@ The runtime recorder boundary is independent of transcript rendering:
 
 - **Default runtime policy**: embedded `transit-core` recorder rooted in machine-managed local state
 - **Available local adapters**: embedded `transit-core` and bounded in-memory fallback
-- **Shared session operations**: `wake`, full `replay`, `resume_from_checkpoint`, and deterministic `replay_slice`
+- **Shared session operations**: `wake`, full `replay`, `resume_from_checkpoint`, deterministic `replay_slice`, and higher-level `query_session_context`
 - **Fallback posture**: if the persistent session spine cannot open, Paddles degrades to in-memory recording and emits an explicit boot warning
 - **Growing edge**: a user-facing recorder-selection flag will land when the policy slice is ready
 
 This keeps the live runtime local-first and safe while making durable session recording the normal path instead of optional metadata.
+
+`query_session_context` is the stable harness-facing slice contract over the recorder:
+
+- `AdaptiveReplay { turn_limit }` yields recent turn-bounded transcript context and turn summaries
+- `Rewind { anchor, record_limit }` yields a deterministic backward slice from a task/turn/record/checkpoint/tail anchor
+- `CompactionWindow { anchor, before_record_limit, after_record_limit }` yields a bounded neighborhood around an anchor for non-destructive compaction and replay inspection
+
+The main runtime now asks the active session for an adaptive-replay slice before it falls back to persisted history or synthesizer-local summary caches. That keeps recent-turn handoff grounded in the durable session whenever recorder state is available.

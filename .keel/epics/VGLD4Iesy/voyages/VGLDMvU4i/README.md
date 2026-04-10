@@ -27,11 +27,11 @@ started_at: 2026-04-09T18:16:31
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Harness Profile Model For Steering And Compaction](../../../../stories/VGLDQBFqJ/README.md) | feat | done |
-| [Expose Session-Queryable Context Slices For Adaptive Replay](../../../../stories/VGLDQBYqH/README.md) | feat | backlog |
+| [Expose Session-Queryable Context Slices For Adaptive Replay](../../../../stories/VGLDQBYqH/README.md) | feat | done |
 | [Model Optional Specialist Brains Without Breaking The Recursive Planner](../../../../stories/VGLDQCIrB/README.md) | feat | backlog |
 <!-- END GENERATED -->

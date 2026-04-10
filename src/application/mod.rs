@@ -42,7 +42,7 @@ use crate::domain::ports::{
     PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
     RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
     RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, TraceRecorder,
-    TraceRecorderCapability, WorkspaceAction,
+    TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -2178,8 +2178,17 @@ impl MechSuitService {
 
     fn recent_turn_summaries(
         &self,
+        session: &ConversationSession,
         synthesizer_engine: &dyn SynthesizerEngine,
     ) -> Result<Vec<String>> {
+        let session_slice = self.query_session_context_slice(
+            &session.task_id(),
+            TraceSessionContextQuery::AdaptiveReplay { turn_limit: 4 },
+        )?;
+        if !session_slice.turn_summaries.is_empty() {
+            return Ok(session_slice.turn_summaries);
+        }
+
         if let Some(store) = self.conversation_history_store() {
             let recent_turns = store.recent_turn_summaries()?;
             if !recent_turns.is_empty() {
@@ -2188,6 +2197,14 @@ impl MechSuitService {
         }
 
         synthesizer_engine.recent_turn_summaries()
+    }
+
+    pub fn query_session_context_slice(
+        &self,
+        task_id: &TaskTraceId,
+        query: TraceSessionContextQuery,
+    ) -> Result<crate::domain::ports::TraceSessionContextSlice> {
+        self.trace_recorder.query_session_context(task_id, &query)
     }
 
     fn persist_prompt_history(&self, prompt: &str) {
@@ -2611,7 +2628,7 @@ impl MechSuitService {
             capability: format_planner_capability(&planner_capability),
         });
 
-        let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
+        let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
         let recent_thread_summary = session.recent_thread_summary(&active_thread);
         let request = PlannerRequest::new(
             prompt,
@@ -2741,7 +2758,8 @@ impl MechSuitService {
 
         let planner_outcome = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
-                let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
+                let recent_turns =
+                    self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
 
                 // Resolve context artifacts using a transit-backed resolver if available.
                 let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
@@ -2990,7 +3008,7 @@ impl MechSuitService {
         });
         trace.record_thread_candidate(&candidate);
 
-        let recent_turns = self.recent_turn_summaries(synthesizer_engine.as_ref())?;
+        let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
         let active_thread = session.active_thread();
         let thread_request = ThreadDecisionRequest::new(
             self.workspace_root.clone(),
@@ -13343,6 +13361,188 @@ mod tests {
             recent_turns,
             vec!["Q: What happened? A: Shared completion helper reply.".to_string()]
         );
+    }
+
+    #[test]
+    fn recent_turn_summaries_prefer_session_context_slice_before_history_or_synth_fallback() {
+        #[derive(Default)]
+        struct StaticHistorySynthesizer;
+
+        impl SynthesizerEngine for StaticHistorySynthesizer {
+            fn set_verbose(&self, _level: u8) {}
+
+            fn respond_for_turn(
+                &self,
+                _prompt: &str,
+                _turn_intent: TurnIntent,
+                _gathered_evidence: Option<&EvidenceBundle>,
+                _handoff: &SynthesisHandoff,
+                _event_sink: Arc<dyn TurnEventSink>,
+            ) -> Result<String> {
+                Ok("unused".to_string())
+            }
+
+            fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+                Ok(vec!["synth fallback".to_string()])
+            }
+
+            fn execute_workspace_action(
+                &self,
+                _action: &WorkspaceAction,
+            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+                Err(anyhow!("unused"))
+            }
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let history_store = Arc::new(ConversationHistoryStore::with_path(
+            workspace.path().join("state/conversation-history.toml"),
+        ));
+        history_store
+            .record_turn("old prompt", "old reply")
+            .expect("record history turn");
+        service.set_conversation_history_store(Arc::clone(&history_store));
+
+        let session = service.shared_conversation_session();
+        record_completed_turn(
+            recorder.as_ref(),
+            &session.task_id(),
+            "task-root",
+            None,
+            1,
+            "fresh prompt",
+            Some("fresh reply"),
+        );
+
+        let summaries = service
+            .recent_turn_summaries(&session, &StaticHistorySynthesizer)
+            .expect("session recent turns");
+
+        assert_eq!(
+            summaries,
+            vec!["Q: fresh prompt A: fresh reply".to_string()]
+        );
+    }
+
+    fn record_completed_turn(
+        recorder: &dyn TraceRecorder,
+        task_id: &TaskTraceId,
+        turn_suffix: &str,
+        parent_record_id: Option<&str>,
+        sequence_start: u64,
+        prompt: &str,
+        reply: Option<&str>,
+    ) {
+        let turn_id = if turn_suffix == "task-root" {
+            paddles_conversation::TurnTraceId::new(format!("{}.turn-0001", task_id.as_str()))
+                .expect("turn id")
+        } else {
+            paddles_conversation::TurnTraceId::new(turn_suffix).expect("turn id")
+        };
+        let prompt_record_id =
+            paddles_conversation::TraceRecordId::new(format!("{turn_suffix}.record-0001"))
+                .expect("prompt record id");
+        let parent_record_id = parent_record_id
+            .map(|id| paddles_conversation::TraceRecordId::new(id).expect("parent record id"));
+        let prompt_kind = if sequence_start == 1 {
+            TraceRecordKind::TaskRootStarted(crate::domain::model::TraceTaskRoot {
+                prompt: crate::domain::model::ArtifactEnvelope::text(
+                    paddles_conversation::TraceArtifactId::new(format!(
+                        "{turn_suffix}.artifact.prompt"
+                    ))
+                    .expect("artifact"),
+                    crate::domain::model::ArtifactKind::Prompt,
+                    "prompt",
+                    prompt,
+                    256,
+                ),
+                interpretation: None,
+                planner_model: "planner".to_string(),
+                synthesizer_model: "synth".to_string(),
+                harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                    requested_profile_id: "recursive-structured-v1".to_string(),
+                    active_profile_id: "recursive-structured-v1".to_string(),
+                    downgrade_reason: None,
+                },
+            })
+        } else {
+            TraceRecordKind::TurnStarted(crate::domain::model::TraceTurnStarted {
+                prompt: crate::domain::model::ArtifactEnvelope::text(
+                    paddles_conversation::TraceArtifactId::new(format!(
+                        "{turn_suffix}.artifact.prompt"
+                    ))
+                    .expect("artifact"),
+                    crate::domain::model::ArtifactKind::Prompt,
+                    "prompt",
+                    prompt,
+                    256,
+                ),
+                interpretation: None,
+                planner_model: "planner".to_string(),
+                synthesizer_model: "synth".to_string(),
+                harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                    requested_profile_id: "recursive-structured-v1".to_string(),
+                    active_profile_id: "recursive-structured-v1".to_string(),
+                    downgrade_reason: None,
+                },
+                thread: crate::domain::model::ConversationThreadRef::Mainline,
+            })
+        };
+        recorder
+            .record(crate::domain::model::TraceRecord {
+                record_id: prompt_record_id.clone(),
+                sequence: sequence_start,
+                lineage: crate::domain::model::TraceLineage {
+                    task_id: task_id.clone(),
+                    turn_id: turn_id.clone(),
+                    branch_id: None,
+                    parent_record_id,
+                },
+                kind: prompt_kind,
+            })
+            .expect("record prompt");
+
+        if let Some(reply) = reply {
+            recorder
+                .record(crate::domain::model::TraceRecord {
+                    record_id: paddles_conversation::TraceRecordId::new(format!(
+                        "{turn_suffix}.record-0002"
+                    ))
+                    .expect("reply record id"),
+                    sequence: sequence_start + 1,
+                    lineage: crate::domain::model::TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id,
+                        branch_id: None,
+                        parent_record_id: Some(prompt_record_id),
+                    },
+                    kind: TraceRecordKind::CompletionCheckpoint(
+                        crate::domain::model::TraceCompletionCheckpoint {
+                            checkpoint_id: paddles_conversation::TraceCheckpointId::new(format!(
+                                "{turn_suffix}.checkpoint"
+                            ))
+                            .expect("checkpoint"),
+                            kind: crate::domain::model::TraceCheckpointKind::TurnCompleted,
+                            summary: "done".to_string(),
+                            response: Some(crate::domain::model::ArtifactEnvelope::text(
+                                paddles_conversation::TraceArtifactId::new(format!(
+                                    "{turn_suffix}.artifact.reply"
+                                ))
+                                .expect("artifact"),
+                                crate::domain::model::ArtifactKind::ModelOutput,
+                                "reply",
+                                reply,
+                                256,
+                            )),
+                            citations: Vec::new(),
+                            grounded: true,
+                        },
+                    ),
+                })
+                .expect("record reply");
+        }
     }
 
     #[test]

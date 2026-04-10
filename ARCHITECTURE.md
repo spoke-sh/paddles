@@ -528,12 +528,13 @@ The recorder path delivers storage-neutral trace durability:
 
 This design keeps the domain storage-neutral while providing lineage durable enough for replay, branch comparison, and graph-trace analysis.
 
-The durable session contract now names four higher-level operations that later harness layers can depend on without caring which recorder adapter is underneath:
+The durable session contract now names five higher-level operations that later harness layers can depend on without caring which recorder adapter is underneath:
 
 - `wake(task_id)` discovers the latest record position and known checkpoint cursors for a prior task
 - `replay(task_id)` reconstructs the full ordered lineage
 - `resume_from_checkpoint(task_id, checkpoint_id)` resumes from a named checkpoint via a forward replay slice
 - `replay_slice(task_id, request)` interrogates a deterministic forward or backward slice anchored at a task root, turn, branch, record, checkpoint, or tail
+- `query_session_context(task_id, query)` resolves an explicit adaptive-replay, rewind, or compaction-oriented session slice with transcript projection included
 
 When persistent transit state cannot be opened, the runtime degrades to the in-memory adapter instead of failing open into missing traces. That degraded posture is explicit through the recorder capability and boot diagnostics, so operators can tell when session durability is bounded to the current process.
 
@@ -555,6 +556,16 @@ Context in Paddles spans four tiers with increasing depth and decreasing immedia
 Every `ArtifactEnvelope` carries an optional typed `ContextLocator` that encodes which tier holds the full content and how to reach it. When inline content is truncated, the locator points to the full record in transit or on disk. Consumers call `resolver.resolve(&locator)` to retrieve full content on demand — resolution is lazy, pull-based, and never eagerly loads deeper tiers.
 
 Resolution follows a local-first ordering: inline content returns immediately, transit replays local streams, filesystem reads local disk. When a tier is unavailable or a record is missing, resolution fails closed with an explicit error naming the tier and locator details.
+
+### Session-Queryable Slices
+
+Adaptive harness work should not have to reinvent replay semantics on top of raw records. `query_session_context(...)` is the stable bridge between the durable session and later controller/profile logic:
+
+- `AdaptiveReplay { turn_limit }` returns the most recent turn-bounded transcript slice plus `Q: ... A: ...` summaries suitable for handoff
+- `Rewind { anchor, record_limit }` returns a deterministic backward slice anchored at a turn, record, checkpoint, branch, or tail
+- `CompactionWindow { anchor, before_record_limit, after_record_limit }` returns a bounded neighborhood around an anchor so compaction can preserve locators while reducing prompt pressure
+
+The application now uses the adaptive-replay slice as the first source for recent-turn handoff, falling back to persisted history and then synthesizer-local summaries only when the active session has no durable turn context yet.
 
 ### Compaction Planning Today
 

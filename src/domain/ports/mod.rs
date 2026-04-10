@@ -39,7 +39,8 @@ pub use synthesis::{SynthesisHandoff, SynthesizerEngine, WorkspaceActionResult};
 pub use trace_recording::{
     NoopTraceRecorder, TraceRecorder, TraceRecorderCapability, TraceReplaySlice,
     TraceReplaySliceAnchor, TraceReplaySliceDirection, TraceReplaySliceRequest,
-    TraceSessionCheckpointCursor, TraceSessionWake,
+    TraceSessionCheckpointCursor, TraceSessionContextQuery, TraceSessionContextSlice,
+    TraceSessionWake,
 };
 pub use workspace_editing::WorkspaceEditor;
 

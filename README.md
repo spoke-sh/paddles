@@ -314,8 +314,15 @@ The recorder boundary now names four storage-neutral session operations:
 - `replay(task_id)` returns the full ordered lineage for that task
 - `resume_from_checkpoint(task_id, checkpoint_id)` returns the forward replay slice anchored at the named checkpoint
 - `replay_slice(task_id, request)` returns a forward or backward slice anchored at a task root, turn, branch, record, checkpoint, or tail
+- `query_session_context(task_id, query)` returns an explicit adaptive-replay, rewind, or compaction window slice with transcript entries and turn summaries
 
 Those semantics are stable across recorder adapters. Embedded `transit-core` is now the default session spine and persists under machine-managed local state. When that persistent path cannot be opened, Paddles falls back to in-memory recording with the same wake/replay/slice contract and an explicit degraded-session warning.
+
+`query_session_context(...)` is the higher-level harness seam. Today it exposes three explicit slice modes:
+
+- `AdaptiveReplay { turn_limit }` selects the most recent completed turns as replayable transcript context
+- `Rewind { anchor, record_limit }` walks backward from a deterministic trace anchor without rebuilding the whole prompt window
+- `CompactionWindow { anchor, before_record_limit, after_record_limit }` returns a bounded neighborhood around an anchor so compaction logic can prune or summarize without destructive prompt-only summaries
 
 ## Design Principles
 
