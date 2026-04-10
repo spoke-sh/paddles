@@ -124,6 +124,11 @@ mod tests {
                 interpretation: None,
                 planner_model: "qwen-1.5b".to_string(),
                 synthesizer_model: "qwen-1.5b".to_string(),
+                harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                    requested_profile_id: "recursive-structured-v1".to_string(),
+                    active_profile_id: "recursive-structured-v1".to_string(),
+                    downgrade_reason: None,
+                },
             }),
         };
 

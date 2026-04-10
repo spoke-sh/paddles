@@ -357,11 +357,19 @@ pub struct TraceCompletionCheckpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceHarnessProfileSelection {
+    pub requested_profile_id: String,
+    pub active_profile_id: String,
+    pub downgrade_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceTaskRoot {
     pub prompt: ArtifactEnvelope,
     pub interpretation: Option<ArtifactEnvelope>,
     pub planner_model: String,
     pub synthesizer_model: String,
+    pub harness_profile: TraceHarnessProfileSelection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +378,7 @@ pub struct TraceTurnStarted {
     pub interpretation: Option<ArtifactEnvelope>,
     pub planner_model: String,
     pub synthesizer_model: String,
+    pub harness_profile: TraceHarnessProfileSelection,
     pub thread: ConversationThreadRef,
 }
 

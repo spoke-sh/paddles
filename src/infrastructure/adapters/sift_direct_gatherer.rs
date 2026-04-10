@@ -391,7 +391,7 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         let planner = PlannerTraceMetadata {
             mode: request.planning.mode,
             strategy: request.planning.planner_strategy.clone(),
-            profile: None,
+            profile: request.planning.profile.clone(),
             session_id: None,
             completed: true,
             stop_reason: Some("direct-retrieval".to_string()),

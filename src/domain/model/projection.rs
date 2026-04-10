@@ -219,6 +219,11 @@ mod tests {
                         interpretation: None,
                         planner_model: "planner".to_string(),
                         synthesizer_model: "synth".to_string(),
+                        harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                            requested_profile_id: "recursive-structured-v1".to_string(),
+                            active_profile_id: "recursive-structured-v1".to_string(),
+                            downgrade_reason: None,
+                        },
                     }),
                 },
                 TraceRecord {

@@ -191,6 +191,21 @@ That backend stays local-first and services bounded planner search.
 - Planner `search` and `refine` actions may now add `retrievers=["path-fuzzy"]` or `retrievers=["path-fuzzy","segment-fuzzy"]` when `sift` should bias toward structural fuzzy lookup.
 See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
+### Harness Profiles
+
+Paddles resolves an explicit harness profile from the prepared planner and synthesizer capability surfaces before each turn. The profile is not chosen by provider name. The current runtime contract is:
+
+- `recursive-structured-v1`: active when planner next-action transport and final-answer rendering both stay structured
+- `prompt-envelope-safe-v1`: explicit downgrade when prompt-envelope planner recovery or prompt-envelope rendering is required
+
+The active profile owns:
+
+- refinement policy for steering reviews
+- bounded compaction budget
+- recovery mode metadata for invalid model replies
+
+The selected profile and any downgrade reason are recorded on turn-start traces and reused in planner/gatherer metadata as the `profile` field.
+
 Current local model guidance on an 8 GB CUDA card:
 
 - `qwen-1.5b` is the default Qwen2 instruct local path.

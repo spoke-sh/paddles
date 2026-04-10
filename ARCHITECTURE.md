@@ -326,7 +326,22 @@ This is the steering-signal family that prevents the planner from repeatedly shr
 
 ### Compaction Cue
 
-Compaction is how the harness stays sharp under depth. The interface is designed for planner-driven compaction, but the current adapters still implement compaction with bounded heuristics. Pruned material is not lost; typed locators preserve reachability into transit and filesystem tiers.
+Compaction is how the harness stays sharp under depth. The interface is designed for planner-driven compaction, but the runtime now resolves an explicit harness profile before the turn starts and uses that profile to pick the bounded compaction budget and refinement policy. Pruned material is not lost; typed locators preserve reachability into transit and filesystem tiers.
+
+### Harness Profiles
+
+Harness profiles make steering and recovery policy explicit and versionable instead of burying them in provider-shaped branches. Today the runtime resolves one requested profile, `recursive-structured-v1`, from the planner and synthesizer capability surfaces:
+
+- stay on `recursive-structured-v1` when the planner can return structured next actions and the synthesizer can return structured final answers
+- downgrade to `prompt-envelope-safe-v1` when prompt-envelope planner recovery or prompt-envelope rendering is required
+
+The selected profile owns three bounded contracts:
+
+- steering refinement policy
+- compaction budget
+- recovery mode for invalid replies
+
+Selection and downgrade are recorded on turn-start trace records so replay-backed surfaces can explain which profile ran.
 
 ### Budget Boundary
 
@@ -543,7 +558,7 @@ Resolution follows a local-first ordering: inline content returns immediately, t
 
 ### Compaction Planning Today
 
-The compaction interface is shaped for recursive self-assessment, but the current planner adapters do not yet fully earn that label. Today a `CompactionEngine` walks retained evidence and applies bounded keep/compact/discard heuristics while preserving addressable locators to the pruned content. This keeps the working context tight without losing depth, but it is still more policy-driven than planner-judged.
+The compaction interface is shaped for recursive self-assessment, but the current planner adapters do not yet fully earn that label. Today a `CompactionEngine` walks retained evidence and applies bounded keep/compact/discard heuristics while preserving addressable locators to the pruned content. The difference now is that those bounds are selected through the active harness profile instead of being left as implicit provider-shaped defaults. This keeps the working context tight without losing depth, but it is still more policy-driven than planner-judged.
 
 ### Context Strain Signals
 

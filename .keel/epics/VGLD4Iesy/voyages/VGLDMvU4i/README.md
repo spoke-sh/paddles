@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGLDMvU4i
-status: planned
+status: in-progress
 epic: VGLD4Iesy
 created_at: 2026-04-09T16:55:17
 # authored
 title: Add Adaptive Harness Profiles And Specialist Brains
 index: 3
 updated_at: 2026-04-09T16:58:07
+started_at: 2026-04-09T18:16:31
 ---
 
 # Add Adaptive Harness Profiles And Specialist Brains
@@ -26,11 +27,11 @@ updated_at: 2026-04-09T16:58:07
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Harness Profile Model For Steering And Compaction](../../../../stories/VGLDQBFqJ/README.md) | feat | backlog |
+| [Define Harness Profile Model For Steering And Compaction](../../../../stories/VGLDQBFqJ/README.md) | feat | done |
 | [Expose Session-Queryable Context Slices For Adaptive Replay](../../../../stories/VGLDQBYqH/README.md) | feat | backlog |
 | [Model Optional Specialist Brains Without Breaking The Recursive Planner](../../../../stories/VGLDQCIrB/README.md) | feat | backlog |
 <!-- END GENERATED -->

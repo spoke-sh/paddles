@@ -144,7 +144,8 @@ The systems serve different jobs:
 - **Deterministic entity resolution** self-discovers authored workspace paths for edit-oriented hints before broad search or mutation and records whether the target resolved, remained ambiguous, or went missing.
 - **Known-edit headroom** keeps edit turns bounded but leaves enough read/inspect/search budget to inspect a few candidate files before the workspace-editor boundary closes the loop.
 - **Premise challenge** injects a steering-review note back into the planner when gathered sources start to outweigh the original premise, so the model must decide whether to stop, revise, or keep investigating.
-- **Compaction cue** keeps the active context tight by summarizing or pruning low-value artifacts while preserving locators to the deeper record. Today that compaction policy is still mostly heuristic rather than fully model-judged.
+- **Harness profiles** make steering and compaction explicit. Paddles now resolves a versioned profile from capability surfaces instead of provider names: `recursive-structured-v1` stays active when planner and render transports stay structured, while `prompt-envelope-safe-v1` is an explicit downgrade when prompt-envelope recovery or rendering is required.
+- **Compaction cue** keeps the active context tight by summarizing or pruning low-value artifacts while preserving locators to the deeper record. The active harness profile now owns the bounded compaction budget instead of leaving that policy as an invisible provider-shaped heuristic.
 - **Budget boundary** terminates recursive work when step, search, inspect, or read caps have been reached.
 
 The important invariant is that steering signals become stronger as real evidence accumulates. A user claim can start the investigation, but gathered sources get the final say.

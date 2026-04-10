@@ -6,6 +6,7 @@ use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+use crate::infrastructure::harness_profile::HarnessProfileSelection;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
@@ -23,12 +24,12 @@ use crate::domain::model::{
     PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
     StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
     ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
-    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -232,6 +233,19 @@ impl PreparedRuntimeLanes {
     pub fn default_response_lane(&self) -> &PreparedModelLane {
         &self.synthesizer
     }
+
+    pub fn harness_profile(&self) -> HarnessProfileSelection {
+        HarnessProfileSelection::resolve(
+            &self
+                .planner
+                .provider
+                .capability_surface(&self.planner.model_id),
+            &self
+                .synthesizer
+                .provider
+                .capability_surface(&self.synthesizer.model_id),
+        )
+    }
 }
 
 struct ActiveRuntimeState {
@@ -433,6 +447,12 @@ impl StructuredTurnTrace {
                 true
             }
         };
+        let harness_profile = prepared.harness_profile();
+        let trace_harness_profile = TraceHarnessProfileSelection {
+            requested_profile_id: harness_profile.requested.id().to_string(),
+            active_profile_id: harness_profile.active.id().to_string(),
+            downgrade_reason: harness_profile.downgrade_reason.clone(),
+        };
 
         if record_task_root {
             self.record_kind(
@@ -442,6 +462,7 @@ impl StructuredTurnTrace {
                     interpretation: interpretation_artifact,
                     planner_model: prepared.planner.model_id.clone(),
                     synthesizer_model: prepared.synthesizer.model_id.clone(),
+                    harness_profile: trace_harness_profile,
                 }),
             );
             self.record_lineage_edge(
@@ -461,6 +482,7 @@ impl StructuredTurnTrace {
                 interpretation: interpretation_artifact,
                 planner_model: prepared.planner.model_id.clone(),
                 synthesizer_model: prepared.synthesizer.model_id.clone(),
+                harness_profile: trace_harness_profile,
                 thread: self.active_thread.clone(),
             }),
         );
@@ -2233,6 +2255,7 @@ impl MechSuitService {
             .with_mode(mode)
             .with_retrieval_strategy(strategy)
             .with_retrievers(retrievers)
+            .with_profile(context.prepared.harness_profile().active_profile_id())
             .with_step_limit(1);
         let capability = gatherer.capability_for_planning(&planning);
 
@@ -3076,8 +3099,10 @@ impl MechSuitService {
         let base_budget =
             planner_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
         let mut budget = planner_budget_for_replan_attempt(&base_budget, 0);
+        let harness_profile = context.prepared.harness_profile();
         let mut loop_state = PlannerLoopState {
             target_resolution: context.initial_edit.resolution.clone(),
+            refinement_policy: harness_profile.active_refinement_policy(),
             ..PlannerLoopState::default()
         };
         if let Some(checklist) = execution_checklist.as_ref() {
@@ -6916,7 +6941,7 @@ fn build_planner_evidence_bundle(
             .map(|planner| planner.mode)
             .unwrap_or_default(),
         strategy: PlannerStrategyKind::ModelDriven,
-        profile: Some(prepared.planner.model_id.clone()),
+        profile: Some(prepared.harness_profile().active_profile_id().to_string()),
         session_id: latest_gatherer_trace
             .as_ref()
             .and_then(|planner| planner.session_id.clone()),
@@ -7108,10 +7133,10 @@ mod tests {
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
         ConversationTranscriptUpdate, ExecutionHandAuthority, ExecutionHandKind,
         ExecutionHandPhase, ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink,
-        ForensicUpdateSink, StrainFactor, TaskTraceId, ThreadDecision, ThreadDecisionId,
-        ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation, TraceModelExchangeCategory,
-        TraceModelExchangeLane, TraceModelExchangePhase, TraceRecordKind, TraceSignalKind,
-        TranscriptUpdateSink, TurnEvent, TurnEventSink,
+        ForensicUpdateSink, NullTurnEventSink, StrainFactor, TaskTraceId, ThreadDecision,
+        ThreadDecisionId, ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation,
+        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
+        TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EntityLookupMode,
@@ -7751,6 +7776,83 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn prepare_runtime_lanes_resolves_structured_harness_profile_without_downgrade() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let service = MechSuitService::new(
+            workspace.path(),
+            registry,
+            operator_memory,
+            Box::new(|_, _lane| {
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(|_, _lane| {
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::new(Mutex::new(Vec::new())),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(|_, _, _, _| Ok(None)),
+        );
+        let config = RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Openai)
+            .with_planner_provider(Some(ModelProvider::Google))
+            .with_planner_model_id(Some("gemini-2.5-flash".to_string()));
+
+        let prepared = service
+            .prepare_runtime_lanes(&config)
+            .await
+            .expect("prepare runtime lanes");
+
+        let selection = prepared.harness_profile();
+        assert_eq!(selection.requested.id(), "recursive-structured-v1");
+        assert_eq!(selection.active.id(), "recursive-structured-v1");
+        assert_eq!(selection.downgrade_reason, None);
+    }
+
+    #[tokio::test]
+    async fn prepare_runtime_lanes_downgrades_harness_profile_when_prompt_envelopes_are_required() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let service = MechSuitService::new(
+            workspace.path(),
+            registry,
+            operator_memory,
+            Box::new(|_, _lane| {
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(|_, _lane| {
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::new(Mutex::new(Vec::new())),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(|_, _, _, _| Ok(None)),
+        );
+        let config = RuntimeLaneConfig::new("claude-sonnet-4-20250514".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Anthropic)
+            .with_planner_provider(Some(ModelProvider::Anthropic))
+            .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
+
+        let prepared = service
+            .prepare_runtime_lanes(&config)
+            .await
+            .expect("prepare runtime lanes");
+
+        let selection = prepared.harness_profile();
+        assert_eq!(selection.requested.id(), "recursive-structured-v1");
+        assert_eq!(selection.active.id(), "prompt-envelope-safe-v1");
+        assert_eq!(
+            selection.downgrade_reason.as_deref(),
+            Some("planner next-action transport requires prompt-envelope recovery")
+        );
+    }
+
     #[test]
     fn prepared_runtime_lanes_keep_synthesizer_as_default_response_lane() {
         let planner = MechSuitService::build_lane(
@@ -8233,6 +8335,59 @@ mod tests {
             TurnEvent::HarnessState { snapshot }
                 if snapshot.chamber == crate::domain::model::HarnessChamber::Rendering
         )));
+    }
+
+    #[test]
+    fn task_root_trace_records_resolved_harness_profile_selection() {
+        let task_id = TaskTraceId::new("task-harness-profile").expect("task");
+        let session = ConversationSession::new(task_id.clone());
+        let turn_id = session.allocate_turn_id();
+        let active_thread = session.active_thread().thread_ref;
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let prepared = PreparedRuntimeLanes {
+            planner: MechSuitService::build_lane(
+                RuntimeLaneRole::Planner,
+                ModelProvider::Anthropic,
+                "claude-sonnet-4-20250514",
+                None,
+            ),
+            synthesizer: MechSuitService::build_lane(
+                RuntimeLaneRole::Synthesizer,
+                ModelProvider::Anthropic,
+                "claude-sonnet-4-20250514",
+                None,
+            ),
+            gatherer: None,
+        };
+        let trace = StructuredTurnTrace::new(
+            Arc::new(NullTurnEventSink),
+            recorder.clone(),
+            Vec::new(),
+            session,
+            turn_id,
+            active_thread,
+        );
+
+        trace.record_turn_start(
+            "Record this turn",
+            &InterpretationContext::default(),
+            &prepared,
+        );
+
+        let replay = recorder.replay(&task_id).expect("replay");
+        let Some(TraceRecordKind::TaskRootStarted(root)) =
+            replay.records.first().map(|record| &record.kind)
+        else {
+            panic!("expected task root trace record");
+        };
+        assert_eq!(
+            root.harness_profile.active_profile_id,
+            "prompt-envelope-safe-v1"
+        );
+        assert_eq!(
+            root.harness_profile.downgrade_reason.as_deref(),
+            Some("planner next-action transport requires prompt-envelope recovery")
+        );
     }
 
     #[test]
