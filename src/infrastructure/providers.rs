@@ -1,3 +1,4 @@
+use crate::infrastructure::rendering::RenderCapability;
 use clap::ValueEnum;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
@@ -23,6 +24,39 @@ pub enum ProviderAuthRequirement {
     None,
     OptionalApiKey,
     RequiredApiKey,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiFormat {
+    OpenAi,
+    Anthropic,
+    Gemini,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlannerToolCallCapability {
+    NativeFunctionTool,
+    StructuredJsonEnvelope,
+    PromptEnvelope,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderTransportSupport {
+    Supported,
+    Unsupported { reason: String },
+}
+
+/// Shared provider/runtime contract that the harness negotiates from a
+/// provider + model id pair before planner or synthesizer execution begins.
+///
+/// The rest of the runtime should consume this surface instead of matching on
+/// provider names when the behavior is conceptually shared across providers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelCapabilitySurface {
+    pub http_format: Option<ApiFormat>,
+    pub render_capability: RenderCapability,
+    pub planner_tool_call: PlannerToolCallCapability,
+    pub transport_support: ProviderTransportSupport,
 }
 
 const OPENAI_MODELS: &[&str] = &[
@@ -173,20 +207,61 @@ impl ModelProvider {
     }
 
     pub fn supports_paddles_http_transport(self, model: &str) -> bool {
-        !matches!(self, Self::Openai) || !OPENAI_RESPONSES_ONLY_MODELS.contains(&model)
+        matches!(
+            self.capability_surface(model).transport_support,
+            ProviderTransportSupport::Supported
+        )
     }
 
     pub fn paddles_http_transport_error(self, model: &str) -> Option<String> {
-        if self.supports_paddles_http_transport(model) {
-            return None;
+        match self.capability_surface(model).transport_support {
+            ProviderTransportSupport::Supported => None,
+            ProviderTransportSupport::Unsupported { reason } => Some(reason),
         }
+    }
 
-        match self {
-            Self::Openai => Some(format!(
-                "Model `{}` is Responses API only and is not supported by Paddles' current OpenAI transport. Paddles currently uses Chat Completions with structured JSON/tool calls. Choose `openai:gpt-5.4`, `openai:gpt-5.4-mini`, or `openai:gpt-4o` instead.",
-                self.qualified_model_label(model)
-            )),
-            _ => None,
+    pub fn capability_surface(self, model: &str) -> ModelCapabilitySurface {
+        let normalized_model = self.normalize_model_alias(model);
+        let transport_support = match self {
+            Self::Openai if OPENAI_RESPONSES_ONLY_MODELS.contains(&normalized_model.as_str()) => {
+                ProviderTransportSupport::Unsupported {
+                    reason: format!(
+                        "Model `{}` is Responses API only and is not supported by Paddles' current OpenAI transport. Paddles currently uses Chat Completions with structured JSON/tool calls. Choose `openai:gpt-5.4`, `openai:gpt-5.4-mini`, or `openai:gpt-4o` instead.",
+                        self.qualified_model_label(&normalized_model)
+                    ),
+                }
+            }
+            _ => ProviderTransportSupport::Supported,
+        };
+
+        let (http_format, render_capability, planner_tool_call) = match self {
+            Self::Sift => (
+                None,
+                RenderCapability::PromptEnvelope,
+                PlannerToolCallCapability::PromptEnvelope,
+            ),
+            Self::Openai | Self::Inception | Self::Moonshot | Self::Ollama => (
+                Some(ApiFormat::OpenAi),
+                RenderCapability::OpenAiJsonSchema,
+                PlannerToolCallCapability::NativeFunctionTool,
+            ),
+            Self::Anthropic => (
+                Some(ApiFormat::Anthropic),
+                RenderCapability::AnthropicToolUse,
+                PlannerToolCallCapability::PromptEnvelope,
+            ),
+            Self::Google => (
+                Some(ApiFormat::Gemini),
+                RenderCapability::GeminiJsonSchema,
+                PlannerToolCallCapability::StructuredJsonEnvelope,
+            ),
+        };
+
+        ModelCapabilitySurface {
+            http_format,
+            render_capability,
+            planner_tool_call,
+            transport_support,
         }
     }
 
@@ -216,7 +291,11 @@ pub fn known_state_space_models() -> Vec<KnownModel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelProvider, ProviderAuthRequirement, known_state_space_models};
+    use super::{
+        ApiFormat, ModelProvider, PlannerToolCallCapability, ProviderAuthRequirement,
+        ProviderTransportSupport, known_state_space_models,
+    };
+    use crate::infrastructure::rendering::RenderCapability;
 
     #[test]
     fn moonshot_aliases_are_normalized() {
@@ -299,6 +378,37 @@ mod tests {
         assert!(error.contains("Responses API only"));
         assert!(error.contains("openai:gpt-5.4"));
         assert!(error.contains("openai:gpt-4o"));
+    }
+
+    #[test]
+    fn capability_surface_negotiates_shared_http_render_and_tool_call_behavior() {
+        let openai = ModelProvider::Openai.capability_surface("gpt-5.4");
+        assert_eq!(openai.http_format, Some(ApiFormat::OpenAi));
+        assert_eq!(openai.render_capability, RenderCapability::OpenAiJsonSchema);
+        assert_eq!(
+            openai.planner_tool_call,
+            PlannerToolCallCapability::NativeFunctionTool
+        );
+        assert!(matches!(
+            openai.transport_support,
+            ProviderTransportSupport::Supported
+        ));
+
+        let gemini = ModelProvider::Google.capability_surface("gemini-2.5-flash");
+        assert_eq!(gemini.http_format, Some(ApiFormat::Gemini));
+        assert_eq!(gemini.render_capability, RenderCapability::GeminiJsonSchema);
+        assert_eq!(
+            gemini.planner_tool_call,
+            PlannerToolCallCapability::StructuredJsonEnvelope
+        );
+
+        let sift = ModelProvider::Sift.capability_surface("qwen-1.5b");
+        assert_eq!(sift.http_format, None);
+        assert_eq!(sift.render_capability, RenderCapability::PromptEnvelope);
+        assert_eq!(
+            sift.planner_tool_call,
+            PlannerToolCallCapability::PromptEnvelope
+        );
     }
 
     #[test]

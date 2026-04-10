@@ -1170,12 +1170,10 @@ mod tests {
         ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
-    use crate::infrastructure::adapters::http_provider::{
-        ApiFormat, HttpPlannerAdapter, HttpProviderAdapter,
-    };
+    use crate::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
-    use crate::infrastructure::providers::ModelProvider;
+    use crate::infrastructure::providers::{ApiFormat, ModelProvider};
     use crate::infrastructure::rendering::RenderCapability;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;

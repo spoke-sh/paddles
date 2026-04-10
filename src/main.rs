@@ -12,9 +12,7 @@ use paddles::application::{
 use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
 use paddles::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
-use paddles::infrastructure::adapters::http_provider::{
-    ApiFormat, HttpPlannerAdapter, HttpProviderAdapter,
-};
+use paddles::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
 use paddles::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
@@ -34,8 +32,7 @@ use paddles::infrastructure::native_transport::{
     NativeTransportRegistry, record_binding_started, record_bound_transport,
     record_transport_failure, resolve_shared_web_bind_target,
 };
-use paddles::infrastructure::providers::ModelProvider;
-use paddles::infrastructure::rendering::RenderCapability;
+use paddles::infrastructure::providers::{ApiFormat, ModelCapabilitySurface, ModelProvider};
 use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
 
 /// The mech suit for the famous assistant, Paddles mate!
@@ -117,18 +114,6 @@ fn resolve_provider_from_name(configured: &str, field_name: &str) -> ModelProvid
     }
 }
 
-fn provider_api_format(provider: ModelProvider) -> Option<ApiFormat> {
-    match provider {
-        ModelProvider::Openai
-        | ModelProvider::Inception
-        | ModelProvider::Moonshot
-        | ModelProvider::Ollama => Some(ApiFormat::OpenAi),
-        ModelProvider::Anthropic => Some(ApiFormat::Anthropic),
-        ModelProvider::Google => Some(ApiFormat::Gemini),
-        ModelProvider::Sift => None,
-    }
-}
-
 fn ensure_remote_provider_transport_support(provider: ModelProvider, model_id: &str) -> Result<()> {
     if let Some(message) = provider.paddles_http_transport_error(model_id) {
         bail!("{message}");
@@ -141,8 +126,9 @@ fn resolve_remote_provider_config(
     model_id: &str,
     credential_store: &CredentialStore,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
-) -> Result<(ApiFormat, String, String, RenderCapability)> {
+) -> Result<(ApiFormat, String, String, ModelCapabilitySurface)> {
     ensure_remote_provider_transport_support(provider, model_id)?;
+    let capability_surface = provider.capability_surface(model_id);
 
     let resolved_api_key = credential_store.resolve_provider_api_key(provider);
     if provider.auth_requirement()
@@ -159,7 +145,7 @@ fn resolve_remote_provider_config(
         );
     }
 
-    let api_format = provider_api_format(provider).ok_or_else(|| {
+    let api_format = capability_surface.http_format.ok_or_else(|| {
         anyhow::anyhow!(
             "provider `{}` does not use the HTTP adapter",
             provider.name()
@@ -172,12 +158,11 @@ fn resolve_remote_provider_config(
         .ok_or_else(|| {
             anyhow::anyhow!("provider `{}` does not define a base URL", provider.name())
         })?;
-    let render_capability = RenderCapability::resolve(provider.name(), model_id);
     Ok((
         api_format,
         base_url,
         resolved_api_key.value,
-        render_capability,
+        capability_surface,
     ))
 }
 
@@ -194,10 +179,12 @@ fn build_synthesizer_engine(
             lane.paths
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("local sift lane missing prepared model paths"))?,
-            RenderCapability::resolve(lane.provider.name(), &lane.model_id),
+            lane.provider
+                .capability_surface(&lane.model_id)
+                .render_capability,
         )?) as Arc<dyn SynthesizerEngine>),
         provider => {
-            let (format, base_url, api_key, render_capability) = resolve_remote_provider_config(
+            let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
                 provider,
                 &lane.model_id,
                 credential_store,
@@ -210,7 +197,7 @@ fn build_synthesizer_engine(
                 api_key,
                 base_url,
                 format,
-                render_capability,
+                capabilities.render_capability,
             )) as Arc<dyn SynthesizerEngine>)
         }
     }
@@ -230,13 +217,15 @@ fn build_planner_engine(
                 lane.paths.clone().ok_or_else(|| {
                     anyhow::anyhow!("local sift lane missing prepared model paths")
                 })?,
-                RenderCapability::resolve(lane.provider.name(), &lane.model_id),
+                lane.provider
+                    .capability_surface(&lane.model_id)
+                    .render_capability,
             )?);
             Ok(Arc::new(SiftPlannerAdapter::new(engine))
                 as Arc<dyn paddles::domain::ports::RecursivePlanner>)
         }
         provider => {
-            let (format, base_url, api_key, render_capability) = resolve_remote_provider_config(
+            let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
                 provider,
                 &lane.model_id,
                 credential_store,
@@ -249,7 +238,7 @@ fn build_planner_engine(
                 api_key,
                 base_url,
                 format,
-                render_capability,
+                capabilities.render_capability,
             ));
             Ok(Arc::new(HttpPlannerAdapter::new(engine))
                 as Arc<dyn paddles::domain::ports::RecursivePlanner>)

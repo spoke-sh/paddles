@@ -370,6 +370,27 @@ path is usable today without provider-native streaming/diffusion views.
 Workspace edits still execute locally through the shared workspace editor
 boundary, even when the planner lane is Inception-backed.
 
+### Negotiated Provider Capability Surface
+
+Remote lane behavior now resolves from one negotiated capability surface per
+provider/model pair instead of repeating provider-name branches in the runtime.
+That surface currently carries four shared decisions:
+
+- `http_format` — whether the lane uses the HTTP adapter and which wire format
+  it speaks (`OpenAi`, `Anthropic`, or `Gemini`)
+- `render_capability` — the strictest final-answer contract the synthesizer can
+  use (`OpenAiJsonSchema`, `AnthropicToolUse`, `GeminiJsonSchema`, or prompt
+  envelope fallback)
+- `planner_tool_call` — how the remote planner selects its next bounded action
+  (`NativeFunctionTool`, `StructuredJsonEnvelope`, or `PromptEnvelope`)
+- `transport_support` — whether the selected model is supported on the current
+  transport, plus an explicit operator-facing rejection reason when it is not
+
+When a future provider is added, extend this negotiated surface first. The
+controller, planner, and renderer should consume the shared capability record
+rather than branching on provider names for behavior that is conceptually the
+same.
+
 For the local `sift` provider, `bonsai-8b` is now available as an opt-in local
 model path:
 

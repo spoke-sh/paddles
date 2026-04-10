@@ -14,12 +14,9 @@ pub enum RenderCapability {
 
 impl RenderCapability {
     pub fn resolve(provider: &str, _model_id: &str) -> Self {
-        match provider {
-            "openai" | "inception" => Self::OpenAiJsonSchema,
-            "anthropic" => Self::AnthropicToolUse,
-            "google" => Self::GeminiJsonSchema,
-            _ => Self::PromptEnvelope,
-        }
+        crate::infrastructure::providers::ModelProvider::from_name(provider)
+            .map(|provider| provider.capability_surface(_model_id).render_capability)
+            .unwrap_or(Self::PromptEnvelope)
     }
 
     pub fn label(self) -> &'static str {

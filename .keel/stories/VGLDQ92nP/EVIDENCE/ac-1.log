@@ -1,0 +1,66 @@
+---
+recorded_at: 2026-04-09T17:23:26.358885457-07:00
+mode: manual
+files: [".keel/stories/VGLDQ92nP/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+---
+recorded_at: 2026-04-09T17:23:01.723188741-07:00
+mode: manual
+files: [".keel/stories/VGLDQ92nP/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+---
+recorded_at: 2026-04-09T17:22:43.438493164-07:00
+mode: manual
+files: [".keel/stories/VGLDQ92nP/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 1 test
+test infrastructure::providers::tests::capability_surface_negotiates_shared_http_render_and_tool_call_behavior ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 519 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-4e3950804ed20f43)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 1 test
+test infrastructure::adapters::http_provider::tests::openai_planner_uses_native_action_tool_and_parses_tool_calls ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 519 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-4e3950804ed20f43)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 1 test
+test infrastructure::adapters::http_provider::tests::openai_provider_executes_a_full_turn_against_a_mock_server ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 519 filtered out; finished in 1.60s
+
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-4e3950804ed20f43)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+
+
+

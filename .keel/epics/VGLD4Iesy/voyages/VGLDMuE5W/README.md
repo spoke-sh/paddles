@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VGLDMuE5W
-status: in-progress
+status: done
 epic: VGLD4Iesy
 created_at: 2026-04-09T16:55:17
 # authored
@@ -21,16 +21,18 @@ started_at: 2026-04-09T16:58:07
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Session Wake Slice And Checkpoint Contract](../../../../stories/VGLDQ7pnQ/README.md) | feat | done |
 | [Promote Embedded Transit Recorder To Default Session Spine](../../../../stories/VGLDQ8NnO/README.md) | feat | done |
-| [Replace Provider Branching With Negotiated Capability Surface](../../../../stories/VGLDQ92nP/README.md) | feat | backlog |
+| [Replace Provider Branching With Negotiated Capability Surface](../../../../stories/VGLDQ92nP/README.md) | feat | done |
 <!-- END GENERATED -->

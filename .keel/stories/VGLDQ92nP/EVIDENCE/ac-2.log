@@ -1,0 +1,32 @@
+---
+recorded_at: 2026-04-09T17:23:26.396254846-07:00
+mode: manual
+files: [".keel/stories/VGLDQ92nP/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+---
+recorded_at: 2026-04-09T17:23:01.760248886-07:00
+mode: manual
+files: [".keel/stories/VGLDQ92nP/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+---
+recorded_at: 2026-04-09T17:22:43.475952831-07:00
+mode: manual
+files: [".keel/stories/VGLDQ92nP/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+CONFIGURATION.md:132:- The **shared lane selection** is the default provider/model pair for both planner and synthesizer lanes.
+CONFIGURATION.md:375:Remote lane behavior now resolves from one negotiated capability surface per
+CONFIGURATION.md:376:provider/model pair instead of repeating provider-name branches in the runtime.
+CONFIGURATION.md:389:When a future provider is added, extend this negotiated surface first. The
+CONFIGURATION.md:410:provider/model pair and then uses the strictest supported transport for the
+ARCHITECTURE.md:60:**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles negotiates one shared provider capability surface from the selected provider/model pair and then uses that surface to resolve:
+ARCHITECTURE.md:64:- the planner tool-call shape when the planner is remote
+README.md:326:- Remote provider behavior now resolves from one negotiated capability surface per provider/model pair: HTTP wire format, final-answer render contract, planner tool-call shape, and transport support. Adding a future provider should extend that surface instead of forking controller logic by provider name.
+
+
+

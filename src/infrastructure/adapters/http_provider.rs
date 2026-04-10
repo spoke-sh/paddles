@@ -12,6 +12,10 @@ use crate::domain::ports::{
     WorkspaceActionResult, WorkspaceEditor,
 };
 use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
+use crate::infrastructure::providers::{
+    ApiFormat, ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability,
+    ProviderTransportSupport,
+};
 use crate::infrastructure::rendering::{
     ANTHROPIC_RENDER_TOOL_NAME, RenderCapability, assistant_response_json_schema,
     ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
@@ -75,14 +79,6 @@ async fn send_with_retry(
     unreachable!()
 }
 
-/// Which HTTP API format to use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ApiFormat {
-    OpenAi,
-    Anthropic,
-    Gemini,
-}
-
 /// HTTP-based model provider implementing SynthesizerEngine.
 pub struct HttpProviderAdapter {
     workspace_root: PathBuf,
@@ -92,9 +88,31 @@ pub struct HttpProviderAdapter {
     base_url: String,
     model_id: String,
     format: ApiFormat,
-    render_capability: RenderCapability,
+    capabilities: ModelCapabilitySurface,
     verbose: AtomicU8,
     turn_history: Mutex<Vec<String>>,
+}
+
+fn negotiated_capability_surface(
+    provider_name: &str,
+    model_id: &str,
+    format: ApiFormat,
+    render_capability: RenderCapability,
+) -> ModelCapabilitySurface {
+    if let Some(provider) = ModelProvider::from_name(provider_name) {
+        return provider.capability_surface(model_id);
+    }
+
+    ModelCapabilitySurface {
+        http_format: Some(format),
+        render_capability,
+        planner_tool_call: match format {
+            ApiFormat::OpenAi => PlannerToolCallCapability::NativeFunctionTool,
+            ApiFormat::Gemini => PlannerToolCallCapability::StructuredJsonEnvelope,
+            ApiFormat::Anthropic => PlannerToolCallCapability::PromptEnvelope,
+        },
+        transport_support: ProviderTransportSupport::Supported,
+    }
 }
 
 impl HttpProviderAdapter {
@@ -107,15 +125,19 @@ impl HttpProviderAdapter {
         format: ApiFormat,
         render_capability: RenderCapability,
     ) -> Self {
+        let provider_name = provider_name.into();
+        let model_id = model_id.into();
+        let capabilities =
+            negotiated_capability_surface(&provider_name, &model_id, format, render_capability);
         Self {
             workspace_root: workspace_root.into(),
             client: reqwest::Client::new(),
-            provider_name: provider_name.into(),
+            provider_name,
             api_key: api_key.into(),
             base_url: base_url.into(),
-            model_id: model_id.into(),
+            model_id,
             format,
-            render_capability,
+            capabilities,
             verbose: AtomicU8::new(0),
             turn_history: Mutex::new(Vec::new()),
         }
@@ -177,7 +199,7 @@ impl HttpProviderAdapter {
         require_citations: bool,
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
-        match self.render_capability {
+        match self.capabilities.render_capability {
             RenderCapability::OpenAiJsonSchema => {
                 self.send_openai_structured_answer(system, user, require_citations, capture)
                     .await
@@ -775,14 +797,14 @@ impl HttpProviderAdapter {
 
     fn build_planner_system_prompt(&self, interpretation: &InterpretationContext) -> String {
         let mut system = self.build_system_prompt(interpretation);
-        let transport_rule = match self.format {
-            ApiFormat::OpenAi => {
+        let transport_rule = match self.capabilities.planner_tool_call {
+            PlannerToolCallCapability::NativeFunctionTool => {
                 "The transport exposes a native tool named `select_planner_action`; call it exactly once and put the complete action envelope in the tool arguments."
             }
-            ApiFormat::Gemini => {
+            PlannerToolCallCapability::StructuredJsonEnvelope => {
                 "The transport enforces a JSON schema, but you must still produce one complete action envelope."
             }
-            ApiFormat::Anthropic => {
+            PlannerToolCallCapability::PromptEnvelope => {
                 "Your response is parsed directly, so the action envelope must be valid JSON on the first try."
             }
         };
@@ -858,7 +880,7 @@ Rules:
     fn build_answer_system_prompt(&self, require_citations: bool) -> String {
         format!(
             "You are Paddles, a helpful AI assistant. Provide concise, accurate answers. Do not invent package names, crate names, websites, or URLs.\n\n{}",
-            final_answer_contract_prompt(self.render_capability, require_citations)
+            final_answer_contract_prompt(self.capabilities.render_capability, require_citations)
         )
     }
 
@@ -868,16 +890,18 @@ Rules:
         user: &str,
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
-        match self.format {
-            ApiFormat::OpenAi => {
+        match self.capabilities.planner_tool_call {
+            PlannerToolCallCapability::NativeFunctionTool => {
                 self.send_openai_planner_tool_call(system, user, capture)
                     .await
             }
-            ApiFormat::Gemini => {
+            PlannerToolCallCapability::StructuredJsonEnvelope => {
                 self.send_gemini_json_schema(system, user, planner_action_json_schema(), capture)
                     .await
             }
-            ApiFormat::Anthropic => self.send_anthropic(system, user, capture).await,
+            PlannerToolCallCapability::PromptEnvelope => {
+                self.send_anthropic(system, user, capture).await
+            }
         }
     }
 

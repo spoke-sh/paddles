@@ -57,7 +57,14 @@ That gives TUI, web, and future API clients one shared harness manifold instead 
 
 ### Act 3: Synthesis
 
-**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles resolves a provider/model-specific render capability and then uses the strictest supported transport for final answers — native JSON schema or tool-call structure when available, prompt-enveloped JSON when not.
+**`SynthesisLane`** takes the accumulated planner trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the planner gathered. At boot, Paddles negotiates one shared provider capability surface from the selected provider/model pair and then uses that surface to resolve:
+
+- the remote HTTP wire format when the lane is HTTP-backed
+- the strictest supported final-answer render contract
+- the planner tool-call shape when the planner is remote
+- whether the selected model is transport-supported at all
+
+That keeps provider additions on one typed contract (`ModelCapabilitySurface`) instead of scattering provider-name branches across the controller, planner, and rendering paths.
 
 Planner and answer lanes now share one typed conversational handoff: recent turns plus the active thread summary. That keeps follow-up turns coherent even when the planner chooses a direct-answer route on one turn and a synthesizer-authored route on the next.
 

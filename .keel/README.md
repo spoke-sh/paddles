@@ -331,7 +331,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Define Durable Session And Capability Interfaces](epics/VGLD4Iesy/voyages/VGLDMuE5W/) | in-progress |
+| [Define Durable Session And Capability Interfaces](epics/VGLD4Iesy/voyages/VGLDMuE5W/) | done |
 | [Decouple Brain From Hands In The Local Runtime](epics/VGLD4Iesy/voyages/VGLDMuu5X/) | planned |
 | [Add Adaptive Harness Profiles And Specialist Brains](epics/VGLD4Iesy/voyages/VGLDMvU4i/) | planned |
 
