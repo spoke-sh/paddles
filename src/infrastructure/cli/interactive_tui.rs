@@ -2835,15 +2835,26 @@ impl InteractiveApp {
     fn cursor_position(&self, area: Rect) -> (u16, u16) {
         let inner_width = area.width.saturating_sub(2).max(1) as usize;
         let mut row = self.composer_prefix_height(inner_width) as u16;
-        let text_to_cursor: String = self.input.chars().take(self.cursor_pos).collect();
         let mut col = 0usize;
-        for (i, line) in text_to_cursor.split('\n').enumerate() {
-            if i > 0 {
+
+        for ch in self.input.chars().take(self.cursor_pos) {
+            if ch == '\n' {
                 row += 1;
+                col = 0;
+                continue;
             }
-            let char_count = line.chars().count();
-            row += (char_count / inner_width) as u16;
-            col = char_count % inner_width;
+
+            if col == inner_width {
+                row += 1;
+                col = 0;
+            }
+
+            col += 1;
+        }
+
+        if col == inner_width {
+            // Keep the cursor on the final body cell until another character forces a wrap.
+            col = inner_width.saturating_sub(1);
         }
 
         let x = area.x.saturating_add(1 + col as u16);
@@ -4155,6 +4166,80 @@ mod tests {
         // transcript (5 empty) + prompt box (3) + status bar (1) = 9
         // Prompt box border with title starts at line 5.
         assert!(buffer_line(&buffer, 5).contains("Prompt"));
+    }
+
+    #[test]
+    fn prompt_wrap_redraw_does_not_leave_duplicated_text_on_the_next_line() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let width = 20;
+        let height = 9;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+
+        app.input = "abcdefghijklmnopqr".to_string();
+        app.cursor_pos = app.input.chars().count();
+        terminal
+            .draw(|frame| app.render(frame))
+            .expect("first frame");
+
+        app.input.push('s');
+        app.cursor_pos = app.input.chars().count();
+        terminal
+            .draw(|frame| app.render(frame))
+            .expect("second frame");
+
+        let buffer = terminal.backend().buffer().clone();
+        let input_height = app.input_area_height(width);
+        let input_top = height.saturating_sub(1 + input_height);
+        let first_body_line = buffer_line(&buffer, input_top + 1);
+        let second_body_line = buffer_line(&buffer, input_top + 2);
+        let inner_width = usize::from(width.saturating_sub(2));
+
+        let first_body = first_body_line
+            .chars()
+            .skip(1)
+            .take(inner_width)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+        let second_body = second_body_line
+            .chars()
+            .skip(1)
+            .take(inner_width)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
+
+        assert_eq!(first_body, "abcdefghijklmnopqr");
+        assert_eq!(second_body, "s");
+    }
+
+    #[test]
+    fn cursor_stays_inside_prompt_body_when_text_exactly_fills_the_line() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let area = Rect::new(0, 5, 20, 3);
+
+        app.input = "abcdefghijklmnopqr".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert_eq!(app.cursor_position(area), (18, 6));
     }
 
     #[test]
