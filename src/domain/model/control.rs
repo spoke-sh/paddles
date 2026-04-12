@@ -2,9 +2,9 @@ use super::{
     AppliedEdit, ConversationThreadRef, PlanChecklistItem, ThreadDecision, ThreadDecisionKind,
     ThreadMergeRecord, TraceBranchId, TraceRecordKind, TurnEvent, TurnTraceId,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnControlOperation {
     Steer,
@@ -22,7 +22,7 @@ impl TurnControlOperation {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadControlOperation {
     ContinueCurrent,
@@ -46,7 +46,7 @@ impl ThreadControlOperation {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "scope", content = "operation", rename_all = "snake_case")]
 pub enum ControlOperation {
     Turn(TurnControlOperation),
@@ -62,7 +62,7 @@ impl ControlOperation {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlResultStatus {
     Accepted,
@@ -84,7 +84,7 @@ impl ControlResultStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ControlSubject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnTraceId>,
@@ -92,7 +92,7 @@ pub struct ControlSubject {
     pub thread: Option<ConversationThreadRef>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControlResult {
     pub operation: ControlOperation,
     pub status: ControlResultStatus,
@@ -273,6 +273,11 @@ impl TurnEvent {
                         .unwrap_or_else(|| "thread merged".to_string()),
                 },
             })],
+            Self::ControlStateChanged { result } => {
+                vec![RuntimeItem::Control(ControlRuntimeItem {
+                    result: result.clone(),
+                })]
+            }
             _ => Vec::new(),
         }
     }
@@ -300,6 +305,7 @@ pub fn thread_control_result(decision: &ThreadDecision) -> ControlResult {
 
 pub fn trace_control_result(record: &TraceRecordKind) -> Option<ControlResult> {
     match record {
+        TraceRecordKind::ControlResultRecorded(result) => Some(result.clone()),
         TraceRecordKind::ThreadDecisionSelected(decision) => Some(thread_control_result(decision)),
         TraceRecordKind::ThreadMerged(merge) => Some(thread_merge_control_result(merge)),
         _ => None,

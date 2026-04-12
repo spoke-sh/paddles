@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:06:44.902371814-07:00
+mode: manual
+---
+Busy-turn steering and interrupt requests now attach to the active turn lifecycle instead of enqueuing opaque follow-up prompts. Verified with cargo test app_requests_same_turn_steering_while_busy -- --nocapture and cargo test escape_requests_turn_interrupt_before_falling_back_to_abort -- --nocapture.

@@ -84,6 +84,13 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             HarnessSnapshot::active(HarnessChamber::Threading)
                 .with_detail(format!("{source_thread} -> {target_thread} via {mode}")),
         ),
+        TurnEvent::ControlStateChanged { result } => Some(
+            HarnessSnapshot::intervening(
+                HarnessChamber::Governor,
+                format!("{}: {}", result.summary(), result.detail),
+            )
+            .with_detail(result.detail.clone()),
+        ),
         TurnEvent::PlannerStepProgress {
             step_number,
             step_limit,

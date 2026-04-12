@@ -39,6 +39,7 @@ paddles_id!(TraceArtifactId);
 paddles_id!(TraceCheckpointId);
 paddles_id!(ThreadCandidateId);
 paddles_id!(ThreadDecisionId);
+paddles_id!(TurnControlId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContextTier {
@@ -298,6 +299,36 @@ pub struct ThreadMergeRecord {
     pub summary_artifact: Option<ArtifactEnvelope>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TurnControlKind {
+    Steer,
+    Interrupt,
+}
+
+impl TurnControlKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Steer => "steer",
+            Self::Interrupt => "interrupt",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnControlRequest {
+    pub control_id: TurnControlId,
+    pub turn_id: TurnTraceId,
+    pub active_thread: ConversationThreadRef,
+    pub kind: TurnControlKind,
+    pub prompt: Option<String>,
+    pub captured_sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnControlRequestError {
+    NoActiveTurn,
+}
+
 #[derive(Clone)]
 pub struct ConversationSession {
     state: Arc<Mutex<ConversationSessionState>>,
@@ -312,13 +343,16 @@ pub struct ConversationSessionState {
     pub next_record_sequence: u64,
     pub next_artifact_sequence: u64,
     pub next_branch_sequence: u64,
+    pub next_turn_control_sequence: u64,
     pub root_started: bool,
     pub root_last_record_id: Option<TraceRecordId>,
     pub branch_last_record_ids: HashMap<TraceBranchId, TraceRecordId>,
     pub recorder_warning_emitted: bool,
+    pub active_turn_id: Option<TurnTraceId>,
     pub active_thread: ConversationThreadRef,
     pub threads: HashMap<String, ConversationThread>,
     pub recent_thread_summaries: HashMap<String, String>,
+    pub pending_turn_controls: Vec<TurnControlRequest>,
 }
 
 impl ConversationSession {
@@ -341,13 +375,16 @@ impl ConversationSession {
                 next_record_sequence: 1,
                 next_artifact_sequence: 1,
                 next_branch_sequence: 1,
+                next_turn_control_sequence: 1,
                 root_started: false,
                 root_last_record_id: None,
                 branch_last_record_ids: HashMap::new(),
                 recorder_warning_emitted: false,
+                active_turn_id: None,
                 active_thread: ConversationThreadRef::Mainline,
                 threads,
                 recent_thread_summaries: HashMap::new(),
+                pending_turn_controls: Vec::new(),
             })),
         }
     }
@@ -393,6 +430,117 @@ impl ConversationSession {
             active_thread: state.active_thread.clone(),
             captured_sequence,
         }
+    }
+
+    pub fn mark_turn_active(&self, turn_id: TurnTraceId) {
+        self.state
+            .lock()
+            .expect("conversation session lock")
+            .active_turn_id = Some(turn_id);
+    }
+
+    pub fn active_turn_id(&self) -> Option<TurnTraceId> {
+        self.state
+            .lock()
+            .expect("conversation session lock")
+            .active_turn_id
+            .clone()
+    }
+
+    pub fn clear_turn_if_active(&self, turn_id: &TurnTraceId) {
+        let mut state = self.state.lock().expect("conversation session lock");
+        if state.active_turn_id.as_ref() == Some(turn_id) {
+            state.active_turn_id = None;
+        }
+    }
+
+    pub fn request_turn_steer(
+        &self,
+        prompt: impl Into<String>,
+    ) -> std::result::Result<TurnControlRequest, TurnControlRequestError> {
+        let mut state = self.state.lock().expect("conversation session lock");
+        let Some(turn_id) = state.active_turn_id.clone() else {
+            return Err(TurnControlRequestError::NoActiveTurn);
+        };
+        let request = TurnControlRequest {
+            control_id: TurnControlId::new(format!(
+                "{}.control-{:04}",
+                state.task_id.as_str(),
+                state.next_turn_control_sequence
+            ))
+            .expect("generated turn control id"),
+            turn_id,
+            active_thread: state.active_thread.clone(),
+            kind: TurnControlKind::Steer,
+            prompt: Some(prompt.into()),
+            captured_sequence: state.next_turn_control_sequence,
+        };
+        state.next_turn_control_sequence += 1;
+        state.pending_turn_controls.push(request.clone());
+        Ok(request)
+    }
+
+    pub fn request_turn_interrupt(
+        &self,
+    ) -> std::result::Result<TurnControlRequest, TurnControlRequestError> {
+        let mut state = self.state.lock().expect("conversation session lock");
+        let Some(turn_id) = state.active_turn_id.clone() else {
+            return Err(TurnControlRequestError::NoActiveTurn);
+        };
+        let request = TurnControlRequest {
+            control_id: TurnControlId::new(format!(
+                "{}.control-{:04}",
+                state.task_id.as_str(),
+                state.next_turn_control_sequence
+            ))
+            .expect("generated turn control id"),
+            turn_id,
+            active_thread: state.active_thread.clone(),
+            kind: TurnControlKind::Interrupt,
+            prompt: None,
+            captured_sequence: state.next_turn_control_sequence,
+        };
+        state.next_turn_control_sequence += 1;
+        state.pending_turn_controls.push(request.clone());
+        Ok(request)
+    }
+
+    pub fn take_turn_control_requests(&self, turn_id: &TurnTraceId) -> Vec<TurnControlRequest> {
+        let mut state = self.state.lock().expect("conversation session lock");
+        let mut retained = Vec::new();
+        let mut matched = Vec::new();
+        for request in state.pending_turn_controls.drain(..) {
+            if &request.turn_id == turn_id {
+                matched.push(request);
+            } else {
+                retained.push(request);
+            }
+        }
+        state.pending_turn_controls = retained;
+        matched
+    }
+
+    pub fn capture_candidate_from_turn_control(
+        &self,
+        request: &TurnControlRequest,
+    ) -> Option<ThreadCandidate> {
+        let prompt = request.prompt.as_ref()?.clone();
+        let mut state = self.state.lock().expect("conversation session lock");
+        let candidate_id = ThreadCandidateId::new(format!(
+            "{}.candidate-{:04}",
+            state.task_id.as_str(),
+            state.next_candidate_sequence
+        ))
+        .expect("generated candidate id");
+        let captured_sequence = state.next_candidate_sequence;
+        state.next_candidate_sequence += 1;
+        Some(ThreadCandidate {
+            candidate_id,
+            prompt,
+            captured_from_turn_id: Some(request.turn_id.clone()),
+            active_thread: request.active_thread.clone(),
+            captured_sequence,
+        })
     }
 
     pub fn next_exchange_id(&self, turn_id: &TurnTraceId) -> String {
@@ -544,7 +692,7 @@ mod tests {
     use super::{
         ConversationSession, ConversationThread, ConversationThreadRef, ConversationThreadStatus,
         TaskTraceId, ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
-        ThreadMergeMode, TraceBranchId,
+        ThreadMergeMode, TraceBranchId, TurnControlKind, TurnControlRequestError,
     };
 
     #[test]
@@ -627,5 +775,51 @@ mod tests {
 
         assert_eq!(active, ConversationThreadRef::Branch(branch_id));
         assert_eq!(session.known_threads().len(), 2);
+    }
+
+    #[test]
+    fn turn_control_requests_attach_to_the_active_turn() {
+        let session = ConversationSession::new(TaskTraceId::new("task-3").expect("task"));
+        let turn_id = session.allocate_turn_id();
+        session.mark_turn_active(turn_id.clone());
+
+        let request = session
+            .request_turn_steer("focus on the failing test")
+            .expect("active turn should accept steering");
+
+        assert_eq!(request.turn_id, turn_id);
+        assert_eq!(request.kind, TurnControlKind::Steer);
+        assert_eq!(
+            session.take_turn_control_requests(&request.turn_id),
+            vec![request]
+        );
+    }
+
+    #[test]
+    fn turn_control_requests_fail_closed_without_an_active_turn() {
+        let session = ConversationSession::new(TaskTraceId::new("task-4").expect("task"));
+
+        assert_eq!(
+            session.request_turn_interrupt(),
+            Err(TurnControlRequestError::NoActiveTurn)
+        );
+    }
+
+    #[test]
+    fn turn_control_candidates_remember_the_source_turn() {
+        let session = ConversationSession::new(TaskTraceId::new("task-5").expect("task"));
+        let turn_id = session.allocate_turn_id();
+        session.mark_turn_active(turn_id.clone());
+        let request = session
+            .request_turn_steer("follow the branch")
+            .expect("active turn should accept steering");
+
+        let candidate = session
+            .capture_candidate_from_turn_control(&request)
+            .expect("steering prompt should become a candidate");
+
+        assert_eq!(candidate.prompt, "follow the branch");
+        assert_eq!(candidate.captured_from_turn_id, Some(turn_id));
+        assert_eq!(candidate.active_thread, ConversationThreadRef::Mainline);
     }
 }

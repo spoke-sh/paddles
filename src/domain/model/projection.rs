@@ -91,6 +91,9 @@ impl ConversationTraceGraph {
                     TraceRecordKind::CompletionCheckpoint(cp) => {
                         ("checkpoint".to_string(), cp.kind.label().to_string())
                     }
+                    TraceRecordKind::ControlResultRecorded(result) => {
+                        ("control".to_string(), result.summary())
+                    }
                     TraceRecordKind::ThreadMerged(_) => ("merge".to_string(), "merge".to_string()),
                     TraceRecordKind::ThreadCandidateCaptured(_) => {
                         ("thread".to_string(), "candidate".to_string())

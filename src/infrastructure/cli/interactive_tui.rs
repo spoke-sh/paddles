@@ -334,6 +334,13 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
                 false
             } else {
                 if app.busy {
+                    if app.session.request_turn_interrupt().is_ok() {
+                        app.push_event(
+                            "Requested turn interrupt",
+                            "The active turn will stop at the next safe checkpoint.",
+                        );
+                        return false;
+                    }
                     if app.abort_active_work() {
                         app.clear_queued_prompts();
                     } else if app.input.is_empty() {
@@ -1759,6 +1766,17 @@ impl InteractiveApp {
 
         // Normal prompt submission.
         let was_busy = self.busy || self.pending_reveal.is_some();
+        if was_busy && self.session.request_turn_steer(raw.clone()).is_ok() {
+            self.rows.push(TranscriptRow::new(
+                TranscriptRowKind::Event,
+                "• Requested same-turn steering",
+                format!(
+                    "`{}` will apply at the next safe checkpoint.",
+                    trim_for_display(&raw_display, 96)
+                ),
+            ));
+            return;
+        }
         if was_busy || !self.queued_prompts.is_empty() {
             self.queued_prompts.push_back(QueuedPrompt::Steering(
                 self.session.capture_candidate(raw.clone()),
@@ -4312,7 +4330,7 @@ mod tests {
     }
 
     #[test]
-    fn app_accepts_steering_prompts_while_busy_and_queues_them() {
+    fn app_requests_same_turn_steering_while_busy() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -4331,20 +4349,21 @@ mod tests {
             Some(QueuedPrompt::Prompt("first".to_string()))
         );
         assert!(app.busy);
+        let turn_id = app.session.allocate_turn_id();
+        app.session.mark_turn_active(turn_id.clone());
 
         app.input = "steer harder".to_string();
         app.submit_prompt();
 
         assert_eq!(app.input, "");
-        assert_eq!(app.queued_prompts.len(), 1);
-        assert!(matches!(
-            app.queued_prompts.front(),
-            Some(QueuedPrompt::Steering(candidate)) if candidate.prompt == "steer harder"
-        ));
+        assert!(app.queued_prompts.is_empty());
+        let controls = app.session.take_turn_control_requests(&turn_id);
+        assert_eq!(controls.len(), 1);
+        assert_eq!(controls[0].prompt.as_deref(), Some("steer harder"));
         assert!(
             app.rows
                 .iter()
-                .any(|row| row.header == "• Queued steering prompt")
+                .any(|row| row.header == "• Requested same-turn steering")
         );
     }
 
@@ -5128,7 +5147,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn escape_cancels_active_work_and_queued_prompts() {
+    async fn escape_requests_turn_interrupt_before_falling_back_to_abort() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5146,6 +5165,8 @@ mod tests {
             app.dispatch_next_prompt(),
             Some(QueuedPrompt::Prompt("first".to_string()))
         );
+        let turn_id = app.session.allocate_turn_id();
+        app.session.mark_turn_active(turn_id.clone());
 
         let work_id = app.next_work_id();
         let handle = tokio::spawn(async move {
@@ -5157,16 +5178,22 @@ mod tests {
 
         app.input = "second".to_string();
         app.submit_prompt();
-        assert_eq!(app.queued_prompts.len(), 1);
+        assert!(app.queued_prompts.is_empty());
 
         let should_exit =
             super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         assert!(!should_exit);
-        assert!(!app.busy);
-        assert_eq!(app.busy_phase, BusyPhase::Idle);
-        assert!(app.queued_prompts.is_empty());
-        assert!(app.rows.iter().any(|row| row.header == "• Work cancelled"));
+        assert!(app.busy);
+        let controls = app.session.take_turn_control_requests(&turn_id);
+        assert_eq!(controls.len(), 2);
+        assert_eq!(controls[0].prompt.as_deref(), Some("second"));
+        assert_eq!(controls[1].prompt, None);
+        assert!(
+            app.rows
+                .iter()
+                .any(|row| row.header == "• Requested turn interrupt")
+        );
     }
 
     #[test]

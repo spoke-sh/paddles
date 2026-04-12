@@ -15,26 +15,29 @@ use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::specialist_brains::SpecialistBrainRegistry;
 use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
-pub use paddles_conversation::{ContextLocator, ConversationSession, TraceArtifactId};
+pub use paddles_conversation::{
+    ContextLocator, ConversationSession, TraceArtifactId, TurnControlKind, TurnControlRequest,
+};
 
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CompactionDecision,
-    CompactionPlan, ConversationForensicProjection, ConversationForensicUpdate,
-    ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
-    ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ExecutionGovernanceDecision,
-    ExecutionGovernanceOutcome, ExecutionHandDiagnostic, ExecutionPermissionRequest,
-    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
-    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
-    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
-    StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
-    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TranscriptUpdateSink, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    CompactionPlan, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
+    ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
+    ConversationTranscriptUpdate, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
+    ExecutionHandDiagnostic, ExecutionPermissionRequest, ForensicArtifactCapture,
+    ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
+    NativeTransportDiagnostic, PlanChecklistItem, PlanChecklistItemStatus, ResponseMode,
+    SteeringGateKind, SteeringGatePhase, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate,
+    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
+    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge,
+    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation,
+    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -260,6 +263,24 @@ struct ActiveRuntimeState {
     planner_engine: Arc<dyn RecursivePlanner>,
     synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
+}
+
+struct ActiveTurnGuard {
+    session: ConversationSession,
+    turn_id: TurnTraceId,
+}
+
+impl ActiveTurnGuard {
+    fn new(session: ConversationSession, turn_id: TurnTraceId) -> Self {
+        session.mark_turn_active(turn_id.clone());
+        Self { session, turn_id }
+    }
+}
+
+impl Drop for ActiveTurnGuard {
+    fn drop(&mut self) {
+        self.session.clear_turn_if_active(&self.turn_id);
+    }
 }
 
 struct PlannerLoopContext {
@@ -627,6 +648,18 @@ impl StructuredTurnTrace {
         );
     }
 
+    fn record_control_result(&self, result: &ControlResult) {
+        self.record_kind(
+            result
+                .subject
+                .thread
+                .as_ref()
+                .and_then(ConversationThreadRef::branch_id)
+                .or_else(|| self.default_branch_id()),
+            TraceRecordKind::ControlResultRecorded(result.clone()),
+        );
+    }
+
     fn remember_synthesis(
         &self,
         grounded: bool,
@@ -737,6 +770,24 @@ impl StructuredTurnTrace {
                 "model call resulted in final output",
             );
         }
+    }
+
+    fn record_checkpoint_without_response(
+        &self,
+        kind: TraceCheckpointKind,
+        summary: impl Into<String>,
+    ) {
+        self.record_kind(
+            self.default_branch_id(),
+            TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                checkpoint_id: self.next_checkpoint_id(),
+                kind,
+                summary: summary.into(),
+                response: None,
+                citations: Vec::new(),
+                grounded: false,
+            }),
+        );
     }
 
     fn parent_record_id_for(
@@ -969,6 +1020,9 @@ impl TurnEventSink for StructuredTurnTrace {
                     self.default_branch_id(),
                     TraceRecordKind::ExecutionGovernanceDecisionRecorded(decision),
                 );
+            }
+            TurnEvent::ControlStateChanged { result } => {
+                self.record_control_result(&result);
             }
             TurnEvent::ToolCalled {
                 call_id,
@@ -1753,6 +1807,11 @@ fn render_turn_event(event: &TurnEvent) -> String {
                 summary.as_deref().unwrap_or("No merge summary recorded."),
                 2
             )
+        ),
+        TurnEvent::ControlStateChanged { result } => format!(
+            "• Control: {}\n  └ {}",
+            result.summary(),
+            trim_event_detail(&result.detail, 2)
         ),
         TurnEvent::GathererSummary {
             provider,
@@ -2671,313 +2730,355 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.persist_prompt_history(prompt);
         let event_sink = self.wrap_sink_with_observers(event_sink);
-        let runtime_guard = self.runtime.read().await;
-        let runtime = runtime_guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
-        let prepared = runtime.prepared.clone();
-        self.execution_hand_registry().set_governance_profile(
-            prepared
-                .harness_profile()
-                .active_execution_governance()
-                .clone(),
-        );
-        let planner_engine = Arc::clone(&runtime.planner_engine);
-        let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
-        let gatherer = runtime.gatherer.clone();
-        drop(runtime_guard);
+        let mut current_prompt = prompt.to_string();
 
-        let interpretation = self
-            .derive_interpretation_context(prompt, planner_engine.as_ref(), event_sink.clone())
-            .await;
-        let turn_id = session.allocate_turn_id();
-        let active_thread = session.active_thread().thread_ref;
-        let trace = Arc::new(StructuredTurnTrace::new(
-            event_sink,
-            Arc::clone(&self.trace_recorder),
-            self.cloned_forensic_observers(),
-            session.clone(),
-            turn_id,
-            active_thread.clone(),
-        ));
-        trace.record_turn_start(prompt, &interpretation, &prepared);
-        let harness_profile = prepared.harness_profile();
-        trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
-            snapshot: crate::domain::model::ExecutionGovernanceSnapshot::new(
-                harness_profile.requested.id(),
-                harness_profile.active.id(),
-                harness_profile.active_execution_governance().clone(),
-            ),
-        });
-        self.emit_transcript_update(&session.task_id());
-        trace.emit(TurnEvent::InterpretationContext {
-            context: interpretation.clone(),
-        });
+        loop {
+            self.persist_prompt_history(&current_prompt);
+            let runtime_guard = self.runtime.read().await;
+            let runtime = runtime_guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
+            let prepared = runtime.prepared.clone();
+            self.execution_hand_registry().set_governance_profile(
+                prepared
+                    .harness_profile()
+                    .active_execution_governance()
+                    .clone(),
+            );
+            let planner_engine = Arc::clone(&runtime.planner_engine);
+            let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
+            let gatherer = runtime.gatherer.clone();
+            drop(runtime_guard);
 
-        let planner_capability = planner_engine.capability();
-        trace.emit(TurnEvent::PlannerCapability {
-            provider: prepared.planner.model_id.clone(),
-            capability: format_planner_capability(&planner_capability),
-        });
+            let interpretation = self
+                .derive_interpretation_context(
+                    &current_prompt,
+                    planner_engine.as_ref(),
+                    event_sink.clone(),
+                )
+                .await;
+            let turn_id = session.allocate_turn_id();
+            let active_thread = session.active_thread().thread_ref;
+            let _active_turn = ActiveTurnGuard::new(session.clone(), turn_id.clone());
+            let trace = Arc::new(StructuredTurnTrace::new(
+                event_sink.clone(),
+                Arc::clone(&self.trace_recorder),
+                self.cloned_forensic_observers(),
+                session.clone(),
+                turn_id,
+                active_thread.clone(),
+            ));
+            trace.record_turn_start(&current_prompt, &interpretation, &prepared);
+            let harness_profile = prepared.harness_profile();
+            trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
+                snapshot: crate::domain::model::ExecutionGovernanceSnapshot::new(
+                    harness_profile.requested.id(),
+                    harness_profile.active.id(),
+                    harness_profile.active_execution_governance().clone(),
+                ),
+            });
+            self.emit_transcript_update(&session.task_id());
+            trace.emit(TurnEvent::InterpretationContext {
+                context: interpretation.clone(),
+            });
 
-        let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
-        let specialist_runtime_notes = self.specialist_runtime_notes(prompt, &session, &prepared);
-        let recent_thread_summary = session.recent_thread_summary(&active_thread);
-        let request = PlannerRequest::new(
-            prompt,
-            self.workspace_root.clone(),
-            interpretation.clone(),
-            PlannerBudget::default(),
-        )
-        .with_recent_turns(recent_turns.clone())
-        .with_recent_thread_summary(recent_thread_summary.clone())
-        .with_runtime_notes(planner_runtime_notes(
-            gatherer.as_ref(),
-            &specialist_runtime_notes,
-        ))
-        .with_entity_resolver(Arc::clone(&self.entity_resolver));
+            let planner_capability = planner_engine.capability();
+            trace.emit(TurnEvent::PlannerCapability {
+                provider: prepared.planner.model_id.clone(),
+                capability: format_planner_capability(&planner_capability),
+            });
 
-        let execution_plan = match planner_capability {
-            PlannerCapability::Available => {
-                let mut decision = planner_engine
-                    .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
-                    .await?;
-                let controller_edit =
-                    controller_prompt_edit_instruction(&self.workspace_root, prompt);
-                let provider_edit_missing = !decision.edit.known_edit && controller_edit.known_edit;
-                decision.edit = merge_initial_edit_instruction(&decision.edit, &controller_edit);
-                if provider_edit_missing {
-                    let candidate_summary = if decision.edit.candidate_files.is_empty() {
-                        "no candidate files surfaced yet".to_string()
-                    } else {
-                        format!(
-                            "candidate files: {}",
-                            decision.edit.candidate_files.join(", ")
+            let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
+            let specialist_runtime_notes =
+                self.specialist_runtime_notes(&current_prompt, &session, &prepared);
+            let recent_thread_summary = session.recent_thread_summary(&active_thread);
+            let request = PlannerRequest::new(
+                &current_prompt,
+                self.workspace_root.clone(),
+                interpretation.clone(),
+                PlannerBudget::default(),
+            )
+            .with_recent_turns(recent_turns.clone())
+            .with_recent_thread_summary(recent_thread_summary.clone())
+            .with_runtime_notes(planner_runtime_notes(
+                gatherer.as_ref(),
+                &specialist_runtime_notes,
+            ))
+            .with_entity_resolver(Arc::clone(&self.entity_resolver));
+
+            let execution_plan = match planner_capability {
+                PlannerCapability::Available => {
+                    let mut decision = planner_engine
+                        .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
+                        .await?;
+                    let controller_edit =
+                        controller_prompt_edit_instruction(&self.workspace_root, &current_prompt);
+                    let provider_edit_missing =
+                        !decision.edit.known_edit && controller_edit.known_edit;
+                    decision.edit =
+                        merge_initial_edit_instruction(&decision.edit, &controller_edit);
+                    if provider_edit_missing {
+                        let candidate_summary = if decision.edit.candidate_files.is_empty() {
+                            "no candidate files surfaced yet".to_string()
+                        } else {
+                            format!(
+                                "candidate files: {}",
+                                decision.edit.candidate_files.join(", ")
+                            )
+                        };
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "action-bias".to_string(),
+                            reason: format!(
+                                "controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; {candidate_summary}"
+                            ),
+                        });
+                    }
+                    let controller_commit_instruction =
+                        controller_prompt_commit_instruction(&current_prompt);
+                    if let Some(bootstrapped) =
+                        bootstrap_git_commit_initial_action(&current_prompt, &decision)
+                    {
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "commit-bootstrap".to_string(),
+                            reason: format!(
+                                "commit-oriented turn bypassed initial `{}` and forced `{}` to inspect workspace status before committing",
+                                decision.action.summary(),
+                                bootstrapped.action.summary()
+                            ),
+                        });
+                        decision = bootstrapped;
+                    }
+                    if let Some(bootstrapped) = self
+                        .bootstrap_known_edit_initial_action(
+                            &current_prompt,
+                            &interpretation,
+                            &recent_turns,
+                            gatherer.as_ref(),
+                            &decision,
+                            trace.as_ref(),
                         )
+                        .await?
+                    {
+                        let candidate_summary = if bootstrapped.edit.candidate_files.is_empty() {
+                            "no viable candidates discovered".to_string()
+                        } else {
+                            format!(
+                                "candidate files: {}",
+                                bootstrapped.edit.candidate_files.join(", ")
+                            )
+                        };
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "known-edit-bootstrap".to_string(),
+                            reason: format!(
+                                "known edit turn bypassed initial `{}` and forced `{}`; {}",
+                                decision.action.summary(),
+                                bootstrapped.action.summary(),
+                                candidate_summary
+                            ),
+                        });
+                        decision = bootstrapped;
+                    }
+                    if let Some(bootstrapped) =
+                        bootstrap_repository_grounding_initial_action(&current_prompt, &decision)
+                    {
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "grounding-bootstrap".to_string(),
+                            reason: format!(
+                                "repo-scoped conversational turn bypassed initial `{}` and forced `{}` to ground the reply locally",
+                                decision.action.summary(),
+                                bootstrapped.action.summary()
+                            ),
+                        });
+                        decision = bootstrapped;
+                    }
+                    trace.emit(TurnEvent::PlannerActionSelected {
+                        sequence: 1,
+                        action: decision.action.summary(),
+                        rationale: decision.rationale.clone(),
+                    });
+                    trace.record_planner_action(
+                        &decision.action.summary(),
+                        &decision.rationale,
+                        None,
+                    );
+                    let mut execution_plan =
+                        execution_plan_from_initial_action(&prepared, decision);
+                    execution_plan.instruction_frame = merge_instruction_frames(
+                        execution_plan.instruction_frame.clone(),
+                        controller_commit_instruction,
+                    );
+                    execution_plan
+                }
+                PlannerCapability::Unsupported { reason } => {
+                    trace.emit(TurnEvent::Fallback {
+                        stage: "planner".to_string(),
+                        reason: format!(
+                            "planner unavailable before first action selection: {reason}"
+                        ),
+                    });
+                    fallback_execution_plan(&prepared)
+                }
+            };
+
+            let mut execution_checklist =
+                build_execution_checklist(&current_prompt, &recent_turns, &execution_plan);
+
+            trace.emit(TurnEvent::IntentClassified {
+                intent: execution_plan.intent.clone(),
+            });
+            trace.emit(TurnEvent::RouteSelected {
+                summary: execution_plan.route_summary.clone(),
+            });
+            if let Some(checklist) = execution_checklist.as_mut() {
+                checklist.emit(trace.as_ref());
+            }
+
+            let planner_outcome = match execution_plan.path {
+                PromptExecutionPath::PlannerThenSynthesize => {
+                    let recent_turns =
+                        self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
+
+                    let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
+                        .trace_recorder
+                        .as_any()
+                        .downcast_ref::<TransitTraceRecorder>()
+                    {
+                        Arc::new(TransitContextResolver::new(Arc::new(transit.clone())))
+                    } else {
+                        Arc::new(NoopContextResolver)
                     };
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "action-bias".to_string(),
-                        reason: format!(
-                            "controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; {candidate_summary}"
-                        ),
-                    });
-                }
-                let controller_commit_instruction = controller_prompt_commit_instruction(prompt);
-                if let Some(bootstrapped) = bootstrap_git_commit_initial_action(prompt, &decision) {
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "commit-bootstrap".to_string(),
-                        reason: format!(
-                            "commit-oriented turn bypassed initial `{}` and forced `{}` to inspect workspace status before committing",
-                            decision.action.summary(),
-                            bootstrapped.action.summary()
-                        ),
-                    });
-                    decision = bootstrapped;
-                }
-                if let Some(bootstrapped) = self
-                    .bootstrap_known_edit_initial_action(
-                        prompt,
-                        &interpretation,
-                        &recent_turns,
-                        gatherer.as_ref(),
-                        &decision,
-                        trace.as_ref(),
+
+                    self.execute_recursive_planner_loop(
+                        &current_prompt,
+                        PlannerLoopContext {
+                            prepared: prepared.clone(),
+                            planner_engine,
+                            synthesizer_engine: Arc::clone(&synthesizer_engine),
+                            gatherer,
+                            resolver,
+                            entity_resolver: Arc::clone(&self.entity_resolver),
+                            interpretation: interpretation.clone(),
+                            recent_turns,
+                            recent_thread_summary: recent_thread_summary.clone(),
+                            specialist_runtime_notes,
+                            instruction_frame: execution_plan.instruction_frame.clone(),
+                            initial_edit: execution_plan.initial_edit.clone(),
+                            grounding: execution_plan.grounding.clone(),
+                        },
+                        execution_plan.initial_planner_decision.clone(),
+                        execution_checklist,
+                        Arc::clone(&trace),
                     )
                     .await?
-                {
-                    let candidate_summary = if bootstrapped.edit.candidate_files.is_empty() {
-                        "no viable candidates discovered".to_string()
-                    } else {
-                        format!(
-                            "candidate files: {}",
-                            bootstrapped.edit.candidate_files.join(", ")
-                        )
-                    };
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "known-edit-bootstrap".to_string(),
-                        reason: format!(
-                            "known edit turn bypassed initial `{}` and forced `{}`; {}",
-                            decision.action.summary(),
-                            bootstrapped.action.summary(),
-                            candidate_summary
-                        ),
-                    });
-                    decision = bootstrapped;
                 }
-                if let Some(bootstrapped) =
-                    bootstrap_repository_grounding_initial_action(prompt, &decision)
-                {
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "grounding-bootstrap".to_string(),
-                        reason: format!(
-                            "repo-scoped conversational turn bypassed initial `{}` and forced `{}` to ground the reply locally",
-                            decision.action.summary(),
-                            bootstrapped.action.summary()
-                        ),
-                    });
-                    decision = bootstrapped;
-                }
-                trace.emit(TurnEvent::PlannerActionSelected {
-                    sequence: 1,
-                    action: decision.action.summary(),
-                    rationale: decision.rationale.clone(),
-                });
-                trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
-                let mut execution_plan = execution_plan_from_initial_action(&prepared, decision);
-                execution_plan.instruction_frame = merge_instruction_frames(
-                    execution_plan.instruction_frame.clone(),
-                    controller_commit_instruction,
+                PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
+                    evidence: None,
+                    direct_answer: execution_plan.direct_answer.clone(),
+                    instruction_frame: execution_plan.instruction_frame.clone(),
+                    grounding: execution_plan.grounding.clone(),
+                    continuation: None,
+                },
+            };
+
+            self.expire_turn_control_requests(
+                &trace,
+                "The turn closed before the requested control could reach another safe checkpoint.",
+            );
+
+            if let Some(continuation) = planner_outcome.continuation {
+                trace.record_checkpoint_without_response(
+                    TraceCheckpointKind::TurnCompleted,
+                    continuation.summary,
                 );
-                execution_plan
+                current_prompt = continuation.prompt;
+                continue;
             }
-            PlannerCapability::Unsupported { reason } => {
-                trace.emit(TurnEvent::Fallback {
-                    stage: "planner".to_string(),
-                    reason: format!("planner unavailable before first action selection: {reason}"),
-                });
-                fallback_execution_plan(&prepared)
-            }
-        };
 
-        let mut execution_checklist =
-            build_execution_checklist(prompt, &recent_turns, &execution_plan);
-
-        trace.emit(TurnEvent::IntentClassified {
-            intent: execution_plan.intent.clone(),
-        });
-        trace.emit(TurnEvent::RouteSelected {
-            summary: execution_plan.route_summary.clone(),
-        });
-        if let Some(checklist) = execution_checklist.as_mut() {
-            checklist.emit(trace.as_ref());
-        }
-
-        let planner_outcome = match execution_plan.path {
-            PromptExecutionPath::PlannerThenSynthesize => {
-                let recent_turns =
-                    self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
-
-                // Resolve context artifacts using a transit-backed resolver if available.
-                let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
-                    .trace_recorder
-                    .as_any()
-                    .downcast_ref::<TransitTraceRecorder>()
+            if let Some(reply) = planner_outcome.direct_answer {
+                let response = if let Some(frame) = planner_outcome
+                    .instruction_frame
+                    .as_ref()
+                    .filter(|frame| frame.has_pending_workspace_obligation())
                 {
-                    Arc::new(TransitContextResolver::new(Arc::new(transit.clone())))
+                    blocked_instruction_response(frame)
                 } else {
-                    Arc::new(NoopContextResolver)
+                    reply
                 };
-
-                self.execute_recursive_planner_loop(
-                    prompt,
-                    PlannerLoopContext {
-                        prepared: prepared.clone(),
-                        planner_engine,
-                        synthesizer_engine: Arc::clone(&synthesizer_engine),
-                        gatherer,
-                        resolver,
-                        entity_resolver: Arc::clone(&self.entity_resolver),
-                        interpretation: interpretation.clone(),
-                        recent_turns,
-                        recent_thread_summary: recent_thread_summary.clone(),
-                        specialist_runtime_notes,
-                        instruction_frame: execution_plan.instruction_frame.clone(),
-                        initial_edit: execution_plan.initial_edit.clone(),
-                        grounding: execution_plan.grounding.clone(),
-                    },
-                    execution_plan.initial_planner_decision.clone(),
-                    execution_checklist,
-                    Arc::clone(&trace),
-                )
-                .await?
+                trace.emit(TurnEvent::SynthesisReady {
+                    grounded: false,
+                    citations: Vec::new(),
+                    insufficient_evidence: false,
+                });
+                let reply = self.finalize_turn_response(
+                    &trace,
+                    &session,
+                    &active_thread,
+                    &current_prompt,
+                    &response,
+                );
+                return Ok(reply);
             }
-            PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
-                evidence: None,
-                direct_answer: execution_plan.direct_answer.clone(),
-                instruction_frame: execution_plan.instruction_frame.clone(),
-                grounding: execution_plan.grounding.clone(),
-            },
-        };
 
-        if let Some(reply) = planner_outcome.direct_answer {
-            let response = if let Some(frame) = planner_outcome
+            let intent = execution_plan.intent;
+            let engine = synthesizer_engine;
+            let trace_for_reply = Arc::clone(&trace);
+            let event_sink = trace.as_event_sink();
+            let session_for_reply = session.clone();
+            let thread_for_reply = active_thread;
+            let prompt_for_model = current_prompt.clone();
+            let handoff = SynthesisHandoff {
+                recent_turns,
+                recent_thread_summary,
+                instruction_frame: planner_outcome.instruction_frame.clone(),
+                grounding: planner_outcome.grounding.clone(),
+            };
+            if let Some(frame) = planner_outcome
                 .instruction_frame
                 .as_ref()
                 .filter(|frame| frame.has_pending_workspace_obligation())
             {
-                blocked_instruction_response(frame)
-            } else {
-                reply
-            };
-            trace.emit(TurnEvent::SynthesisReady {
-                grounded: false,
-                citations: Vec::new(),
-                insufficient_evidence: false,
-            });
-            let reply =
-                self.finalize_turn_response(&trace, &session, &active_thread, prompt, &response);
-            return Ok(reply);
-        }
-
-        let prompt = prompt.to_string();
-        let intent = execution_plan.intent;
-        let engine = synthesizer_engine;
-        let event_sink = trace.as_event_sink();
-        let session_for_reply = session.clone();
-        let thread_for_reply = active_thread;
-        let prompt_for_model = prompt.clone();
-        let handoff = SynthesisHandoff {
-            recent_turns,
-            recent_thread_summary,
-            instruction_frame: planner_outcome.instruction_frame.clone(),
-            grounding: planner_outcome.grounding.clone(),
-        };
-        if let Some(frame) = planner_outcome
-            .instruction_frame
-            .as_ref()
-            .filter(|frame| frame.has_pending_workspace_obligation())
-        {
-            let response = blocked_instruction_response(frame);
-            trace.emit(TurnEvent::SynthesisReady {
-                grounded: false,
-                citations: Vec::new(),
-                insufficient_evidence: false,
-            });
+                let response = blocked_instruction_response(frame);
+                trace.emit(TurnEvent::SynthesisReady {
+                    grounded: false,
+                    citations: Vec::new(),
+                    insufficient_evidence: false,
+                });
+                let reply = self.finalize_turn_response(
+                    &trace_for_reply,
+                    &session_for_reply,
+                    &thread_for_reply,
+                    &current_prompt,
+                    &response,
+                );
+                return Ok(reply);
+            }
+            let reply = tokio::task::spawn_blocking(move || {
+                engine.respond_for_turn(
+                    &prompt_for_model,
+                    intent,
+                    planner_outcome.evidence.as_ref(),
+                    &handoff,
+                    event_sink,
+                )
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
+            let response = AuthoredResponse::from_plain_text(
+                trace_for_reply.completion_response_mode_for_synthesis(
+                    planner_outcome.instruction_frame.as_ref(),
+                ),
+                &reply,
+            );
             let reply = self.finalize_turn_response(
-                &trace,
+                &trace_for_reply,
                 &session_for_reply,
                 &thread_for_reply,
-                &prompt,
+                &current_prompt,
                 &response,
             );
             return Ok(reply);
         }
-        let reply = tokio::task::spawn_blocking(move || {
-            engine.respond_for_turn(
-                &prompt_for_model,
-                intent,
-                planner_outcome.evidence.as_ref(),
-                &handoff,
-                event_sink,
-            )
-        })
-        .await
-        .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
-        let response = AuthoredResponse::from_plain_text(
-            trace
-                .completion_response_mode_for_synthesis(planner_outcome.instruction_frame.as_ref()),
-            &reply,
-        );
-        let reply = self.finalize_turn_response(
-            &trace,
-            &session_for_reply,
-            &thread_for_reply,
-            &prompt,
-            &response,
-        );
-        Ok(reply)
     }
 
     async fn bootstrap_known_edit_initial_action(
@@ -3066,6 +3167,193 @@ impl MechSuitService {
             },
             grounding: decision.grounding.clone(),
         }))
+    }
+
+    async fn apply_turn_controls_at_safe_checkpoint(
+        &self,
+        context: &PlannerLoopContext,
+        trace: &Arc<StructuredTurnTrace>,
+    ) -> Result<Option<PlannerLoopOutcome>> {
+        let requests = trace.session.take_turn_control_requests(&trace.turn_id);
+        if requests.is_empty() {
+            return Ok(None);
+        }
+
+        let effective_index = requests
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, request)| request.captured_sequence)
+            .map(|(index, _)| index)
+            .expect("non-empty turn control batch");
+        let effective = requests[effective_index].clone();
+
+        for (index, request) in requests.iter().enumerate() {
+            if index == effective_index {
+                continue;
+            }
+            trace.emit(TurnEvent::ControlStateChanged {
+                result: turn_control_result_for_request(
+                    request,
+                    ControlResultStatus::Stale,
+                    format!(
+                        "Superseded by later `{}` control request on the active turn.",
+                        effective.kind.label()
+                    ),
+                ),
+            });
+        }
+
+        match effective.kind {
+            TurnControlKind::Interrupt => {
+                trace.emit(TurnEvent::ControlStateChanged {
+                    result: turn_control_result_for_request(
+                        &effective,
+                        ControlResultStatus::Applied,
+                        "Interrupted the active turn at a safe checkpoint.",
+                    ),
+                });
+                Ok(Some(PlannerLoopOutcome {
+                    evidence: None,
+                    direct_answer: Some(AuthoredResponse::from_plain_text(
+                        ResponseMode::DirectAnswer,
+                        "Interrupted the active turn at a safe checkpoint.",
+                    )),
+                    instruction_frame: None,
+                    grounding: None,
+                    continuation: None,
+                }))
+            }
+            TurnControlKind::Steer => {
+                let Some(candidate) = trace
+                    .session
+                    .capture_candidate_from_turn_control(&effective)
+                else {
+                    trace.emit(TurnEvent::ControlStateChanged {
+                        result: turn_control_result_for_request(
+                            &effective,
+                            ControlResultStatus::Rejected,
+                            "Steering requires a non-empty prompt payload.",
+                        ),
+                    });
+                    return Ok(None);
+                };
+                trace.emit(TurnEvent::ThreadCandidateCaptured {
+                    candidate_id: candidate.candidate_id.as_str().to_string(),
+                    active_thread: candidate.active_thread.stable_id(),
+                    prompt: candidate.prompt.clone(),
+                });
+                trace.record_thread_candidate(&candidate);
+
+                let interpretation = self
+                    .derive_interpretation_context(
+                        &candidate.prompt,
+                        context.planner_engine.as_ref(),
+                        trace.clone() as Arc<dyn TurnEventSink>,
+                    )
+                    .await;
+                let active_thread = trace.session.active_thread();
+                let thread_request = ThreadDecisionRequest::new(
+                    self.workspace_root.clone(),
+                    interpretation,
+                    active_thread.clone(),
+                    candidate.clone(),
+                )
+                .with_recent_turns(context.recent_turns.clone())
+                .with_known_threads(trace.session.known_threads())
+                .with_recent_thread_summary(
+                    trace
+                        .session
+                        .recent_thread_summary(&active_thread.thread_ref),
+                );
+
+                let decision = context
+                    .planner_engine
+                    .select_thread_decision(
+                        &thread_request,
+                        trace.clone() as Arc<dyn TurnEventSink>,
+                    )
+                    .await?;
+                trace.emit(TurnEvent::ThreadDecisionApplied {
+                    candidate_id: candidate.candidate_id.as_str().to_string(),
+                    decision: decision.kind.label().to_string(),
+                    target_thread: decision.target_thread.stable_id(),
+                    rationale: decision.rationale.clone(),
+                });
+                trace.record_thread_decision(&decision, &candidate.active_thread);
+
+                let branch_id = if matches!(decision.kind, ThreadDecisionKind::OpenChildThread) {
+                    let branch_id = trace.session.next_branch_id();
+                    trace.declare_branch(
+                        branch_id.clone(),
+                        decision
+                            .new_thread_label
+                            .as_deref()
+                            .unwrap_or(candidate.prompt.as_str()),
+                        Some(decision.rationale.as_str()),
+                        candidate.active_thread.branch_id(),
+                    );
+                    Some(branch_id)
+                } else {
+                    None
+                };
+
+                if matches!(decision.kind, ThreadDecisionKind::MergeIntoTarget) {
+                    trace.emit(TurnEvent::ThreadMerged {
+                        source_thread: candidate.active_thread.stable_id(),
+                        target_thread: decision.target_thread.stable_id(),
+                        mode: decision
+                            .merge_mode
+                            .unwrap_or(ThreadMergeMode::Summary)
+                            .label()
+                            .to_string(),
+                        summary: decision.merge_summary.clone(),
+                    });
+                    trace.record_thread_merge(
+                        &decision,
+                        &candidate.active_thread,
+                        &decision.target_thread,
+                    );
+                }
+
+                trace
+                    .session
+                    .apply_thread_decision(&decision, branch_id, &candidate.prompt);
+                trace.emit(TurnEvent::ControlStateChanged {
+                    result: turn_control_result_for_request(
+                        &effective,
+                        ControlResultStatus::Applied,
+                        format!("Steered the active turn via `{}`.", decision.kind.label()),
+                    ),
+                });
+
+                Ok(Some(PlannerLoopOutcome {
+                    evidence: None,
+                    direct_answer: None,
+                    instruction_frame: None,
+                    grounding: None,
+                    continuation: Some(PlannerLoopContinuation {
+                        prompt: candidate.prompt,
+                        summary: format!(
+                            "turn handed off to steered prompt on {} via {}",
+                            decision.target_thread.stable_id(),
+                            decision.kind.label()
+                        ),
+                    }),
+                }))
+            }
+        }
+    }
+
+    fn expire_turn_control_requests(&self, trace: &Arc<StructuredTurnTrace>, detail: &str) {
+        for request in trace.session.take_turn_control_requests(&trace.turn_id) {
+            trace.emit(TurnEvent::ControlStateChanged {
+                result: turn_control_result_for_request(
+                    &request,
+                    ControlResultStatus::Unavailable,
+                    detail.to_string(),
+                ),
+            });
+        }
     }
 
     pub async fn process_thread_candidate_in_session_with_sink(
@@ -3241,6 +3529,13 @@ impl MechSuitService {
             .unwrap_or_else(|| "workspace".to_string());
 
         loop {
+            if let Some(control_outcome) = self
+                .apply_turn_controls_at_safe_checkpoint(&context, &trace)
+                .await?
+            {
+                return Ok(control_outcome);
+            }
+
             if sequence > budget.max_steps {
                 if activate_replan(
                     "planner-budget-exhausted",
@@ -3902,6 +4197,7 @@ impl MechSuitService {
                 }),
                 instruction_frame,
                 grounding: context.grounding.clone(),
+                continuation: None,
             });
         }
 
@@ -3921,6 +4217,7 @@ impl MechSuitService {
             }),
             instruction_frame,
             grounding: context.grounding.clone(),
+            continuation: None,
         })
     }
 
@@ -4071,6 +4368,12 @@ struct PlannerLoopOutcome {
     direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
     grounding: Option<GroundingRequirement>,
+    continuation: Option<PlannerLoopContinuation>,
+}
+
+struct PlannerLoopContinuation {
+    prompt: String,
+    summary: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -4217,6 +4520,29 @@ const POLICY_VIOLATION_DIRECT_REPLY: &str = "I can't help with that because it v
 const EDIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested repository edit yet. This turn stays open until Paddles applies a workspace change.";
 const COMMIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested git commit yet. This turn stays open until Paddles records a commit in the workspace.";
 const EDIT_AND_COMMIT_INSTRUCTION_UNSATISFIED_DIRECT_REPLY: &str = "I haven't completed the requested repository work yet. This turn stays open until Paddles applies the requested workspace change and records the requested git commit.";
+
+fn turn_control_operation(kind: TurnControlKind) -> TurnControlOperation {
+    match kind {
+        TurnControlKind::Steer => TurnControlOperation::Steer,
+        TurnControlKind::Interrupt => TurnControlOperation::Interrupt,
+    }
+}
+
+fn turn_control_result_for_request(
+    request: &TurnControlRequest,
+    status: ControlResultStatus,
+    detail: impl Into<String>,
+) -> ControlResult {
+    ControlResult {
+        operation: ControlOperation::Turn(turn_control_operation(request.kind)),
+        status,
+        subject: ControlSubject {
+            turn_id: Some(request.turn_id.clone()),
+            thread: Some(request.active_thread.clone()),
+        },
+        detail: detail.into(),
+    }
+}
 
 fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
     PromptExecutionPlan {
@@ -7381,7 +7707,10 @@ mod tests {
         PreparedGathererLane, PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig,
         RuntimeLaneRole, StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
     };
-    use crate::domain::model::{AuthoredResponse, CompactionPlan, CompactionRequest, ResponseMode};
+    use crate::domain::model::{
+        AuthoredResponse, CompactionPlan, CompactionRequest, ControlOperation, ControlResultStatus,
+        ConversationReplayView, ResponseMode, TurnControlOperation,
+    };
     use crate::domain::model::{
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
         ConversationTranscriptSpeaker, ConversationTranscriptUpdate, ExecutionApprovalPolicy,
@@ -7390,9 +7719,10 @@ mod tests {
         ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
         ExecutionSandboxMode, ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink,
         ForensicUpdateSink, NullTurnEventSink, StrainFactor, TaskTraceId, ThreadDecision,
-        ThreadDecisionId, ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation,
-        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
-        TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
+        ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, TraceLineageNodeKind,
+        TraceLineageRelation, TraceModelExchangeCategory, TraceModelExchangeLane,
+        TraceModelExchangePhase, TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent,
+        TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EntityLookupMode,
@@ -7631,6 +7961,168 @@ mod tests {
             })
         }
     }
+
+    #[derive(Clone)]
+    struct ThreadDecisionPlan {
+        kind: ThreadDecisionKind,
+        rationale: String,
+        new_thread_label: Option<String>,
+        merge_mode: Option<ThreadMergeMode>,
+        merge_summary: Option<String>,
+        target_thread: Option<ConversationThreadRef>,
+    }
+
+    impl ThreadDecisionPlan {
+        fn continue_current() -> Self {
+            Self {
+                kind: ThreadDecisionKind::ContinueCurrent,
+                rationale: "test planner keeps steering on the active thread".to_string(),
+                new_thread_label: None,
+                merge_mode: None,
+                merge_summary: None,
+                target_thread: None,
+            }
+        }
+
+        fn open_child(label: &str) -> Self {
+            Self {
+                kind: ThreadDecisionKind::OpenChildThread,
+                rationale: "test planner opens a child thread for the steered path".to_string(),
+                new_thread_label: Some(label.to_string()),
+                merge_mode: None,
+                merge_summary: None,
+                target_thread: None,
+            }
+        }
+    }
+
+    struct BlockingTurnControlPlanner {
+        initial_decision: InitialActionDecision,
+        next_decisions: Mutex<VecDeque<RecursivePlannerDecision>>,
+        recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+        thread_decision: ThreadDecisionPlan,
+        release_initial_once: Mutex<Option<Arc<tokio::sync::Notify>>>,
+    }
+
+    impl BlockingTurnControlPlanner {
+        fn new(
+            initial_decision: InitialActionDecision,
+            next_decisions: Vec<RecursivePlannerDecision>,
+            recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+            thread_decision: ThreadDecisionPlan,
+            release_initial_once: Arc<tokio::sync::Notify>,
+        ) -> Self {
+            Self {
+                initial_decision,
+                next_decisions: Mutex::new(VecDeque::from(next_decisions)),
+                recorded_requests,
+                thread_decision,
+                release_initial_once: Mutex::new(Some(release_initial_once)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RecursivePlanner for BlockingTurnControlPlanner {
+        fn capability(&self) -> PlannerCapability {
+            PlannerCapability::Available
+        }
+
+        async fn derive_interpretation_context(
+            &self,
+            request: &InterpretationRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
+        ) -> Result<InterpretationContext> {
+            Ok(InterpretationContext {
+                summary: format!(
+                    "blocking test interpretation assembled from {} operator-memory document(s).",
+                    request.operator_memory.len()
+                ),
+                documents: request
+                    .operator_memory
+                    .iter()
+                    .map(|document| crate::domain::ports::InterpretationDocument {
+                        source: document.source.clone(),
+                        excerpt: document.contents.clone(),
+                        category: crate::domain::ports::GuidanceCategory::Rule,
+                    })
+                    .collect(),
+                tool_hints: Vec::new(),
+                decision_framework: Default::default(),
+                ..Default::default()
+            })
+        }
+
+        async fn select_initial_action(
+            &self,
+            request: &PlannerRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
+        ) -> Result<InitialActionDecision> {
+            self.recorded_requests
+                .lock()
+                .expect("recorded requests lock")
+                .push(request.clone());
+            let gate = self
+                .release_initial_once
+                .lock()
+                .expect("initial gate lock")
+                .take();
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            Ok(self.initial_decision.clone())
+        }
+
+        async fn select_next_action(
+            &self,
+            request: &PlannerRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
+        ) -> Result<RecursivePlannerDecision> {
+            self.recorded_requests
+                .lock()
+                .expect("recorded requests lock")
+                .push(request.clone());
+            self.next_decisions
+                .lock()
+                .expect("planner decisions lock")
+                .pop_front()
+                .ok_or_else(|| anyhow!("blocking test planner exhausted"))
+        }
+
+        async fn select_thread_decision(
+            &self,
+            request: &ThreadDecisionRequest,
+            _event_sink: Arc<dyn TurnEventSink>,
+        ) -> Result<ThreadDecision> {
+            Ok(ThreadDecision {
+                decision_id: ThreadDecisionId::new(format!(
+                    "{}.decision",
+                    request.candidate.candidate_id.as_str()
+                ))?,
+                candidate_id: request.candidate.candidate_id.clone(),
+                kind: self.thread_decision.kind,
+                rationale: self.thread_decision.rationale.clone(),
+                target_thread: self
+                    .thread_decision
+                    .target_thread
+                    .clone()
+                    .unwrap_or_else(|| request.active_thread.thread_ref.clone()),
+                new_thread_label: self.thread_decision.new_thread_label.clone(),
+                merge_mode: self.thread_decision.merge_mode,
+                merge_summary: self.thread_decision.merge_summary.clone(),
+            })
+        }
+
+        async fn assess_context_relevance(
+            &self,
+            _request: &CompactionRequest,
+        ) -> Result<CompactionPlan> {
+            Ok(CompactionPlan {
+                decisions: std::collections::HashMap::new(),
+            })
+        }
+    }
+
     #[derive(Default)]
     struct RecordingTurnEventSink {
         events: Mutex<Vec<TurnEvent>>,
@@ -9682,6 +10174,456 @@ mod tests {
                 .any(|note| note.contains("Execution checklist")),
             "follow-on planner requests should carry the containment checklist note"
         );
+    }
+
+    #[tokio::test]
+    async fn process_prompt_records_steering_control_and_hands_off_to_the_steered_prompt() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nTurn controls should stay attached to the active runtime.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let release_initial = Arc::new(tokio::sync::Notify::new());
+        let planner = Arc::new(BlockingTurnControlPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "AGENTS.md".to_string(),
+                    },
+                },
+                "read the operator contract before replying",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "steered path complete".to_string(),
+                },
+                rationale: "the steered prompt is complete".to_string(),
+                answer: Some("Steered reply.".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            recorded_requests.clone(),
+            ThreadDecisionPlan::continue_current(),
+            release_initial.clone(),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared,
+            planner_engine: planner,
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
+
+        let process = service.process_prompt_in_session_with_sink(
+            "original prompt",
+            session.clone(),
+            sink.clone(),
+        );
+        tokio::pin!(process);
+
+        let mut steer_requested = false;
+        loop {
+            tokio::select! {
+                result = &mut process, if !steer_requested => {
+                    panic!("process prompt completed before steering could attach: {result:?}");
+                }
+                _ = tokio::task::yield_now(), if !steer_requested => {
+                    if session.active_turn_id().is_some() {
+                        session
+                            .request_turn_steer("steer harder")
+                            .expect("active turn should accept steering");
+                        release_initial.notify_waiters();
+                        steer_requested = true;
+                    }
+                }
+            }
+            if steer_requested {
+                break;
+            }
+        }
+
+        let reply = process.await.expect("process prompt");
+        assert_eq!(reply, "Steered reply.");
+        assert_eq!(session.active_turn_id(), None);
+
+        let prompts = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .iter()
+            .map(|request| request.user_prompt.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(prompts.first().map(String::as_str), Some("original prompt"));
+        assert!(
+            prompts
+                .iter()
+                .skip(1)
+                .all(|prompt| prompt == "steer harder"),
+            "all follow-on planner requests should use the steered prompt: {prompts:?}"
+        );
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::ControlResultRecorded(result)
+                if result.operation == ControlOperation::Turn(TurnControlOperation::Steer)
+                    && result.status == ControlResultStatus::Applied
+        )));
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::ThreadDecisionSelected(decision)
+                if decision.kind == ThreadDecisionKind::ContinueCurrent
+        )));
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::CompletionCheckpoint(checkpoint)
+                if checkpoint.response.is_none()
+                    && checkpoint.summary.contains("turn handed off to steered prompt")
+        )));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::ControlStateChanged { result }
+                if result.operation == ControlOperation::Turn(TurnControlOperation::Steer)
+                    && result.status == ControlResultStatus::Applied
+        )));
+    }
+
+    #[tokio::test]
+    async fn process_prompt_interrupts_at_a_safe_checkpoint_and_records_the_control_result() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nInterrupts should stop planned turns at safe checkpoints.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let release_initial = Arc::new(tokio::sync::Notify::new());
+        let planner = Arc::new(BlockingTurnControlPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "AGENTS.md".to_string(),
+                    },
+                },
+                "read the operator contract before replying",
+            ),
+            Vec::new(),
+            recorded_requests.clone(),
+            ThreadDecisionPlan::continue_current(),
+            release_initial.clone(),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared,
+            planner_engine: planner,
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
+
+        let process = service.process_prompt_in_session_with_sink(
+            "original prompt",
+            session.clone(),
+            Arc::new(RecordingTurnEventSink::default()),
+        );
+        tokio::pin!(process);
+
+        let mut interrupt_requested = false;
+        loop {
+            tokio::select! {
+                result = &mut process, if !interrupt_requested => {
+                    panic!("process prompt completed before interrupt could attach: {result:?}");
+                }
+                _ = tokio::task::yield_now(), if !interrupt_requested => {
+                    if session.active_turn_id().is_some() {
+                        session
+                            .request_turn_interrupt()
+                            .expect("active turn should accept interrupt");
+                        release_initial.notify_waiters();
+                        interrupt_requested = true;
+                    }
+                }
+            }
+            if interrupt_requested {
+                break;
+            }
+        }
+
+        let reply = process.await.expect("process prompt");
+        assert_eq!(reply, "Interrupted the active turn at a safe checkpoint.");
+        assert_eq!(session.active_turn_id(), None);
+        assert_eq!(
+            recorded_requests
+                .lock()
+                .expect("recorded requests lock")
+                .iter()
+                .map(|request| request.user_prompt.clone())
+                .collect::<Vec<_>>(),
+            vec!["original prompt".to_string()]
+        );
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::ControlResultRecorded(result)
+                if result.operation == ControlOperation::Turn(TurnControlOperation::Interrupt)
+                    && result.status == ControlResultStatus::Applied
+        )));
+        assert!(
+            !replay
+                .records
+                .iter()
+                .any(|record| matches!(&record.kind, TraceRecordKind::ThreadDecisionSelected(_)))
+        );
+    }
+
+    #[tokio::test]
+    async fn later_interrupts_mark_older_turn_controls_stale_instead_of_mutating_hidden_state() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nSuperseded turn controls must degrade honestly.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let release_initial = Arc::new(tokio::sync::Notify::new());
+        let planner = Arc::new(BlockingTurnControlPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "AGENTS.md".to_string(),
+                    },
+                },
+                "read the operator contract before replying",
+            ),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+            ThreadDecisionPlan::continue_current(),
+            release_initial.clone(),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared,
+            planner_engine: planner,
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
+
+        let process = service.process_prompt_in_session_with_sink(
+            "original prompt",
+            session.clone(),
+            Arc::new(RecordingTurnEventSink::default()),
+        );
+        tokio::pin!(process);
+
+        let mut controls_sent = false;
+        loop {
+            tokio::select! {
+                result = &mut process, if !controls_sent => {
+                    panic!("process prompt completed before stale-control proof could attach: {result:?}");
+                }
+                _ = tokio::task::yield_now(), if !controls_sent => {
+                    if session.active_turn_id().is_some() {
+                        session
+                            .request_turn_steer("steer harder")
+                            .expect("active turn should accept steering");
+                        session
+                            .request_turn_interrupt()
+                            .expect("active turn should accept interrupt");
+                        release_initial.notify_waiters();
+                        controls_sent = true;
+                    }
+                }
+            }
+            if controls_sent {
+                break;
+            }
+        }
+
+        let reply = process.await.expect("process prompt");
+        assert_eq!(reply, "Interrupted the active turn at a safe checkpoint.");
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::ControlResultRecorded(result)
+                if result.operation == ControlOperation::Turn(TurnControlOperation::Steer)
+                    && result.status == ControlResultStatus::Stale
+        )));
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::ControlResultRecorded(result)
+                if result.operation == ControlOperation::Turn(TurnControlOperation::Interrupt)
+                    && result.status == ControlResultStatus::Applied
+        )));
+    }
+
+    #[tokio::test]
+    async fn steering_into_a_child_thread_preserves_replayable_thread_lineage() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nChild-thread handoffs should stay replayable.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let release_initial = Arc::new(tokio::sync::Notify::new());
+        let planner = Arc::new(BlockingTurnControlPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "AGENTS.md".to_string(),
+                    },
+                },
+                "read the operator contract before replying",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "child thread complete".to_string(),
+                },
+                rationale: "the child-thread steer completed".to_string(),
+                answer: Some("Child thread reply.".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+            ThreadDecisionPlan::open_child("investigate"),
+            release_initial.clone(),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared,
+            planner_engine: planner,
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
+
+        let process = service.process_prompt_in_session_with_sink(
+            "original prompt",
+            session.clone(),
+            Arc::new(RecordingTurnEventSink::default()),
+        );
+        tokio::pin!(process);
+
+        let mut steer_requested = false;
+        loop {
+            tokio::select! {
+                result = &mut process, if !steer_requested => {
+                    panic!("process prompt completed before child-thread steering could attach: {result:?}");
+                }
+                _ = tokio::task::yield_now(), if !steer_requested => {
+                    if session.active_turn_id().is_some() {
+                        session
+                            .request_turn_steer("follow the branch")
+                            .expect("active turn should accept steering");
+                        release_initial.notify_waiters();
+                        steer_requested = true;
+                    }
+                }
+            }
+            if steer_requested {
+                break;
+            }
+        }
+
+        let reply = process.await.expect("process prompt");
+        assert_eq!(reply, "Child thread reply.");
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        let child_branch_id = replay
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TraceRecordKind::PlannerBranchDeclared(branch) => Some(branch.branch_id.clone()),
+                _ => None,
+            })
+            .expect("child branch should be declared");
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::ThreadDecisionSelected(decision)
+                if decision.kind == ThreadDecisionKind::OpenChildThread
+        )));
+        assert!(replay.records.iter().any(|record| {
+            record.lineage.branch_id.as_ref() == Some(&child_branch_id)
+                && matches!(record.kind, TraceRecordKind::TurnStarted(_))
+        }));
+        let replay_view = ConversationReplayView::from_trace_replay(&replay);
+        assert_eq!(replay_view.threads.len(), 2);
     }
 
     #[test]

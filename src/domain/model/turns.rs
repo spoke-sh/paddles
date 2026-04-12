@@ -1,4 +1,5 @@
 use super::context_quality::ContextStrain;
+use super::control::ControlResult;
 use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
 use super::harness::HarnessSnapshot;
 use super::interpretation::InterpretationContext;
@@ -128,6 +129,9 @@ pub enum TurnEvent {
         mode: String,
         summary: Option<String>,
     },
+    ControlStateChanged {
+        result: ControlResult,
+    },
     PlannerStepProgress {
         step_number: usize,
         step_limit: usize,
@@ -230,6 +234,7 @@ impl TurnEvent {
             Self::ThreadCandidateCaptured { .. } => "thread_candidate_captured",
             Self::ThreadDecisionApplied { .. } => "thread_decision_applied",
             Self::ThreadMerged { .. } => "thread_merged",
+            Self::ControlStateChanged { .. } => "control_state_changed",
             Self::PlannerStepProgress { .. } => "planner_step_progress",
             Self::GathererSearchProgress { .. } => "gatherer_search_progress",
             Self::GathererSummary { .. } => "gatherer_summary",
@@ -264,6 +269,7 @@ impl TurnEvent {
             | Self::ToolOutput { .. }
             | Self::ToolFinished { .. }
             | Self::WorkspaceEditApplied { .. }
+            | Self::ControlStateChanged { .. }
             | Self::ExecutionGovernanceProfileApplied { .. }
             | Self::ExecutionGovernanceDecisionRecorded { .. }
             | Self::Fallback { .. }
@@ -338,6 +344,7 @@ impl TurnEvent {
             Self::ThreadCandidateCaptured { .. }
             | Self::ThreadDecisionApplied { .. }
             | Self::ThreadMerged { .. } => "Threading",
+            Self::ControlStateChanged { .. } => "Intervening",
             Self::Fallback { .. } => "Recovering",
             Self::SynthesisReady { .. } => "Rendering",
         }

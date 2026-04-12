@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:06:44.845421853-07:00
+mode: manual
+---
+Planner-loop safe checkpoints now consume turn controls, persist ControlResultRecorded trace records, and return explicit applied/rejected/unavailable outcomes. Verified with cargo test process_prompt_records_steering_control_and_hands_off_to_the_steered_prompt -- --nocapture, cargo test process_prompt_interrupts_at_a_safe_checkpoint_and_records_the_control_result -- --nocapture, and cargo test later_interrupts_mark_older_turn_controls_stale_instead_of_mutating_hidden_state -- --nocapture.

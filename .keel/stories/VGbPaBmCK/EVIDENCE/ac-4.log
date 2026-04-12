@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:06:44.927848363-07:00
+mode: manual
+---
+Superseded or late turn controls now degrade honestly with stale or unavailable control results rather than mutating hidden state. Verified with cargo test later_interrupts_mark_older_turn_controls_stale_instead_of_mutating_hidden_state -- --nocapture plus end-of-turn unavailable draining in the planner runtime.

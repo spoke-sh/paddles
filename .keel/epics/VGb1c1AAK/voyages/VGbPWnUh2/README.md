@@ -27,11 +27,11 @@ started_at: 2026-04-12T11:35:18
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Turn And Thread Control Contracts](../../../../stories/VGbPaBICN/README.md) | feat | done |
-| [Wire Same-Turn Steering Through Replayable Control Flow](../../../../stories/VGbPaBmCK/README.md) | feat | backlog |
+| [Wire Same-Turn Steering Through Replayable Control Flow](../../../../stories/VGbPaBmCK/README.md) | feat | done |
 | [Project Live Control State Across Operator Surfaces](../../../../stories/VGbPaCCCI/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -140,6 +140,27 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             ),
             text: format!("{source_thread} -> {target_thread}"),
         },
+        TurnEvent::ControlStateChanged { result } => RuntimeEventPresentation {
+            badge: "control".to_string(),
+            badge_class: "governor".to_string(),
+            title: format!("• Control: {}", result.summary()),
+            detail: result.detail.clone(),
+            text: format!(
+                "{} · {}",
+                result.summary(),
+                result
+                    .subject
+                    .thread
+                    .as_ref()
+                    .map(|thread| thread.stable_id())
+                    .or_else(|| result
+                        .subject
+                        .turn_id
+                        .as_ref()
+                        .map(|turn| turn.as_str().to_string()))
+                    .unwrap_or_else(|| "session".to_string())
+            ),
+        },
         TurnEvent::PlannerStepProgress {
             step_number,
             step_limit,

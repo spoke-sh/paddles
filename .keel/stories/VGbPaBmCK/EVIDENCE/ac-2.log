@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:06:44.870948770-07:00
+mode: manual
+---
+Thread steering now reuses recorded candidate/decision/merge lineage and hands the active work item directly into continued or child-thread turns without returning to the TUI queue. Verified with cargo test steering_into_a_child_thread_preserves_replayable_thread_lineage -- --nocapture and replay assertions on PlannerBranchDeclared/TurnStarted records.
