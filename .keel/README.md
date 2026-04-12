@@ -335,6 +335,20 @@
 | [Decouple Brain From Hands In The Local Runtime](epics/VGLD4Iesy/voyages/VGLDMuu5X/) | done |
 | [Add Adaptive Harness Profiles And Specialist Brains](epics/VGLD4Iesy/voyages/VGLDMvU4i/) | done |
 
+### [Sandboxed Execution And Approval Policies](epics/VGb1c0pAN/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Govern Local Hands With Explicit Execution Policy](epics/VGb1c0pAN/voyages/VGb2gViJ2/) | planned |
+
+### [Turn-Scoped Control API And Runtime Events](epics/VGb1c1AAK/) (draft)
+
+### [External Capability Fabric For Web, MCP, And Connectors](epics/VGb1c1XAL/) (draft)
+
+### [Mode-Aware Planning And Review Workflows](epics/VGb1c1pAR/) (draft)
+
+### [Role-Based Multi-Agent Delegation](epics/VGb1c2DBj/) (draft)
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
