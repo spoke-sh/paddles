@@ -339,7 +339,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Govern Local Hands With Explicit Execution Policy](epics/VGb1c0pAN/voyages/VGb2gViJ2/) | planned |
+| [Govern Local Hands With Explicit Execution Policy](epics/VGb1c0pAN/voyages/VGb2gViJ2/) | in-progress |
 
 ### [Turn-Scoped Control API And Runtime Events](epics/VGb1c1AAK/) (draft)
 

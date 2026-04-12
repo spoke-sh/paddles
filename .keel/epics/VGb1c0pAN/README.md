@@ -22,8 +22,8 @@ mission: VGb1Xq72Y
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/3 stories done
+**Progress:** 0/1 voyages complete, 1/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Govern Local Hands With Explicit Execution Policy](voyages/VGb2gViJ2/) | planned | 0/3 |
+| [Govern Local Hands With Explicit Execution Policy](voyages/VGb2gViJ2/) | in-progress | 1/3 |
 <!-- END GENERATED -->

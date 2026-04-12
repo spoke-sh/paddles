@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VGb2k7SBM
-status: backlog
+status: done
 created_at: 2026-04-12T09:53:26
-updated_at: 2026-04-12T09:56:30
+updated_at: 2026-04-12T10:10:51
 # authored
 title: Define Execution Governance Contracts
 type: feat
 operator-signal:
 scope: VGb1c0pAN/VGb2gViJ2
 index: 1
+started_at: 2026-04-12T10:05:24
+submitted_at: 2026-04-12T10:10:51
+completed_at: 2026-04-12T10:10:51
 ---
 
 # Define Execution Governance Contracts
@@ -23,5 +26,5 @@ governed hand is wired through the new gate.
 
 ## Acceptance Criteria
 
-- [ ] The runtime defines explicit contracts for sandbox mode, approval policy, permission requirements, escalation requests, and execution-governance outcomes. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
-- [ ] The contract vocabulary is hand-agnostic enough to cover shell, workspace, and future execution surfaces without provider-specific branching. [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end -->
+- [x] The runtime defines explicit contracts for sandbox mode, approval policy, permission requirements, escalation requests, and execution-governance outcomes. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] The contract vocabulary is hand-agnostic enough to cover shell, workspace, and future execution surfaces without provider-specific branching. [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end, proof: ac-2.log-->

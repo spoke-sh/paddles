@@ -335,13 +335,18 @@ Harness profiles make steering and recovery policy explicit and versionable inst
 - stay on `recursive-structured-v1` when the planner can return structured next actions and the synthesizer can return structured final answers
 - downgrade to `prompt-envelope-safe-v1` when prompt-envelope planner recovery or prompt-envelope rendering is required
 
-The selected profile owns three bounded contracts:
+The selected profile owns four bounded contracts:
 
 - steering refinement policy
 - compaction budget
 - recovery mode for invalid replies
+- execution-governance posture for local hands, including sandbox mode, approval policy, and supported escalation-reuse scopes
 
-Selection and downgrade are recorded on turn-start trace records so replay-backed surfaces can explain which profile ran.
+Today both profiles keep the local runtime in `workspace_write` sandbox mode
+with `on_request` approval, but the degraded `prompt-envelope-safe-v1` posture
+explicitly disables bounded `command_prefix` escalation reuse. Selection and
+downgrade are recorded on turn-start trace records so replay-backed surfaces can
+explain which profile ran and which governance features remained available.
 
 ### Budget Boundary
 
@@ -488,7 +493,7 @@ The runtime follows the backbone narrative from above:
 2. **Planning** — workspace actions stay inside the planner loop. Search/refine actions carry model-selected retrieval mode, strategy, and optional structural fuzzy retriever overrides into the gatherer boundary. The `sift-direct` gatherer executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second planner.
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
 4. **Context quality** — a `StrainTracker` accumulates truncation events during context assembly and emits `ContextStrain` as a turn event when strain is non-nominal.
-5. **Execution hands** — `MechSuitService` owns a session-scoped execution-hand registry so workspace, terminal, and transport surfaces can report one stable lifecycle/diagnostics contract before their concrete adapters are swapped or generalized.
+5. **Execution hands** — `MechSuitService` owns a session-scoped execution-hand registry so workspace, terminal, and transport surfaces can report one stable lifecycle/diagnostics contract before their concrete adapters are swapped or generalized. Those hands now also share one execution-governance vocabulary for permission requirements, escalation requests, and structured allow or deny outcomes.
 6. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
 
 ### Growing Edges

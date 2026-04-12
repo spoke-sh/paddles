@@ -1,4 +1,7 @@
-use crate::domain::model::CompactionBudget;
+use crate::domain::model::{
+    CompactionBudget, ExecutionApprovalPolicy, ExecutionGovernanceProfile,
+    ExecutionPermissionReuseScope, ExecutionSandboxMode,
+};
 use crate::domain::ports::RefinementPolicy;
 use crate::infrastructure::providers::{ModelCapabilitySurface, PlannerToolCallCapability};
 use crate::infrastructure::rendering::RenderCapability;
@@ -59,6 +62,7 @@ pub struct HarnessProfile {
     pub steering: HarnessSteeringPolicy,
     pub compaction: HarnessCompactionPolicy,
     pub recovery: HarnessRecoveryPolicy,
+    pub execution_governance: ExecutionGovernanceProfile,
     pub specialist_brain_ids: &'static [&'static str],
 }
 
@@ -127,6 +131,10 @@ impl HarnessProfileSelection {
         self.active.compaction.budget.clone()
     }
 
+    pub fn active_execution_governance(&self) -> &ExecutionGovernanceProfile {
+        &self.active.execution_governance
+    }
+
     pub fn active_specialist_brain_ids(&self) -> &'static [&'static str] {
         self.active.specialist_brain_ids
     }
@@ -150,6 +158,16 @@ fn recursive_structured_v1() -> HarnessProfile {
             mode: "structured-retry",
             invalid_reply_retries: 1,
         },
+        execution_governance: ExecutionGovernanceProfile::new(
+            ExecutionSandboxMode::WorkspaceWrite,
+            ExecutionApprovalPolicy::OnRequest,
+            vec![
+                ExecutionPermissionReuseScope::Turn,
+                ExecutionPermissionReuseScope::CommandPrefix,
+                ExecutionPermissionReuseScope::Hand,
+            ],
+            None,
+        ),
         specialist_brain_ids: &["session-continuity-v1"],
     }
 }
@@ -172,6 +190,18 @@ fn prompt_envelope_safe_v1() -> HarnessProfile {
             mode: "prompt-envelope-retry",
             invalid_reply_retries: 2,
         },
+        execution_governance: ExecutionGovernanceProfile::new(
+            ExecutionSandboxMode::WorkspaceWrite,
+            ExecutionApprovalPolicy::OnRequest,
+            vec![
+                ExecutionPermissionReuseScope::Turn,
+                ExecutionPermissionReuseScope::Hand,
+            ],
+            Some(
+                "prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse"
+                    .to_string(),
+            ),
+        ),
         specialist_brain_ids: &["session-continuity-v1"],
     }
 }
@@ -179,6 +209,9 @@ fn prompt_envelope_safe_v1() -> HarnessProfile {
 #[cfg(test)]
 mod tests {
     use super::HarnessProfileSelection;
+    use crate::domain::model::{
+        ExecutionApprovalPolicy, ExecutionPermissionReuseScope, ExecutionSandboxMode,
+    };
     use crate::infrastructure::providers::ModelProvider;
 
     #[test]
@@ -196,6 +229,16 @@ mod tests {
             "policy:context-refine-structured-v1"
         );
         assert_eq!(selection.active_compaction_budget().max_steps, 3);
+        let governance = selection.active_execution_governance();
+        assert_eq!(
+            governance.sandbox_mode,
+            ExecutionSandboxMode::WorkspaceWrite
+        );
+        assert_eq!(
+            governance.approval_policy,
+            ExecutionApprovalPolicy::OnRequest
+        );
+        assert!(governance.supports_reuse_scope(ExecutionPermissionReuseScope::CommandPrefix));
     }
 
     #[test]
@@ -218,5 +261,19 @@ mod tests {
             "policy:context-refine-prompt-envelope-v1"
         );
         assert_eq!(selection.active_compaction_budget().max_steps, 2);
+        let governance = selection.active_execution_governance();
+        assert_eq!(
+            governance.sandbox_mode,
+            ExecutionSandboxMode::WorkspaceWrite
+        );
+        assert_eq!(
+            governance.approval_policy,
+            ExecutionApprovalPolicy::OnRequest
+        );
+        assert!(!governance.supports_reuse_scope(ExecutionPermissionReuseScope::CommandPrefix));
+        assert_eq!(
+            governance.downgrade_reason.as_deref(),
+            Some("prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse")
+        );
     }
 }

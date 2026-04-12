@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:10:17.625567273-07:00
+mode: manual
+---
+Documented the hand-agnostic governance vocabulary in README.md, ARCHITECTURE.md, and CONFIGURATION.md; the contract now covers shell, workspace-edit, and future execution hands without provider-specific branching.

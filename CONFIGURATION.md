@@ -203,9 +203,15 @@ The active profile owns:
 - refinement policy for steering reviews
 - bounded compaction budget
 - recovery mode metadata for invalid model replies
+- execution-governance posture for local hands, including sandbox mode, approval policy, and supported permission-reuse scopes
 - active specialist-brain ids that may contribute bounded runtime notes
 
 The selected profile and any downgrade reason are recorded on turn-start traces and reused in planner/gatherer metadata as the `profile` field.
+
+Current execution-governance posture by profile:
+
+- `recursive-structured-v1`: `workspace_write` sandbox, `on_request` approval, reuse scopes `turn`, `command_prefix`, and `hand`
+- `prompt-envelope-safe-v1`: `workspace_write` sandbox, `on_request` approval, reuse scopes `turn` and `hand`; `command_prefix` reuse is explicitly disabled as part of the downgrade
 
 Current specialist-brain contract:
 

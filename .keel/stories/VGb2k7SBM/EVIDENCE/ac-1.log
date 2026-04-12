@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:10:17.601446298-07:00
+mode: manual
+---
+Added explicit execution-governance contracts in src/domain/model/execution_hand.rs and exported them through src/domain/model/mod.rs; verified with cargo test execution_governance and cargo test harness_profile.
