@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:22:48.489738097-07:00
+mode: manual
+---
+ExecutionHandRegistry now carries the active governance profile and the shared gate returns policy_unavailable when it is missing, preventing shell spawn or workspace writes before side effects occur.

@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod conversation_history;
 pub mod credentials;
+pub mod execution_governance;
 pub mod execution_hand;
 pub mod harness_profile;
 pub mod native_transport;

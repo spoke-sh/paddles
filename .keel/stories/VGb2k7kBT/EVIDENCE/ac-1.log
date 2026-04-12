@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:22:48.412540402-07:00
+mode: manual
+---
+Added a shared permission gate in src/infrastructure/execution_governance.rs and routed terminal/workspace editor execution through it; verified with cargo test infrastructure::execution_governance::tests, cargo test infrastructure::terminal::tests, and cargo test infrastructure::adapters::local_workspace_editor::tests.

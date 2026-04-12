@@ -12,6 +12,9 @@ use crate::domain::ports::{
     WorkspaceActionResult, WorkspaceEditor,
 };
 use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
+use crate::infrastructure::execution_governance::{
+    GovernedTerminalCommandResult, summarize_governance_outcome,
+};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
     ApiFormat, ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability,
@@ -131,7 +134,7 @@ impl HttpProviderAdapter {
     ) -> Self {
         Self::new_with_execution_hand_registry(
             workspace_root,
-            Arc::new(ExecutionHandRegistry::default()),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
             provider_name,
             model_id,
             api_key,
@@ -1123,6 +1126,7 @@ Rules:
                     name: "read".to_string(),
                     summary: truncate(&content, 4000),
                     applied_edit: None,
+                    governance_outcome: None,
                 })
             }
             WorkspaceAction::ListFiles { pattern } => {
@@ -1136,11 +1140,20 @@ Rules:
                     Arc::clone(&self.execution_hand_registry),
                     Arc::clone(&self.transport_mediator),
                 )?;
-                Ok(WorkspaceActionResult {
-                    name: "list_files".to_string(),
-                    summary: String::from_utf8_lossy(&output.stdout).to_string(),
-                    applied_edit: None,
-                })
+                match output {
+                    GovernedTerminalCommandResult::Executed(output) => Ok(WorkspaceActionResult {
+                        name: "list_files".to_string(),
+                        summary: String::from_utf8_lossy(&output.stdout).to_string(),
+                        applied_edit: None,
+                        governance_outcome: None,
+                    }),
+                    GovernedTerminalCommandResult::Blocked(outcome) => Ok(WorkspaceActionResult {
+                        name: "list_files".to_string(),
+                        summary: summarize_governance_outcome(&outcome),
+                        applied_edit: None,
+                        governance_outcome: Some(outcome),
+                    }),
+                }
             }
             WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command } => {
                 let tool_name = if matches!(action, WorkspaceAction::Inspect { .. }) {
@@ -1157,22 +1170,34 @@ Rules:
                     Arc::clone(&self.execution_hand_registry),
                     Arc::clone(&self.transport_mediator),
                 )?;
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                Ok(WorkspaceActionResult {
-                    name: tool_name.to_string(),
-                    summary: if stderr.trim().is_empty() {
-                        truncate(&stdout, 4000)
-                    } else {
-                        truncate(&format!("{stdout}\n{stderr}"), 4000)
-                    },
-                    applied_edit: None,
-                })
+                match output {
+                    GovernedTerminalCommandResult::Executed(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        Ok(WorkspaceActionResult {
+                            name: tool_name.to_string(),
+                            summary: if stderr.trim().is_empty() {
+                                truncate(&stdout, 4000)
+                            } else {
+                                truncate(&format!("{stdout}\n{stderr}"), 4000)
+                            },
+                            applied_edit: None,
+                            governance_outcome: None,
+                        })
+                    }
+                    GovernedTerminalCommandResult::Blocked(outcome) => Ok(WorkspaceActionResult {
+                        name: tool_name.to_string(),
+                        summary: summarize_governance_outcome(&outcome),
+                        applied_edit: None,
+                        governance_outcome: Some(outcome),
+                    }),
+                }
             }
             WorkspaceAction::Search { query, .. } => Ok(WorkspaceActionResult {
                 name: "search".to_string(),
                 summary: format!("search not available via HTTP provider for: {query}"),
                 applied_edit: None,
+                governance_outcome: None,
             }),
             WorkspaceAction::Diff { path } => workspace_editor.diff(path.as_deref()),
             WorkspaceAction::WriteFile { path, content } => {

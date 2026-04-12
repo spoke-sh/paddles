@@ -24,8 +24,9 @@ pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceOutcome,
     ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile, ExecutionHandAuthority,
     ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
-    ExecutionHandPhase, ExecutionPermission, ExecutionPermissionRequirement,
-    ExecutionPermissionReuseScope, ExecutionSandboxMode, default_local_execution_hand_descriptors,
+    ExecutionHandPhase, ExecutionPermission, ExecutionPermissionRequest,
+    ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
+    default_local_execution_governance_profile, default_local_execution_hand_descriptors,
 };
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,

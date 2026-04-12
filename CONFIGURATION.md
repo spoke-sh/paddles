@@ -213,6 +213,11 @@ Current execution-governance posture by profile:
 - `recursive-structured-v1`: `workspace_write` sandbox, `on_request` approval, reuse scopes `turn`, `command_prefix`, and `hand`
 - `prompt-envelope-safe-v1`: `workspace_write` sandbox, `on_request` approval, reuse scopes `turn` and `hand`; `command_prefix` reuse is explicitly disabled as part of the downgrade
 
+The active posture is enforced through one shared permission gate for the
+terminal runner and workspace editor. When a request exceeds the current
+profile, the runtime returns a structured deny or escalation outcome instead of
+silently broadening authority.
+
 Current specialist-brain contract:
 
 - `session-continuity-v1` is registered under both profiles so the planner contract stays stable across models

@@ -16,6 +16,9 @@ use crate::domain::ports::{
     RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
     ThreadDecisionRequest, WorkspaceAction, WorkspaceEditor,
 };
+use crate::infrastructure::execution_governance::{
+    GovernedTerminalCommandResult, summarize_governance_outcome,
+};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::rendering::{
     RenderCapability, ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
@@ -147,6 +150,7 @@ pub(crate) struct ToolResult {
     pub(crate) name: &'static str,
     pub(crate) summary: String,
     pub(crate) applied_edit: Option<crate::domain::model::AppliedEdit>,
+    pub(crate) governance_outcome: Option<crate::domain::model::ExecutionGovernanceOutcome>,
     pub(crate) retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
@@ -1115,7 +1119,7 @@ impl SiftAgentAdapter {
     ) -> Result<Self> {
         Self::new_with_execution_hand_registry(
             workspace_root,
-            Arc::new(ExecutionHandRegistry::default()),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
             model_id,
             model_paths,
             render_capability,
@@ -1215,7 +1219,8 @@ impl SiftAgentAdapter {
         model_id: &str,
         conversation: Box<dyn Conversation>,
     ) -> Self {
-        let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+        let execution_hand_registry =
+            Arc::new(ExecutionHandRegistry::with_default_local_governance());
         Self::from_factory(
             workspace_root.into(),
             Arc::clone(&execution_hand_registry),
@@ -1234,7 +1239,8 @@ impl SiftAgentAdapter {
         model_id: &str,
         conversations: Vec<Box<dyn Conversation>>,
     ) -> Self {
-        let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+        let execution_hand_registry =
+            Arc::new(ExecutionHandRegistry::with_default_local_governance());
         Self::from_factory(
             workspace_root.into(),
             Arc::clone(&execution_hand_registry),
@@ -1864,6 +1870,7 @@ impl SiftAgentAdapter {
                         name: tool_call.name(),
                         summary: format!("Tool `{}` failed: {err:#}", tool_call.name()),
                         applied_edit: None,
+                        governance_outcome: None,
                         retained_artifacts: None,
                     },
                 };
@@ -2177,6 +2184,7 @@ impl SiftAgentAdapter {
                     name: "search",
                     summary: format_search_summary(query, &assembly),
                     applied_edit: None,
+                    governance_outcome: None,
                     retained_artifacts: Some(assembly.retained_artifacts),
                 })
             }
@@ -2191,6 +2199,7 @@ impl SiftAgentAdapter {
                     name: "list_files",
                     summary: trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS),
                     applied_edit: None,
+                    governance_outcome: None,
                     retained_artifacts: None,
                 })
             }
@@ -2208,6 +2217,7 @@ impl SiftAgentAdapter {
                     name: "read_file",
                     summary,
                     applied_edit: None,
+                    governance_outcome: None,
                     retained_artifacts: None,
                 })
             }
@@ -2222,6 +2232,7 @@ impl SiftAgentAdapter {
                     name: "write_file",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
             }
@@ -2241,6 +2252,7 @@ impl SiftAgentAdapter {
                     name: "replace_in_file",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
             }
@@ -2255,14 +2267,23 @@ impl SiftAgentAdapter {
                     Arc::clone(&self.transport_mediator),
                 )
                 .with_context(|| format!("failed to execute shell command `{command}`"))?;
-                let summary = format_command_summary("Shell command", command, &output);
-                if !output.status.success() {
-                    bail!("{summary}");
-                }
+                let (summary, governance_outcome) = match output {
+                    GovernedTerminalCommandResult::Executed(output) => {
+                        let summary = format_command_summary("Shell command", command, &output);
+                        if !output.status.success() {
+                            bail!("{summary}");
+                        }
+                        (summary, None)
+                    }
+                    GovernedTerminalCommandResult::Blocked(outcome) => {
+                        (summarize_governance_outcome(&outcome), Some(outcome))
+                    }
+                };
                 Ok(ToolResult {
                     name: "shell",
                     summary,
                     applied_edit: None,
+                    governance_outcome,
                     retained_artifacts: None,
                 })
             }
@@ -2277,6 +2298,7 @@ impl SiftAgentAdapter {
                     name: "diff",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
             }
@@ -2291,6 +2313,7 @@ impl SiftAgentAdapter {
                     name: "apply_patch",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
             }
@@ -2460,6 +2483,7 @@ impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
             name: result.name.to_string(),
             summary: result.summary,
             applied_edit: result.applied_edit,
+            governance_outcome: result.governance_outcome,
         })
     }
 }

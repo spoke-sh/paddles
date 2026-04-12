@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:22:48.462871787-07:00
+mode: manual
+---
+Escalation outcomes now carry bounded reuse metadata through ExecutionPermissionRequest and ExecutionEscalationRequest; command-prefix reuse is scoped for terminal commands and turn-scoped reuse is preserved for blocked workspace edits.

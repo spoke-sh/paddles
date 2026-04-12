@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:22:48.440987438-07:00
+mode: manual
+---
+Blocked shell and workspace-edit requests now return structured governance outcomes instead of falling through to raw execution; the blocked terminal and workspace tests assert fail-closed behavior and structured escalation or policy-unavailable results.

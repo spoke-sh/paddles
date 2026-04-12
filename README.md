@@ -197,6 +197,11 @@ escalation requests, and structured allow or deny outcomes. That keeps shell,
 workspace-edit, and future hands on one hand-agnostic contract instead of
 provider-specific branches.
 
+The terminal runner and workspace editor now execute through one shared
+permission gate. If the active posture does not allow a request, the runtime
+fails closed before any side effect and returns a structured deny or escalation
+result instead of widening authority implicitly.
+
 The `transport_mediator` is now the only runtime boundary that resolves remote
 provider API keys and native-transport bearer tokens. Local shell and
 workspace-diff/apply child processes have those credential env vars stripped

@@ -1,4 +1,6 @@
-use crate::domain::model::{AppliedEdit, InstructionFrame, TurnEventSink, TurnIntent};
+use crate::domain::model::{
+    AppliedEdit, ExecutionGovernanceOutcome, InstructionFrame, TurnEventSink, TurnIntent,
+};
 use crate::domain::ports::context_gathering::EvidenceBundle;
 use crate::domain::ports::planning::{GroundingRequirement, WorkspaceAction};
 use anyhow::Result;
@@ -10,6 +12,7 @@ pub struct WorkspaceActionResult {
     pub name: String,
     pub summary: String,
     pub applied_edit: Option<AppliedEdit>,
+    pub governance_outcome: Option<ExecutionGovernanceOutcome>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

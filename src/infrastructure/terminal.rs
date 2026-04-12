@@ -1,8 +1,12 @@
 use crate::domain::model::{
-    ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
-    ExecutionHandPhase, TurnEvent, TurnEventSink,
+    ExecutionGovernanceOutcomeKind, ExecutionHandDescriptor, ExecutionHandDiagnostic,
+    ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase, TurnEvent, TurnEventSink,
 };
 use crate::domain::ports::ExecutionHand;
+use crate::infrastructure::execution_governance::{
+    ExecutionPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
+    terminal_command_permission_request,
+};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use anyhow::{Context, Result};
@@ -29,7 +33,7 @@ pub(crate) fn run_background_terminal_command(
     tool_name: &str,
     call_id: &str,
     event_sink: &dyn TurnEventSink,
-) -> Result<Output> {
+) -> Result<GovernedTerminalCommandResult> {
     BackgroundTerminalRunner::new(workspace_root).run(command, tool_name, call_id, event_sink)
 }
 
@@ -40,7 +44,7 @@ pub(crate) fn run_background_terminal_command_with_execution_hand_registry(
     call_id: &str,
     event_sink: &dyn TurnEventSink,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
-) -> Result<Output> {
+) -> Result<GovernedTerminalCommandResult> {
     let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
         Arc::clone(&execution_hand_registry),
     ));
@@ -63,7 +67,7 @@ pub(crate) fn run_background_terminal_command_with_runtime_mediator(
     event_sink: &dyn TurnEventSink,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
-) -> Result<Output> {
+) -> Result<GovernedTerminalCommandResult> {
     BackgroundTerminalRunner::with_execution_hand_registry(workspace_root, execution_hand_registry)
         .with_transport_mediator(transport_mediator)
         .run(command, tool_name, call_id, event_sink)
@@ -81,7 +85,7 @@ impl BackgroundTerminalRunner {
     fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self::with_execution_hand_registry(
             workspace_root,
-            Arc::new(ExecutionHandRegistry::default()),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
         )
     }
 
@@ -151,7 +155,27 @@ impl BackgroundTerminalRunner {
         tool_name: &str,
         call_id: &str,
         event_sink: &dyn TurnEventSink,
-    ) -> Result<Output> {
+    ) -> Result<GovernedTerminalCommandResult> {
+        let permission_request = terminal_command_permission_request(command, tool_name);
+        let governance_outcome = ExecutionPermissionGate::evaluate(
+            self.execution_hand_registry.governance_profile().as_ref(),
+            &permission_request,
+        );
+        if !matches!(
+            governance_outcome.kind,
+            ExecutionGovernanceOutcomeKind::Allowed
+        ) {
+            let summary = summarize_governance_outcome(&governance_outcome);
+            self.execution_hand_registry.record_phase(
+                ExecutionHandKind::TerminalRunner,
+                ExecutionHandPhase::Degraded,
+                ExecutionHandOperation::Degrade,
+                format!("terminal runner blocked `{command}`"),
+                Some(summary),
+            );
+            return Ok(GovernedTerminalCommandResult::Blocked(governance_outcome));
+        }
+
         self.record_execution_started(command);
         let mut shell = Command::new("sh");
         shell
@@ -264,7 +288,7 @@ impl BackgroundTerminalRunner {
             ))
         };
         self.record_execution_finished(command, last_error);
-        Ok(output)
+        Ok(GovernedTerminalCommandResult::Executed(output))
     }
 }
 
@@ -356,8 +380,10 @@ fn append_terminal_truncation_notice(target: &mut String, stream: &str) {
 mod tests {
     use super::run_background_terminal_command_with_execution_hand_registry;
     use crate::domain::model::{
-        ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase, TurnEvent, TurnEventSink,
+        ExecutionGovernanceOutcomeKind, ExecutionHandKind, ExecutionHandOperation,
+        ExecutionHandPhase, TurnEvent, TurnEventSink,
     };
+    use crate::infrastructure::execution_governance::GovernedTerminalCommandResult;
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
     use std::sync::{Arc, Mutex};
 
@@ -381,7 +407,7 @@ mod tests {
     #[test]
     fn terminal_runner_reports_hand_execution_diagnostics_after_command_completion() {
         let workspace = tempfile::tempdir().expect("workspace");
-        let registry = Arc::new(ExecutionHandRegistry::default());
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
         let sink = RecordingTurnEventSink::default();
 
         let output = run_background_terminal_command_with_execution_hand_registry(
@@ -394,6 +420,9 @@ mod tests {
         )
         .expect("terminal command output");
 
+        let GovernedTerminalCommandResult::Executed(output) = output else {
+            panic!("expected terminal command to execute");
+        };
         assert!(output.status.success());
         assert!(sink.recorded().iter().any(|event| matches!(
             event,
@@ -414,7 +443,7 @@ mod tests {
     #[test]
     fn terminal_runner_does_not_forward_provider_or_transport_credentials_into_shells() {
         let workspace = tempfile::tempdir().expect("workspace");
-        let registry = Arc::new(ExecutionHandRegistry::default());
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
         let sink = RecordingTurnEventSink::default();
 
         unsafe {
@@ -432,12 +461,58 @@ mod tests {
         )
         .expect("terminal command output");
 
+        let GovernedTerminalCommandResult::Executed(output) = output else {
+            panic!("expected terminal command to execute");
+        };
+
         let rendered = String::from_utf8_lossy(&output.stdout);
         assert_eq!(rendered, "missing|missing");
 
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
             std::env::remove_var("PADDLES_HTTP_BEARER_TOKEN");
+        }
+    }
+
+    #[test]
+    fn terminal_runner_fails_closed_before_spawning_when_policy_is_unavailable() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        let sink = RecordingTurnEventSink::default();
+
+        let result = run_background_terminal_command_with_execution_hand_registry(
+            workspace.path(),
+            "printf 'blocked' > blocked.txt",
+            "shell",
+            "call-3",
+            &sink,
+            Arc::clone(&registry),
+        )
+        .expect("governed terminal result");
+
+        assert!(!workspace.path().join("blocked.txt").exists());
+        assert!(sink.recorded().is_empty());
+
+        match result {
+            GovernedTerminalCommandResult::Blocked(outcome) => {
+                assert_eq!(
+                    outcome.kind,
+                    ExecutionGovernanceOutcomeKind::PolicyUnavailable
+                );
+                assert!(
+                    outcome
+                        .reason
+                        .contains("active execution-governance profile")
+                );
+            }
+            GovernedTerminalCommandResult::Executed(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                panic!(
+                    "expected the terminal runner to block, got status {:?}, stdout={stdout:?}, stderr={stderr:?}",
+                    output.status
+                );
+            }
         }
     }
 }

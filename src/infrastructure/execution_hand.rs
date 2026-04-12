@@ -1,6 +1,7 @@
 use crate::domain::model::{
-    ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
-    ExecutionHandPhase, default_local_execution_hand_descriptors,
+    ExecutionGovernanceProfile, ExecutionHandDescriptor, ExecutionHandDiagnostic,
+    ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
+    default_local_execution_governance_profile, default_local_execution_hand_descriptors,
 };
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -8,6 +9,7 @@ use std::sync::Mutex;
 #[derive(Debug)]
 pub struct ExecutionHandRegistry {
     diagnostics: Mutex<BTreeMap<ExecutionHandKind, ExecutionHandDiagnostic>>,
+    governance_profile: Mutex<Option<ExecutionGovernanceProfile>>,
 }
 
 impl Default for ExecutionHandRegistry {
@@ -29,7 +31,14 @@ impl ExecutionHandRegistry {
             .collect();
         Self {
             diagnostics: Mutex::new(diagnostics),
+            governance_profile: Mutex::new(None),
         }
+    }
+
+    pub fn with_default_local_governance() -> Self {
+        let registry = Self::default();
+        registry.set_governance_profile(default_local_execution_governance_profile());
+        registry
     }
 
     pub fn diagnostics(&self) -> Vec<ExecutionHandDiagnostic> {
@@ -47,6 +56,27 @@ impl ExecutionHandRegistry {
             .expect("execution hand diagnostics lock")
             .get(&hand)
             .cloned()
+    }
+
+    pub fn governance_profile(&self) -> Option<ExecutionGovernanceProfile> {
+        self.governance_profile
+            .lock()
+            .expect("execution hand governance lock")
+            .clone()
+    }
+
+    pub fn set_governance_profile(&self, profile: ExecutionGovernanceProfile) {
+        *self
+            .governance_profile
+            .lock()
+            .expect("execution hand governance lock") = Some(profile);
+    }
+
+    pub fn clear_governance_profile(&self) {
+        *self
+            .governance_profile
+            .lock()
+            .expect("execution hand governance lock") = None;
     }
 
     pub fn record_phase(
@@ -127,7 +157,8 @@ impl ExecutionHandRegistry {
 mod tests {
     use super::ExecutionHandRegistry;
     use crate::domain::model::{
-        ExecutionHandAuthority, ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
+        ExecutionApprovalPolicy, ExecutionHandAuthority, ExecutionHandKind, ExecutionHandOperation,
+        ExecutionHandPhase, ExecutionPermissionReuseScope, ExecutionSandboxMode,
     };
 
     #[test]
@@ -181,5 +212,27 @@ mod tests {
             diagnostic.last_error.as_deref(),
             Some("terminal runner degraded after repeated spawn failures")
         );
+    }
+
+    #[test]
+    fn registry_can_publish_and_clear_the_active_governance_profile() {
+        let registry = ExecutionHandRegistry::default();
+        assert_eq!(registry.governance_profile(), None);
+
+        registry.set_governance_profile(crate::domain::model::ExecutionGovernanceProfile::new(
+            ExecutionSandboxMode::ReadOnly,
+            ExecutionApprovalPolicy::Never,
+            vec![ExecutionPermissionReuseScope::Turn],
+            Some("test downgrade".to_string()),
+        ));
+
+        let profile = registry
+            .governance_profile()
+            .expect("governance profile should be recorded");
+        assert_eq!(profile.sandbox_mode, ExecutionSandboxMode::ReadOnly);
+        assert_eq!(profile.approval_policy, ExecutionApprovalPolicy::Never);
+
+        registry.clear_governance_profile();
+        assert_eq!(registry.governance_profile(), None);
     }
 }

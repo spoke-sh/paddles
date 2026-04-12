@@ -264,6 +264,19 @@ impl ExecutionGovernanceProfile {
     }
 }
 
+pub fn default_local_execution_governance_profile() -> ExecutionGovernanceProfile {
+    ExecutionGovernanceProfile::new(
+        ExecutionSandboxMode::WorkspaceWrite,
+        ExecutionApprovalPolicy::OnRequest,
+        vec![
+            ExecutionPermissionReuseScope::Turn,
+            ExecutionPermissionReuseScope::CommandPrefix,
+            ExecutionPermissionReuseScope::Hand,
+        ],
+        None,
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionHandKind {
@@ -420,6 +433,39 @@ impl ExecutionHandDiagnostic {
             summary: descriptor.summary.clone(),
             last_error: None,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPermissionRequest {
+    pub hand: ExecutionHandKind,
+    pub requirement: ExecutionPermissionRequirement,
+    pub requested_reuse_scope: Option<ExecutionPermissionReuseScope>,
+    pub requested_command_prefix: Option<Vec<String>>,
+}
+
+impl ExecutionPermissionRequest {
+    pub fn new(hand: ExecutionHandKind, requirement: ExecutionPermissionRequirement) -> Self {
+        Self {
+            hand,
+            requirement,
+            requested_reuse_scope: None,
+            requested_command_prefix: None,
+        }
+    }
+
+    pub fn with_bounded_reuse(
+        mut self,
+        reuse_scope: ExecutionPermissionReuseScope,
+        command_prefix: Vec<String>,
+    ) -> Self {
+        self.requested_reuse_scope = Some(reuse_scope);
+        self.requested_command_prefix = if command_prefix.is_empty() {
+            None
+        } else {
+            Some(command_prefix)
+        };
+        self
     }
 }
 

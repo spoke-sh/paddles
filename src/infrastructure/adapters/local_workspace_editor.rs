@@ -1,8 +1,13 @@
 use crate::domain::model::{
-    AppliedEdit, ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind,
-    ExecutionHandOperation, ExecutionHandPhase,
+    AppliedEdit, ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind,
+    ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
+    ExecutionHandPhase, ExecutionPermission, ExecutionPermissionRequest,
+    ExecutionPermissionRequirement,
 };
 use crate::domain::ports::{ExecutionHand, WorkspaceActionResult, WorkspaceEditor};
+use crate::infrastructure::execution_governance::{
+    ExecutionPermissionGate, summarize_governance_outcome,
+};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
@@ -28,7 +33,7 @@ impl LocalWorkspaceEditor {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self::with_execution_hand_registry(
             workspace_root,
-            Arc::new(ExecutionHandRegistry::default()),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
         )
     }
 
@@ -93,6 +98,35 @@ impl LocalWorkspaceEditor {
         self.transport_mediator
             .protect_command_env(command, purpose);
     }
+
+    fn evaluate_request(&self, request: &ExecutionPermissionRequest) -> ExecutionGovernanceOutcome {
+        ExecutionPermissionGate::evaluate(
+            self.execution_hand_registry.governance_profile().as_ref(),
+            request,
+        )
+    }
+
+    fn blocked_result(
+        &self,
+        action_name: &str,
+        blocked_summary: impl Into<String>,
+        outcome: ExecutionGovernanceOutcome,
+    ) -> WorkspaceActionResult {
+        let summary = summarize_governance_outcome(&outcome);
+        self.execution_hand_registry.record_phase(
+            ExecutionHandKind::WorkspaceEditor,
+            ExecutionHandPhase::Degraded,
+            ExecutionHandOperation::Degrade,
+            blocked_summary,
+            Some(summary.clone()),
+        );
+        WorkspaceActionResult {
+            name: action_name.to_string(),
+            summary,
+            applied_edit: None,
+            governance_outcome: Some(outcome),
+        }
+    }
 }
 
 impl ExecutionHand for LocalWorkspaceEditor {
@@ -110,6 +144,20 @@ impl ExecutionHand for LocalWorkspaceEditor {
 impl WorkspaceEditor for LocalWorkspaceEditor {
     fn diff(&self, path: Option<&str>) -> Result<WorkspaceActionResult> {
         let target = path.unwrap_or(".").trim();
+        let governance = self.evaluate_request(&ExecutionPermissionRequest::new(
+            ExecutionHandKind::WorkspaceEditor,
+            ExecutionPermissionRequirement::new(
+                format!("diff `{target}`"),
+                vec![ExecutionPermission::ReadWorkspace],
+            ),
+        ));
+        if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
+            return Ok(self.blocked_result(
+                "diff",
+                format!("workspace editor blocked diff for {target}"),
+                governance,
+            ));
+        }
         self.record_execution_started(format!("workspace editor diffing {target}"));
         let mut command = Command::new("git");
         let result = (|| {
@@ -147,6 +195,7 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 name: "diff".to_string(),
                 summary,
                 applied_edit: None,
+                governance_outcome: Some(governance.clone()),
             })
         })();
         match &result {
@@ -170,6 +219,29 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
     }
 
     fn write_file(&self, path: &str, content: &str) -> Result<WorkspaceActionResult> {
+        let governance = self.evaluate_request(
+            &ExecutionPermissionRequest::new(
+                ExecutionHandKind::WorkspaceEditor,
+                ExecutionPermissionRequirement::new(
+                    format!("write `{path}`"),
+                    vec![
+                        ExecutionPermission::ReadWorkspace,
+                        ExecutionPermission::WriteWorkspace,
+                    ],
+                ),
+            )
+            .with_bounded_reuse(
+                crate::domain::model::ExecutionPermissionReuseScope::Turn,
+                Vec::new(),
+            ),
+        );
+        if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
+            return Ok(self.blocked_result(
+                "write_file",
+                format!("workspace editor blocked write_file for {path}"),
+                governance,
+            ));
+        }
         self.record_execution_started(format!("workspace editor writing {path}"));
         let result: Result<WorkspaceActionResult> = (|| {
             let resolved = resolve_workspace_path(&self.workspace_root, path, true)?;
@@ -193,6 +265,7 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 name: "write_file".to_string(),
                 summary: summarize_applied_edit("write_file", &applied_edit),
                 applied_edit: Some(applied_edit),
+                governance_outcome: Some(governance.clone()),
             })
         })();
         match &result {
@@ -219,6 +292,29 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
         new: &str,
         replace_all: bool,
     ) -> Result<WorkspaceActionResult> {
+        let governance = self.evaluate_request(
+            &ExecutionPermissionRequest::new(
+                ExecutionHandKind::WorkspaceEditor,
+                ExecutionPermissionRequirement::new(
+                    format!("replace content in `{path}`"),
+                    vec![
+                        ExecutionPermission::ReadWorkspace,
+                        ExecutionPermission::WriteWorkspace,
+                    ],
+                ),
+            )
+            .with_bounded_reuse(
+                crate::domain::model::ExecutionPermissionReuseScope::Turn,
+                Vec::new(),
+            ),
+        );
+        if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
+            return Ok(self.blocked_result(
+                "replace_in_file",
+                format!("workspace editor blocked replace_in_file for {path}"),
+                governance,
+            ));
+        }
         self.record_execution_started(format!("workspace editor replacing in {path}"));
         let result: Result<WorkspaceActionResult> = (|| {
             let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
@@ -241,6 +337,7 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 name: "replace_in_file".to_string(),
                 summary: summarize_applied_edit("replace_in_file", &applied_edit),
                 applied_edit: Some(applied_edit),
+                governance_outcome: Some(governance.clone()),
             })
         })();
         match &result {
@@ -261,6 +358,29 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
     }
 
     fn apply_patch(&self, patch: &str) -> Result<WorkspaceActionResult> {
+        let governance = self.evaluate_request(
+            &ExecutionPermissionRequest::new(
+                ExecutionHandKind::WorkspaceEditor,
+                ExecutionPermissionRequirement::new(
+                    "apply a workspace patch",
+                    vec![
+                        ExecutionPermission::ReadWorkspace,
+                        ExecutionPermission::WriteWorkspace,
+                    ],
+                ),
+            )
+            .with_bounded_reuse(
+                crate::domain::model::ExecutionPermissionReuseScope::Turn,
+                Vec::new(),
+            ),
+        );
+        if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
+            return Ok(self.blocked_result(
+                "apply_patch",
+                "workspace editor blocked apply_patch",
+                governance,
+            ));
+        }
         self.record_execution_started("workspace editor applying patch");
         let result: Result<WorkspaceActionResult> = (|| {
             let patch_paths = extract_diff_paths(patch);
@@ -303,6 +423,7 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 name: "apply_patch".to_string(),
                 summary: summarize_applied_edit("apply_patch", &applied_edit),
                 applied_edit: Some(applied_edit),
+                governance_outcome: Some(governance.clone()),
             })
         })();
         match &result {
@@ -582,7 +703,11 @@ fn relative_path(workspace_root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::LocalWorkspaceEditor;
-    use crate::domain::model::{ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase};
+    use crate::domain::model::{
+        ExecutionApprovalPolicy, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,
+        ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
+        ExecutionPermissionReuseScope, ExecutionSandboxMode,
+    };
     use crate::domain::ports::{ExecutionHand, WorkspaceEditor};
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
     use std::fs;
@@ -712,7 +837,7 @@ mod tests {
     #[test]
     fn workspace_editor_reports_hand_execution_diagnostics_after_successful_write() {
         let workspace = tempfile::tempdir().expect("workspace");
-        let registry = Arc::new(ExecutionHandRegistry::default());
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
         let editor = LocalWorkspaceEditor::with_execution_hand_registry(
             workspace.path(),
             Arc::clone(&registry),
@@ -735,5 +860,40 @@ mod tests {
             .diagnostic(ExecutionHandKind::WorkspaceEditor)
             .expect("workspace editor diagnostic");
         assert_eq!(registry_diagnostic, diagnostic);
+    }
+
+    #[test]
+    fn workspace_editor_returns_structured_escalation_without_writing_when_policy_blocks() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        registry.set_governance_profile(ExecutionGovernanceProfile::new(
+            ExecutionSandboxMode::ReadOnly,
+            ExecutionApprovalPolicy::OnRequest,
+            vec![ExecutionPermissionReuseScope::Turn],
+            None,
+        ));
+        let editor = LocalWorkspaceEditor::with_execution_hand_registry(
+            workspace.path(),
+            Arc::clone(&registry),
+        );
+
+        let result = editor
+            .write_file("notes.txt", "alpha\n")
+            .expect("blocked write_file still returns a structured result");
+
+        assert!(!workspace.path().join("notes.txt").exists());
+        assert!(result.applied_edit.is_none());
+        let outcome = result
+            .governance_outcome
+            .expect("structured governance outcome");
+        assert_eq!(
+            outcome.kind,
+            ExecutionGovernanceOutcomeKind::EscalationRequired
+        );
+        let escalation = outcome.escalation_request.expect("escalation request");
+        assert_eq!(
+            escalation.reuse_scope,
+            Some(ExecutionPermissionReuseScope::Turn)
+        );
     }
 }

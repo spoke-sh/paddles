@@ -27,11 +27,11 @@ started_at: 2026-04-12T10:05:24
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Execution Governance Contracts](../../../../stories/VGb2k7SBM/README.md) | feat | done |
-| [Route Shell And Workspace Hands Through The Permission Gate](../../../../stories/VGb2k7kBT/README.md) | feat | backlog |
+| [Route Shell And Workspace Hands Through The Permission Gate](../../../../stories/VGb2k7kBT/README.md) | feat | done |
 | [Project Execution Governance Into Trace And UI Surfaces](../../../../stories/VGb2k87BR/README.md) | feat | backlog |
 <!-- END GENERATED -->

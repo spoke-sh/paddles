@@ -5,6 +5,9 @@ use crate::infrastructure::adapters::trace_recorders::{
 use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
+use crate::infrastructure::execution_governance::{
+    GovernedTerminalCommandResult, summarize_governance_outcome,
+};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::harness_profile::HarnessProfileSelection;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
@@ -2600,6 +2603,12 @@ impl MechSuitService {
             synthesizer,
             gatherer: prepared_gatherer,
         };
+        self.execution_hand_registry().set_governance_profile(
+            prepared
+                .harness_profile()
+                .active_execution_governance()
+                .clone(),
+        );
 
         let verbose = self.verbose.load(Ordering::Relaxed);
         let engine = (self.synthesizer_factory)(&self.workspace_root, &prepared.synthesizer)?;
@@ -2646,6 +2655,12 @@ impl MechSuitService {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
         let prepared = runtime.prepared.clone();
+        self.execution_hand_registry().set_governance_profile(
+            prepared
+                .harness_profile()
+                .active_execution_governance()
+                .clone(),
+        );
         let planner_engine = Arc::clone(&runtime.planner_engine);
         let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
         let gatherer = runtime.gatherer.clone();
@@ -6861,6 +6876,12 @@ fn run_planner_inspect_command(
         event_sink,
         execution_hand_registry,
     )?;
+    let output = match output {
+        GovernedTerminalCommandResult::Executed(output) => output,
+        GovernedTerminalCommandResult::Blocked(outcome) => {
+            anyhow::bail!("{}", summarize_governance_outcome(&outcome));
+        }
+    };
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let rendered = if stderr.trim().is_empty() {
@@ -6887,6 +6908,12 @@ fn run_planner_shell_command(
         event_sink,
         execution_hand_registry,
     )?;
+    let output = match output {
+        GovernedTerminalCommandResult::Executed(output) => output,
+        GovernedTerminalCommandResult::Blocked(outcome) => {
+            anyhow::bail!("{}", summarize_governance_outcome(&outcome));
+        }
+    };
     let summary = format_command_output_summary(command, &output);
     if !output.status.success() {
         anyhow::bail!("{summary}");
@@ -7621,6 +7648,7 @@ mod tests {
                 name: action.label().to_string(),
                 summary: format!("executed {}", action.summary()),
                 applied_edit: mock_applied_edit_for_action(action),
+                governance_outcome: None,
             })
         }
     }
