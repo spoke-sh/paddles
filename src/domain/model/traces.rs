@@ -1,3 +1,4 @@
+use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
 use paddles_conversation::{
     ArtifactEnvelope, ConversationThreadRef, TaskTraceId, ThreadCandidate, ThreadDecision,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
@@ -389,6 +390,8 @@ pub enum TraceRecordKind {
     ThreadCandidateCaptured(ThreadCandidate),
     ThreadDecisionSelected(ThreadDecision),
     ThreadMerged(ThreadMergeRecord),
+    ExecutionGovernanceProfileDeclared(ExecutionGovernanceSnapshot),
+    ExecutionGovernanceDecisionRecorded(ExecutionGovernanceDecision),
     PlannerAction {
         action: String,
         rationale: String,

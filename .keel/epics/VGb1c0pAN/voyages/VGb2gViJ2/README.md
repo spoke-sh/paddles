@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VGb2gViJ2
-status: in-progress
+status: done
 epic: VGb1c0pAN
 created_at: 2026-04-12T09:53:12
 # authored
@@ -9,6 +9,7 @@ title: Govern Local Hands With Explicit Execution Policy
 index: 1
 updated_at: 2026-04-12T09:56:30
 started_at: 2026-04-12T10:05:24
+completed_at: 2026-04-12T10:47:09
 ---
 
 # Govern Local Hands With Explicit Execution Policy
@@ -22,16 +23,18 @@ started_at: 2026-04-12T10:05:24
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Execution Governance Contracts](../../../../stories/VGb2k7SBM/README.md) | feat | done |
 | [Route Shell And Workspace Hands Through The Permission Gate](../../../../stories/VGb2k7kBT/README.md) | feat | done |
-| [Project Execution Governance Into Trace And UI Surfaces](../../../../stories/VGb2k87BR/README.md) | feat | backlog |
+| [Project Execution Governance Into Trace And UI Surfaces](../../../../stories/VGb2k87BR/README.md) | feat | done |
 <!-- END GENERATED -->

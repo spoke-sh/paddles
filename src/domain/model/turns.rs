@@ -1,4 +1,5 @@
 use super::context_quality::ContextStrain;
+use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
 use super::harness::HarnessSnapshot;
 use super::interpretation::InterpretationContext;
 use super::traces::{TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase};
@@ -146,6 +147,12 @@ pub enum TurnEvent {
         summary: String,
         sources: Vec<String>,
     },
+    ExecutionGovernanceProfileApplied {
+        snapshot: ExecutionGovernanceSnapshot,
+    },
+    ExecutionGovernanceDecisionRecorded {
+        decision: ExecutionGovernanceDecision,
+    },
     HarnessState {
         snapshot: HarnessSnapshot,
     },
@@ -226,6 +233,12 @@ impl TurnEvent {
             Self::PlannerStepProgress { .. } => "planner_step_progress",
             Self::GathererSearchProgress { .. } => "gatherer_search_progress",
             Self::GathererSummary { .. } => "gatherer_summary",
+            Self::ExecutionGovernanceProfileApplied { .. } => {
+                "execution_governance_profile_applied"
+            }
+            Self::ExecutionGovernanceDecisionRecorded { .. } => {
+                "execution_governance_decision_recorded"
+            }
             Self::HarnessState { .. } => "harness_state",
             Self::PlannerSummary { .. } => "planner_summary",
             Self::RefinementApplied { .. } => "refinement_applied",
@@ -251,6 +264,8 @@ impl TurnEvent {
             | Self::ToolOutput { .. }
             | Self::ToolFinished { .. }
             | Self::WorkspaceEditApplied { .. }
+            | Self::ExecutionGovernanceProfileApplied { .. }
+            | Self::ExecutionGovernanceDecisionRecorded { .. }
             | Self::Fallback { .. }
             | Self::SynthesisReady { grounded: true, .. }
             | Self::SynthesisReady {
@@ -306,6 +321,8 @@ impl TurnEvent {
             },
             Self::PlannerCapability { .. } => "Planning",
             Self::GathererCapability { .. } => "Gathering evidence",
+            Self::ExecutionGovernanceProfileApplied { .. }
+            | Self::ExecutionGovernanceDecisionRecorded { .. } => "Governing",
             Self::IntentClassified { .. } | Self::InterpretationContext { .. } => "Routing",
             Self::GuidanceGraphExpanded { .. } => "Interpreting",
             Self::RouteSelected { .. } => "Synthesizing",

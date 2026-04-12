@@ -494,6 +494,19 @@ The runtime follows the backbone narrative from above:
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
 4. **Context quality** — a `StrainTracker` accumulates truncation events during context assembly and emits `ContextStrain` as a turn event when strain is non-nominal.
 5. **Execution hands** — `MechSuitService` owns a session-scoped execution-hand registry so workspace, terminal, and transport surfaces can report one stable lifecycle/diagnostics contract before their concrete adapters are swapped or generalized. Those hands now also share one execution-governance vocabulary for permission requirements, escalation requests, and structured allow or deny outcomes. The terminal runner and workspace editor already execute through one shared permission gate that fails closed when no active posture is available.
+
+   That governance layer now projects back out through the same trace spine.
+   Turn boot records the active posture as a typed governance snapshot, and each
+   governed tool call records a typed decision artifact carrying the request,
+   outcome kind, and reuse metadata. Runtime event streams, transcript replay,
+   forensic records, and trace-graph projections all consume that same
+   vocabulary, so operator surfaces can distinguish `allowed`, `denied`, and
+   `escalation required` outcomes without reverse-engineering tool summaries.
+
+   Downgraded profiles must surface their limits honestly. When
+   `prompt-envelope-safe-v1` disables bounded `command_prefix` reuse, that loss
+   appears in the governance snapshot detail and in replayed transcript/API
+   projections instead of staying implicit in gate behavior.
 6. **Threading** — session-scoped orchestration uses the shared conversation crate for structured candidates, model-driven decisions, and explicit merge-back records.
 
 ### Growing Edges

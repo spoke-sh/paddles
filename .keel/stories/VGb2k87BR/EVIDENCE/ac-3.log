@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:46:39.141379487-07:00
+mode: manual
+---
+Documented the honest downgrade path for prompt-envelope-safe profiles and unsupported governance features in README.md, ARCHITECTURE.md, and CONFIGURATION.md, including requested-vs-active profile selection and disabled bounded reuse metadata. Verified with cargo test execution_governance_snapshot_describes_profile_selection_and_downgrade and manual doc review.

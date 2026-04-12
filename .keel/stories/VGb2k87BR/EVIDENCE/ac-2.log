@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:46:39.117340818-07:00
+mode: manual
+---
+Operator-facing projections now distinguish allowed, denied, escalated, and unavailable governance outcomes in runtime events, transcript system rows, CLI rendering, and web styling, with human-readable summaries for profile selection and action rationale. Verified with cargo test projects_governance_decisions_into_runtime_event_presentation, cargo test projects_governance_records_into_system_transcript_entries, cargo test embedded_primary_shell_renders_system_transcript_messages_with_system_styling, and cargo test inspect_actions_emit_tool_execution_events.

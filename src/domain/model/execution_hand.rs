@@ -166,6 +166,15 @@ impl ExecutionGovernanceOutcomeKind {
             Self::PolicyUnavailable => "policy_unavailable",
         }
     }
+
+    pub fn human_label(self) -> &'static str {
+        match self {
+            Self::Allowed => "allowed",
+            Self::Denied => "denied",
+            Self::EscalationRequired => "escalation required",
+            Self::PolicyUnavailable => "policy unavailable",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,6 +270,25 @@ impl ExecutionGovernanceProfile {
 
     pub fn supports_reuse_scope(&self, scope: ExecutionPermissionReuseScope) -> bool {
         self.supported_reuse_scopes.contains(&scope)
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "sandbox={}, approval={}",
+            self.sandbox_mode.label(),
+            self.approval_policy.label()
+        )
+    }
+
+    pub fn detail(&self) -> String {
+        let permissions = summarize_execution_permissions(&self.allowed_permissions);
+        let reuse = summarize_execution_reuse_scopes(&self.supported_reuse_scopes);
+        match self.downgrade_reason.as_deref() {
+            Some(reason) => {
+                format!("permissions=[{permissions}], reuse=[{reuse}], downgrade={reason}")
+            }
+            None => format!("permissions=[{permissions}], reuse=[{reuse}]"),
+        }
     }
 }
 
@@ -469,6 +497,127 @@ impl ExecutionPermissionRequest {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionGovernanceSnapshot {
+    pub requested_profile_id: String,
+    pub active_profile_id: String,
+    pub profile: ExecutionGovernanceProfile,
+}
+
+impl ExecutionGovernanceSnapshot {
+    pub fn new(
+        requested_profile_id: impl Into<String>,
+        active_profile_id: impl Into<String>,
+        profile: ExecutionGovernanceProfile,
+    ) -> Self {
+        Self {
+            requested_profile_id: requested_profile_id.into(),
+            active_profile_id: active_profile_id.into(),
+            profile,
+        }
+    }
+
+    pub fn profile_selection(&self) -> String {
+        if self.requested_profile_id == self.active_profile_id {
+            self.active_profile_id.clone()
+        } else {
+            format!(
+                "{} -> {}",
+                self.requested_profile_id, self.active_profile_id
+            )
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "execution posture {} ({})",
+            self.profile_selection(),
+            self.profile.summary()
+        )
+    }
+
+    pub fn detail(&self) -> String {
+        self.profile.detail()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionGovernanceDecision {
+    pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub request: ExecutionPermissionRequest,
+    pub outcome: ExecutionGovernanceOutcome,
+}
+
+impl ExecutionGovernanceDecision {
+    pub fn new(
+        call_id: Option<String>,
+        tool_name: Option<String>,
+        request: ExecutionPermissionRequest,
+        outcome: ExecutionGovernanceOutcome,
+    ) -> Self {
+        Self {
+            call_id,
+            tool_name,
+            request,
+            outcome,
+        }
+    }
+
+    pub fn subject(&self) -> String {
+        match self.tool_name.as_deref() {
+            Some(tool_name) => format!("{tool_name} via {}", self.request.hand.label()),
+            None => self.request.hand.label().to_string(),
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        format!("{} {}", self.outcome.kind.human_label(), self.subject())
+    }
+
+    pub fn detail(&self) -> String {
+        let required_permissions =
+            summarize_execution_permissions(&self.request.requirement.permissions);
+        let mut detail = format!(
+            "requires [{}] ({}) | reason: {}",
+            required_permissions, self.request.requirement.summary, self.outcome.reason
+        );
+
+        if let Some(reuse_scope) = self.request.requested_reuse_scope {
+            detail.push_str(&format!(" | requested_reuse={}", reuse_scope.label()));
+        }
+        if let Some(command_prefix) = self
+            .request
+            .requested_command_prefix
+            .as_ref()
+            .filter(|prefix| !prefix.is_empty())
+        {
+            detail.push_str(&format!(" | prefix={}", command_prefix.join(" ")));
+        }
+        if let Some(escalation) = self.outcome.escalation_request.as_ref() {
+            detail.push_str(&format!(
+                " | escalation=[{}]",
+                summarize_execution_permissions(&escalation.requested_permissions)
+            ));
+            if let Some(reuse_scope) = escalation.reuse_scope {
+                detail.push_str(&format!(" | granted_reuse={}", reuse_scope.label()));
+            }
+            if let Some(command_prefix) = escalation
+                .command_prefix
+                .as_ref()
+                .filter(|prefix| !prefix.is_empty())
+            {
+                detail.push_str(&format!(
+                    " | escalation_prefix={}",
+                    command_prefix.join(" ")
+                ));
+            }
+        }
+
+        detail
+    }
+}
+
 pub fn default_local_execution_hand_descriptors() -> Vec<ExecutionHandDescriptor> {
     let supported_operations = vec![
         ExecutionHandOperation::Describe,
@@ -505,14 +654,39 @@ fn canonicalize_reuse_scopes(
     scopes
 }
 
+pub fn summarize_execution_permissions(permissions: &[ExecutionPermission]) -> String {
+    if permissions.is_empty() {
+        "none".to_string()
+    } else {
+        permissions
+            .iter()
+            .map(|permission| permission.label())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+pub fn summarize_execution_reuse_scopes(scopes: &[ExecutionPermissionReuseScope]) -> String {
+    if scopes.is_empty() {
+        "none".to_string()
+    } else {
+        scopes
+            .iter()
+            .map(|scope| scope.label())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceOutcome,
-        ExecutionGovernanceOutcomeKind, ExecutionHandAuthority, ExecutionHandKind,
+        ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
+        ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,
+        ExecutionGovernanceSnapshot, ExecutionHandAuthority, ExecutionHandKind,
         ExecutionHandOperation, ExecutionHandPhase, ExecutionPermission,
-        ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
-        default_local_execution_hand_descriptors,
+        ExecutionPermissionRequest, ExecutionPermissionRequirement, ExecutionPermissionReuseScope,
+        ExecutionSandboxMode, default_local_execution_hand_descriptors,
     };
 
     #[test]
@@ -665,5 +839,74 @@ mod tests {
         );
         assert_eq!(denied.requirement, requirement);
         assert_eq!(denied.escalation_request, None);
+    }
+
+    #[test]
+    fn execution_governance_snapshot_describes_profile_selection_and_downgrade() {
+        let snapshot = ExecutionGovernanceSnapshot::new(
+            "recursive-structured-v1",
+            "prompt-envelope-safe-v1",
+            ExecutionGovernanceProfile::new(
+                ExecutionSandboxMode::WorkspaceWrite,
+                ExecutionApprovalPolicy::OnRequest,
+                vec![
+                    ExecutionPermissionReuseScope::Turn,
+                    ExecutionPermissionReuseScope::Hand,
+                ],
+                Some("bounded command-prefix reuse is unavailable".to_string()),
+            ),
+        );
+
+        assert_eq!(
+            snapshot.profile_selection(),
+            "recursive-structured-v1 -> prompt-envelope-safe-v1"
+        );
+        assert!(snapshot.summary().contains("execution posture"));
+        assert!(
+            snapshot
+                .detail()
+                .contains("downgrade=bounded command-prefix reuse is unavailable")
+        );
+    }
+
+    #[test]
+    fn execution_governance_decision_describes_subject_and_requested_reuse() {
+        let decision = ExecutionGovernanceDecision::new(
+            Some("call-1".to_string()),
+            Some("shell".to_string()),
+            ExecutionPermissionRequest::new(
+                ExecutionHandKind::TerminalRunner,
+                ExecutionPermissionRequirement::new(
+                    "run shell command",
+                    vec![ExecutionPermission::RunWorkspaceCommand],
+                ),
+            )
+            .with_bounded_reuse(
+                ExecutionPermissionReuseScope::CommandPrefix,
+                vec!["cargo".to_string(), "test".to_string()],
+            ),
+            ExecutionGovernanceOutcome::escalation_required(
+                "approval is required before reusing this command prefix",
+                ExecutionPermissionRequirement::new(
+                    "run shell command",
+                    vec![ExecutionPermission::RunWorkspaceCommand],
+                ),
+                ExecutionEscalationRequest::new(
+                    "allow cargo test",
+                    vec![ExecutionPermission::RunWorkspaceCommand],
+                    Some(ExecutionPermissionReuseScope::CommandPrefix),
+                    Some(vec!["cargo".to_string(), "test".to_string()]),
+                ),
+            ),
+        );
+
+        assert_eq!(decision.subject(), "shell via terminal_runner");
+        assert_eq!(
+            decision.summary(),
+            "escalation required shell via terminal_runner"
+        );
+        assert!(decision.detail().contains("requested_reuse=command_prefix"));
+        assert!(decision.detail().contains("prefix=cargo test"));
+        assert!(decision.detail().contains("escalation_prefix=cargo test"));
     }
 }

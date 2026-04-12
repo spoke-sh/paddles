@@ -7,8 +7,15 @@ use std::process::Output;
 
 #[derive(Debug)]
 pub enum GovernedTerminalCommandResult {
-    Executed(Output),
-    Blocked(ExecutionGovernanceOutcome),
+    Executed {
+        output: Output,
+        governance_request: ExecutionPermissionRequest,
+        governance_outcome: ExecutionGovernanceOutcome,
+    },
+    Blocked {
+        governance_request: ExecutionPermissionRequest,
+        governance_outcome: ExecutionGovernanceOutcome,
+    },
 }
 
 pub struct ExecutionPermissionGate;

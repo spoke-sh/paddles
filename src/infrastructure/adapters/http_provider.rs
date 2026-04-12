@@ -1126,6 +1126,7 @@ Rules:
                     name: "read".to_string(),
                     summary: truncate(&content, 4000),
                     applied_edit: None,
+                    governance_request: None,
                     governance_outcome: None,
                 })
             }
@@ -1141,17 +1142,26 @@ Rules:
                     Arc::clone(&self.transport_mediator),
                 )?;
                 match output {
-                    GovernedTerminalCommandResult::Executed(output) => Ok(WorkspaceActionResult {
+                    GovernedTerminalCommandResult::Executed {
+                        output,
+                        governance_request,
+                        governance_outcome,
+                    } => Ok(WorkspaceActionResult {
                         name: "list_files".to_string(),
                         summary: String::from_utf8_lossy(&output.stdout).to_string(),
                         applied_edit: None,
-                        governance_outcome: None,
+                        governance_request: Some(governance_request),
+                        governance_outcome: Some(governance_outcome),
                     }),
-                    GovernedTerminalCommandResult::Blocked(outcome) => Ok(WorkspaceActionResult {
+                    GovernedTerminalCommandResult::Blocked {
+                        governance_request,
+                        governance_outcome,
+                    } => Ok(WorkspaceActionResult {
                         name: "list_files".to_string(),
-                        summary: summarize_governance_outcome(&outcome),
+                        summary: summarize_governance_outcome(&governance_outcome),
                         applied_edit: None,
-                        governance_outcome: Some(outcome),
+                        governance_request: Some(governance_request),
+                        governance_outcome: Some(governance_outcome),
                     }),
                 }
             }
@@ -1171,7 +1181,11 @@ Rules:
                     Arc::clone(&self.transport_mediator),
                 )?;
                 match output {
-                    GovernedTerminalCommandResult::Executed(output) => {
+                    GovernedTerminalCommandResult::Executed {
+                        output,
+                        governance_request,
+                        governance_outcome,
+                    } => {
                         let stdout = String::from_utf8_lossy(&output.stdout);
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         Ok(WorkspaceActionResult {
@@ -1182,14 +1196,19 @@ Rules:
                                 truncate(&format!("{stdout}\n{stderr}"), 4000)
                             },
                             applied_edit: None,
-                            governance_outcome: None,
+                            governance_request: Some(governance_request),
+                            governance_outcome: Some(governance_outcome),
                         })
                     }
-                    GovernedTerminalCommandResult::Blocked(outcome) => Ok(WorkspaceActionResult {
+                    GovernedTerminalCommandResult::Blocked {
+                        governance_request,
+                        governance_outcome,
+                    } => Ok(WorkspaceActionResult {
                         name: tool_name.to_string(),
-                        summary: summarize_governance_outcome(&outcome),
+                        summary: summarize_governance_outcome(&governance_outcome),
                         applied_edit: None,
-                        governance_outcome: Some(outcome),
+                        governance_request: Some(governance_request),
+                        governance_outcome: Some(governance_outcome),
                     }),
                 }
             }
@@ -1197,6 +1216,7 @@ Rules:
                 name: "search".to_string(),
                 summary: format!("search not available via HTTP provider for: {query}"),
                 applied_edit: None,
+                governance_request: None,
                 governance_outcome: None,
             }),
             WorkspaceAction::Diff { path } => workspace_editor.diff(path.as_deref()),

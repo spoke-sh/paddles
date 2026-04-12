@@ -137,6 +137,8 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             HarnessSnapshot::active(HarnessChamber::Gathering)
                 .with_detail(format!("{provider}: {summary}")),
         ),
+        TurnEvent::ExecutionGovernanceProfileApplied { .. }
+        | TurnEvent::ExecutionGovernanceDecisionRecorded { .. } => None,
         TurnEvent::PlannerSummary {
             strategy,
             mode,

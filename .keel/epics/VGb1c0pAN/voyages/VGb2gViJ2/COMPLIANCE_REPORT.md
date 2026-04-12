@@ -1,0 +1,12 @@
+# COMPLIANCE REPORT: Govern Local Hands With Explicit Execution Policy
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [VGb2k7SBM](../../../../stories/VGb2k7SBM/README.md), [VGb2k7SBM](../../../../stories/VGb2k7SBM/README.md) | [ac-1.log](../../../../stories/VGb2k7SBM/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k7SBM/EVIDENCE/ac-2.log)<br>[ac-1.log](../../../../stories/VGb2k7SBM/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k7SBM/EVIDENCE/ac-2.log) |
+| SRS-02 | ✓ VERIFIED | [VGb2k7kBT](../../../../stories/VGb2k7kBT/README.md) | [ac-1.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-4.log) |
+| SRS-03 | ✓ VERIFIED | [VGb2k7kBT](../../../../stories/VGb2k7kBT/README.md) | [ac-1.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-4.log) |
+| SRS-04 | ✓ VERIFIED | [VGb2k7kBT](../../../../stories/VGb2k7kBT/README.md) | [ac-1.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGb2k7kBT/EVIDENCE/ac-4.log) |
+| SRS-05 | ✓ VERIFIED | [VGb2k87BR](../../../../stories/VGb2k87BR/README.md), [VGb2k87BR](../../../../stories/VGb2k87BR/README.md) | [ac-1.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-4.log)<br>[ac-1.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-4.log) |
+| SRS-06 | ✓ VERIFIED | [VGb2k87BR](../../../../stories/VGb2k87BR/README.md) | [ac-1.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGb2k87BR/EVIDENCE/ac-4.log) |

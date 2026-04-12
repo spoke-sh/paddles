@@ -43,6 +43,13 @@ impl ConversationTraceGraph {
                         ("root".to_string(), root.planner_model.clone())
                     }
                     TraceRecordKind::TurnStarted(_) => ("turn".to_string(), "turn".to_string()),
+                    TraceRecordKind::ExecutionGovernanceProfileDeclared(snapshot) => (
+                        "governance".to_string(),
+                        truncate(&snapshot.profile_selection(), 24),
+                    ),
+                    TraceRecordKind::ExecutionGovernanceDecisionRecorded(decision) => {
+                        ("governance".to_string(), truncate(&decision.summary(), 24))
+                    }
                     TraceRecordKind::PlannerAction { action, .. } => {
                         ("action".to_string(), truncate(action, 24))
                     }

@@ -202,6 +202,13 @@ permission gate. If the active posture does not allow a request, the runtime
 fails closed before any side effect and returns a structured deny or escalation
 result instead of widening authority implicitly.
 
+That posture is no longer hidden inside controller code. Each turn now emits a
+typed execution-governance posture snapshot plus per-action allow, deny, or
+escalation decisions into the runtime event stream and durable trace. Transcript
+and web projections replay those records as system policy rows, and downgraded
+profiles such as `prompt-envelope-safe-v1` surface their disabled features
+explicitly instead of silently pretending full parity.
+
 The `transport_mediator` is now the only runtime boundary that resolves remote
 provider API keys and native-transport bearer tokens. Local shell and
 workspace-diff/apply child processes have those credential env vars stripped

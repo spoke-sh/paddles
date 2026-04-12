@@ -21,12 +21,14 @@ pub mod turns;
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use context_quality::{ContextStrain, StrainFactor, StrainLevel, StrainTracker};
 pub use execution_hand::{
-    ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceOutcome,
-    ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile, ExecutionHandAuthority,
-    ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
-    ExecutionHandPhase, ExecutionPermission, ExecutionPermissionRequest,
-    ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
+    ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
+    ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,
+    ExecutionGovernanceSnapshot, ExecutionHandAuthority, ExecutionHandDescriptor,
+    ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
+    ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
+    ExecutionPermissionReuseScope, ExecutionSandboxMode,
     default_local_execution_governance_profile, default_local_execution_hand_descriptors,
+    summarize_execution_permissions, summarize_execution_reuse_scopes,
 };
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,

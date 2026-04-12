@@ -218,6 +218,14 @@ terminal runner and workspace editor. When a request exceeds the current
 profile, the runtime returns a structured deny or escalation outcome instead of
 silently broadening authority.
 
+That selected posture is also projected into turn-time observability. Each turn
+records a typed governance snapshot with the requested profile id, active
+profile id, sandbox mode, approval policy, supported reuse scopes, and any
+downgrade reason. Governed tool calls then record typed decision artifacts with
+their permission request and allow, deny, or escalation outcome, so transcript,
+trace, and API consumers can replay the exact governance story without parsing
+free-form tool summaries.
+
 Current specialist-brain contract:
 
 - `session-continuity-v1` is registered under both profiles so the planner contract stays stable across models

@@ -335,11 +335,11 @@
 | [Decouple Brain From Hands In The Local Runtime](epics/VGLD4Iesy/voyages/VGLDMuu5X/) | done |
 | [Add Adaptive Harness Profiles And Specialist Brains](epics/VGLD4Iesy/voyages/VGLDMvU4i/) | done |
 
-### [Sandboxed Execution And Approval Policies](epics/VGb1c0pAN/) (active)
+### [Sandboxed Execution And Approval Policies](epics/VGb1c0pAN/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Govern Local Hands With Explicit Execution Policy](epics/VGb1c0pAN/voyages/VGb2gViJ2/) | in-progress |
+| [Govern Local Hands With Explicit Execution Policy](epics/VGb1c0pAN/voyages/VGb2gViJ2/) | done |
 
 ### [Turn-Scoped Control API And Runtime Events](epics/VGb1c1AAK/) (draft)
 

@@ -22,7 +22,8 @@ use crate::domain::model::{
     CompactionPlan, ConversationForensicProjection, ConversationForensicUpdate,
     ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
     ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ExecutionHandDiagnostic,
+    ConversationTranscript, ConversationTranscriptUpdate, ExecutionGovernanceDecision,
+    ExecutionGovernanceOutcome, ExecutionHandDiagnostic, ExecutionPermissionRequest,
     ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
     InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
     PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
@@ -957,6 +958,18 @@ impl TurnEventSink for StructuredTurnTrace {
             self.downstream.emit(TurnEvent::HarnessState { snapshot });
         }
         match event {
+            TurnEvent::ExecutionGovernanceProfileApplied { snapshot } => {
+                self.record_kind(
+                    self.default_branch_id(),
+                    TraceRecordKind::ExecutionGovernanceProfileDeclared(snapshot),
+                );
+            }
+            TurnEvent::ExecutionGovernanceDecisionRecorded { decision } => {
+                self.record_kind(
+                    self.default_branch_id(),
+                    TraceRecordKind::ExecutionGovernanceDecisionRecorded(decision),
+                );
+            }
             TurnEvent::ToolCalled {
                 call_id,
                 tool_name,
@@ -1758,6 +1771,16 @@ fn render_turn_event(event: &TurnEvent) -> String {
             }
             lines.join("\n")
         }
+        TurnEvent::ExecutionGovernanceProfileApplied { snapshot } => format!(
+            "• {}\n  └ {}",
+            snapshot.summary(),
+            trim_event_detail(&snapshot.detail(), 3)
+        ),
+        TurnEvent::ExecutionGovernanceDecisionRecorded { decision } => format!(
+            "• {}\n  └ {}",
+            decision.summary(),
+            trim_event_detail(&decision.detail(), 3)
+        ),
         TurnEvent::PlannerSummary {
             strategy,
             mode,
@@ -2680,6 +2703,14 @@ impl MechSuitService {
             active_thread.clone(),
         ));
         trace.record_turn_start(prompt, &interpretation, &prepared);
+        let harness_profile = prepared.harness_profile();
+        trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
+            snapshot: crate::domain::model::ExecutionGovernanceSnapshot::new(
+                harness_profile.requested.id(),
+                harness_profile.active.id(),
+                harness_profile.active_execution_governance().clone(),
+            ),
+        });
         self.emit_transcript_update(&session.task_id());
         trace.emit(TurnEvent::InterpretationContext {
             context: interpretation.clone(),
@@ -3347,25 +3378,43 @@ impl MechSuitService {
                                 trace.as_ref(),
                             ) {
                                 Ok(output) => {
-                                    let summary =
-                                        planner_terminal_tool_success_summary("inspect", &output);
-                                    trace.emit(TurnEvent::ToolFinished {
-                                        call_id,
-                                        tool_name: "inspect".to_string(),
-                                        summary,
-                                    });
-                                    append_evidence_item(
-                                        &mut loop_state.evidence_items,
-                                        EvidenceItem {
-                                            source: format!("command: {command}"),
-                                            snippet: trim_for_planner(&output, 800),
-                                            rationale: decision.rationale.clone(),
-                                            rank: 0,
-                                        },
-                                        budget.max_evidence_items,
+                                    emit_execution_governance_decision(
+                                        trace.as_ref(),
+                                        Some(&call_id),
+                                        Some("inspect"),
+                                        output.governance_request,
+                                        output.governance_outcome,
                                     );
-                                    used_workspace_resources = true;
-                                    format!("inspected {command}")
+                                    if !output.command_succeeded {
+                                        trace.emit(TurnEvent::ToolFinished {
+                                            call_id,
+                                            tool_name: "inspect".to_string(),
+                                            summary: format!("inspect failed: {}", output.summary),
+                                        });
+                                        format!("inspect failed: {}", output.summary)
+                                    } else {
+                                        let summary = planner_terminal_tool_success_summary(
+                                            "inspect",
+                                            &output.summary,
+                                        );
+                                        trace.emit(TurnEvent::ToolFinished {
+                                            call_id,
+                                            tool_name: "inspect".to_string(),
+                                            summary,
+                                        });
+                                        append_evidence_item(
+                                            &mut loop_state.evidence_items,
+                                            EvidenceItem {
+                                                source: format!("command: {command}"),
+                                                snippet: trim_for_planner(&output.summary, 800),
+                                                rationale: decision.rationale.clone(),
+                                                rank: 0,
+                                            },
+                                            budget.max_evidence_items,
+                                        );
+                                        used_workspace_resources = true;
+                                        format!("inspected {command}")
+                                    }
                                 }
                                 Err(err) => {
                                     trace.emit(TurnEvent::ToolFinished {
@@ -3393,28 +3442,62 @@ impl MechSuitService {
                             trace.as_ref(),
                         ) {
                             Ok(result) => {
-                                let summary =
-                                    planner_terminal_tool_success_summary("shell", &result);
-                                trace.emit(TurnEvent::ToolFinished {
-                                    call_id,
-                                    tool_name: "shell".to_string(),
-                                    summary,
-                                });
-                                append_evidence_item(
-                                    &mut loop_state.evidence_items,
-                                    EvidenceItem {
-                                        source: format!("command: {command}"),
-                                        snippet: trim_for_planner(&result, 1_200),
-                                        rationale: decision.rationale.clone(),
-                                        rank: 0,
-                                    },
-                                    budget.max_evidence_items,
+                                emit_execution_governance_decision(
+                                    trace.as_ref(),
+                                    Some(&call_id),
+                                    Some("shell"),
+                                    result.governance_request,
+                                    result.governance_outcome,
                                 );
-                                if let Some(frame) = instruction_frame.as_mut() {
-                                    frame.note_successful_workspace_action(action);
+                                if result.command_succeeded {
+                                    let summary = planner_terminal_tool_success_summary(
+                                        "shell",
+                                        &result.summary,
+                                    );
+                                    trace.emit(TurnEvent::ToolFinished {
+                                        call_id,
+                                        tool_name: "shell".to_string(),
+                                        summary,
+                                    });
+                                    append_evidence_item(
+                                        &mut loop_state.evidence_items,
+                                        EvidenceItem {
+                                            source: format!("command: {command}"),
+                                            snippet: trim_for_planner(&result.summary, 1_200),
+                                            rationale: decision.rationale.clone(),
+                                            rank: 0,
+                                        },
+                                        budget.max_evidence_items,
+                                    );
+                                    if let Some(frame) = instruction_frame.as_mut() {
+                                        frame.note_successful_workspace_action(action);
+                                    }
+                                    used_workspace_resources = true;
+                                    result.summary
+                                } else {
+                                    let summary =
+                                        format!("Tool `shell` failed: {}", result.summary);
+                                    trace.emit(TurnEvent::ToolFinished {
+                                        call_id,
+                                        tool_name: "shell".to_string(),
+                                        summary: summary.clone(),
+                                    });
+                                    append_evidence_item(
+                                        &mut loop_state.evidence_items,
+                                        EvidenceItem {
+                                            source: format!("command: {command}"),
+                                            snippet: trim_for_planner(&summary, 1_200),
+                                            rationale: decision.rationale.clone(),
+                                            rank: 0,
+                                        },
+                                        budget.max_evidence_items,
+                                    );
+                                    used_workspace_resources = true;
+                                    stop_reason.get_or_insert_with(|| {
+                                        "workspace-action-failed".to_string()
+                                    });
+                                    summary
                                 }
-                                used_workspace_resources = true;
-                                result
                             }
                             Err(err) => {
                                 let summary = format!("Tool `shell` failed: {err:#}");
@@ -3483,6 +3566,18 @@ impl MechSuitService {
                             });
                             match context.synthesizer_engine.execute_workspace_action(action) {
                                 Ok(result) => {
+                                    if let (Some(governance_request), Some(governance_outcome)) = (
+                                        result.governance_request.clone(),
+                                        result.governance_outcome.clone(),
+                                    ) {
+                                        emit_execution_governance_decision(
+                                            trace.as_ref(),
+                                            Some(&call_id),
+                                            Some(action.label()),
+                                            governance_request,
+                                            governance_outcome,
+                                        );
+                                    }
                                     completed_exact_edit = decision_is_exact_edit(&decision.action);
                                     if let Some(frame) = instruction_frame.as_mut() {
                                         frame.note_successful_workspace_action(action);
@@ -6860,13 +6955,20 @@ fn append_evidence_item(target: &mut Vec<EvidenceItem>, item: EvidenceItem, limi
     }
 }
 
+struct GovernedPlannerCommandSummary {
+    summary: String,
+    command_succeeded: bool,
+    governance_request: ExecutionPermissionRequest,
+    governance_outcome: ExecutionGovernanceOutcome,
+}
+
 fn run_planner_inspect_command(
     workspace_root: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     command: &str,
     call_id: &str,
     event_sink: &dyn TurnEventSink,
-) -> Result<String> {
+) -> Result<GovernedPlannerCommandSummary> {
     validate_inspect_command(command)?;
     let output = run_background_terminal_command_with_execution_hand_registry(
         workspace_root,
@@ -6876,21 +6978,37 @@ fn run_planner_inspect_command(
         event_sink,
         execution_hand_registry,
     )?;
-    let output = match output {
-        GovernedTerminalCommandResult::Executed(output) => output,
-        GovernedTerminalCommandResult::Blocked(outcome) => {
-            anyhow::bail!("{}", summarize_governance_outcome(&outcome));
-        }
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let rendered = if stderr.trim().is_empty() {
-        stdout
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
+    match output {
+        GovernedTerminalCommandResult::Executed {
+            output,
+            governance_request,
+            governance_outcome,
+        } => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let rendered = if stderr.trim().is_empty() {
+                stdout
+            } else {
+                format!("{stdout}\n{stderr}")
+            };
 
-    Ok(trim_for_planner(&rendered, 1_200))
+            Ok(GovernedPlannerCommandSummary {
+                summary: trim_for_planner(&rendered, 1_200),
+                command_succeeded: output.status.success(),
+                governance_request,
+                governance_outcome,
+            })
+        }
+        GovernedTerminalCommandResult::Blocked {
+            governance_request,
+            governance_outcome,
+        } => Ok(GovernedPlannerCommandSummary {
+            summary: summarize_governance_outcome(&governance_outcome),
+            command_succeeded: false,
+            governance_request,
+            governance_outcome,
+        }),
+    }
 }
 
 fn run_planner_shell_command(
@@ -6899,7 +7017,7 @@ fn run_planner_shell_command(
     command: &str,
     call_id: &str,
     event_sink: &dyn TurnEventSink,
-) -> Result<String> {
+) -> Result<GovernedPlannerCommandSummary> {
     let output = run_background_terminal_command_with_execution_hand_registry(
         workspace_root,
         command,
@@ -6908,17 +7026,47 @@ fn run_planner_shell_command(
         event_sink,
         execution_hand_registry,
     )?;
-    let output = match output {
-        GovernedTerminalCommandResult::Executed(output) => output,
-        GovernedTerminalCommandResult::Blocked(outcome) => {
-            anyhow::bail!("{}", summarize_governance_outcome(&outcome));
+    match output {
+        GovernedTerminalCommandResult::Executed {
+            output,
+            governance_request,
+            governance_outcome,
+        } => {
+            let summary = format_command_output_summary(command, &output);
+            Ok(GovernedPlannerCommandSummary {
+                summary,
+                command_succeeded: output.status.success(),
+                governance_request,
+                governance_outcome,
+            })
         }
-    };
-    let summary = format_command_output_summary(command, &output);
-    if !output.status.success() {
-        anyhow::bail!("{summary}");
+        GovernedTerminalCommandResult::Blocked {
+            governance_request,
+            governance_outcome,
+        } => Ok(GovernedPlannerCommandSummary {
+            summary: summarize_governance_outcome(&governance_outcome),
+            command_succeeded: false,
+            governance_request,
+            governance_outcome,
+        }),
     }
-    Ok(summary)
+}
+
+fn emit_execution_governance_decision(
+    event_sink: &dyn TurnEventSink,
+    call_id: Option<&str>,
+    tool_name: Option<&str>,
+    governance_request: ExecutionPermissionRequest,
+    governance_outcome: ExecutionGovernanceOutcome,
+) {
+    event_sink.emit(TurnEvent::ExecutionGovernanceDecisionRecorded {
+        decision: ExecutionGovernanceDecision::new(
+            call_id.map(str::to_string),
+            tool_name.map(str::to_string),
+            governance_request,
+            governance_outcome,
+        ),
+    });
 }
 
 fn validate_inspect_command(command: &str) -> Result<()> {
@@ -7236,8 +7384,11 @@ mod tests {
     use crate::domain::model::{AuthoredResponse, CompactionPlan, CompactionRequest, ResponseMode};
     use crate::domain::model::{
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
-        ConversationTranscriptUpdate, ExecutionHandAuthority, ExecutionHandKind,
-        ExecutionHandPhase, ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink,
+        ConversationTranscriptSpeaker, ConversationTranscriptUpdate, ExecutionApprovalPolicy,
+        ExecutionGovernanceDecision, ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind,
+        ExecutionGovernanceSnapshot, ExecutionHandAuthority, ExecutionHandKind, ExecutionHandPhase,
+        ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
+        ExecutionSandboxMode, ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink,
         ForensicUpdateSink, NullTurnEventSink, StrainFactor, TaskTraceId, ThreadDecision,
         ThreadDecisionId, ThreadDecisionKind, TraceLineageNodeKind, TraceLineageRelation,
         TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
@@ -7648,6 +7799,7 @@ mod tests {
                 name: action.label().to_string(),
                 summary: format!("executed {}", action.summary()),
                 applied_edit: mock_applied_edit_for_action(action),
+                governance_request: None,
                 governance_outcome: None,
             })
         }
@@ -9081,9 +9233,14 @@ mod tests {
             .expect("transcript replay");
 
         assert_eq!(transcript.task_id, session.task_id());
-        assert_eq!(transcript.entries.len(), 2);
+        assert_eq!(transcript.entries.len(), 3);
         assert_eq!(transcript.entries[0].content, "Project this conversation");
-        assert_eq!(transcript.entries[1].content, "Transcript response.");
+        assert_eq!(
+            transcript.entries[1].speaker,
+            ConversationTranscriptSpeaker::System
+        );
+        assert!(transcript.entries[1].content.contains("execution posture"));
+        assert_eq!(transcript.entries[2].content, "Transcript response.");
     }
 
     #[test]
@@ -9163,7 +9320,11 @@ mod tests {
             .expect("projection replay");
 
         assert_eq!(projection.task_id, session.task_id());
-        assert_eq!(projection.transcript.entries.len(), 2);
+        assert_eq!(projection.transcript.entries.len(), 3);
+        assert_eq!(
+            projection.transcript.entries[1].speaker,
+            ConversationTranscriptSpeaker::System
+        );
         assert_eq!(projection.forensics.turns.len(), 1);
         assert_eq!(projection.manifold.turns.len(), 1);
         assert!(!projection.trace_graph.nodes.is_empty());
@@ -9180,6 +9341,13 @@ mod tests {
                 .nodes
                 .iter()
                 .any(|node| node.kind == "action")
+        );
+        assert!(
+            projection
+                .trace_graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == "governance")
         );
     }
 
@@ -11306,6 +11474,200 @@ mod tests {
         assert!(!events.iter().any(|event| matches!(
             event,
             TurnEvent::ToolFinished { tool_name, .. } if tool_name == "write_file"
+        )));
+    }
+
+    #[test]
+    fn planner_workspace_actions_emit_governance_decision_events() {
+        #[derive(Default)]
+        struct GovernedWriteSynthesizer;
+
+        impl SynthesizerEngine for GovernedWriteSynthesizer {
+            fn set_verbose(&self, _level: u8) {}
+
+            fn respond_for_turn(
+                &self,
+                _prompt: &str,
+                _turn_intent: TurnIntent,
+                _gathered_evidence: Option<&EvidenceBundle>,
+                _handoff: &SynthesisHandoff,
+                _event_sink: Arc<dyn TurnEventSink>,
+            ) -> Result<String> {
+                Ok("done".to_string())
+            }
+
+            fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+
+            fn execute_workspace_action(
+                &self,
+                action: &WorkspaceAction,
+            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+                Ok(crate::domain::ports::WorkspaceActionResult {
+                    name: action.label().to_string(),
+                    summary: format!("executed {}", action.summary()),
+                    applied_edit: None,
+                    governance_request: Some(ExecutionPermissionRequest::new(
+                        ExecutionHandKind::WorkspaceEditor,
+                        ExecutionPermissionRequirement::new(
+                            "write file",
+                            vec![
+                                ExecutionPermission::ReadWorkspace,
+                                ExecutionPermission::WriteWorkspace,
+                            ],
+                        ),
+                    )),
+                    governance_outcome: Some(ExecutionGovernanceOutcome::allowed(
+                        "workspace write is allowed under the active sandbox",
+                        ExecutionPermissionRequirement::new(
+                            "write file",
+                            vec![
+                                ExecutionPermission::ReadWorkspace,
+                                ExecutionPermission::WriteWorkspace,
+                            ],
+                        ),
+                        vec![
+                            ExecutionPermission::ReadWorkspace,
+                            ExecutionPermission::WriteWorkspace,
+                        ],
+                    )),
+                })
+            }
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::WriteFile {
+                        path: "note.txt".to_string(),
+                        content: "hello\n".to_string(),
+                    },
+                },
+                "apply the requested edit",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "edit complete".to_string(),
+                },
+                rationale: "stop after the edit".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(GovernedWriteSynthesizer);
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("write the local file", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ExecutionGovernanceDecisionRecorded { decision }
+                if decision.tool_name.as_deref() == Some("write_file")
+                    && decision.request.hand == ExecutionHandKind::WorkspaceEditor
+                    && decision.outcome.kind == ExecutionGovernanceOutcomeKind::Allowed
+        )));
+    }
+
+    #[test]
+    fn structured_turn_trace_records_governance_profile_and_decision_artifacts() {
+        let task_id = TaskTraceId::new("task-governance").expect("task");
+        let session = ConversationSession::new(task_id.clone());
+        let turn_id = session.allocate_turn_id();
+        let active_thread = session.active_thread().thread_ref;
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let trace = Arc::new(StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            recorder.clone(),
+            Vec::new(),
+            session,
+            turn_id,
+            active_thread,
+        ));
+
+        trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
+            snapshot: ExecutionGovernanceSnapshot::new(
+                "recursive-structured-v1",
+                "recursive-structured-v1",
+                crate::domain::model::ExecutionGovernanceProfile::new(
+                    ExecutionSandboxMode::WorkspaceWrite,
+                    ExecutionApprovalPolicy::OnRequest,
+                    Vec::new(),
+                    None,
+                ),
+            ),
+        });
+        trace.emit(TurnEvent::ExecutionGovernanceDecisionRecorded {
+            decision: ExecutionGovernanceDecision::new(
+                Some("tool-1".to_string()),
+                Some("write_file".to_string()),
+                ExecutionPermissionRequest::new(
+                    ExecutionHandKind::WorkspaceEditor,
+                    ExecutionPermissionRequirement::new(
+                        "write file",
+                        vec![
+                            ExecutionPermission::ReadWorkspace,
+                            ExecutionPermission::WriteWorkspace,
+                        ],
+                    ),
+                ),
+                ExecutionGovernanceOutcome::allowed(
+                    "workspace write is allowed under the active sandbox",
+                    ExecutionPermissionRequirement::new(
+                        "write file",
+                        vec![
+                            ExecutionPermission::ReadWorkspace,
+                            ExecutionPermission::WriteWorkspace,
+                        ],
+                    ),
+                    vec![
+                        ExecutionPermission::ReadWorkspace,
+                        ExecutionPermission::WriteWorkspace,
+                    ],
+                ),
+            ),
+        });
+
+        let replay = recorder.replay(&task_id).expect("replay");
+        assert!(replay.records.iter().any(|record| matches!(
+            record.kind,
+            TraceRecordKind::ExecutionGovernanceProfileDeclared(_)
+        )));
+        assert!(replay.records.iter().any(|record| matches!(
+            record.kind,
+            TraceRecordKind::ExecutionGovernanceDecisionRecorded(_)
         )));
     }
 

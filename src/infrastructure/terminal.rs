@@ -173,7 +173,10 @@ impl BackgroundTerminalRunner {
                 format!("terminal runner blocked `{command}`"),
                 Some(summary),
             );
-            return Ok(GovernedTerminalCommandResult::Blocked(governance_outcome));
+            return Ok(GovernedTerminalCommandResult::Blocked {
+                governance_request: permission_request,
+                governance_outcome,
+            });
         }
 
         self.record_execution_started(command);
@@ -288,7 +291,11 @@ impl BackgroundTerminalRunner {
             ))
         };
         self.record_execution_finished(command, last_error);
-        Ok(GovernedTerminalCommandResult::Executed(output))
+        Ok(GovernedTerminalCommandResult::Executed {
+            output,
+            governance_request: permission_request,
+            governance_outcome,
+        })
     }
 }
 
@@ -420,10 +427,20 @@ mod tests {
         )
         .expect("terminal command output");
 
-        let GovernedTerminalCommandResult::Executed(output) = output else {
+        let GovernedTerminalCommandResult::Executed {
+            output,
+            governance_request,
+            governance_outcome,
+        } = output
+        else {
             panic!("expected terminal command to execute");
         };
         assert!(output.status.success());
+        assert_eq!(governance_request.hand, ExecutionHandKind::TerminalRunner);
+        assert_eq!(
+            governance_outcome.kind,
+            ExecutionGovernanceOutcomeKind::Allowed
+        );
         assert!(sink.recorded().iter().any(|event| matches!(
             event,
             TurnEvent::ToolOutput { output, .. } if output.contains("hello from terminal")
@@ -461,7 +478,12 @@ mod tests {
         )
         .expect("terminal command output");
 
-        let GovernedTerminalCommandResult::Executed(output) = output else {
+        let GovernedTerminalCommandResult::Executed {
+            output,
+            governance_request: _,
+            governance_outcome: _,
+        } = output
+        else {
             panic!("expected terminal command to execute");
         };
 
@@ -494,18 +516,26 @@ mod tests {
         assert!(sink.recorded().is_empty());
 
         match result {
-            GovernedTerminalCommandResult::Blocked(outcome) => {
+            GovernedTerminalCommandResult::Blocked {
+                governance_request,
+                governance_outcome,
+            } => {
+                assert_eq!(governance_request.hand, ExecutionHandKind::TerminalRunner);
                 assert_eq!(
-                    outcome.kind,
+                    governance_outcome.kind,
                     ExecutionGovernanceOutcomeKind::PolicyUnavailable
                 );
                 assert!(
-                    outcome
+                    governance_outcome
                         .reason
                         .contains("active execution-governance profile")
                 );
             }
-            GovernedTerminalCommandResult::Executed(output) => {
+            GovernedTerminalCommandResult::Executed {
+                output,
+                governance_request: _,
+                governance_outcome: _,
+            } => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 panic!(

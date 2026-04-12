@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:46:39.084038645-07:00
+mode: manual
+---
+Added typed execution governance snapshot and decision artifacts to turn events, trace records, transcript replay, and projection graph surfaces. Verified with cargo test structured_turn_trace_records_governance_profile_and_decision_artifacts, cargo test projects_governance, cargo test planner_workspace_actions_emit_governance_decision_events, and cargo test terminal_runner_fails_closed_before_spawning_when_policy_is_unavailable.

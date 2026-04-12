@@ -1,3 +1,4 @@
+use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
 use super::generative::ResponseMode;
 use super::render::RenderDocument;
 use super::traces::{TraceRecordKind, TraceReplay};
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub enum ConversationTranscriptSpeaker {
     User,
     Assistant,
+    System,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +68,26 @@ impl ConversationTranscript {
                         });
                     }
                 }
+                TraceRecordKind::ExecutionGovernanceProfileDeclared(snapshot) => {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format_execution_governance_snapshot(snapshot),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
+                TraceRecordKind::ExecutionGovernanceDecisionRecorded(decision) => {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format_execution_governance_decision(decision),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
                 _ => {}
             }
         }
@@ -91,6 +113,14 @@ fn response_mode_label(artifact: &ArtifactEnvelope) -> Option<ResponseMode> {
         .and_then(|value| ResponseMode::from_label(value))
 }
 
+fn format_execution_governance_snapshot(snapshot: &ExecutionGovernanceSnapshot) -> String {
+    format!("{}\n{}", snapshot.summary(), snapshot.detail())
+}
+
+fn format_execution_governance_decision(decision: &ExecutionGovernanceDecision) -> String {
+    format!("{}\n{}", decision.summary(), decision.detail())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationTranscriptUpdate {
     pub task_id: TaskTraceId,
@@ -111,6 +141,10 @@ impl TranscriptUpdateSink for NullTranscriptUpdateSink {
 mod tests {
     use super::{ConversationTranscript, ConversationTranscriptSpeaker};
     use crate::domain::model::{
+        ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
+        ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionGovernanceSnapshot,
+        ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequest,
+        ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
         ResponseMode, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord,
         TraceRecordKind, TraceReplay, TraceTaskRoot,
     };
@@ -202,5 +236,164 @@ mod tests {
             Some(ResponseMode::GroundedAnswer)
         );
         assert!(transcript.entries[1].render.is_some());
+    }
+
+    #[test]
+    fn projects_governance_records_into_system_transcript_entries() {
+        let task_id = TaskTraceId::new("task-2").expect("task");
+        let turn_id = TurnTraceId::new("task-2.turn-0001").expect("turn");
+        let replay = TraceReplay {
+            task_id: task_id.clone(),
+            records: vec![
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    sequence: 1,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: None,
+                    },
+                    kind: TraceRecordKind::TaskRootStarted(TraceTaskRoot {
+                        prompt: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-1").expect("artifact"),
+                            ArtifactKind::Prompt,
+                            "prompt",
+                            "ship it",
+                            200,
+                        ),
+                        interpretation: None,
+                        planner_model: "planner".to_string(),
+                        synthesizer_model: "synth".to_string(),
+                        harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                            requested_profile_id: "recursive-structured-v1".to_string(),
+                            active_profile_id: "recursive-structured-v1".to_string(),
+                            downgrade_reason: None,
+                        },
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    sequence: 2,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: Some(
+                            TraceRecordId::new("record-1").expect("parent record"),
+                        ),
+                    },
+                    kind: TraceRecordKind::ExecutionGovernanceProfileDeclared(
+                        ExecutionGovernanceSnapshot::new(
+                            "recursive-structured-v1",
+                            "prompt-envelope-safe-v1",
+                            ExecutionGovernanceProfile::new(
+                                ExecutionSandboxMode::WorkspaceWrite,
+                                ExecutionApprovalPolicy::OnRequest,
+                                vec![
+                                    ExecutionPermissionReuseScope::Turn,
+                                    ExecutionPermissionReuseScope::Hand,
+                                ],
+                                Some(
+                                    "prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse"
+                                        .to_string(),
+                                ),
+                            ),
+                        ),
+                    ),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-3").expect("record"),
+                    sequence: 3,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: Some(
+                            TraceRecordId::new("record-2").expect("parent record"),
+                        ),
+                    },
+                    kind: TraceRecordKind::ExecutionGovernanceDecisionRecorded(
+                        ExecutionGovernanceDecision::new(
+                            Some("tool-1".to_string()),
+                            Some("shell".to_string()),
+                            ExecutionPermissionRequest::new(
+                                ExecutionHandKind::TerminalRunner,
+                                ExecutionPermissionRequirement::new(
+                                    "run shell command",
+                                    vec![ExecutionPermission::RunWorkspaceCommand],
+                                ),
+                            )
+                            .with_bounded_reuse(
+                                ExecutionPermissionReuseScope::CommandPrefix,
+                                vec!["cargo".to_string(), "test".to_string()],
+                            ),
+                            ExecutionGovernanceOutcome::escalation_required(
+                                "approval is required before reusing this command prefix",
+                                ExecutionPermissionRequirement::new(
+                                    "run shell command",
+                                    vec![ExecutionPermission::RunWorkspaceCommand],
+                                ),
+                                ExecutionEscalationRequest::new(
+                                    "allow cargo test",
+                                    vec![ExecutionPermission::RunWorkspaceCommand],
+                                    Some(ExecutionPermissionReuseScope::CommandPrefix),
+                                    Some(vec!["cargo".to_string(), "test".to_string()]),
+                                ),
+                            ),
+                        ),
+                    ),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-4").expect("record"),
+                    sequence: 4,
+                    lineage: TraceLineage {
+                        task_id,
+                        turn_id,
+                        branch_id: None,
+                        parent_record_id: Some(
+                            TraceRecordId::new("record-3").expect("parent record"),
+                        ),
+                    },
+                    kind: TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                        checkpoint_id: TraceCheckpointId::new("checkpoint-1").expect("checkpoint"),
+                        kind: TraceCheckpointKind::TurnCompleted,
+                        summary: "turn completed".to_string(),
+                        response: Some(ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-2").expect("artifact"),
+                            ArtifactKind::ModelOutput,
+                            "assistant response",
+                            "done",
+                            200,
+                        )),
+                        citations: Vec::new(),
+                        grounded: false,
+                    }),
+                },
+            ],
+        };
+
+        let transcript = ConversationTranscript::from_trace_replay(&replay);
+        assert_eq!(transcript.entries.len(), 4);
+        assert_eq!(
+            transcript.entries[1].speaker,
+            ConversationTranscriptSpeaker::System
+        );
+        assert!(transcript.entries[1].content.contains("execution posture"));
+        assert!(transcript.entries[1].content.contains("downgrade="));
+        assert_eq!(
+            transcript.entries[2].speaker,
+            ConversationTranscriptSpeaker::System
+        );
+        assert!(
+            transcript.entries[2]
+                .content
+                .contains("escalation required shell")
+        );
+        assert!(
+            transcript.entries[2]
+                .content
+                .contains("escalation_prefix=cargo test")
+        );
     }
 }

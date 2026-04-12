@@ -1172,12 +1172,12 @@ mod tests {
     use crate::domain::model::NullTurnEventSink;
     use crate::domain::model::{
         ArtifactKind, ConversationForensicUpdate, ConversationProjectionUpdateKind,
-        ConversationTranscriptUpdate, ForensicUpdateSink, TraceCheckpointKind,
-        TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind, TraceLineageNodeRef,
-        TraceModelExchangeArtifact, TraceModelExchangeCategory, TraceModelExchangeLane,
-        TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
-        TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TranscriptUpdateSink,
-        TurnEventSink,
+        ConversationTranscriptSpeaker, ConversationTranscriptUpdate, ForensicUpdateSink,
+        TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind,
+        TraceLineageNodeRef, TraceModelExchangeArtifact, TraceModelExchangeCategory,
+        TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+        TraceRecordKind, TraceReplay, TraceSignalContribution, TraceSignalKind,
+        TraceSignalSnapshot, TranscriptUpdateSink, TurnEventSink,
     };
     use crate::domain::ports::{
         ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
@@ -1989,9 +1989,9 @@ mod tests {
             transcript_payload.transcript_update,
             Some(transcript_update)
         );
-        assert_eq!(transcript_payload.snapshot.transcript.entries.len(), 2);
+        assert_eq!(transcript_payload.snapshot.transcript.entries.len(), 3);
         assert!(
-            transcript_payload.snapshot.transcript.entries[1]
+            transcript_payload.snapshot.transcript.entries[2]
                 .render
                 .as_ref()
                 .is_some_and(|render| !render.blocks.is_empty())
@@ -2398,6 +2398,15 @@ mod tests {
     }
 
     #[test]
+    fn embedded_primary_shell_renders_system_transcript_messages_with_system_styling() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains(".msg.system"));
+        assert!(html.contains(".event-badge.governor"));
+        assert!(html.contains("entry.speaker === 'system' ? 'system' : 'user'"));
+    }
+
+    #[test]
     fn embedded_primary_shell_only_auto_scrolls_chat_when_the_viewport_is_at_the_tail() {
         let html = include_str!("index.html");
 
@@ -2492,18 +2501,33 @@ mod tests {
                 .await
                 .expect("conversation projection");
         assert_eq!(projection.task_id.as_str(), task_id);
-        assert_eq!(projection.transcript.entries.len(), 2);
+        assert_eq!(projection.transcript.entries.len(), 3);
+        assert_eq!(
+            projection.transcript.entries[1].speaker,
+            ConversationTranscriptSpeaker::System
+        );
         assert_eq!(projection.forensics.turns.len(), 1);
         assert_eq!(projection.manifold.turns.len(), 1);
         assert!(!projection.trace_graph.nodes.is_empty());
+        assert!(
+            projection
+                .trace_graph
+                .nodes
+                .iter()
+                .any(|node| node.kind == "governance")
+        );
 
         let Json(super::TranscriptResponse(transcript)) =
             super::conversation_transcript(State(Arc::clone(&state)), Path(task_id.clone()))
                 .await
                 .expect("conversation transcript");
-        assert_eq!(transcript.entries.len(), 2);
-        assert!(!transcript.entries[1].content.trim().is_empty());
-        assert!(transcript.entries[1].render.is_some());
+        assert_eq!(transcript.entries.len(), 3);
+        assert_eq!(
+            transcript.entries[1].speaker,
+            ConversationTranscriptSpeaker::System
+        );
+        assert!(transcript.entries[1].content.contains("execution posture"));
+        assert!(transcript.entries[2].render.is_some());
 
         let Json(graph) = super::trace_graph(State(Arc::clone(&state)), Path(task_id.clone()))
             .await

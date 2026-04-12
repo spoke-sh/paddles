@@ -417,6 +417,7 @@ fn summarize_transcript_turns(transcript: &ConversationTranscript) -> Vec<String
                     .entry(entry.turn_id.clone())
                     .or_insert_with(|| entry.content.clone());
             }
+            ConversationTranscriptSpeaker::System => {}
         }
     }
 
@@ -437,9 +438,9 @@ fn summarize_transcript_turns(transcript: &ConversationTranscript) -> Vec<String
 mod tests {
     use super::{TraceReplaySliceAnchor, TraceSessionContextQuery, TraceSessionWake};
     use crate::domain::model::{
-        ArtifactEnvelope, ArtifactKind, ConversationTranscriptSpeaker, TraceCheckpointKind,
-        TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage, TraceRecord,
-        TraceRecordKind, TraceReplay, TraceTaskRoot, TraceTurnStarted,
+        ArtifactEnvelope, ArtifactKind, ConversationTranscript, ConversationTranscriptSpeaker,
+        TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
+        TraceRecord, TraceRecordKind, TraceReplay, TraceTaskRoot, TraceTurnStarted,
     };
     use paddles_conversation::{
         TaskTraceId, TraceArtifactId, TraceCheckpointId, TraceRecordId, TurnTraceId,
@@ -465,6 +466,44 @@ mod tests {
         assert_eq!(
             slice.transcript.entries[0].speaker,
             ConversationTranscriptSpeaker::User
+        );
+    }
+
+    #[test]
+    fn transcript_turn_summaries_ignore_system_governance_entries() {
+        let transcript = ConversationTranscript {
+            task_id: TaskTraceId::new("task-1").expect("task"),
+            entries: vec![
+                crate::domain::model::ConversationTranscriptEntry {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    turn_id: TurnTraceId::new("task-1.turn-0001").expect("turn"),
+                    speaker: ConversationTranscriptSpeaker::User,
+                    content: "hello".to_string(),
+                    response_mode: None,
+                    render: None,
+                },
+                crate::domain::model::ConversationTranscriptEntry {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    turn_id: TurnTraceId::new("task-1.turn-0001").expect("turn"),
+                    speaker: ConversationTranscriptSpeaker::System,
+                    content: "execution posture recursive-structured-v1".to_string(),
+                    response_mode: None,
+                    render: None,
+                },
+                crate::domain::model::ConversationTranscriptEntry {
+                    record_id: TraceRecordId::new("record-3").expect("record"),
+                    turn_id: TurnTraceId::new("task-1.turn-0001").expect("turn"),
+                    speaker: ConversationTranscriptSpeaker::Assistant,
+                    content: "hi".to_string(),
+                    response_mode: None,
+                    render: None,
+                },
+            ],
+        };
+
+        assert_eq!(
+            super::summarize_transcript_turns(&transcript),
+            vec!["Q: hello A: hi".to_string()]
         );
     }
 

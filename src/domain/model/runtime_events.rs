@@ -1,4 +1,4 @@
-use super::{AppliedEdit, PlanChecklistItem, TurnEvent};
+use super::{AppliedEdit, ExecutionGovernanceDecision, PlanChecklistItem, TurnEvent};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -213,6 +213,20 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
                 text: summary.clone(),
             }
         }
+        TurnEvent::ExecutionGovernanceProfileApplied { snapshot } => RuntimeEventPresentation {
+            badge: "policy".to_string(),
+            badge_class: "governor".to_string(),
+            title: format!("• {}", snapshot.summary()),
+            detail: snapshot.detail(),
+            text: snapshot.profile_selection(),
+        },
+        TurnEvent::ExecutionGovernanceDecisionRecorded { decision } => RuntimeEventPresentation {
+            badge: governance_badge(decision).to_string(),
+            badge_class: governance_badge_class(decision).to_string(),
+            title: format!("• {}", decision.summary()),
+            detail: decision.detail(),
+            text: decision.subject(),
+        },
         TurnEvent::HarnessState { snapshot } => {
             let detail = snapshot.governor_summary(true);
             let mut text_parts = vec![
@@ -551,12 +565,33 @@ fn format_duration_compact(duration: Duration) -> String {
     format!("{hours}h {minutes:02}m")
 }
 
+fn governance_badge(decision: &ExecutionGovernanceDecision) -> &'static str {
+    match decision.outcome.kind {
+        crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed => "allow",
+        crate::domain::model::ExecutionGovernanceOutcomeKind::Denied => "deny",
+        crate::domain::model::ExecutionGovernanceOutcomeKind::EscalationRequired => "ask",
+        crate::domain::model::ExecutionGovernanceOutcomeKind::PolicyUnavailable => "deny",
+    }
+}
+
+fn governance_badge_class(decision: &ExecutionGovernanceDecision) -> &'static str {
+    match decision.outcome.kind {
+        crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed => "governor",
+        crate::domain::model::ExecutionGovernanceOutcomeKind::Denied => "fallback",
+        crate::domain::model::ExecutionGovernanceOutcomeKind::EscalationRequired => "fallback",
+        crate::domain::model::ExecutionGovernanceOutcomeKind::PolicyUnavailable => "fallback",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{RuntimeEventPresentation, project_runtime_event, project_runtime_event_for_tui};
     use crate::domain::model::{
-        AppliedEdit, GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase,
-        TimeoutState, TurnEvent,
+        AppliedEdit, ExecutionEscalationRequest, ExecutionGovernanceDecision,
+        ExecutionGovernanceOutcome, ExecutionHandKind, ExecutionPermission,
+        ExecutionPermissionRequest, ExecutionPermissionRequirement, ExecutionPermissionReuseScope,
+        GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
+        TurnEvent,
     };
 
     #[test]
@@ -675,6 +710,54 @@ mod tests {
         assert!(presentation.detail.contains("Files: src/app.rs"));
         assert!(presentation.detail.contains("+new"));
         assert_eq!(presentation.text, "apply_patch: src/app.rs (+1 -1)");
+    }
+
+    #[test]
+    fn projects_governance_decisions_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::ExecutionGovernanceDecisionRecorded {
+            decision: ExecutionGovernanceDecision::new(
+                Some("tool-1".to_string()),
+                Some("shell".to_string()),
+                ExecutionPermissionRequest::new(
+                    ExecutionHandKind::TerminalRunner,
+                    ExecutionPermissionRequirement::new(
+                        "run shell command",
+                        vec![ExecutionPermission::RunWorkspaceCommand],
+                    ),
+                )
+                .with_bounded_reuse(
+                    ExecutionPermissionReuseScope::CommandPrefix,
+                    vec!["cargo".to_string(), "test".to_string()],
+                ),
+                ExecutionGovernanceOutcome::escalation_required(
+                    "approval is required before reusing this command prefix",
+                    ExecutionPermissionRequirement::new(
+                        "run shell command",
+                        vec![ExecutionPermission::RunWorkspaceCommand],
+                    ),
+                    ExecutionEscalationRequest::new(
+                        "allow cargo test",
+                        vec![ExecutionPermission::RunWorkspaceCommand],
+                        Some(ExecutionPermissionReuseScope::CommandPrefix),
+                        Some(vec!["cargo".to_string(), "test".to_string()]),
+                    ),
+                ),
+            ),
+        });
+
+        assert_eq!(presentation.badge, "ask");
+        assert_eq!(presentation.badge_class, "fallback");
+        assert_eq!(
+            presentation.title,
+            "• escalation required shell via terminal_runner"
+        );
+        assert!(
+            presentation
+                .detail
+                .contains("requested_reuse=command_prefix")
+        );
+        assert!(presentation.detail.contains("escalation_prefix=cargo test"));
+        assert_eq!(presentation.text, "shell via terminal_runner");
     }
 
     #[test]

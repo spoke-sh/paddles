@@ -150,6 +150,7 @@ pub(crate) struct ToolResult {
     pub(crate) name: &'static str,
     pub(crate) summary: String,
     pub(crate) applied_edit: Option<crate::domain::model::AppliedEdit>,
+    pub(crate) governance_request: Option<crate::domain::model::ExecutionPermissionRequest>,
     pub(crate) governance_outcome: Option<crate::domain::model::ExecutionGovernanceOutcome>,
     pub(crate) retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
@@ -1870,6 +1871,7 @@ impl SiftAgentAdapter {
                         name: tool_call.name(),
                         summary: format!("Tool `{}` failed: {err:#}", tool_call.name()),
                         applied_edit: None,
+                        governance_request: None,
                         governance_outcome: None,
                         retained_artifacts: None,
                     },
@@ -1877,6 +1879,19 @@ impl SiftAgentAdapter {
 
                 if let Some(retained) = result.retained_artifacts {
                     working_retained = retained;
+                }
+                if let (Some(governance_request), Some(governance_outcome)) = (
+                    result.governance_request.clone(),
+                    result.governance_outcome.clone(),
+                ) {
+                    event_sink.emit(TurnEvent::ExecutionGovernanceDecisionRecorded {
+                        decision: crate::domain::model::ExecutionGovernanceDecision::new(
+                            Some(call_id.clone()),
+                            Some(result.name.to_string()),
+                            governance_request,
+                            governance_outcome,
+                        ),
+                    });
                 }
                 if let Some(edit) = result.applied_edit.clone() {
                     event_sink.emit(TurnEvent::WorkspaceEditApplied {
@@ -2184,6 +2199,7 @@ impl SiftAgentAdapter {
                     name: "search",
                     summary: format_search_summary(query, &assembly),
                     applied_edit: None,
+                    governance_request: None,
                     governance_outcome: None,
                     retained_artifacts: Some(assembly.retained_artifacts),
                 })
@@ -2199,6 +2215,7 @@ impl SiftAgentAdapter {
                     name: "list_files",
                     summary: trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS),
                     applied_edit: None,
+                    governance_request: None,
                     governance_outcome: None,
                     retained_artifacts: None,
                 })
@@ -2217,6 +2234,7 @@ impl SiftAgentAdapter {
                     name: "read_file",
                     summary,
                     applied_edit: None,
+                    governance_request: None,
                     governance_outcome: None,
                     retained_artifacts: None,
                 })
@@ -2232,6 +2250,7 @@ impl SiftAgentAdapter {
                     name: "write_file",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_request: result.governance_request,
                     governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
@@ -2252,6 +2271,7 @@ impl SiftAgentAdapter {
                     name: "replace_in_file",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_request: result.governance_request,
                     governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
@@ -2267,22 +2287,32 @@ impl SiftAgentAdapter {
                     Arc::clone(&self.transport_mediator),
                 )
                 .with_context(|| format!("failed to execute shell command `{command}`"))?;
-                let (summary, governance_outcome) = match output {
-                    GovernedTerminalCommandResult::Executed(output) => {
+                let (summary, governance_request, governance_outcome) = match output {
+                    GovernedTerminalCommandResult::Executed {
+                        output,
+                        governance_request,
+                        governance_outcome,
+                    } => {
                         let summary = format_command_summary("Shell command", command, &output);
                         if !output.status.success() {
                             bail!("{summary}");
                         }
-                        (summary, None)
+                        (summary, Some(governance_request), Some(governance_outcome))
                     }
-                    GovernedTerminalCommandResult::Blocked(outcome) => {
-                        (summarize_governance_outcome(&outcome), Some(outcome))
-                    }
+                    GovernedTerminalCommandResult::Blocked {
+                        governance_request,
+                        governance_outcome,
+                    } => (
+                        summarize_governance_outcome(&governance_outcome),
+                        Some(governance_request),
+                        Some(governance_outcome),
+                    ),
                 };
                 Ok(ToolResult {
                     name: "shell",
                     summary,
                     applied_edit: None,
+                    governance_request,
                     governance_outcome,
                     retained_artifacts: None,
                 })
@@ -2298,6 +2328,7 @@ impl SiftAgentAdapter {
                     name: "diff",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_request: result.governance_request,
                     governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
@@ -2313,6 +2344,7 @@ impl SiftAgentAdapter {
                     name: "apply_patch",
                     summary: result.summary,
                     applied_edit: result.applied_edit,
+                    governance_request: result.governance_request,
                     governance_outcome: result.governance_outcome,
                     retained_artifacts: None,
                 })
@@ -2483,6 +2515,7 @@ impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
             name: result.name.to_string(),
             summary: result.summary,
             applied_edit: result.applied_edit,
+            governance_request: result.governance_request,
             governance_outcome: result.governance_outcome,
         })
     }

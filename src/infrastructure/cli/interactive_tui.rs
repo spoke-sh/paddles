@@ -2079,6 +2079,13 @@ impl InteractiveApp {
                         self.rows.push(row);
                     }
                 }
+                ConversationTranscriptSpeaker::System => {
+                    self.rows.push(TranscriptRow::new(
+                        TranscriptRowKind::Event,
+                        "Policy",
+                        entry.content.clone(),
+                    ));
+                }
             }
 
             self.seen_transcript_record_ids.insert(record_id);

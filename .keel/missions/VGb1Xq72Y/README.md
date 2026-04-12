@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGb1Xq72Y
-status: active
+status: achieved
 created_at: 2026-04-12T09:48:41
-updated_at: 2026-04-12T09:56:30
+updated_at: 2026-04-12T10:49:08
 # authored
 title: Govern Recursive Execution With Sandboxed Hands
 watch: ~
 activated_at: 2026-04-12T09:56:30
+achieved_at: 2026-04-12T10:49:08
 ---
 
 # Govern Recursive Execution With Sandboxed Hands

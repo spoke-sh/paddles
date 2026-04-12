@@ -1,5 +1,6 @@
 use crate::domain::model::{
-    AppliedEdit, ExecutionGovernanceOutcome, InstructionFrame, TurnEventSink, TurnIntent,
+    AppliedEdit, ExecutionGovernanceOutcome, ExecutionPermissionRequest, InstructionFrame,
+    TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::context_gathering::EvidenceBundle;
 use crate::domain::ports::planning::{GroundingRequirement, WorkspaceAction};
@@ -12,6 +13,7 @@ pub struct WorkspaceActionResult {
     pub name: String,
     pub summary: String,
     pub applied_edit: Option<AppliedEdit>,
+    pub governance_request: Option<ExecutionPermissionRequest>,
     pub governance_outcome: Option<ExecutionGovernanceOutcome>,
 }
 

@@ -234,6 +234,7 @@ body {
 .event-badge.tool-diff { background: rgba(23, 149, 108, 0.22); color: #166751; }
 .event-badge.gatherer { background: rgba(223, 178, 63, 0.2); color: #82620f; }
 .event-badge.route { background: rgba(45, 144, 200, 0.18); color: #255f86; }
+.event-badge.governor { background: rgba(83, 118, 163, 0.18); color: #36537c; }
 .event-badge.synthesis { background: rgba(23, 149, 108, 0.16); color: #166751; }
 .event-badge.fallback { background: rgba(214, 95, 74, 0.18); color: #9a4536; }
 .event-output {
@@ -4752,7 +4753,11 @@ function renderConversationTranscript(transcript, { reset = false } = {}) {
     clearTranscriptMessages();
   }
   for (const entry of transcript.entries) {
-    addMessage(entry.speaker === 'assistant' ? 'assistant' : 'user', entry.content, entry.turn_id);
+    const role =
+      entry.speaker === 'assistant'
+        ? 'assistant'
+        : (entry.speaker === 'system' ? 'system' : 'user');
+    addMessage(role, entry.content, entry.turn_id);
   }
 }
 

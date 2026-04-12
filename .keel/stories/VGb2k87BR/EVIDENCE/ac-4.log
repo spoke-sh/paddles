@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T10:46:39.168124728-07:00
+mode: manual
+---
+Governance artifacts now replay cleanly through transcript and API projections, including live projection rebuilds and shared session routes. Verified with cargo test replay_conversation_transcript_projects_prompt_and_completion_records, cargo test replay_conversation_projection_packages_all_shared_session_surfaces, cargo test session_routes_project_live_shared_session_turns_from_mock_provider, and cargo test broadcast_projection_sinks_rebuild_snapshots_from_authoritative_replay.
