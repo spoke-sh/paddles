@@ -347,7 +347,11 @@
 |--------|--------|
 | [Establish A Replayable Turn And Thread Control Substrate](epics/VGb1c1AAK/voyages/VGbPWnUh2/) | done |
 
-### [External Capability Fabric For Web, MCP, And Connectors](epics/VGb1c1XAL/) (draft)
+### [External Capability Fabric For Web, MCP, And Connectors](epics/VGb1c1XAL/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Establish A Typed External Capability Fabric Substrate](epics/VGb1c1XAL/voyages/VGcZRpCKi/) | planned |
 
 ### [Mode-Aware Planning And Review Workflows](epics/VGb1c1pAR/) (draft)
 
