@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T16:47:15.520536832-07:00
+mode: manual
+---
+Disabled or unavailable external fabrics now degrade into typed unavailable evidence instead of collapsing the harness, and prompt contracts advertise the external lane so planning can reason about degraded fabrics explicitly. Verified with cargo test external_capability_, cargo test parse_planner_action_supports_external_capability_actions, and cargo test planner_action_prompts_include_exact_diff_guidance.

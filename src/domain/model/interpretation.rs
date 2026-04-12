@@ -1,3 +1,4 @@
+use super::ExternalCapabilityInvocation;
 use crate::domain::ports::{RetrievalMode, RetrievalStrategy, RetrieverOption};
 use serde::{Deserialize, Serialize};
 
@@ -211,6 +212,9 @@ pub enum WorkspaceAction {
     ApplyPatch {
         patch: String,
     },
+    ExternalCapability {
+        invocation: ExternalCapabilityInvocation,
+    },
 }
 
 impl WorkspaceAction {
@@ -225,6 +229,7 @@ impl WorkspaceAction {
             Self::WriteFile { .. } => "write_file",
             Self::ReplaceInFile { .. } => "replace_in_file",
             Self::ApplyPatch { .. } => "apply_patch",
+            Self::ExternalCapability { .. } => "external_capability",
         }
     }
 
@@ -258,6 +263,10 @@ impl WorkspaceAction {
             Self::WriteFile { path, .. } => format!("write `{path}`"),
             Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
             Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+            Self::ExternalCapability { invocation } => format!(
+                "invoke external capability `{}` ({})",
+                invocation.capability_id, invocation.purpose
+            ),
         }
     }
 
@@ -286,6 +295,10 @@ impl WorkspaceAction {
             Self::WriteFile { path, .. } => format!("write `{path}`"),
             Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
             Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+            Self::ExternalCapability { invocation } => format!(
+                "invoke external capability `{}` for {} with payload {}",
+                invocation.capability_id, invocation.purpose, invocation.payload
+            ),
         }
     }
 }

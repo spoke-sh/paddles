@@ -27,11 +27,11 @@ started_at: 2026-04-12T16:24:50
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define External Capability Contracts](../../../../stories/VGcZTFufQ/README.md) | feat | done |
-| [Route External Capability Discovery Through The Recursive Harness](../../../../stories/VGcZTGZgd/README.md) | feat | backlog |
+| [Route External Capability Discovery Through The Recursive Harness](../../../../stories/VGcZTGZgd/README.md) | feat | done |
 | [Project External Capability Evidence And Degradation Across Surfaces](../../../../stories/VGcZTH2gV/README.md) | feat | backlog |
 <!-- END GENERATED -->

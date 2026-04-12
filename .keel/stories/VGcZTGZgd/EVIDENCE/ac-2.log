@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T16:47:09.159233800-07:00
+mode: manual
+---
+Normalized external results into evidence items with capability lineage, source records, availability-aware summaries, and runtime tool artifacts in the planner loop. Verified with cargo test external_capability_ and cargo test process_prompt_assembles_interpretation_before_model_selected_initial_action.

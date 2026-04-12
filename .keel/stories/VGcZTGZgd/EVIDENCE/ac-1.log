@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T16:47:06.141140050-07:00
+mode: manual
+---
+Added a first-class external-capability workspace action, interpretation enrichment, and adapter envelope support so planners can discover and select external fabrics through the recursive loop. Verified with cargo test external_capability_ and cargo test initial_action_prompts_include_interpretation_context.

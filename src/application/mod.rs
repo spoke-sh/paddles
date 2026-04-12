@@ -6,7 +6,7 @@ use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::execution_governance::{
-    GovernedTerminalCommandResult, summarize_governance_outcome,
+    ExecutionPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::external_capability::NoopExternalCapabilityBroker;
@@ -28,17 +28,18 @@ use crate::domain::model::{
     ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
     ConversationTranscriptUpdate, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
     ExecutionHandDiagnostic, ExecutionPermissionRequest, ExternalCapabilityDescriptor,
-    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
-    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
-    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
-    StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
-    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ExternalCapabilityInvocation, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
+    InstructionFrame, InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic,
+    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase,
+    StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
+    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
+    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
+    TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -3510,9 +3511,12 @@ impl MechSuitService {
             }
         };
 
-        enrich_interpretation_with_local_harness_profile(
-            interpretation,
-            local_harness_capabilities(),
+        enrich_interpretation_with_external_capabilities(
+            enrich_interpretation_with_local_harness_profile(
+                interpretation,
+                local_harness_capabilities(),
+            ),
+            &self.external_capability_descriptors(),
         )
     }
 
@@ -3842,6 +3846,31 @@ impl MechSuitService {
                                 summary
                             }
                         }
+                    }
+                    WorkspaceAction::ExternalCapability { invocation } => {
+                        let call_id = format!("planner-tool-{sequence}");
+                        trace.emit(TurnEvent::ToolCalled {
+                            call_id: call_id.clone(),
+                            tool_name: action.label().to_string(),
+                            invocation: action.describe(),
+                        });
+                        let summary = execute_external_capability_action(
+                            self.external_capability_broker(),
+                            context
+                                .prepared
+                                .harness_profile()
+                                .active_execution_governance(),
+                            invocation,
+                            ExternalCapabilityExecutionFrame {
+                                rationale: decision.rationale.as_str(),
+                                evidence_limit: budget.max_evidence_items,
+                                evidence_items: &mut loop_state.evidence_items,
+                                call_id: &call_id,
+                                event_sink: trace.as_ref(),
+                            },
+                        );
+                        used_workspace_resources = true;
+                        summary
                     }
                     WorkspaceAction::Read { .. }
                     | WorkspaceAction::ListFiles { .. }
@@ -5816,6 +5845,83 @@ fn enrich_interpretation_with_local_harness_profile(
     context
 }
 
+fn enrich_interpretation_with_external_capabilities(
+    mut context: InterpretationContext,
+    descriptors: &[ExternalCapabilityDescriptor],
+) -> InterpretationContext {
+    if descriptors.is_empty() {
+        return context;
+    }
+
+    let source = "external-capability-catalog";
+    let capability_summary = descriptors
+        .iter()
+        .map(|descriptor| {
+            format!(
+                "{} [{}; auth={}; evidence={}]",
+                descriptor.label,
+                descriptor.availability.label(),
+                descriptor.auth_posture.label(),
+                descriptor.evidence_shape.summary
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let summary = format!(
+        "Paddles can route external capability fabrics through the recursive harness. Catalog: {capability_summary}."
+    );
+    if context.summary.trim().is_empty() {
+        context.summary = summary.clone();
+    } else if !context.summary.contains("external capability fabrics") {
+        context.summary = format!("{}\n\n{}", context.summary.trim(), summary);
+    }
+
+    for descriptor in descriptors {
+        append_interpretation_tool_hint(
+            &mut context,
+            InterpretationToolHint {
+                source: source.to_string(),
+                action: WorkspaceAction::ExternalCapability {
+                    invocation: sample_external_capability_invocation(descriptor),
+                },
+                note: format!(
+                    "{}. Status: {}. Auth posture: {}. Expected evidence: {}.",
+                    descriptor.summary,
+                    descriptor.availability.label(),
+                    descriptor.auth_posture.label(),
+                    descriptor.evidence_shape.summary
+                ),
+            },
+        );
+    }
+
+    append_interpretation_procedure(
+        &mut context,
+        InterpretationProcedure {
+            source: source.to_string(),
+            label: "Ground With External Capabilities".to_string(),
+            purpose: "Use the typed external-capability lane when the turn needs current, connector-backed, or MCP-mediated evidence, and preserve degraded availability or governance outcomes as evidence.".to_string(),
+            steps: descriptors
+                .iter()
+                .enumerate()
+                .map(|(index, descriptor)| InterpretationProcedureStep {
+                    index,
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: sample_external_capability_invocation(descriptor),
+                    },
+                    note: format!(
+                        "{} [{}]",
+                        descriptor.summary,
+                        descriptor.availability.label()
+                    ),
+                })
+                .collect(),
+        },
+    );
+
+    context
+}
+
 fn append_interpretation_tool_hint(
     context: &mut InterpretationContext,
     hint: InterpretationToolHint,
@@ -5845,6 +5951,27 @@ fn append_interpretation_procedure(
     if !duplicate {
         context.decision_framework.procedures.push(procedure);
     }
+}
+
+fn sample_external_capability_invocation(
+    descriptor: &ExternalCapabilityDescriptor,
+) -> ExternalCapabilityInvocation {
+    let payload = match descriptor.kind {
+        crate::domain::model::ExternalCapabilityKind::WebSearch => {
+            serde_json::json!({ "query": "current topic" })
+        }
+        crate::domain::model::ExternalCapabilityKind::McpTool => {
+            serde_json::json!({ "tool": "tool_name", "arguments": {} })
+        }
+        crate::domain::model::ExternalCapabilityKind::ConnectorApp => {
+            serde_json::json!({ "app": "app_name", "action": "operation", "arguments": {} })
+        }
+    };
+    ExternalCapabilityInvocation::new(
+        descriptor.id.clone(),
+        format!("gather {} evidence", descriptor.label.to_lowercase()),
+        payload,
+    )
 }
 
 fn local_workspace_procedure_steps(
@@ -6457,7 +6584,8 @@ fn workspace_action_path(action: &WorkspaceAction) -> Option<&str> {
         | WorkspaceAction::ApplyPatch { .. }
         | WorkspaceAction::Search { .. }
         | WorkspaceAction::Inspect { .. }
-        | WorkspaceAction::Shell { .. } => None,
+        | WorkspaceAction::Shell { .. }
+        | WorkspaceAction::ExternalCapability { .. } => None,
     }
 }
 
@@ -7403,6 +7531,115 @@ fn run_planner_shell_command(
     }
 }
 
+struct ExternalCapabilityExecutionFrame<'a> {
+    rationale: &'a str,
+    evidence_limit: usize,
+    evidence_items: &'a mut Vec<EvidenceItem>,
+    call_id: &'a str,
+    event_sink: &'a dyn TurnEventSink,
+}
+
+fn execute_external_capability_action(
+    broker: Arc<dyn ExternalCapabilityBroker>,
+    governance_profile: &crate::domain::model::ExecutionGovernanceProfile,
+    invocation: &ExternalCapabilityInvocation,
+    frame: ExternalCapabilityExecutionFrame<'_>,
+) -> String {
+    let Some(descriptor) = broker.descriptor(&invocation.capability_id) else {
+        let summary = format!(
+            "External capability `{}` is unknown to this runtime",
+            invocation.capability_id
+        );
+        frame.event_sink.emit(TurnEvent::ToolFinished {
+            call_id: frame.call_id.to_string(),
+            tool_name: "external_capability".to_string(),
+            summary: summary.clone(),
+        });
+        append_evidence_item(
+            frame.evidence_items,
+            EvidenceItem {
+                source: format!("external_capability:{}", invocation.capability_id),
+                snippet: trim_for_planner(&summary, 1_200),
+                rationale: frame.rationale.to_string(),
+                rank: 0,
+            },
+            frame.evidence_limit,
+        );
+        return summary;
+    };
+
+    let governance_request = ExecutionPermissionRequest::new(
+        descriptor.hand,
+        descriptor.governance_requirement(format!(
+            "invoke external capability `{}` for {}",
+            descriptor.id, invocation.purpose
+        )),
+    );
+    let governance_outcome =
+        ExecutionPermissionGate::evaluate(Some(governance_profile), &governance_request);
+    emit_execution_governance_decision(
+        frame.event_sink,
+        Some(frame.call_id),
+        Some("external_capability"),
+        governance_request.clone(),
+        governance_outcome.clone(),
+    );
+
+    if governance_outcome.kind != crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed {
+        let summary = summarize_governance_outcome(&governance_outcome);
+        frame.event_sink.emit(TurnEvent::ToolFinished {
+            call_id: frame.call_id.to_string(),
+            tool_name: "external_capability".to_string(),
+            summary: summary.clone(),
+        });
+        append_evidence_item(
+            frame.evidence_items,
+            EvidenceItem {
+                source: format!("external_capability:{}", descriptor.id),
+                snippet: trim_for_planner(&summary, 1_200),
+                rationale: frame.rationale.to_string(),
+                rank: 0,
+            },
+            frame.evidence_limit,
+        );
+        return summary;
+    }
+
+    match broker.invoke(invocation) {
+        Ok(result) => {
+            let summary = summarize_external_capability_result(&result);
+            frame.event_sink.emit(TurnEvent::ToolFinished {
+                call_id: frame.call_id.to_string(),
+                tool_name: "external_capability".to_string(),
+                summary: summary.clone(),
+            });
+            for item in external_capability_result_evidence_items(&result, frame.rationale) {
+                append_evidence_item(frame.evidence_items, item, frame.evidence_limit);
+            }
+            summary
+        }
+        Err(err) => {
+            let summary = format!("External capability `{}` failed: {err:#}", descriptor.id);
+            frame.event_sink.emit(TurnEvent::ToolFinished {
+                call_id: frame.call_id.to_string(),
+                tool_name: "external_capability".to_string(),
+                summary: summary.clone(),
+            });
+            append_evidence_item(
+                frame.evidence_items,
+                EvidenceItem {
+                    source: format!("external_capability:{}", descriptor.id),
+                    snippet: trim_for_planner(&summary, 1_200),
+                    rationale: frame.rationale.to_string(),
+                    rank: 0,
+                },
+                frame.evidence_limit,
+            );
+            summary
+        }
+    }
+}
+
 fn emit_execution_governance_decision(
     event_sink: &dyn TurnEventSink,
     call_id: Option<&str>,
@@ -7480,6 +7717,48 @@ fn planner_terminal_tool_success_summary(tool_name: &str, output: &str) -> Strin
         (_, true) => "tool completed".to_string(),
         (_, false) => "tool completed with no output".to_string(),
     }
+}
+
+fn summarize_external_capability_result(
+    result: &crate::domain::model::ExternalCapabilityResult,
+) -> String {
+    format!("{}: {}", result.summary, result.detail)
+}
+
+fn external_capability_result_evidence_items(
+    result: &crate::domain::model::ExternalCapabilityResult,
+    rationale: &str,
+) -> Vec<EvidenceItem> {
+    let mut items = vec![EvidenceItem {
+        source: format!("external_capability:{}", result.descriptor.id),
+        snippet: trim_for_planner(
+            &format!(
+                "status={}\nsummary={}\ndetail={}",
+                result.status.label(),
+                result.summary,
+                result.detail
+            ),
+            1_200,
+        ),
+        rationale: rationale.to_string(),
+        rank: 0,
+    }];
+    items.extend(
+        result
+            .sources
+            .iter()
+            .enumerate()
+            .map(|(index, source)| EvidenceItem {
+                source: format!(
+                    "external_capability:{}:{}",
+                    result.descriptor.id, source.locator
+                ),
+                snippet: trim_for_planner(&format!("{}\n{}", source.label, source.snippet), 1_200),
+                rationale: rationale.to_string(),
+                rank: index + 1,
+            }),
+    );
+    items
 }
 
 fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
@@ -7615,6 +7894,7 @@ fn planner_action_query(action: &PlannerAction) -> Option<String> {
             WorkspaceAction::ApplyPatch { .. } => {
                 Some("git apply --whitespace=nowarn -".to_string())
             }
+            WorkspaceAction::ExternalCapability { invocation } => Some(invocation.summary()),
         },
         PlannerAction::Refine { query, .. } => Some(query.clone()),
         PlannerAction::Branch { branches, .. } => Some(branches.join(" | ")),
@@ -7639,6 +7919,9 @@ fn workspace_action_evidence_source(action: &WorkspaceAction) -> String {
         WorkspaceAction::WriteFile { path, .. } => path.clone(),
         WorkspaceAction::ReplaceInFile { path, .. } => path.clone(),
         WorkspaceAction::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+        WorkspaceAction::ExternalCapability { invocation } => {
+            format!("external_capability:{}", invocation.capability_id)
+        }
     }
 }
 
@@ -7742,24 +8025,29 @@ mod tests {
         ExecutionGovernanceDecision, ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind,
         ExecutionGovernanceSnapshot, ExecutionHandAuthority, ExecutionHandKind, ExecutionHandPhase,
         ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
-        ExecutionSandboxMode, ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink,
-        ForensicUpdateSink, NullTurnEventSink, StrainFactor, TaskTraceId, ThreadDecision,
-        ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, TraceLineageNodeKind,
-        TraceLineageRelation, TraceModelExchangeCategory, TraceModelExchangeLane,
-        TraceModelExchangePhase, TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent,
-        TurnEventSink,
+        ExecutionSandboxMode, ExternalCapabilityAuthPosture, ExternalCapabilityAvailability,
+        ExternalCapabilityDescriptor, ExternalCapabilityDescriptorMetadata,
+        ExternalCapabilityEvidenceKind, ExternalCapabilityEvidenceShape,
+        ExternalCapabilityInvocation, ExternalCapabilityResult, ExternalCapabilityResultStatus,
+        ExternalCapabilitySideEffectPosture, ExternalCapabilitySourceRecord,
+        ForensicArtifactCapture, ForensicLifecycle, ForensicTraceSink, ForensicUpdateSink,
+        NullTurnEventSink, StrainFactor, TaskTraceId, ThreadDecision, ThreadDecisionId,
+        ThreadDecisionKind, ThreadMergeMode, TraceLineageNodeKind, TraceLineageRelation,
+        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
+        TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
         ContextGatherRequest, ContextGatherResult, ContextGatherer, EntityLookupMode,
         EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
-        EntityResolver, EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement,
-        InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
-        InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction, PlannerBudget,
-        PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEpisode,
-        PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
-        PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence,
-        RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff, SynthesizerEngine,
-        ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, WorkspaceAction,
+        EntityResolver, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker, GroundingDomain,
+        GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
+        InterpretationContext, InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction,
+        PlannerBudget, PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus,
+        PlannerGraphEpisode, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+        PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision,
+        RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
+        SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
+        WorkspaceAction,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -7771,6 +8059,7 @@ mod tests {
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use paddles_conversation::ConversationSession;
+    use serde_json::json;
     use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
@@ -8241,6 +8530,56 @@ mod tests {
     }
 
     #[derive(Debug)]
+    struct RecordingExternalCapabilityBroker {
+        descriptors: Vec<ExternalCapabilityDescriptor>,
+        results: Vec<ExternalCapabilityResult>,
+        invocations: Mutex<Vec<ExternalCapabilityInvocation>>,
+    }
+
+    impl RecordingExternalCapabilityBroker {
+        fn new(
+            descriptors: Vec<ExternalCapabilityDescriptor>,
+            results: Vec<ExternalCapabilityResult>,
+        ) -> Self {
+            Self {
+                descriptors,
+                results,
+                invocations: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn recorded_invocations(&self) -> Vec<ExternalCapabilityInvocation> {
+            self.invocations.lock().expect("invocations lock").clone()
+        }
+    }
+
+    impl ExternalCapabilityBroker for RecordingExternalCapabilityBroker {
+        fn descriptors(&self) -> Vec<ExternalCapabilityDescriptor> {
+            self.descriptors.clone()
+        }
+
+        fn invoke(
+            &self,
+            invocation: &ExternalCapabilityInvocation,
+        ) -> Result<ExternalCapabilityResult> {
+            self.invocations
+                .lock()
+                .expect("invocations lock")
+                .push(invocation.clone());
+            self.results
+                .iter()
+                .find(|result| result.descriptor.id == invocation.capability_id)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "missing external capability result for `{}`",
+                        invocation.capability_id
+                    )
+                })
+        }
+    }
+
+    #[derive(Debug)]
     struct StaticEntityResolver {
         outcome: EntityResolutionOutcome,
         recorded_requests: Arc<Mutex<Vec<EntityResolutionRequest>>>,
@@ -8291,6 +8630,7 @@ mod tests {
     struct RecordingSynthesizer {
         executed_actions: Mutex<Vec<WorkspaceAction>>,
         gathered_summaries: Mutex<Vec<String>>,
+        gathered_bundles: Mutex<Vec<EvidenceBundle>>,
         handoffs: Mutex<Vec<SynthesisHandoff>>,
     }
 
@@ -8310,6 +8650,10 @@ mod tests {
                     .lock()
                     .expect("gathered summaries lock")
                     .push(bundle.summary.clone());
+                self.gathered_bundles
+                    .lock()
+                    .expect("gathered bundles lock")
+                    .push(bundle.clone());
             }
             self.handoffs
                 .lock()
@@ -8946,6 +9290,449 @@ mod tests {
     }
 
     #[test]
+    fn external_capability_enrichment_adds_discovery_hints_and_grounding_procedure() {
+        let descriptor = ExternalCapabilityDescriptor::new(
+            "web.search",
+            crate::domain::model::ExternalCapabilityKind::WebSearch,
+            "Web Search",
+            "Search the public web for current documentation and return citations.",
+            ExternalCapabilityDescriptorMetadata::new(
+                ExternalCapabilityAvailability::Available,
+                ExternalCapabilityAuthPosture::NoneRequired,
+                ExternalCapabilitySideEffectPosture::ReadOnly,
+                ExecutionHandKind::TransportMediator,
+                Vec::new(),
+                ExternalCapabilityEvidenceShape::new(
+                    "current web answers should produce citations and a runtime summary",
+                    vec![
+                        ExternalCapabilityEvidenceKind::Citation,
+                        ExternalCapabilityEvidenceKind::RuntimeSummary,
+                    ],
+                ),
+            ),
+        );
+
+        let context = super::enrich_interpretation_with_external_capabilities(
+            InterpretationContext::default(),
+            &[descriptor],
+        );
+
+        assert!(context.summary.contains("external capability fabrics"));
+        assert!(context.tool_hints.iter().any(|hint| matches!(
+            hint.action,
+            WorkspaceAction::ExternalCapability { ref invocation }
+                if invocation.capability_id == "web.search"
+        )));
+        assert!(
+            context
+                .decision_framework
+                .procedures
+                .iter()
+                .any(|procedure| {
+                    procedure.label == "Ground With External Capabilities"
+                        && procedure.steps.iter().any(|step| {
+                            matches!(
+                                step.action,
+                                WorkspaceAction::ExternalCapability { ref invocation }
+                                    if invocation.capability_id == "web.search"
+                            )
+                        })
+                })
+        );
+    }
+
+    #[test]
+    fn external_capability_actions_route_through_discovery_governance_and_evidence() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let invocation = ExternalCapabilityInvocation::new(
+            "web.search",
+            "confirm the latest external docs",
+            json!({ "query": "paddles external capability docs" }),
+        );
+        let descriptor = ExternalCapabilityDescriptor::new(
+            "web.search",
+            crate::domain::model::ExternalCapabilityKind::WebSearch,
+            "Web Search",
+            "Search the public web for current documentation and return citations.",
+            ExternalCapabilityDescriptorMetadata::new(
+                ExternalCapabilityAvailability::Available,
+                ExternalCapabilityAuthPosture::NoneRequired,
+                ExternalCapabilitySideEffectPosture::ReadOnly,
+                ExecutionHandKind::TransportMediator,
+                Vec::new(),
+                ExternalCapabilityEvidenceShape::new(
+                    "current web answers should produce citations and a runtime summary",
+                    vec![
+                        ExternalCapabilityEvidenceKind::Citation,
+                        ExternalCapabilityEvidenceKind::RuntimeSummary,
+                        ExternalCapabilityEvidenceKind::SourceLineage,
+                    ],
+                ),
+            ),
+        );
+        let result = ExternalCapabilityResult {
+            descriptor: descriptor.clone(),
+            invocation: invocation.clone(),
+            status: ExternalCapabilityResultStatus::Succeeded,
+            summary: "Web Search succeeded".to_string(),
+            detail: "Found the latest external capability docs with a cited source.".to_string(),
+            sources: vec![ExternalCapabilitySourceRecord {
+                label: "OpenAI docs".to_string(),
+                locator: "https://example.com/docs".to_string(),
+                snippet: "External capability calls should return citation-backed evidence."
+                    .to_string(),
+            }],
+        };
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: invocation.clone(),
+                    },
+                },
+                "use the external evidence lane before answering",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "external evidence captured the answer".to_string(),
+                },
+                rationale: "the cited web result is enough".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::clone(&request_log),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let broker = Arc::new(RecordingExternalCapabilityBroker::new(
+            vec![descriptor.clone()],
+            vec![result],
+        ));
+        let service = test_service(workspace.path());
+        service.set_external_capability_broker(broker.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("look up the latest docs", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Applied the bounded action.");
+        let requests = request_log.lock().expect("request log");
+        assert!(
+            requests[0]
+                .interpretation
+                .tool_hints
+                .iter()
+                .any(|hint| matches!(
+                    hint.action,
+                    WorkspaceAction::ExternalCapability { ref invocation }
+                        if invocation.capability_id == "web.search"
+                ))
+        );
+        assert!(
+            requests[0]
+                .interpretation
+                .decision_framework
+                .procedures
+                .iter()
+                .any(|procedure| procedure.label == "Ground With External Capabilities")
+        );
+        drop(requests);
+
+        assert_eq!(broker.recorded_invocations(), vec![invocation]);
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, invocation, .. }
+                if tool_name == "external_capability"
+                    && invocation.contains("web.search")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ExecutionGovernanceDecisionRecorded { decision }
+                if decision.tool_name.as_deref() == Some("external_capability")
+                    && decision.request.hand == ExecutionHandKind::TransportMediator
+                    && decision.outcome.kind == ExecutionGovernanceOutcomeKind::Allowed
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolFinished { tool_name, summary, .. }
+                if tool_name == "external_capability"
+                    && summary.contains("Web Search succeeded")
+        )));
+
+        let bundles = synthesizer
+            .gathered_bundles
+            .lock()
+            .expect("gathered bundles lock");
+        let bundle = bundles.last().expect("gathered evidence bundle");
+        assert!(bundle.items.iter().any(|item| {
+            item.source.contains("web.search")
+                && item.snippet.contains("latest external capability docs")
+        }));
+        assert!(bundle.items.iter().any(|item| {
+            item.source.contains("https://example.com/docs")
+                && item.snippet.contains("citation-backed evidence")
+        }));
+    }
+
+    #[test]
+    fn external_capability_actions_fail_closed_when_governance_blocks_network_access() {
+        let workspace = tempfile::tempdir().expect("workspace");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let invocation = ExternalCapabilityInvocation::new(
+            "web.search",
+            "look up the latest release notes",
+            json!({ "query": "paddles release notes" }),
+        );
+        let descriptor = ExternalCapabilityDescriptor::new(
+            "web.search",
+            crate::domain::model::ExternalCapabilityKind::WebSearch,
+            "Web Search",
+            "Search the public web for current documentation and return citations.",
+            ExternalCapabilityDescriptorMetadata::new(
+                ExternalCapabilityAvailability::Available,
+                ExternalCapabilityAuthPosture::NoneRequired,
+                ExternalCapabilitySideEffectPosture::ReadOnly,
+                ExecutionHandKind::TransportMediator,
+                vec![ExecutionPermission::AccessNetwork],
+                ExternalCapabilityEvidenceShape::new(
+                    "network-backed search should yield citations when allowed",
+                    vec![ExternalCapabilityEvidenceKind::Citation],
+                ),
+            ),
+        );
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: invocation.clone(),
+                    },
+                },
+                "use web search before answering",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "governance outcome was recorded".to_string(),
+                },
+                rationale: "stop after the governance boundary is exercised".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::clone(&request_log),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let broker = Arc::new(RecordingExternalCapabilityBroker::new(
+            vec![descriptor.clone()],
+            vec![ExternalCapabilityResult {
+                descriptor: descriptor.clone(),
+                invocation: invocation.clone(),
+                status: ExternalCapabilityResultStatus::Succeeded,
+                summary: "unexpected".to_string(),
+                detail: "broker should not be invoked when governance blocks the call".to_string(),
+                sources: Vec::new(),
+            }],
+        ));
+        let service = test_service(workspace.path());
+        service.set_external_capability_broker(broker.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("look up the latest release notes", sink.clone())
+                .await
+                .expect("process prompt");
+        });
+
+        assert!(
+            broker.recorded_invocations().is_empty(),
+            "blocked transport calls must not invoke the broker"
+        );
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ExecutionGovernanceDecisionRecorded { decision }
+                if decision.tool_name.as_deref() == Some("external_capability")
+                    && decision.request.hand == ExecutionHandKind::TransportMediator
+                    && decision.outcome.kind == ExecutionGovernanceOutcomeKind::EscalationRequired
+                    && decision.request.requirement.permissions.contains(&ExecutionPermission::AccessNetwork)
+        )));
+
+        let bundles = synthesizer
+            .gathered_bundles
+            .lock()
+            .expect("gathered bundles lock");
+        let bundle = bundles.last().expect("gathered evidence bundle");
+        assert!(bundle.items.iter().any(|item| {
+            item.source.contains("web.search") && item.snippet.contains("requires approval")
+        }));
+    }
+
+    #[test]
+    fn external_capability_actions_remain_useful_when_the_fabric_is_disabled() {
+        let workspace = tempfile::tempdir().expect("workspace");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let invocation = ExternalCapabilityInvocation::new(
+            "connector.app_action",
+            "query the connector fabric",
+            json!({ "app": "gmail", "action": "search" }),
+        );
+        let descriptor = ExternalCapabilityDescriptor::new(
+            "connector.app_action",
+            crate::domain::model::ExternalCapabilityKind::ConnectorApp,
+            "Connector App Action",
+            "Invoke a connector-backed application action through the transport boundary.",
+            ExternalCapabilityDescriptorMetadata::new(
+                ExternalCapabilityAvailability::Disabled,
+                ExternalCapabilityAuthPosture::Required,
+                ExternalCapabilitySideEffectPosture::PotentiallyMutating,
+                ExecutionHandKind::TransportMediator,
+                Vec::new(),
+                ExternalCapabilityEvidenceShape::new(
+                    "connector actions should explain degraded availability",
+                    vec![ExternalCapabilityEvidenceKind::RuntimeSummary],
+                ),
+            ),
+        );
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: invocation.clone(),
+                    },
+                },
+                "probe the connector fabric before answering",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "the degraded connector state is enough evidence".to_string(),
+                },
+                rationale: "stop after capturing the disabled state".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::clone(&request_log),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let broker = Arc::new(RecordingExternalCapabilityBroker::new(
+            vec![descriptor.clone()],
+            vec![ExternalCapabilityResult::unavailable(
+                descriptor,
+                invocation.clone(),
+                "Connector App Action is currently disabled in this runtime",
+            )],
+        ));
+        let service = test_service(workspace.path());
+        service.set_external_capability_broker(broker.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "check whether the connector fabric is available",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        assert_eq!(broker.recorded_invocations(), vec![invocation]);
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolFinished { tool_name, summary, .. }
+                if tool_name == "external_capability"
+                    && summary.contains("currently disabled")
+        )));
+
+        let bundles = synthesizer
+            .gathered_bundles
+            .lock()
+            .expect("gathered bundles lock");
+        let bundle = bundles.last().expect("gathered evidence bundle");
+        assert!(bundle.items.iter().any(|item| {
+            item.source.contains("connector.app_action")
+                && item.snippet.contains("currently disabled")
+        }));
+    }
+
+    #[test]
     fn process_prompt_assembles_interpretation_before_model_selected_initial_action() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -9007,10 +9794,10 @@ mod tests {
         let requests = request_log.lock().expect("request log");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].user_prompt, "Howdy");
-        assert_eq!(
-            requests[0].interpretation.sources(),
-            vec!["AGENTS.md".to_string(), "paddles-harness".to_string()]
-        );
+        let sources = requests[0].interpretation.sources();
+        assert!(sources.contains(&"AGENTS.md".to_string()));
+        assert!(sources.contains(&"paddles-harness".to_string()));
+        assert!(sources.contains(&"external-capability-catalog".to_string()));
         assert!(!requests[0].interpretation.tool_hints.is_empty());
         assert!(
             requests[0]

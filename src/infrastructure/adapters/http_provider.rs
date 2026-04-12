@@ -1,8 +1,9 @@
 use crate::domain::model::ForensicArtifactCapture;
 use crate::domain::model::{
-    CompactionDecision, CompactionPlan, CompactionRequest, NullTurnEventSink, ThreadDecision,
-    ThreadDecisionId, ThreadDecisionKind, TraceArtifactId, TraceModelExchangeCategory,
-    TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
+    CompactionDecision, CompactionPlan, CompactionRequest, ExternalCapabilityInvocation,
+    NullTurnEventSink, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceArtifactId,
+    TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent,
+    TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
@@ -1042,6 +1043,15 @@ Rules:
                     patch: envelope.patch.unwrap_or_default(),
                 },
             },
+            "external_capability" => PlannerAction::Workspace {
+                action: WorkspaceAction::ExternalCapability {
+                    invocation: ExternalCapabilityInvocation::new(
+                        envelope.capability_id.unwrap_or_default(),
+                        envelope.purpose.unwrap_or_default(),
+                        envelope.payload.unwrap_or_else(|| json!({})),
+                    ),
+                },
+            },
             "refine" => PlannerAction::Refine {
                 query: envelope.query.unwrap_or_default(),
                 mode: envelope.mode.unwrap_or(RetrievalMode::Graph),
@@ -1230,6 +1240,10 @@ Rules:
                 replace_all,
             } => workspace_editor.replace_in_file(path, old, new, *replace_all),
             WorkspaceAction::ApplyPatch { patch } => workspace_editor.apply_patch(patch),
+            WorkspaceAction::ExternalCapability { invocation } => Err(anyhow!(
+                "external capability `{}` must be routed through the recursive harness control plane",
+                invocation.capability_id
+            )),
         }
     }
 }
@@ -1831,6 +1845,12 @@ struct PlannerEnvelope {
     #[serde(default)]
     query: Option<String>,
     #[serde(default)]
+    capability_id: Option<String>,
+    #[serde(default)]
+    purpose: Option<String>,
+    #[serde(default)]
+    payload: Option<Value>,
+    #[serde(default)]
     mode: Option<RetrievalMode>,
     #[serde(default)]
     path: Option<String>,
@@ -1882,6 +1902,7 @@ fn planner_action_json_schema() -> Value {
                     "write_file",
                     "replace_in_file",
                     "apply_patch",
+                    "external_capability",
                     "refine",
                     "branch",
                     "stop"
@@ -1903,6 +1924,18 @@ fn planner_action_json_schema() -> Value {
             "query": {
                 "type": "string",
                 "description": "Search query when `action` is `search`."
+            },
+            "capability_id": {
+                "type": "string",
+                "description": "Required when `action` is `external_capability`."
+            },
+            "purpose": {
+                "type": "string",
+                "description": "Required when `action` is `external_capability`."
+            },
+            "payload": {
+                "type": "object",
+                "description": "Optional JSON payload when `action` is `external_capability`."
             },
             "mode": {
                 "type": "string",
@@ -1998,6 +2031,9 @@ fn planner_action_json_schema() -> Value {
         "answer",
         "reason",
         "query",
+        "capability_id",
+        "purpose",
+        "payload",
         "mode",
         "strategy",
         "retrievers",
@@ -2354,6 +2390,9 @@ fn infer_planner_action_name(envelope: &PlannerEnvelope) -> Option<String> {
     }
     if envelope.query.is_some() {
         return Some("search".to_string());
+    }
+    if envelope.capability_id.is_some() {
+        return Some("external_capability".to_string());
     }
     if envelope.branches.is_some() {
         return Some("branch".to_string());
@@ -2721,8 +2760,8 @@ mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::{
-        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase,
-        TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
+        ExternalCapabilityInvocation, TraceModelExchangeCategory, TraceModelExchangeLane,
+        TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
@@ -3582,6 +3621,45 @@ mod tests {
     }
 
     #[test]
+    fn parse_planner_action_supports_external_capability_actions() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_planner_action(
+                r#"{"action":"external_capability","capability_id":"web.search","purpose":"find the latest docs","payload":{"query":"paddles docs"},"rationale":"ground the answer with a current external source","edit":"no","candidate_files":[]}"#,
+            )
+            .expect("planner decision");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: ExternalCapabilityInvocation::new(
+                            "web.search",
+                            "find the latest docs",
+                            json!({ "query": "paddles docs" }),
+                        ),
+                    },
+                },
+                rationale: "ground the answer with a current external source".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }
+        );
+    }
+
+    #[test]
     fn parse_planner_action_accepts_pretty_printed_multiline_json() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
@@ -4028,6 +4106,16 @@ mod tests {
             schema["properties"]["grounding"]["required"][1].as_str(),
             Some("reason")
         );
+        assert!(
+            schema["properties"]["action"]["enum"]
+                .as_array()
+                .expect("planner action enum")
+                .iter()
+                .any(|value| value.as_str() == Some("external_capability"))
+        );
+        assert!(schema["properties"].get("capability_id").is_some());
+        assert!(schema["properties"].get("purpose").is_some());
+        assert!(schema["properties"].get("payload").is_some());
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -498,6 +498,7 @@ impl PlannerAction {
                 WorkspaceAction::WriteFile { path, .. } => Some(path.clone()),
                 WorkspaceAction::ReplaceInFile { path, .. } => Some(path.clone()),
                 WorkspaceAction::ApplyPatch { .. } => None,
+                WorkspaceAction::ExternalCapability { invocation } => Some(invocation.summary()),
             },
             Self::Refine { query, .. } => Some(query.clone()),
             Self::Branch { branches, .. } => Some(branches.join(" | ")),

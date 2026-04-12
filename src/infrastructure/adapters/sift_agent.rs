@@ -1,10 +1,11 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
 use super::local_workspace_editor::LocalWorkspaceEditor;
 use crate::domain::model::{
-    CompactionDecision, ConversationThreadRef, ForensicArtifactCapture, NullTurnEventSink,
-    StrainFactor, StrainTracker, ThreadDecision, ThreadDecisionId, ThreadDecisionKind,
-    ThreadMergeMode, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
-    TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
+    CompactionDecision, ConversationThreadRef, ExternalCapabilityInvocation,
+    ForensicArtifactCapture, NullTurnEventSink, StrainFactor, StrainTracker, ThreadDecision,
+    ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, TraceArtifactId,
+    TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent,
+    TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     CompactionPlan, CompactionRequest, EvidenceBundle, GroundingDomain, GroundingRequirement,
@@ -40,7 +41,7 @@ use candle_transformers::models::{
     qwen3_5::{Config as Qwen3_5Config, ModelForCausalLM as Qwen3_5Model},
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use sift::internal::search::adapters::llm_utils::{QwenConfigPartial, get_device_for};
 use sift::{
     AgentTurnInput, ContextAssemblyBudget, ContextAssemblyRequest, ContextAssemblyResponse,
@@ -216,6 +217,13 @@ enum PlannerActionEnvelope {
         patch: String,
         rationale: String,
     },
+    ExternalCapability {
+        capability_id: String,
+        purpose: String,
+        #[serde(default)]
+        payload: Option<Value>,
+        rationale: String,
+    },
     Refine {
         query: String,
         mode: RetrievalMode,
@@ -317,6 +325,13 @@ enum InitialActionVariantEnvelope {
     },
     ApplyPatch {
         patch: String,
+        rationale: String,
+    },
+    ExternalCapability {
+        capability_id: String,
+        purpose: String,
+        #[serde(default)]
+        payload: Option<Value>,
         rationale: String,
     },
     Refine {
@@ -3018,6 +3033,7 @@ Workspace action schema:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\"}}\n\
+- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null}}\n\
 \n\
 Rules:\n\
 - Use ONLY the loaded document sources shown below.\n\
@@ -3106,6 +3122,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -3192,6 +3209,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
+- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
 	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -3336,6 +3354,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"rationale\":\"...\"}}\n\
 	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
@@ -3424,6 +3443,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"rationale\":\"...\"}}\n\
 	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
@@ -3496,6 +3516,7 @@ Allowed actions:\n\
 - {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
 - {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
 - {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
+- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"rationale\":\"...\"}}\n\
 	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
 - {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
@@ -4698,6 +4719,26 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             edit,
             grounding: grounding.clone(),
         },
+        InitialActionVariantEnvelope::ExternalCapability {
+            capability_id,
+            purpose,
+            payload,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::ExternalCapability {
+                    invocation: ExternalCapabilityInvocation::new(
+                        required_planner_field("capability_id", capability_id)?,
+                        required_planner_field("purpose", purpose)?,
+                        payload.unwrap_or_else(|| json!({})),
+                    ),
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit,
+            grounding: grounding.clone(),
+        },
         InitialActionVariantEnvelope::Refine {
             query,
             mode,
@@ -4958,6 +4999,26 @@ fn planner_action_from_envelope(
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
         },
+        PlannerActionEnvelope::ExternalCapability {
+            capability_id,
+            purpose,
+            payload,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::ExternalCapability {
+                    invocation: ExternalCapabilityInvocation::new(
+                        required_planner_field("capability_id", capability_id)?,
+                        required_planner_field("purpose", purpose)?,
+                        payload.unwrap_or_else(|| json!({})),
+                    ),
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
+        },
         PlannerActionEnvelope::Refine {
             query,
             mode,
@@ -5200,6 +5261,7 @@ fn tool_call_from_workspace_action(action: &WorkspaceAction) -> Option<ToolCall>
         WorkspaceAction::ApplyPatch { patch } => Some(ToolCall::ApplyPatch {
             patch: patch.clone(),
         }),
+        WorkspaceAction::ExternalCapability { .. } => None,
     }
 }
 
@@ -6300,6 +6362,8 @@ mod tests {
         assert!(prompt.contains("exact-diff state space"));
         assert!(prompt.contains("replace_in_file"));
         assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("external_capability"));
+        assert!(prompt.contains("\"capability_id\":\"web.search|mcp.tool|connector.app_action\""));
         assert!(prompt.contains("safe, reasonable repository change"));
         assert!(prompt.contains("make the workspace edit in this turn"));
     }
@@ -6352,6 +6416,7 @@ mod tests {
         assert!(prompt.contains("exact-diff state space"));
         assert!(prompt.contains("replace_in_file"));
         assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("external_capability"));
         assert!(prompt.contains("Steering review [action-bias]"));
         assert!(prompt.contains("safe, reasonable repository change"));
         assert!(prompt.contains("make the workspace edit in this turn"));

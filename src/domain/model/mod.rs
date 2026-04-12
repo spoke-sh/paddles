@@ -40,10 +40,10 @@ pub use execution_hand::{
 };
 pub use external_capability::{
     ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityDescriptor,
-    ExternalCapabilityEvidenceKind, ExternalCapabilityEvidenceShape, ExternalCapabilityInvocation,
-    ExternalCapabilityKind, ExternalCapabilityResult, ExternalCapabilityResultStatus,
-    ExternalCapabilitySideEffectPosture, ExternalCapabilitySourceRecord,
-    default_external_capability_descriptors,
+    ExternalCapabilityDescriptorMetadata, ExternalCapabilityEvidenceKind,
+    ExternalCapabilityEvidenceShape, ExternalCapabilityInvocation, ExternalCapabilityKind,
+    ExternalCapabilityResult, ExternalCapabilityResultStatus, ExternalCapabilitySideEffectPosture,
+    ExternalCapabilitySourceRecord, default_external_capability_descriptors,
 };
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T16:47:12.204765681-07:00
+mode: manual
+---
+External capability execution now evaluates the descriptor-driven permission requirement through the shared execution governance gate and records the resulting governance decision before any broker invocation. Verified with cargo test external_capability_ and cargo test planner_workspace_actions_emit_governance_decision_events.
