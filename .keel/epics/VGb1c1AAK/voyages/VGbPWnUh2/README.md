@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGbPWnUh2
-status: planned
+status: in-progress
 epic: VGb1c1AAK
 created_at: 2026-04-12T11:23:57
 # authored
 title: Establish A Replayable Turn And Thread Control Substrate
 index: 1
 updated_at: 2026-04-12T11:25:34
+started_at: 2026-04-12T11:35:18
 ---
 
 # Establish A Replayable Turn And Thread Control Substrate
@@ -26,11 +27,11 @@ updated_at: 2026-04-12T11:25:34
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Turn And Thread Control Contracts](../../../../stories/VGbPaBICN/README.md) | feat | backlog |
+| [Define Turn And Thread Control Contracts](../../../../stories/VGbPaBICN/README.md) | feat | done |
 | [Wire Same-Turn Steering Through Replayable Control Flow](../../../../stories/VGbPaBmCK/README.md) | feat | backlog |
 | [Project Live Control State Across Operator Surfaces](../../../../stories/VGbPaCCCI/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T11:41:43.690120186-07:00
+mode: manual
+---
+Added src/domain/model/control.rs with typed turn/thread control operations, control results, and runtime items for plan, diff, command, file, and control updates. Verified with cargo test control::tests -- --nocapture.

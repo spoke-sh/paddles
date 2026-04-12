@@ -345,7 +345,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Establish A Replayable Turn And Thread Control Substrate](epics/VGb1c1AAK/voyages/VGbPWnUh2/) | planned |
+| [Establish A Replayable Turn And Thread Control Substrate](epics/VGb1c1AAK/voyages/VGbPWnUh2/) | in-progress |
 
 ### [External Capability Fabric For Web, MCP, And Connectors](epics/VGb1c1XAL/) (draft)
 

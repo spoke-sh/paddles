@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VGbPaBICN
-status: backlog
+status: done
 created_at: 2026-04-12T11:24:10
-updated_at: 2026-04-12T11:25:34
+updated_at: 2026-04-12T11:42:31
 # authored
 title: Define Turn And Thread Control Contracts
 type: feat
 operator-signal:
 scope: VGb1c1AAK/VGbPWnUh2
 index: 1
+started_at: 2026-04-12T11:35:18
+submitted_at: 2026-04-12T11:42:26
+completed_at: 2026-04-12T11:42:31
 ---
 
 # Define Turn And Thread Control Contracts
@@ -23,6 +26,6 @@ prompt conventions.
 
 ## Acceptance Criteria
 
-- [ ] The runtime defines typed contracts for turn and thread control operations, control results, and shared runtime items for plan, diff, command, file, and control-state updates. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
-- [ ] The contract vocabulary defines turn and thread control semantics independently of any one operator surface or prompt phrasing. [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end -->
-- [ ] The contract model builds directly on the existing recorder, replay, and thread-lineage substrate instead of introducing a parallel state store. [SRS-NFR-01/AC-01] <!-- verify: manual, SRS-NFR-01:start:end -->
+- [x] The runtime defines typed contracts for turn and thread control operations, control results, and shared runtime items for plan, diff, command, file, and control-state updates. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] The contract vocabulary defines turn and thread control semantics independently of any one operator surface or prompt phrasing. [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end, proof: ac-2.log-->
+- [x] The contract model builds directly on the existing recorder, replay, and thread-lineage substrate instead of introducing a parallel state store. [SRS-NFR-01/AC-01] <!-- verify: manual, SRS-NFR-01:start:end, proof: ac-3.log-->

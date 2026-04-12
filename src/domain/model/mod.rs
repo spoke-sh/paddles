@@ -2,6 +2,7 @@ use anyhow::Result;
 
 pub mod compaction;
 pub mod context_quality;
+pub mod control;
 pub mod execution_hand;
 pub mod forensics;
 pub mod generative;
@@ -20,6 +21,12 @@ pub mod transcript;
 pub mod turns;
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use context_quality::{ContextStrain, StrainFactor, StrainLevel, StrainTracker};
+pub use control::{
+    CommandRuntimeItem, CommandRuntimePhase, ControlOperation, ControlResult, ControlResultStatus,
+    ControlRuntimeItem, ControlSubject, DiffRuntimeItem, FileRuntimeItem, FileRuntimeOperation,
+    PlanRuntimeItem, RuntimeItem, ThreadControlOperation, TurnControlOperation,
+    thread_control_operation, thread_control_result, trace_control_result,
+};
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
     ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,

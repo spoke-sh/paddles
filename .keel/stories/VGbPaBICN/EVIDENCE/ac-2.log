@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T11:41:43.724271701-07:00
+mode: manual
+---
+The contract vocabulary is surface-agnostic: TurnControlOperation, ThreadControlOperation, ControlOperation, and RuntimeItem encode semantics without TUI/web/prompt-specific phrasing. Verified in src/domain/model/control.rs and cargo test control::tests -- --nocapture.
