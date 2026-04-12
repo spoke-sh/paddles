@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:19:01.039119569-07:00
+mode: manual
+---
+Rejected, stale, and unavailable control results stay explicit and replayable instead of mutating hidden state; stale interruptions remain visible in projections and transcript output. Verified with cargo test later_interrupts_mark_older_turn_controls_stale_instead_of_mutating_hidden_state -- --nocapture, cargo test process_prompt_interrupts_at_a_safe_checkpoint_and_records_the_control_result -- --nocapture, cargo test broadcast_event_sink_projects_runtime_items_for_control_state_events -- --nocapture, and cargo test projects_control_results_into_system_transcript_entries -- --nocapture.

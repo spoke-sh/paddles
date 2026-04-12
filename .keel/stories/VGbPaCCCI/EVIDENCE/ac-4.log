@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:19:04.211587441-07:00
+mode: manual
+---
+Control transitions now stay readable across transcript, TUI, and web surfaces, including unavailable states and detailed operator-facing explanations. Verified with cargo test control_state_rows_keep_runtime_items_and_degraded_detail_visible -- --nocapture, cargo test projects_control_results_into_system_transcript_entries -- --nocapture, and npm --workspace @paddles/web test -- src/runtime-helpers.test.ts.

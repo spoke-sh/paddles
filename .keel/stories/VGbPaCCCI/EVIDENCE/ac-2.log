@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:18:57.279073131-07:00
+mode: manual
+---
+Rust and web projections now share one runtime vocabulary: ProjectionTurnEvent exposes runtime_items and the React runtime shell consumes the Rust-authored presentation without reinterpreting control semantics. Verified with cargo test broadcast_event_sink_ -- --nocapture, npm --workspace @paddles/web test -- src/runtime-helpers.test.ts, and npm --workspace @paddles/web test -- src/chat/runtime-shell.test.tsx.

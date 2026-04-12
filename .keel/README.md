@@ -341,11 +341,11 @@
 |--------|--------|
 | [Govern Local Hands With Explicit Execution Policy](epics/VGb1c0pAN/voyages/VGb2gViJ2/) | done |
 
-### [Turn-Scoped Control API And Runtime Events](epics/VGb1c1AAK/) (active)
+### [Turn-Scoped Control API And Runtime Events](epics/VGb1c1AAK/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Establish A Replayable Turn And Thread Control Substrate](epics/VGb1c1AAK/voyages/VGbPWnUh2/) | in-progress |
+| [Establish A Replayable Turn And Thread Control Substrate](epics/VGb1c1AAK/voyages/VGbPWnUh2/) | done |
 
 ### [External Capability Fabric For Web, MCP, And Connectors](epics/VGb1c1XAL/) (draft)
 

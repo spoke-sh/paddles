@@ -16,7 +16,7 @@ export interface SessionResponse {
 export interface ConversationTranscriptEntry {
   record_id: string;
   turn_id: string;
-  speaker: 'user' | 'assistant';
+  speaker: 'user' | 'assistant' | 'system';
   content: string;
   response_mode?:
     | 'direct_answer'
@@ -218,9 +218,67 @@ export interface RuntimeEventPresentation {
   text: string;
 }
 
+export interface RuntimeItemPlan {
+  kind: 'plan';
+  payload: {
+    items: Array<Record<string, unknown>>;
+  };
+}
+
+export interface RuntimeItemDiff {
+  kind: 'diff';
+  payload: {
+    files: string[];
+    diff: string;
+    insertions: number;
+    deletions: number;
+  };
+}
+
+export interface RuntimeItemCommand {
+  kind: 'command';
+  payload: {
+    call_id: string;
+    tool_name: string;
+    phase: string;
+    detail: string;
+  };
+}
+
+export interface RuntimeItemFile {
+  kind: 'file';
+  payload: {
+    path: string;
+    operation: string;
+  };
+}
+
+export interface RuntimeItemControl {
+  kind: 'control';
+  payload: {
+    result: {
+      operation: {
+        scope: string;
+        operation: string;
+      };
+      status: string;
+      subject: Record<string, unknown>;
+      detail: string;
+    };
+  };
+}
+
+export type RuntimeItem =
+  | RuntimeItemPlan
+  | RuntimeItemDiff
+  | RuntimeItemCommand
+  | RuntimeItemFile
+  | RuntimeItemControl;
+
 export type TurnEvent = Record<string, unknown> & { type: string };
 
 export interface ProjectionTurnEvent {
   event: TurnEvent;
   presentation: RuntimeEventPresentation;
+  runtime_items: RuntimeItem[];
 }

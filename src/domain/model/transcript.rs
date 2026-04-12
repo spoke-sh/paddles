@@ -2,6 +2,7 @@ use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnap
 use super::generative::ResponseMode;
 use super::render::RenderDocument;
 use super::traces::{TraceRecordKind, TraceReplay};
+use super::{ControlResult, ControlSubject, trace_control_result};
 use paddles_conversation::{ArtifactEnvelope, TaskTraceId, TraceRecordId, TurnTraceId};
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +89,18 @@ impl ConversationTranscript {
                         render: None,
                     });
                 }
-                _ => {}
+                kind => {
+                    if let Some(result) = trace_control_result(kind) {
+                        entries.push(ConversationTranscriptEntry {
+                            record_id: record.record_id.clone(),
+                            turn_id: record.lineage.turn_id.clone(),
+                            speaker: ConversationTranscriptSpeaker::System,
+                            content: format_control_result(&result),
+                            response_mode: None,
+                            render: None,
+                        });
+                    }
+                }
             }
         }
 
@@ -121,6 +133,29 @@ fn format_execution_governance_decision(decision: &ExecutionGovernanceDecision) 
     format!("{}\n{}", decision.summary(), decision.detail())
 }
 
+fn format_control_result(result: &ControlResult) -> String {
+    format!(
+        "control: {}\nsubject={}\n{}",
+        result.summary(),
+        control_subject_label(&result.subject),
+        result.detail
+    )
+}
+
+fn control_subject_label(subject: &ControlSubject) -> String {
+    subject
+        .thread
+        .as_ref()
+        .map(|thread| thread.stable_id())
+        .or_else(|| {
+            subject
+                .turn_id
+                .as_ref()
+                .map(|turn| turn.as_str().to_string())
+        })
+        .unwrap_or_else(|| "session".to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConversationTranscriptUpdate {
     pub task_id: TaskTraceId,
@@ -141,12 +176,13 @@ impl TranscriptUpdateSink for NullTranscriptUpdateSink {
 mod tests {
     use super::{ConversationTranscript, ConversationTranscriptSpeaker};
     use crate::domain::model::{
+        ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
         ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
         ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionGovernanceSnapshot,
         ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequest,
         ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
         ResponseMode, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord,
-        TraceRecordKind, TraceReplay, TraceTaskRoot,
+        TraceRecordKind, TraceReplay, TraceTaskRoot, TurnControlOperation,
     };
     use paddles_conversation::{
         ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceCheckpointId,
@@ -395,5 +431,83 @@ mod tests {
                 .content
                 .contains("escalation_prefix=cargo test")
         );
+    }
+
+    #[test]
+    fn projects_control_results_into_system_transcript_entries() {
+        let task_id = TaskTraceId::new("task-3").expect("task");
+        let turn_id = TurnTraceId::new("task-3.turn-0001").expect("turn");
+        let replay = TraceReplay {
+            task_id: task_id.clone(),
+            records: vec![
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    sequence: 1,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: None,
+                    },
+                    kind: TraceRecordKind::TaskRootStarted(TraceTaskRoot {
+                        prompt: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-1").expect("artifact"),
+                            ArtifactKind::Prompt,
+                            "prompt",
+                            "pause this run",
+                            200,
+                        ),
+                        interpretation: None,
+                        planner_model: "planner".to_string(),
+                        synthesizer_model: "synth".to_string(),
+                        harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                            requested_profile_id: "recursive-structured-v1".to_string(),
+                            active_profile_id: "recursive-structured-v1".to_string(),
+                            downgrade_reason: None,
+                        },
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    sequence: 2,
+                    lineage: TraceLineage {
+                        task_id,
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: Some(
+                            TraceRecordId::new("record-1").expect("parent record"),
+                        ),
+                    },
+                    kind: TraceRecordKind::ControlResultRecorded(ControlResult {
+                        operation: ControlOperation::Turn(TurnControlOperation::Interrupt),
+                        status: ControlResultStatus::Unavailable,
+                        subject: ControlSubject {
+                            turn_id: Some(turn_id.clone()),
+                            thread: None,
+                        },
+                        detail: "planner lane is reconfiguring and cannot honor interrupt yet"
+                            .to_string(),
+                    }),
+                },
+            ],
+        };
+
+        let transcript = ConversationTranscript::from_trace_replay(&replay);
+        assert_eq!(transcript.entries.len(), 2);
+        assert_eq!(
+            transcript.entries[1].speaker,
+            ConversationTranscriptSpeaker::System
+        );
+        assert!(
+            transcript.entries[1]
+                .content
+                .contains("interrupt unavailable")
+        );
+        assert!(
+            transcript.entries[1]
+                .content
+                .contains("planner lane is reconfiguring and cannot honor interrupt yet")
+        );
+        assert!(transcript.entries[1].content.contains(turn_id.as_str()));
     }
 }

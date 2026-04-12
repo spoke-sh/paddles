@@ -17,6 +17,17 @@ describe('eventRow', () => {
         detail: 'pwd',
         text: 'shell: pwd',
       },
+      runtime_items: [
+        {
+          kind: 'command',
+          payload: {
+            call_id: 'tool-1',
+            tool_name: 'shell',
+            phase: 'requested',
+            detail: 'pwd',
+          },
+        },
+      ],
     });
 
     expect(row).toEqual({
@@ -30,6 +41,7 @@ describe('eventRow', () => {
     const row = eventRow({
       event: {
         type: 'tool_output',
+        call_id: 'tool-1',
         tool_name: 'shell',
         stream: 'stdout',
         output: 'alpha\nbeta',
@@ -41,6 +53,17 @@ describe('eventRow', () => {
         detail: 'alpha\nbeta',
         text: 'shell stdout',
       },
+      runtime_items: [
+        {
+          kind: 'command',
+          payload: {
+            call_id: 'tool-1',
+            tool_name: 'shell',
+            phase: 'streaming_stdout',
+            detail: 'alpha\nbeta',
+          },
+        },
+      ],
     });
 
     expect(row).toEqual({
@@ -48,6 +71,7 @@ describe('eventRow', () => {
       badgeClass: 'tool-terminal',
       text: 'shell stdout',
       output: 'alpha\nbeta',
+      streamKey: 'tool-stream:tool-1:stdout',
     });
   });
 
@@ -64,6 +88,14 @@ describe('eventRow', () => {
         detail: '□ Inspect `git status --short`\n✓ Verify the change and summarize the outcome.',
         text: 'Updated Plan',
       },
+      runtime_items: [
+        {
+          kind: 'plan',
+          payload: {
+            items: [],
+          },
+        },
+      ],
     });
 
     expect(row).toEqual({
@@ -71,6 +103,80 @@ describe('eventRow', () => {
       badgeClass: 'planner',
       text: 'Updated Plan',
       output: '□ Inspect `git status --short`\n✓ Verify the change and summarize the outcome.',
+    });
+  });
+
+  it('preserves control detail rows from the rust-authored runtime presentation', () => {
+    const row = eventRow({
+      event: {
+        type: 'control_state_changed',
+      },
+      presentation: {
+        badge: 'control',
+        badge_class: 'governor',
+        title: '• Control: interrupt unavailable',
+        detail: 'planner lane is reconfiguring and cannot honor interrupt yet',
+        text: 'interrupt unavailable · session',
+      },
+      runtime_items: [
+        {
+          kind: 'control',
+          payload: {
+            result: {
+              operation: {
+                scope: 'turn',
+                operation: 'interrupt',
+              },
+              status: 'unavailable',
+              subject: {},
+              detail:
+                'planner lane is reconfiguring and cannot honor interrupt yet',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(row).toEqual({
+      badge: 'control',
+      badgeClass: 'governor',
+      text: 'interrupt unavailable · session',
+      output: 'planner lane is reconfiguring and cannot honor interrupt yet',
+    });
+  });
+
+  it('preserves command summaries from the rust-authored runtime presentation', () => {
+    const row = eventRow({
+      event: {
+        type: 'tool_finished',
+        tool_name: 'shell',
+        summary: 'exit 0\n2 files changed',
+      },
+      presentation: {
+        badge: 'tool',
+        badge_class: 'tool',
+        title: '• Completed shell',
+        detail: 'exit 0\n2 files changed',
+        text: 'shell finished',
+      },
+      runtime_items: [
+        {
+          kind: 'command',
+          payload: {
+            call_id: 'tool-1',
+            tool_name: 'shell',
+            phase: 'finished',
+            detail: 'exit 0\n2 files changed',
+          },
+        },
+      ],
+    });
+
+    expect(row).toEqual({
+      badge: 'tool',
+      badgeClass: 'tool',
+      text: 'shell finished',
+      output: 'exit 0\n2 files changed',
     });
   });
 

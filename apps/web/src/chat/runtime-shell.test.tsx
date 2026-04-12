@@ -253,6 +253,34 @@ describe('Runtime shell and chat', () => {
     expect(message.textContent).toBe('line one\nline two\nline three');
   });
 
+  it('renders system transcript entries as system notices instead of user bubbles', async () => {
+    const projectionWithSystemEntry: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      transcript: {
+        ...bootstrapProjection.transcript,
+        entries: [
+          ...bootstrapProjection.transcript.entries,
+          {
+            record_id: 'record-system',
+            turn_id: 'task-123.turn-0001',
+            speaker: 'system',
+            content:
+              'execution posture recursive-structured-v1 (sandbox=workspace_write, approval=on_request)',
+          },
+        ],
+      },
+    };
+
+    stubRuntimeFetch({ projection: projectionWithSystemEntry });
+    renderAtPath('/');
+
+    const systemMessage = await screen.findByText(
+      'execution posture recursive-structured-v1 (sandbox=workspace_write, approval=on_request)'
+    );
+    expect(systemMessage.closest('.msg')).toHaveClass('msg', 'system');
+    expect(systemMessage.closest('.msg')).not.toHaveClass('user');
+  });
+
   it('renders inline code spans in user and assistant transcript text', async () => {
     const inlineCodeProjection: ConversationProjectionSnapshot = {
       ...bootstrapProjection,

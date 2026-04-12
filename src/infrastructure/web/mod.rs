@@ -6,8 +6,8 @@ use crate::domain::model::{
     ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
     ManifoldFrame, ManifoldTurnProjection, NativeTransportConfigurations,
     NativeTransportDiagnostic, NativeTransportKind, NativeTransportSessionIdentity,
-    RuntimeEventPresentation, TaskTraceId, TranscriptUpdateSink, TurnEvent, TurnEventSink,
-    TurnTraceId, project_runtime_event,
+    RuntimeEventPresentation, RuntimeItem, TaskTraceId, TranscriptUpdateSink, TurnEvent,
+    TurnEventSink, TurnTraceId, project_runtime_event,
 };
 use crate::domain::ports::TraceRecorder;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
@@ -55,6 +55,7 @@ enum ConversationProjectionStreamEvent {
         task_id: TaskTraceId,
         event: TurnEvent,
         presentation: RuntimeEventPresentation,
+        runtime_items: Vec<RuntimeItem>,
     },
 }
 
@@ -62,6 +63,7 @@ enum ConversationProjectionStreamEvent {
 struct ProjectionTurnEventResponse {
     event: TurnEvent,
     presentation: RuntimeEventPresentation,
+    runtime_items: Vec<RuntimeItem>,
 }
 
 #[derive(Serialize)]
@@ -180,6 +182,7 @@ impl TurnEventSink for BroadcastEventSink {
                 .send(ConversationProjectionStreamEvent::TurnEvent {
                     task_id: self.task_id.clone(),
                     presentation: project_runtime_event(&event),
+                    runtime_items: event.runtime_items(),
                     event,
                 });
         }
@@ -342,6 +345,7 @@ impl TurnEventSink for GlobalBroadcastSink {
                 .send(ConversationProjectionStreamEvent::TurnEvent {
                     task_id: self.task_id.clone(),
                     presentation: project_runtime_event(&event),
+                    runtime_items: event.runtime_items(),
                     event,
                 });
         }
@@ -991,10 +995,12 @@ async fn conversation_projection_event_stream(
             task_id,
             event,
             presentation,
+            runtime_items,
         }) if task_id.as_str() == id => {
             let json = serde_json::to_string(&ProjectionTurnEventResponse {
                 event,
                 presentation,
+                runtime_items,
             })
             .unwrap_or_default();
             Some(Ok(Event::default().event("turn_event").data(json)))
@@ -1171,13 +1177,14 @@ mod tests {
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::NullTurnEventSink;
     use crate::domain::model::{
-        ArtifactKind, ConversationForensicUpdate, ConversationProjectionUpdateKind,
+        ArtifactKind, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
+        ConversationForensicUpdate, ConversationProjectionUpdateKind,
         ConversationTranscriptSpeaker, ConversationTranscriptUpdate, ForensicUpdateSink,
         TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind,
         TraceLineageNodeRef, TraceModelExchangeArtifact, TraceModelExchangeCategory,
         TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord, TraceRecordId,
         TraceRecordKind, TraceReplay, TraceSignalContribution, TraceSignalKind,
-        TraceSignalSnapshot, TranscriptUpdateSink, TurnEventSink,
+        TraceSignalSnapshot, TranscriptUpdateSink, TurnControlOperation, TurnEventSink,
     };
     use crate::domain::ports::{
         ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
@@ -2044,6 +2051,7 @@ mod tests {
             task_id: received_task_id,
             event: received_projection_event,
             presentation,
+            runtime_items: _,
         } = projection_rx.try_recv().expect("projection event payload")
         else {
             panic!("expected turn event payload");
@@ -2052,6 +2060,45 @@ mod tests {
         assert_eq!(received_projection_event, event);
         assert_eq!(presentation.badge, "tool");
         assert_eq!(presentation.title, "• Ran shell");
+    }
+
+    #[test]
+    fn broadcast_event_sink_projects_runtime_items_for_control_state_events() {
+        let task_id = parse_task_id("task-000001").expect("task");
+        let (event_tx, _) = broadcast::channel(8);
+        let (projection_tx, mut projection_rx) = broadcast::channel(8);
+        let sink = super::BroadcastEventSink {
+            session_id: task_id.as_str().to_string(),
+            task_id: task_id.clone(),
+            verbose: 0,
+            event_tx,
+            projection_tx,
+        };
+
+        let event = crate::domain::model::TurnEvent::ControlStateChanged {
+            result: ControlResult {
+                operation: ControlOperation::Turn(TurnControlOperation::Interrupt),
+                status: ControlResultStatus::Stale,
+                subject: ControlSubject::default(),
+                detail: "a newer interrupt request superseded this one".to_string(),
+            },
+        };
+
+        sink.emit(event.clone());
+
+        let ConversationProjectionStreamEvent::TurnEvent {
+            task_id: received_task_id,
+            event: received_projection_event,
+            presentation,
+            runtime_items,
+        } = projection_rx.try_recv().expect("projection event payload")
+        else {
+            panic!("expected turn event payload");
+        };
+        assert_eq!(received_task_id, task_id);
+        assert_eq!(received_projection_event, event);
+        assert_eq!(presentation.title, "• Control: interrupt stale");
+        assert_eq!(runtime_items, event.runtime_items());
     }
 
     #[test]

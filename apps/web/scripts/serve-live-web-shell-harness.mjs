@@ -1,5 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import process from 'node:process';
@@ -45,6 +47,9 @@ function openAiToolCallResponse(argumentsJson) {
 }
 
 let providerCallCount = 0;
+const stateHome = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'paddles-live-web-shell-state-')
+);
 
 function nextMockResponse() {
   const phase = providerCallCount % 4;
@@ -112,6 +117,7 @@ function shutdown(code = 0) {
   }
 
   providerServer.close(() => {
+    fs.rmSync(stateHome, { recursive: true, force: true });
     process.exit(code);
   });
 
@@ -119,6 +125,7 @@ function shutdown(code = 0) {
     if (paddles && !paddles.killed) {
       paddles.kill('SIGKILL');
     }
+    fs.rmSync(stateHome, { recursive: true, force: true });
     process.exit(code);
   }, 5_000).unref();
 }
@@ -151,6 +158,7 @@ providerServer.listen(providerPort, '127.0.0.1', () => {
       env: {
         ...process.env,
         INCEPTION_API_KEY: process.env.INCEPTION_API_KEY || 'test-key',
+        XDG_STATE_HOME: stateHome,
       },
       stdio: ['pipe', 'inherit', 'inherit'],
     }

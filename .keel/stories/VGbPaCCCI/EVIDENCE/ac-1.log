@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:18:54.205843502-07:00
+mode: manual
+---
+Turn events now carry runtime_items through TUI rows and projection SSE payloads, preserving plan, command, diff/file, and control items. Verified with cargo test turn_events_render_as_codex_like_action_rows -- --nocapture, cargo test plan_updates_render_as_checklist_rows_in_the_tui_transcript -- --nocapture, cargo test applied_edit_events_render_diff_lines_in_the_tui_transcript -- --nocapture, and cargo test broadcast_event_sink_projects_runtime_items_for_control_state_events -- --nocapture.

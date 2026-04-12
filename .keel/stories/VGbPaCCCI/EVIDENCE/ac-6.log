@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T12:19:15.059798054-07:00
+mode: manual
+---
+The change stays local-first: it only projects existing recursive-harness state into transcript, TUI, and web layers and leaves the underlying interrupt and steer execution loop intact. Verified with cargo test process_prompt_interrupts_at_a_safe_checkpoint_and_records_the_control_result -- --nocapture, cargo test later_interrupts_mark_older_turn_controls_stale_instead_of_mutating_hidden_state -- --nocapture, and npm --workspace @paddles/web test -- src/chat/runtime-shell.test.tsx.

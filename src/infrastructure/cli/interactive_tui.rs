@@ -1,8 +1,8 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
 use crate::domain::model::{
     ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
-    RenderBlock, RenderDocument, RuntimeEventPresentation, ThreadCandidate, TranscriptUpdateSink,
-    TurnEvent, TurnEventSink, project_runtime_event_for_tui,
+    RenderBlock, RenderDocument, RuntimeEventPresentation, RuntimeItem, ThreadCandidate,
+    TranscriptUpdateSink, TurnEvent, TurnEventSink, project_runtime_event_for_tui,
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
@@ -691,6 +691,7 @@ struct TranscriptRow {
     content: String,
     render: Option<RenderDocument>,
     timing: Option<TranscriptTiming>,
+    runtime_items: Vec<RuntimeItem>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -721,11 +722,17 @@ impl TranscriptRow {
             content: content.into(),
             render: None,
             timing: None,
+            runtime_items: Vec::new(),
         }
     }
 
     fn with_render(mut self, render: RenderDocument) -> Self {
         self.render = Some(render);
+        self
+    }
+
+    fn with_runtime_items(mut self, runtime_items: Vec<RuntimeItem>) -> Self {
+        self.runtime_items = runtime_items;
         self
     }
 
@@ -1008,7 +1015,10 @@ fn planner_step_matches_tool_call(
     query == invocation && (action == tool_name || action.starts_with(&format!("{tool_name} ")))
 }
 
-fn transcript_row_from_runtime_event(presentation: RuntimeEventPresentation) -> TranscriptRow {
+fn transcript_row_from_runtime_event(
+    presentation: RuntimeEventPresentation,
+    runtime_items: Vec<RuntimeItem>,
+) -> TranscriptRow {
     let content = if presentation.detail.is_empty() {
         String::new()
     } else {
@@ -1016,6 +1026,7 @@ fn transcript_row_from_runtime_event(presentation: RuntimeEventPresentation) -> 
     };
 
     TranscriptRow::new(TranscriptRowKind::Event, presentation.title, content)
+        .with_runtime_items(runtime_items)
 }
 
 fn web_server_ready_row(addr: SocketAddr) -> TranscriptRow {
@@ -3305,6 +3316,7 @@ fn render_assistant_line(
 }
 
 fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
+    let runtime_items = event.runtime_items();
     if let TurnEvent::WorkspaceEditApplied {
         tool_name, edit, ..
     } = &event
@@ -3313,7 +3325,8 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             TranscriptRowKind::Event,
             format!("• Applied {tool_name}"),
             edit.diff.clone(),
-        );
+        )
+        .with_runtime_items(runtime_items);
     }
 
     if let TurnEvent::ToolFinished {
@@ -3326,10 +3339,14 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
             TranscriptRowKind::Event,
             format!("• Completed {tool_name}"),
             content,
-        );
+        )
+        .with_runtime_items(runtime_items);
     }
 
-    transcript_row_from_runtime_event(project_runtime_event_for_tui(&event, verbose))
+    transcript_row_from_runtime_event(
+        project_runtime_event_for_tui(&event, verbose),
+        runtime_items,
+    )
 }
 
 fn parse_hunting_telemetry_sample(phase: &str, detail: &str) -> Option<HuntingTelemetrySample> {
@@ -3718,9 +3735,10 @@ mod tests {
     };
     use crate::application::{ConversationSession, RuntimeLaneConfig};
     use crate::domain::model::{
+        ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
         ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
         ConversationTranscriptUpdate, RenderBlock, RenderDocument, TaskTraceId, TraceRecordId,
-        TurnEvent, TurnIntent, TurnTraceId,
+        TurnControlOperation, TurnEvent, TurnIntent, TurnTraceId,
     };
     use crate::infrastructure::credentials::ProviderAvailability;
     use crate::infrastructure::providers::ModelProvider;
@@ -3882,39 +3900,36 @@ mod tests {
 
     #[test]
     fn turn_events_render_as_codex_like_action_rows() {
-        let row = format_turn_event_row(
-            TurnEvent::ToolCalled {
-                call_id: "tool-1".to_string(),
-                tool_name: "shell".to_string(),
-                invocation: "git status --short".to_string(),
-            },
-            0,
-        );
+        let event = TurnEvent::ToolCalled {
+            call_id: "tool-1".to_string(),
+            tool_name: "shell".to_string(),
+            invocation: "git status --short".to_string(),
+        };
+        let row = format_turn_event_row(event.clone(), 0);
 
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Ran shell");
         assert_eq!(row.content, "git status --short");
+        assert_eq!(row.runtime_items, event.runtime_items());
     }
 
     #[test]
     fn plan_updates_render_as_checklist_rows_in_the_tui_transcript() {
-        let row = format_turn_event_row(
-            TurnEvent::PlanUpdated {
-                items: vec![
-                    crate::domain::model::PlanChecklistItem {
-                        id: "inspect".to_string(),
-                        label: "Inspect `git status --short`".to_string(),
-                        status: crate::domain::model::PlanChecklistItemStatus::Pending,
-                    },
-                    crate::domain::model::PlanChecklistItem {
-                        id: "verify".to_string(),
-                        label: "Verify the change and summarize the outcome.".to_string(),
-                        status: crate::domain::model::PlanChecklistItemStatus::Completed,
-                    },
-                ],
-            },
-            0,
-        );
+        let event = TurnEvent::PlanUpdated {
+            items: vec![
+                crate::domain::model::PlanChecklistItem {
+                    id: "inspect".to_string(),
+                    label: "Inspect `git status --short`".to_string(),
+                    status: crate::domain::model::PlanChecklistItemStatus::Pending,
+                },
+                crate::domain::model::PlanChecklistItem {
+                    id: "verify".to_string(),
+                    label: "Verify the change and summarize the outcome.".to_string(),
+                    status: crate::domain::model::PlanChecklistItemStatus::Completed,
+                },
+            ],
+        };
+        let row = format_turn_event_row(event.clone(), 0);
 
         assert_eq!(row.kind, TranscriptRowKind::Event);
         assert_eq!(row.header, "• Updated Plan");
@@ -3923,6 +3938,7 @@ mod tests {
             row.content
                 .contains("✓ Verify the change and summarize the outcome.")
         );
+        assert_eq!(row.runtime_items, event.runtime_items());
     }
 
     #[test]
@@ -3945,22 +3961,21 @@ mod tests {
     #[test]
     fn applied_edit_events_render_diff_lines_in_the_tui_transcript() {
         let palette = detect_palette();
-        let row = format_turn_event_row(
-            TurnEvent::WorkspaceEditApplied {
-                call_id: "tool-2".to_string(),
-                tool_name: "write_file".to_string(),
-                edit: crate::domain::model::AppliedEdit {
-                    files: vec!["note.txt".to_string()],
-                    diff: "--- a/note.txt\n+++ b/note.txt\n@@ -0,0 +1 @@\n+hello".to_string(),
-                    insertions: 1,
-                    deletions: 0,
-                },
+        let event = TurnEvent::WorkspaceEditApplied {
+            call_id: "tool-2".to_string(),
+            tool_name: "write_file".to_string(),
+            edit: crate::domain::model::AppliedEdit {
+                files: vec!["note.txt".to_string()],
+                diff: "--- a/note.txt\n+++ b/note.txt\n@@ -0,0 +1 @@\n+hello".to_string(),
+                insertions: 1,
+                deletions: 0,
             },
-            0,
-        );
+        };
+        let row = format_turn_event_row(event.clone(), 0);
 
         assert_eq!(row.header, "• Applied write_file");
         assert!(row.content.contains("+++ b/note.txt"));
+        assert_eq!(row.runtime_items, event.runtime_items());
 
         let rendered_lines = render_row_lines(&row, &palette);
         let rendered_text: Vec<String> = rendered_lines
@@ -3980,6 +3995,27 @@ mod tests {
                 .any(|line| line.contains("+++ b/note.txt"))
         );
         assert!(rendered_text.iter().any(|line| line.contains("+hello")));
+    }
+
+    #[test]
+    fn control_state_rows_keep_runtime_items_and_degraded_detail_visible() {
+        let event = TurnEvent::ControlStateChanged {
+            result: ControlResult {
+                operation: ControlOperation::Turn(TurnControlOperation::Interrupt),
+                status: ControlResultStatus::Unavailable,
+                subject: ControlSubject::default(),
+                detail: "planner lane is reconfiguring and cannot honor interrupt yet".to_string(),
+            },
+        };
+        let row = format_turn_event_row(event.clone(), 0);
+
+        assert_eq!(row.kind, TranscriptRowKind::Event);
+        assert_eq!(row.header, "• Control: interrupt unavailable");
+        assert_eq!(
+            row.content,
+            "planner lane is reconfiguring and cannot honor interrupt yet"
+        );
+        assert_eq!(row.runtime_items, event.runtime_items());
     }
 
     #[test]

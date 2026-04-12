@@ -815,6 +815,12 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
         output: projectionEvent.presentation.detail,
       };
     }
+    if (shouldProjectPresentationDetail(type, projectionEvent.runtime_items)) {
+      return {
+        ...row,
+        output: projectionEvent.presentation.detail,
+      };
+    }
     return diff ? { ...row, diff } : row;
   }
 
@@ -967,6 +973,22 @@ export function eventRow(payload: ProjectionTurnEvent | TurnEvent) {
     };
   }
   return null;
+}
+
+function shouldProjectPresentationDetail(
+  type: string,
+  runtimeItems: ProjectionTurnEvent['runtime_items'] | undefined
+) {
+  if (!Array.isArray(runtimeItems) || runtimeItems.length === 0) {
+    return type === 'control_state_changed' || type === 'tool_finished';
+  }
+
+  const kinds = new Set(runtimeItems.map((item) => item.kind));
+  if (kinds.has('control') || kinds.has('plan')) {
+    return true;
+  }
+
+  return kinds.has('command') && type !== 'tool_called';
 }
 
 function eventDiff(payload: ProjectionTurnEvent | TurnEvent) {

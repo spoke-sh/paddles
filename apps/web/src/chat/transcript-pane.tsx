@@ -44,6 +44,16 @@ function diffLineClass(line: string) {
   return 'context';
 }
 
+function transcriptSpeakerClass(speaker: 'user' | 'assistant' | 'system') {
+  if (speaker === 'assistant') {
+    return 'assistant';
+  }
+  if (speaker === 'system') {
+    return 'system';
+  }
+  return 'user';
+}
+
 export function TranscriptPane({
   activeView,
   connected,
@@ -83,7 +93,7 @@ export function TranscriptPane({
         return (
           <div
             aria-pressed={isTurnSelectable ? isTurnSelected : undefined}
-            className={`msg ${entry.speaker === 'assistant' ? 'assistant' : 'user'}${
+            className={`msg ${transcriptSpeakerClass(entry.speaker)}${
               isTurnSelectable ? ' is-turn-selectable' : ''
             }${isTurnSelected ? ' is-selected-turn' : ''}`}
             data-message-turn-id={entry.turn_id}

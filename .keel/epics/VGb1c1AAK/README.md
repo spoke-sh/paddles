@@ -22,8 +22,8 @@ mission: VGb1YwKRk
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/3 stories done
+**Progress:** 1/1 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Establish A Replayable Turn And Thread Control Substrate](voyages/VGbPWnUh2/) | in-progress | 2/3 |
+| [Establish A Replayable Turn And Thread Control Substrate](voyages/VGbPWnUh2/) | done | 3/3 |
 <!-- END GENERATED -->
