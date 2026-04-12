@@ -5,6 +5,7 @@ pub mod conversation_history;
 pub mod credentials;
 pub mod execution_governance;
 pub mod execution_hand;
+pub mod external_capability;
 pub mod harness_profile;
 pub mod native_transport;
 pub mod providers;

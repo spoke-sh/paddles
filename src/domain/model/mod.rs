@@ -4,6 +4,7 @@ pub mod compaction;
 pub mod context_quality;
 pub mod control;
 pub mod execution_hand;
+pub mod external_capability;
 pub mod forensics;
 pub mod generative;
 pub mod harness;
@@ -36,6 +37,13 @@ pub use execution_hand::{
     ExecutionPermissionReuseScope, ExecutionSandboxMode,
     default_local_execution_governance_profile, default_local_execution_hand_descriptors,
     summarize_execution_permissions, summarize_execution_reuse_scopes,
+};
+pub use external_capability::{
+    ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityDescriptor,
+    ExternalCapabilityEvidenceKind, ExternalCapabilityEvidenceShape, ExternalCapabilityInvocation,
+    ExternalCapabilityKind, ExternalCapabilityResult, ExternalCapabilityResultStatus,
+    ExternalCapabilitySideEffectPosture, ExternalCapabilitySourceRecord,
+    default_external_capability_descriptors,
 };
 pub use forensics::{
     ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,

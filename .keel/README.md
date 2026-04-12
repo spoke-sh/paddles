@@ -351,7 +351,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Establish A Typed External Capability Fabric Substrate](epics/VGb1c1XAL/voyages/VGcZRpCKi/) | planned |
+| [Establish A Typed External Capability Fabric Substrate](epics/VGb1c1XAL/voyages/VGcZRpCKi/) | in-progress |
 
 ### [Mode-Aware Planning And Review Workflows](epics/VGb1c1pAR/) (draft)
 

@@ -2,6 +2,7 @@ mod context_gathering;
 mod context_resolution;
 mod entity_resolution;
 mod execution_hands;
+mod external_capabilities;
 mod operator_memory;
 mod planning;
 mod specialist_brains;
@@ -25,6 +26,7 @@ pub use entity_resolution::{
     EntityResolver, NormalizedEntityHint,
 };
 pub use execution_hands::ExecutionHand;
+pub use external_capabilities::ExternalCapabilityBroker;
 pub use operator_memory::OperatorMemory;
 pub use planning::{
     CompactionPlan, CompactionRequest, GroundingDomain, GroundingRequirement, GuidanceCategory,

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T16:27:27.731074860-07:00
+mode: manual
+---
+Added typed external capability contracts in src/domain/model/external_capability.rs covering descriptors, invocation, results, availability, auth posture, side-effect posture, and evidence shape for web search, MCP tools, and connector-backed apps. Verified with cargo test external_capability -- --nocapture.

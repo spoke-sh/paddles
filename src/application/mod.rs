@@ -9,6 +9,7 @@ use crate::infrastructure::execution_governance::{
     GovernedTerminalCommandResult, summarize_governance_outcome,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+use crate::infrastructure::external_capability::NoopExternalCapabilityBroker;
 use crate::infrastructure::harness_profile::HarnessProfileSelection;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
@@ -26,32 +27,32 @@ use crate::domain::model::{
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
     ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
     ConversationTranscriptUpdate, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
-    ExecutionHandDiagnostic, ExecutionPermissionRequest, ForensicArtifactCapture,
-    ForensicTraceSink, ForensicUpdateSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
-    NativeTransportDiagnostic, PlanChecklistItem, PlanChecklistItemStatus, ResponseMode,
-    SteeringGateKind, SteeringGatePhase, StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate,
-    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact,
-    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation,
-    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ExecutionHandDiagnostic, ExecutionPermissionRequest, ExternalCapabilityDescriptor,
+    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
+    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
+    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
     EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest, EntityResolver,
-    EvidenceBudget, EvidenceBundle, EvidenceItem, GathererCapability, GroundingRequirement,
-    InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint, OperatorMemory,
-    PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig, PlannerLoopState,
-    PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-    RetrieverOption, SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine,
-    ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery,
-    WorkspaceAction,
+    EvidenceBudget, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker, GathererCapability,
+    GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
+    InterpretationContext, InterpretationProcedure, InterpretationProcedureStep,
+    InterpretationRequest, InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint,
+    OperatorMemory, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
+    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
+    RetrievalStrategy, RetrieverOption, SpecialistBrainRequest, SynthesisHandoff,
+    SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
+    TraceSessionContextQuery, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -106,6 +107,7 @@ pub struct MechSuitService {
     shared_session_id: Mutex<Option<String>>,
     conversation_history_store: Mutex<Option<Arc<ConversationHistoryStore>>>,
     execution_hand_registry: Mutex<Arc<ExecutionHandRegistry>>,
+    external_capability_broker: Mutex<Arc<dyn ExternalCapabilityBroker>>,
     native_transport_registry: Mutex<Arc<NativeTransportRegistry>>,
     specialist_brain_registry: Mutex<Arc<SpecialistBrainRegistry>>,
 }
@@ -2062,6 +2064,9 @@ impl MechSuitService {
             shared_session_id: Mutex::new(None),
             conversation_history_store: Mutex::new(None),
             execution_hand_registry: Mutex::new(Arc::new(ExecutionHandRegistry::default())),
+            external_capability_broker: Mutex::new(Arc::new(
+                NoopExternalCapabilityBroker::default(),
+            )),
             native_transport_registry: Mutex::new(Arc::new(NativeTransportRegistry::default())),
             specialist_brain_registry: Mutex::new(Arc::new(SpecialistBrainRegistry::new())),
         }
@@ -2104,6 +2109,26 @@ impl MechSuitService {
 
     pub fn execution_hand_diagnostics(&self) -> Vec<ExecutionHandDiagnostic> {
         self.execution_hand_registry().diagnostics()
+    }
+
+    pub fn set_external_capability_broker(&self, broker: Arc<dyn ExternalCapabilityBroker>) {
+        *self
+            .external_capability_broker
+            .lock()
+            .expect("external capability broker lock") = broker;
+    }
+
+    pub fn external_capability_broker(&self) -> Arc<dyn ExternalCapabilityBroker> {
+        Arc::clone(
+            &self
+                .external_capability_broker
+                .lock()
+                .expect("external capability broker lock"),
+        )
+    }
+
+    pub fn external_capability_descriptors(&self) -> Vec<ExternalCapabilityDescriptor> {
+        self.external_capability_broker().descriptors()
     }
 
     pub fn set_native_transport_registry(&self, registry: Arc<NativeTransportRegistry>) {
@@ -7815,6 +7840,24 @@ mod tests {
             diagnostic.hand == ExecutionHandKind::TransportMediator
                 && diagnostic.phase == ExecutionHandPhase::Described
                 && diagnostic.authority == ExecutionHandAuthority::CredentialMediated
+        }));
+    }
+
+    #[test]
+    fn service_new_exposes_default_external_capability_catalog_surface() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+
+        let descriptors = service.external_capability_descriptors();
+
+        assert_eq!(descriptors.len(), 3);
+        assert!(descriptors.iter().any(|descriptor| {
+            descriptor.kind == crate::domain::model::ExternalCapabilityKind::WebSearch
+                && descriptor.availability
+                    == crate::domain::model::ExternalCapabilityAvailability::Unavailable
+        }));
+        assert!(descriptors.iter().all(|descriptor| {
+            descriptor.hand == crate::domain::model::ExecutionHandKind::TransportMediator
         }));
     }
 
