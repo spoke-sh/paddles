@@ -1,12 +1,13 @@
 ---
 # system-managed
 id: VGb1YxNSe
-status: defining
+status: active
 created_at: 2026-04-12T09:48:45
-updated_at: 2026-04-12T09:48:45
+updated_at: 2026-04-12T20:23:54
 # authored
 title: Generalize Subagents Into A Collaborative Multi-Agent Runtime
 watch: ~
+activated_at: 2026-04-12T20:23:54
 ---
 
 # Generalize Subagents Into A Collaborative Multi-Agent Runtime
