@@ -22,8 +22,8 @@ mission: VGb1YwbRO
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/3 stories done
+**Progress:** 1/1 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Establish A Typed External Capability Fabric Substrate](voyages/VGcZRpCKi/) | in-progress | 2/3 |
+| [Establish A Typed External Capability Fabric Substrate](voyages/VGcZRpCKi/) | done | 3/3 |
 <!-- END GENERATED -->

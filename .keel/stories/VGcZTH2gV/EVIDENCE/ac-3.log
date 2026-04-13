@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T16:59:57.183660977-07:00
+mode: manual
+---
+cargo test degraded_external_capability_results_project_honest_state_across_trace_and_transcript -- --nocapture verifies degraded external results remain observable through transcript system entries, trace graph nodes, and raw trace tool payloads, while the shared projection/bootstrap APIs replay those same surfaces from authoritative trace state.

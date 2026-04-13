@@ -28,18 +28,18 @@ use crate::domain::model::{
     ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
     ConversationTranscriptUpdate, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
     ExecutionHandDiagnostic, ExecutionPermissionRequest, ExternalCapabilityDescriptor,
-    ExternalCapabilityInvocation, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
-    InstructionFrame, InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic,
-    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase,
-    StrainFactor, StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind,
-    ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus,
-    TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
-    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
-    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
-    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
-    TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    ExternalCapabilityInvocation, ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord,
+    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
+    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
+    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
@@ -1053,7 +1053,11 @@ impl TurnEventSink for StructuredTurnTrace {
                 tool_name,
                 summary,
             } => {
-                let success = !summary.to_ascii_lowercase().contains("failed:");
+                let success = if tool_name == "external_capability" {
+                    summary.contains("status=succeeded")
+                } else {
+                    !summary.to_ascii_lowercase().contains("failed:")
+                };
                 let artifact = self.text_artifact(
                     ArtifactKind::ToolOutput,
                     format!("tool result `{tool_name}`"),
@@ -3849,13 +3853,18 @@ impl MechSuitService {
                     }
                     WorkspaceAction::ExternalCapability { invocation } => {
                         let call_id = format!("planner-tool-{sequence}");
+                        let broker = self.external_capability_broker();
+                        let descriptor = broker.descriptor(&invocation.capability_id);
                         trace.emit(TurnEvent::ToolCalled {
                             call_id: call_id.clone(),
                             tool_name: action.label().to_string(),
-                            invocation: action.describe(),
+                            invocation: format_external_capability_invocation(
+                                descriptor.as_ref(),
+                                invocation,
+                            ),
                         });
                         let summary = execute_external_capability_action(
-                            self.external_capability_broker(),
+                            broker,
                             context
                                 .prepared
                                 .harness_profile()
@@ -5856,15 +5865,7 @@ fn enrich_interpretation_with_external_capabilities(
     let source = "external-capability-catalog";
     let capability_summary = descriptors
         .iter()
-        .map(|descriptor| {
-            format!(
-                "{} [{}; auth={}; evidence={}]",
-                descriptor.label,
-                descriptor.availability.label(),
-                descriptor.auth_posture.label(),
-                descriptor.evidence_shape.summary
-            )
-        })
+        .map(format_external_capability_catalog_entry)
         .collect::<Vec<_>>()
         .join("; ");
     let summary = format!(
@@ -5885,11 +5886,9 @@ fn enrich_interpretation_with_external_capabilities(
                     invocation: sample_external_capability_invocation(descriptor),
                 },
                 note: format!(
-                    "{}. Status: {}. Auth posture: {}. Expected evidence: {}.",
+                    "{}. {}.",
                     descriptor.summary,
-                    descriptor.availability.label(),
-                    descriptor.auth_posture.label(),
-                    descriptor.evidence_shape.summary
+                    format_external_capability_catalog_entry(descriptor)
                 ),
             },
         );
@@ -5912,7 +5911,7 @@ fn enrich_interpretation_with_external_capabilities(
                     note: format!(
                         "{} [{}]",
                         descriptor.summary,
-                        descriptor.availability.label()
+                        format_external_capability_catalog_entry(descriptor)
                     ),
                 })
                 .collect(),
@@ -7546,9 +7545,16 @@ fn execute_external_capability_action(
     frame: ExternalCapabilityExecutionFrame<'_>,
 ) -> String {
     let Some(descriptor) = broker.descriptor(&invocation.capability_id) else {
-        let summary = format!(
-            "External capability `{}` is unknown to this runtime",
-            invocation.capability_id
+        let summary = format_external_capability_outcome(
+            None,
+            invocation,
+            ExternalCapabilityResultStatus::Unavailable,
+            "External capability unavailable".to_string(),
+            format!(
+                "External capability `{}` is unknown to this runtime",
+                invocation.capability_id
+            ),
+            &[],
         );
         frame.event_sink.emit(TurnEvent::ToolFinished {
             call_id: frame.call_id.to_string(),
@@ -7586,7 +7592,14 @@ fn execute_external_capability_action(
     );
 
     if governance_outcome.kind != crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed {
-        let summary = summarize_governance_outcome(&governance_outcome);
+        let summary = format_external_capability_outcome(
+            Some(&descriptor),
+            invocation,
+            ExternalCapabilityResultStatus::Denied,
+            "External capability denied".to_string(),
+            summarize_governance_outcome(&governance_outcome),
+            &[],
+        );
         frame.event_sink.emit(TurnEvent::ToolFinished {
             call_id: frame.call_id.to_string(),
             tool_name: "external_capability".to_string(),
@@ -7619,7 +7632,14 @@ fn execute_external_capability_action(
             summary
         }
         Err(err) => {
-            let summary = format!("External capability `{}` failed: {err:#}", descriptor.id);
+            let summary = format_external_capability_outcome(
+                Some(&descriptor),
+                invocation,
+                ExternalCapabilityResultStatus::Failed,
+                format!("{} failed", descriptor.label),
+                format!("External capability `{}` failed: {err:#}", descriptor.id),
+                &[],
+            );
             frame.event_sink.emit(TurnEvent::ToolFinished {
                 call_id: frame.call_id.to_string(),
                 tool_name: "external_capability".to_string(),
@@ -7722,7 +7742,14 @@ fn planner_terminal_tool_success_summary(tool_name: &str, output: &str) -> Strin
 fn summarize_external_capability_result(
     result: &crate::domain::model::ExternalCapabilityResult,
 ) -> String {
-    format!("{}: {}", result.summary, result.detail)
+    format_external_capability_outcome(
+        Some(&result.descriptor),
+        &result.invocation,
+        result.status,
+        result.summary.clone(),
+        result.detail.clone(),
+        &result.sources,
+    )
 }
 
 fn external_capability_result_evidence_items(
@@ -7759,6 +7786,106 @@ fn external_capability_result_evidence_items(
             }),
     );
     items
+}
+
+fn format_external_capability_invocation(
+    descriptor: Option<&ExternalCapabilityDescriptor>,
+    invocation: &ExternalCapabilityInvocation,
+) -> String {
+    let (fabric, availability, auth, effects, evidence) = descriptor
+        .map(|descriptor| {
+            (
+                descriptor.id.as_str(),
+                descriptor.availability.label(),
+                descriptor.auth_posture.label(),
+                descriptor.side_effect_posture.label(),
+                descriptor
+                    .evidence_shape
+                    .kinds
+                    .iter()
+                    .map(|kind| kind.label())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            )
+        })
+        .unwrap_or((
+            invocation.capability_id.as_str(),
+            "unknown",
+            "unknown",
+            "unknown",
+            "unknown".to_string(),
+        ));
+    let mut lines = vec![
+        format!(
+            "fabric={fabric} availability={availability} auth={auth} effects={effects} evidence={evidence}"
+        ),
+        format!("purpose={}", invocation.purpose),
+    ];
+    if !invocation.payload.is_null() {
+        lines.push(format!("payload={}", invocation.payload));
+    }
+    lines.join("\n")
+}
+
+fn format_external_capability_catalog_entry(descriptor: &ExternalCapabilityDescriptor) -> String {
+    let evidence = descriptor
+        .evidence_shape
+        .kinds
+        .iter()
+        .map(|kind| kind.label())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "fabric={} availability={} auth={} effects={} evidence={evidence}",
+        descriptor.id,
+        descriptor.availability.label(),
+        descriptor.auth_posture.label(),
+        descriptor.side_effect_posture.label(),
+    )
+}
+
+fn format_external_capability_outcome(
+    descriptor: Option<&ExternalCapabilityDescriptor>,
+    invocation: &ExternalCapabilityInvocation,
+    status: ExternalCapabilityResultStatus,
+    summary: String,
+    detail: String,
+    sources: &[ExternalCapabilitySourceRecord],
+) -> String {
+    let (fabric, availability, auth, effects) = descriptor
+        .map(|descriptor| {
+            (
+                descriptor.id.as_str(),
+                descriptor.availability.label(),
+                descriptor.auth_posture.label(),
+                descriptor.side_effect_posture.label(),
+            )
+        })
+        .unwrap_or((
+            invocation.capability_id.as_str(),
+            "unavailable",
+            "unknown",
+            "unknown",
+        ));
+    let mut lines = vec![
+        format!(
+            "fabric={fabric} status={} availability={availability} auth={auth} effects={effects}",
+            status.label()
+        ),
+        format!("purpose={}", invocation.purpose),
+        format!("summary={summary}"),
+        format!("detail={detail}"),
+    ];
+    if sources.is_empty() {
+        lines.push("provenance=none".to_string());
+    } else {
+        lines.extend(
+            sources
+                .iter()
+                .map(|source| format!("provenance={} -> {}", source.label, source.locator)),
+        );
+    }
+    lines.join("\n")
 }
 
 fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
@@ -9730,6 +9857,170 @@ mod tests {
             item.source.contains("connector.app_action")
                 && item.snippet.contains("currently disabled")
         }));
+    }
+
+    #[test]
+    fn degraded_external_capability_results_project_honest_state_across_trace_and_transcript() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nProject external capability degradation into transcript and trace surfaces.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let invocation = ExternalCapabilityInvocation::new(
+            "web.search",
+            "confirm the latest release notes",
+            json!({ "query": "paddles release notes" }),
+        );
+        let descriptor = ExternalCapabilityDescriptor::new(
+            "web.search",
+            crate::domain::model::ExternalCapabilityKind::WebSearch,
+            "Web Search",
+            "Search the public web for current release notes and return citations.",
+            ExternalCapabilityDescriptorMetadata::new(
+                ExternalCapabilityAvailability::Stale,
+                ExternalCapabilityAuthPosture::NoneRequired,
+                ExternalCapabilitySideEffectPosture::ReadOnly,
+                ExecutionHandKind::TransportMediator,
+                Vec::new(),
+                ExternalCapabilityEvidenceShape::new(
+                    "release-note lookups should yield citations and runtime summaries",
+                    vec![
+                        ExternalCapabilityEvidenceKind::Citation,
+                        ExternalCapabilityEvidenceKind::RuntimeSummary,
+                        ExternalCapabilityEvidenceKind::SourceLineage,
+                    ],
+                ),
+            ),
+        );
+        let result = ExternalCapabilityResult {
+            descriptor: descriptor.clone(),
+            invocation: invocation.clone(),
+            status: ExternalCapabilityResultStatus::Degraded,
+            summary: "Web Search degraded".to_string(),
+            detail: "Capability metadata is stale; using cached release notes.".to_string(),
+            sources: vec![ExternalCapabilitySourceRecord {
+                label: "Release notes".to_string(),
+                locator: "https://example.com/releases".to_string(),
+                snippet: "Cached release notes still describe the current external fabric posture."
+                    .to_string(),
+            }],
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: invocation.clone(),
+                    },
+                },
+                "ground the answer with the external capability lane first",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "degraded external result recorded".to_string(),
+                },
+                rationale: "the degraded external result is sufficient evidence".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let broker = Arc::new(RecordingExternalCapabilityBroker::new(
+            vec![descriptor],
+            vec![result],
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        service.set_external_capability_broker(broker);
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "look up the latest release notes",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        let projection = service
+            .replay_conversation_projection(&session.task_id())
+            .expect("projection replay");
+        assert!(projection.transcript.entries.iter().any(|entry| {
+            entry.speaker == ConversationTranscriptSpeaker::System
+                && entry.content.contains("fabric=web.search")
+                && entry.content.contains("status=degraded")
+                && entry.content.contains("availability=stale")
+                && entry
+                    .content
+                    .contains("provenance=Release notes -> https://example.com/releases")
+        }));
+        assert!(projection.trace_graph.nodes.iter().any(|node| {
+            node.kind == "tool_done"
+                && node.label.contains("web.search")
+                && node.label.contains("degraded")
+        }));
+
+        let replay = service
+            .replay_for_known_session(&session.task_id())
+            .expect("known replay query")
+            .expect("stored replay");
+        let completed_tool_call = replay
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TraceRecordKind::ToolCallCompleted(tool)
+                    if tool.tool_name == "external_capability" =>
+                {
+                    Some(tool)
+                }
+                _ => None,
+            })
+            .expect("external capability tool completion");
+        assert_eq!(completed_tool_call.success, Some(false));
+        assert!(
+            completed_tool_call
+                .payload
+                .inline_content
+                .as_deref()
+                .expect("tool payload")
+                .contains("status=degraded")
+        );
+        assert!(
+            completed_tool_call
+                .payload
+                .inline_content
+                .as_deref()
+                .expect("tool payload")
+                .contains("provenance=Release notes -> https://example.com/releases")
+        );
     }
 
     #[test]

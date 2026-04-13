@@ -209,6 +209,14 @@ and web projections replay those records as system policy rows, and downgraded
 profiles such as `prompt-envelope-safe-v1` surface their disabled features
 explicitly instead of silently pretending full parity.
 
+External capability fabrics now follow the same rule. When the recursive
+harness discovers or invokes `web.search`, `mcp.tool`, or
+`connector.app_action`, the runtime projects one shared vocabulary across the
+event stream, transcript, and trace: `fabric=...`, `status=...`,
+`availability=...`, `auth=...`, `effects=...`, and `provenance=...`. Degraded,
+denied, stale, or unavailable outcomes stay explicit instead of collapsing into
+generic "tool done" success rows.
+
 The `transport_mediator` is now the only runtime boundary that resolves remote
 provider API keys and native-transport bearer tokens. Local shell and
 workspace-diff/apply child processes have those credential env vars stripped

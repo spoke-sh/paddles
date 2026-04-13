@@ -188,6 +188,13 @@ and `GET /session/shared/bootstrap` both publish the session hand diagnostics so
 operators can inspect workspace, terminal, and transport posture from the same
 entry points they already use for recorder and transport health.
 
+External capability fabrics ride on top of that same transport-mediator hand.
+When the planner uses `web.search`, `mcp.tool`, or `connector.app_action`, the
+runtime records one projection vocabulary across transcript, trace, and live UI
+surfaces: `fabric`, `status`, `availability`, `auth`, `effects`, and
+`provenance`. That keeps degraded connector/bootstrap/auth states visible
+without inventing a second, adapter-specific readiness language.
+
 **`ConversationThreadLayer`** maintains one durable conversation root across interactive sessions. Steering prompts become structured thread candidates, classified by a model into continuation, child-thread, or merge-back decisions — preserving full lineage for replay and analysis.
 
 ## Why This Shape Works

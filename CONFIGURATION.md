@@ -226,6 +226,20 @@ their permission request and allow, deny, or escalation outcome, so transcript,
 trace, and API consumers can replay the exact governance story without parsing
 free-form tool summaries.
 
+External capability fabrics use the same projection discipline. Operator
+surfaces should expect request and result rows to carry a stable vocabulary:
+
+- `fabric` — the capability id such as `web.search`, `mcp.tool`, or `connector.app_action`
+- `status` — the invocation outcome such as `succeeded`, `degraded`, `denied`, `unavailable`, or `failed`
+- `availability` — the advertised fabric posture such as `available`, `stale`, `unauthenticated`, `disabled`, or `unavailable`
+- `auth` — whether the fabric requires credentials
+- `effects` — the side-effect posture (`read_only`, `potentially_mutating`, `mutating`)
+- `provenance` — the surfaced source lineage for any returned external evidence
+
+If a fabric is missing, stale, unauthenticated, or blocked by governance, the
+runtime keeps those fields explicit in transcript, trace, and API payloads
+instead of projecting a generic success string.
+
 Current specialist-brain contract:
 
 - `session-continuity-v1` is registered under both profiles so the planner contract stays stable across models

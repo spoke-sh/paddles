@@ -3332,6 +3332,7 @@ fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
     if let TurnEvent::ToolFinished {
         tool_name, summary, ..
     } = &event
+        && tool_name != "external_capability"
     {
         let content = mutation_tool_payload(tool_name, summary)
             .unwrap_or_else(|| collapse_event_details(summary, EVENT_DETAIL_LINE_LIMIT));
@@ -4014,6 +4015,25 @@ mod tests {
         assert_eq!(
             row.content,
             "planner lane is reconfiguring and cannot honor interrupt yet"
+        );
+        assert_eq!(row.runtime_items, event.runtime_items());
+    }
+
+    #[test]
+    fn external_capability_results_render_with_shared_fabric_vocabulary() {
+        let event = TurnEvent::ToolFinished {
+            call_id: "tool-3".to_string(),
+            tool_name: "external_capability".to_string(),
+            summary: "fabric=web.search status=degraded availability=stale auth=none_required effects=read_only\npurpose=confirm the latest release notes\nsummary=Web Search degraded\ndetail=Capability metadata is stale; using cached release notes.\nprovenance=Release notes -> https://example.com/releases".to_string(),
+        };
+        let row = format_turn_event_row(event.clone(), 0);
+
+        assert_eq!(row.kind, TranscriptRowKind::Event);
+        assert_eq!(row.header, "• External fabric result");
+        assert!(row.content.contains("summary=Web Search degraded"));
+        assert!(
+            row.content
+                .contains("provenance=Release notes -> https://example.com/releases")
         );
         assert_eq!(row.runtime_items, event.runtime_items());
     }

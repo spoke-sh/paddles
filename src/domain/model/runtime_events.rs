@@ -317,17 +317,29 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             tool_name,
             invocation,
             ..
-        } => RuntimeEventPresentation {
-            badge: "tool".to_string(),
-            badge_class: "tool".to_string(),
-            title: if tool_name == "shell" {
-                "• Ran shell".to_string()
+        } => {
+            if tool_name == "external_capability" {
+                RuntimeEventPresentation {
+                    badge: "cap".to_string(),
+                    badge_class: external_capability_badge_class(invocation).to_string(),
+                    title: "• External fabric request".to_string(),
+                    detail: invocation.clone(),
+                    text: external_capability_headline(invocation),
+                }
             } else {
-                format!("• Ran {tool_name}")
-            },
-            detail: invocation.clone(),
-            text: format!("{tool_name}: {invocation}"),
-        },
+                RuntimeEventPresentation {
+                    badge: "tool".to_string(),
+                    badge_class: "tool".to_string(),
+                    title: if tool_name == "shell" {
+                        "• Ran shell".to_string()
+                    } else {
+                        format!("• Ran {tool_name}")
+                    },
+                    detail: invocation.clone(),
+                    text: format!("{tool_name}: {invocation}"),
+                }
+            }
+        }
         TurnEvent::ToolOutput {
             tool_name,
             stream,
@@ -342,13 +354,25 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
         },
         TurnEvent::ToolFinished {
             tool_name, summary, ..
-        } => RuntimeEventPresentation {
-            badge: "tool".to_string(),
-            badge_class: "tool".to_string(),
-            title: format!("• Completed {tool_name}"),
-            detail: summary.clone(),
-            text: format!("{tool_name} done"),
-        },
+        } => {
+            if tool_name == "external_capability" {
+                RuntimeEventPresentation {
+                    badge: "cap".to_string(),
+                    badge_class: external_capability_badge_class(summary).to_string(),
+                    title: "• External fabric result".to_string(),
+                    detail: summary.clone(),
+                    text: external_capability_headline(summary),
+                }
+            } else {
+                RuntimeEventPresentation {
+                    badge: "tool".to_string(),
+                    badge_class: "tool".to_string(),
+                    title: format!("• Completed {tool_name}"),
+                    detail: summary.clone(),
+                    text: format!("{tool_name} done"),
+                }
+            }
+        }
         TurnEvent::WorkspaceEditApplied {
             tool_name, edit, ..
         } => RuntimeEventPresentation {
@@ -586,6 +610,29 @@ fn format_duration_compact(duration: Duration) -> String {
     format!("{hours}h {minutes:02}m")
 }
 
+fn external_capability_headline(detail: &str) -> String {
+    let first_line = detail.lines().next().unwrap_or_default().trim();
+    if first_line.is_empty() {
+        "external capability".to_string()
+    } else {
+        first_line.to_string()
+    }
+}
+
+fn external_capability_badge_class(detail: &str) -> &'static str {
+    match external_capability_status(detail) {
+        Some("succeeded") | None => "tool",
+        Some(_) => "fallback",
+    }
+}
+
+fn external_capability_status(detail: &str) -> Option<&str> {
+    detail.lines().next().and_then(|line| {
+        line.split_whitespace()
+            .find_map(|segment| segment.strip_prefix("status="))
+    })
+}
+
 fn governance_badge(decision: &ExecutionGovernanceDecision) -> &'static str {
     match decision.outcome.kind {
         crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed => "allow",
@@ -807,6 +854,29 @@ mod tests {
         assert!(!presentation.detail.contains("timeout="));
         assert!(presentation.text.contains("gathering"));
         assert!(presentation.text.contains("watch slow"));
+    }
+
+    #[test]
+    fn projects_external_capability_results_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::ToolFinished {
+            call_id: "tool-3".to_string(),
+            tool_name: "external_capability".to_string(),
+            summary: "fabric=web.search status=degraded availability=stale auth=none_required effects=read_only\npurpose=confirm the latest release notes\nsummary=Web Search degraded\ndetail=Capability metadata is stale; using cached release notes.\nprovenance=Release notes -> https://example.com/releases".to_string(),
+        });
+
+        assert_eq!(presentation.badge, "cap");
+        assert_eq!(presentation.badge_class, "fallback");
+        assert_eq!(presentation.title, "• External fabric result");
+        assert_eq!(
+            presentation.text,
+            "fabric=web.search status=degraded availability=stale auth=none_required effects=read_only"
+        );
+        assert!(presentation.detail.contains("summary=Web Search degraded"));
+        assert!(
+            presentation
+                .detail
+                .contains("provenance=Release notes -> https://example.com/releases")
+        );
     }
 
     #[test]

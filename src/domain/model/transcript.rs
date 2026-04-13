@@ -89,6 +89,36 @@ impl ConversationTranscript {
                         render: None,
                     });
                 }
+                TraceRecordKind::ToolCallRequested(tool)
+                    if tool.tool_name == "external_capability" =>
+                {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format!(
+                            "external capability request\n{}",
+                            artifact_content(&tool.payload)
+                        ),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
+                TraceRecordKind::ToolCallCompleted(tool)
+                    if tool.tool_name == "external_capability" =>
+                {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format!(
+                            "external capability result\n{}",
+                            artifact_content(&tool.payload)
+                        ),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
                 kind => {
                     if let Some(result) = trace_control_result(kind) {
                         entries.push(ConversationTranscriptEntry {

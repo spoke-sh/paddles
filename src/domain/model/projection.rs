@@ -66,10 +66,10 @@ impl ConversationTraceGraph {
                         ("branch".to_string(), truncate(&branch.label, 24))
                     }
                     TraceRecordKind::ToolCallRequested(tool) => {
-                        ("tool".to_string(), tool.tool_name.clone())
+                        ("tool".to_string(), trace_tool_graph_label(tool, false))
                     }
                     TraceRecordKind::ToolCallCompleted(tool) => {
-                        ("tool_done".to_string(), tool.tool_name.clone())
+                        ("tool_done".to_string(), trace_tool_graph_label(tool, true))
                     }
                     TraceRecordKind::SelectionArtifact(sel) => {
                         ("evidence".to_string(), truncate(&sel.summary, 24))
@@ -187,6 +187,32 @@ fn truncate(s: &str, n: usize) -> String {
     } else {
         s.to_string()
     }
+}
+
+fn trace_tool_graph_label(tool: &crate::domain::model::TraceToolCall, completed: bool) -> String {
+    if tool.tool_name != "external_capability" {
+        return tool.tool_name.clone();
+    }
+
+    let payload = tool.payload.inline_content.as_deref().unwrap_or_default();
+    let first_line = payload.lines().next().unwrap_or_default();
+    let fabric = first_line
+        .split_whitespace()
+        .find_map(|segment| segment.strip_prefix("fabric="))
+        .unwrap_or("external_capability");
+    let status = first_line
+        .split_whitespace()
+        .find_map(|segment| segment.strip_prefix("status="))
+        .unwrap_or(if completed { "completed" } else { "requested" });
+    let availability = first_line
+        .split_whitespace()
+        .find_map(|segment| segment.strip_prefix("availability="));
+
+    let mut label = format!("{fabric} {status}");
+    if completed && let Some(availability) = availability {
+        label.push_str(&format!(" ({availability})"));
+    }
+    label
 }
 
 #[cfg(test)]
