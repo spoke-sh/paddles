@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-04-12T18:53:45.142788252-07:00
+mode: manual
+files: [".keel/stories/VGcvOsBRp/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 1 test
+test application::tests::review_mode_bootstraps_local_diff_and_carries_findings_first_handoff ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 587 filtered out; finished in 0.26s
+
+

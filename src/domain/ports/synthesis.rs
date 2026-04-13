@@ -1,6 +1,6 @@
 use crate::domain::model::{
-    AppliedEdit, ExecutionGovernanceOutcome, ExecutionPermissionRequest, InstructionFrame,
-    TurnEventSink, TurnIntent,
+    AppliedEdit, CollaborationModeResult, ExecutionGovernanceOutcome, ExecutionPermissionRequest,
+    InstructionFrame, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::context_gathering::EvidenceBundle;
 use crate::domain::ports::planning::{GroundingRequirement, WorkspaceAction};
@@ -21,6 +21,7 @@ pub struct WorkspaceActionResult {
 pub struct SynthesisHandoff {
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
+    pub collaboration: CollaborationModeResult,
     pub instruction_frame: Option<InstructionFrame>,
     pub grounding: Option<GroundingRequirement>,
 }

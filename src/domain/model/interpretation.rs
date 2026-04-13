@@ -301,6 +301,16 @@ impl WorkspaceAction {
             ),
         }
     }
+
+    pub fn is_mutating(&self) -> bool {
+        matches!(
+            self,
+            Self::Shell { .. }
+                | Self::WriteFile { .. }
+                | Self::ReplaceInFile { .. }
+                | Self::ApplyPatch { .. }
+        )
+    }
 }
 
 fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {

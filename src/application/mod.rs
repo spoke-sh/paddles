@@ -21,39 +21,42 @@ pub use paddles_conversation::{
 };
 
 use crate::domain::model::{
-    ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CompactionDecision,
-    CompactionPlan, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
-    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
-    ConversationThreadRef, ConversationTraceGraph, ConversationTranscript,
-    ConversationTranscriptUpdate, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
-    ExecutionHandDiagnostic, ExecutionPermissionRequest, ExternalCapabilityDescriptor,
-    ExternalCapabilityInvocation, ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord,
-    ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink, InstructionFrame,
-    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
-    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
-    StrainLevel, TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
-    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CollaborationMode,
+    CollaborationModeRequest, CollaborationModeRequestTarget, CollaborationModeResult,
+    CompactionDecision, CompactionPlan, ControlOperation, ControlResult, ControlResultStatus,
+    ControlSubject, ConversationForensicProjection, ConversationForensicUpdate,
+    ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
+    ConversationTranscript, ConversationTranscriptUpdate, ExecutionGovernanceDecision,
+    ExecutionGovernanceOutcome, ExecutionHandDiagnostic, ExecutionPermissionRequest,
+    ExternalCapabilityDescriptor, ExternalCapabilityInvocation, ExternalCapabilityResultStatus,
+    ExternalCapabilitySourceRecord, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
+    InstructionFrame, InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic,
+    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase,
+    StrainFactor, StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
+    StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
+    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
+    TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
     EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest, EntityResolver,
     EvidenceBudget, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker, GathererCapability,
-    GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
-    InterpretationContext, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationRequest, InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint,
-    OperatorMemory, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode,
-    RetrievalStrategy, RetrieverOption, SpecialistBrainRequest, SynthesisHandoff,
-    SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
-    TraceSessionContextQuery, WorkspaceAction,
+    GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
+    InitialEditInstruction, InterpretationContext, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
+    ModelRegistry, NormalizedEntityHint, OperatorMemory, PlannerAction, PlannerBudget,
+    PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner,
+    RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
+    SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest,
+    TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -296,6 +299,7 @@ struct PlannerLoopContext {
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
+    collaboration: CollaborationModeResult,
     specialist_runtime_notes: Vec<String>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
@@ -2740,8 +2744,13 @@ impl MechSuitService {
     /// Process a single prompt using the prepared synthesizer lane.
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
         let session = self.create_conversation_session();
-        self.process_prompt_in_session_with_sink(prompt, session, Arc::clone(&self.event_sink))
-            .await
+        self.process_prompt_in_session_with_mode_request_and_sink(
+            prompt,
+            session,
+            None,
+            Arc::clone(&self.event_sink),
+        )
+        .await
     }
 
     pub async fn process_prompt_with_sink(
@@ -2750,7 +2759,7 @@ impl MechSuitService {
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
         let session = self.create_conversation_session();
-        self.process_prompt_in_session_with_sink(prompt, session, event_sink)
+        self.process_prompt_in_session_with_mode_request_and_sink(prompt, session, None, event_sink)
             .await
     }
 
@@ -2760,8 +2769,20 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
+        self.process_prompt_in_session_with_mode_request_and_sink(prompt, session, None, event_sink)
+            .await
+    }
+
+    pub async fn process_prompt_in_session_with_mode_request_and_sink(
+        &self,
+        prompt: &str,
+        session: ConversationSession,
+        mode_request: Option<CollaborationModeRequest>,
+        event_sink: Arc<dyn TurnEventSink>,
+    ) -> Result<String> {
         let event_sink = self.wrap_sink_with_observers(event_sink);
         let mut current_prompt = prompt.to_string();
+        let collaboration = resolve_collaboration_mode_request(mode_request);
 
         loop {
             self.persist_prompt_history(&current_prompt);
@@ -2829,11 +2850,13 @@ impl MechSuitService {
                 interpretation.clone(),
                 PlannerBudget::default(),
             )
+            .with_collaboration(collaboration.clone())
             .with_recent_turns(recent_turns.clone())
             .with_recent_thread_summary(recent_thread_summary.clone())
             .with_runtime_notes(planner_runtime_notes(
                 gatherer.as_ref(),
                 &specialist_runtime_notes,
+                &collaboration,
             ))
             .with_entity_resolver(Arc::clone(&self.entity_resolver));
 
@@ -2848,7 +2871,9 @@ impl MechSuitService {
                         !decision.edit.known_edit && controller_edit.known_edit;
                     decision.edit =
                         merge_initial_edit_instruction(&decision.edit, &controller_edit);
-                    if provider_edit_missing {
+                    if provider_edit_missing
+                        && collaboration.active.mutation_posture.allows_mutation()
+                    {
                         let candidate_summary = if decision.edit.candidate_files.is_empty() {
                             "no candidate files surfaced yet".to_string()
                         } else {
@@ -2866,8 +2891,9 @@ impl MechSuitService {
                     }
                     let controller_commit_instruction =
                         controller_prompt_commit_instruction(&current_prompt);
-                    if let Some(bootstrapped) =
-                        bootstrap_git_commit_initial_action(&current_prompt, &decision)
+                    if collaboration.active.mutation_posture.allows_mutation()
+                        && let Some(bootstrapped) =
+                            bootstrap_git_commit_initial_action(&current_prompt, &decision)
                     {
                         trace.emit(TurnEvent::Fallback {
                             stage: "commit-bootstrap".to_string(),
@@ -2922,6 +2948,23 @@ impl MechSuitService {
                         });
                         decision = bootstrapped;
                     }
+                    if collaboration.active.mode == CollaborationMode::Review
+                        && let Some(bootstrapped) = bootstrap_review_initial_action(&decision)
+                    {
+                        trace.emit(TurnEvent::Fallback {
+                            stage: "review-bootstrap".to_string(),
+                            reason: format!(
+                                "review mode bypassed initial `{}` and forced `{}` to inspect local changes before synthesis",
+                                decision.action.summary(),
+                                bootstrapped.action.summary()
+                            ),
+                        });
+                        decision = bootstrapped;
+                    }
+                    decision = sanitize_initial_action_decision_for_collaboration(
+                        &collaboration,
+                        decision,
+                    );
                     trace.emit(TurnEvent::PlannerActionSelected {
                         sequence: 1,
                         action: decision.action.summary(),
@@ -2934,10 +2977,12 @@ impl MechSuitService {
                     );
                     let mut execution_plan =
                         execution_plan_from_initial_action(&prepared, decision);
-                    execution_plan.instruction_frame = merge_instruction_frames(
-                        execution_plan.instruction_frame.clone(),
-                        controller_commit_instruction,
-                    );
+                    if collaboration.active.mutation_posture.allows_mutation() {
+                        execution_plan.instruction_frame = merge_instruction_frames(
+                            execution_plan.instruction_frame.clone(),
+                            controller_commit_instruction,
+                        );
+                    }
                     execution_plan
                 }
                 PlannerCapability::Unsupported { reason } => {
@@ -2991,6 +3036,7 @@ impl MechSuitService {
                             interpretation: interpretation.clone(),
                             recent_turns,
                             recent_thread_summary: recent_thread_summary.clone(),
+                            collaboration: collaboration.clone(),
                             specialist_runtime_notes,
                             instruction_frame: execution_plan.instruction_frame.clone(),
                             initial_edit: execution_plan.initial_edit.clone(),
@@ -3060,6 +3106,7 @@ impl MechSuitService {
             let handoff = SynthesisHandoff {
                 recent_turns,
                 recent_thread_summary,
+                collaboration: collaboration.clone(),
                 instruction_frame: planner_outcome.instruction_frame.clone(),
                 grounding: planner_outcome.grounding.clone(),
             };
@@ -3598,11 +3645,13 @@ impl MechSuitService {
                     context.interpretation.clone(),
                     budget.clone(),
                 )
+                .with_collaboration(context.collaboration.clone())
                 .with_recent_turns(context.recent_turns.clone())
                 .with_recent_thread_summary(context.recent_thread_summary.clone())
                 .with_runtime_notes(planner_runtime_notes(
                     context.gatherer.as_ref(),
                     &context.specialist_runtime_notes,
+                    &context.collaboration,
                 ))
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone())
@@ -3632,6 +3681,10 @@ impl MechSuitService {
                 trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
             }
 
+            decision = sanitize_recursive_planner_decision_for_collaboration(
+                &context.collaboration,
+                decision,
+            );
             instruction_frame =
                 merge_instruction_frame_with_edit_signal(instruction_frame, &decision.edit);
             if let Some(resolution) = decision.edit.resolution.clone() {
@@ -3648,20 +3701,35 @@ impl MechSuitService {
 
             let mut accepted_stop = false;
             let mut completed_exact_edit = false;
-            let outcome = match &decision.action {
-                PlannerAction::Workspace { action } => match action {
-                    WorkspaceAction::Search {
-                        query,
-                        mode,
-                        strategy,
-                        retrievers,
-                        intent,
-                    } => {
-                        if search_steps(&loop_state) >= budget.max_searches {
-                            stop_reason = Some("search-budget-exhausted".to_string());
-                            "planner search budget exhausted".to_string()
-                        } else {
-                            self.execute_planner_gather_step(
+            let outcome = if let Some((reason, response, summary)) =
+                collaboration_boundary_for_action(
+                    &context.collaboration,
+                    &decision.action,
+                    &decision.edit,
+                ) {
+                trace.emit(TurnEvent::Fallback {
+                    stage: "collaboration-mode".to_string(),
+                    reason: summary.clone(),
+                });
+                direct_answer = Some(response);
+                stop_reason = Some(reason);
+                accepted_stop = true;
+                summary
+            } else {
+                match &decision.action {
+                    PlannerAction::Workspace { action } => match action {
+                        WorkspaceAction::Search {
+                            query,
+                            mode,
+                            strategy,
+                            retrievers,
+                            intent,
+                        } => {
+                            if search_steps(&loop_state) >= budget.max_searches {
+                                stop_reason = Some("search-budget-exhausted".to_string());
+                                "planner search budget exhausted".to_string()
+                            } else {
+                                self.execute_planner_gather_step(
                                 &context,
                                 &mut loop_state,
                                 trace.clone(),
@@ -3685,126 +3753,153 @@ impl MechSuitService {
                                 &mut used_workspace_resources,
                             )
                             .await
+                            }
                         }
-                    }
-                    WorkspaceAction::Inspect { command } => {
-                        if inspect_steps(&loop_state) >= budget.max_inspects {
-                            stop_reason = Some("inspect-budget-exhausted".to_string());
-                            "planner inspect budget exhausted".to_string()
-                        } else {
+                        WorkspaceAction::Inspect { command } => {
+                            if inspect_steps(&loop_state) >= budget.max_inspects {
+                                stop_reason = Some("inspect-budget-exhausted".to_string());
+                                "planner inspect budget exhausted".to_string()
+                            } else {
+                                let call_id = format!("planner-tool-{sequence}");
+                                trace.emit(TurnEvent::ToolCalled {
+                                    call_id: call_id.clone(),
+                                    tool_name: "inspect".to_string(),
+                                    invocation: command.clone(),
+                                });
+                                match run_planner_inspect_command(
+                                    &self.workspace_root,
+                                    self.execution_hand_registry(),
+                                    command,
+                                    &call_id,
+                                    trace.as_ref(),
+                                ) {
+                                    Ok(output) => {
+                                        emit_execution_governance_decision(
+                                            trace.as_ref(),
+                                            Some(&call_id),
+                                            Some("inspect"),
+                                            output.governance_request,
+                                            output.governance_outcome,
+                                        );
+                                        if !output.command_succeeded {
+                                            trace.emit(TurnEvent::ToolFinished {
+                                                call_id,
+                                                tool_name: "inspect".to_string(),
+                                                summary: format!(
+                                                    "inspect failed: {}",
+                                                    output.summary
+                                                ),
+                                            });
+                                            format!("inspect failed: {}", output.summary)
+                                        } else {
+                                            let summary = planner_terminal_tool_success_summary(
+                                                "inspect",
+                                                &output.summary,
+                                            );
+                                            trace.emit(TurnEvent::ToolFinished {
+                                                call_id,
+                                                tool_name: "inspect".to_string(),
+                                                summary,
+                                            });
+                                            append_evidence_item(
+                                                &mut loop_state.evidence_items,
+                                                EvidenceItem {
+                                                    source: format!("command: {command}"),
+                                                    snippet: trim_for_planner(&output.summary, 800),
+                                                    rationale: decision.rationale.clone(),
+                                                    rank: 0,
+                                                },
+                                                budget.max_evidence_items,
+                                            );
+                                            used_workspace_resources = true;
+                                            format!("inspected {command}")
+                                        }
+                                    }
+                                    Err(err) => {
+                                        trace.emit(TurnEvent::ToolFinished {
+                                            call_id,
+                                            tool_name: "inspect".to_string(),
+                                            summary: format!("inspect failed: {err:#}"),
+                                        });
+                                        format!("inspect failed: {err:#}")
+                                    }
+                                }
+                            }
+                        }
+                        WorkspaceAction::Shell { command } => {
                             let call_id = format!("planner-tool-{sequence}");
                             trace.emit(TurnEvent::ToolCalled {
                                 call_id: call_id.clone(),
-                                tool_name: "inspect".to_string(),
+                                tool_name: "shell".to_string(),
                                 invocation: command.clone(),
                             });
-                            match run_planner_inspect_command(
+                            match run_planner_shell_command(
                                 &self.workspace_root,
                                 self.execution_hand_registry(),
                                 command,
                                 &call_id,
                                 trace.as_ref(),
                             ) {
-                                Ok(output) => {
+                                Ok(result) => {
                                     emit_execution_governance_decision(
                                         trace.as_ref(),
                                         Some(&call_id),
-                                        Some("inspect"),
-                                        output.governance_request,
-                                        output.governance_outcome,
+                                        Some("shell"),
+                                        result.governance_request,
+                                        result.governance_outcome,
                                     );
-                                    if !output.command_succeeded {
-                                        trace.emit(TurnEvent::ToolFinished {
-                                            call_id,
-                                            tool_name: "inspect".to_string(),
-                                            summary: format!("inspect failed: {}", output.summary),
-                                        });
-                                        format!("inspect failed: {}", output.summary)
-                                    } else {
+                                    if result.command_succeeded {
                                         let summary = planner_terminal_tool_success_summary(
-                                            "inspect",
-                                            &output.summary,
+                                            "shell",
+                                            &result.summary,
                                         );
                                         trace.emit(TurnEvent::ToolFinished {
                                             call_id,
-                                            tool_name: "inspect".to_string(),
+                                            tool_name: "shell".to_string(),
                                             summary,
                                         });
                                         append_evidence_item(
                                             &mut loop_state.evidence_items,
                                             EvidenceItem {
                                                 source: format!("command: {command}"),
-                                                snippet: trim_for_planner(&output.summary, 800),
+                                                snippet: trim_for_planner(&result.summary, 1_200),
+                                                rationale: decision.rationale.clone(),
+                                                rank: 0,
+                                            },
+                                            budget.max_evidence_items,
+                                        );
+                                        if let Some(frame) = instruction_frame.as_mut() {
+                                            frame.note_successful_workspace_action(action);
+                                        }
+                                        used_workspace_resources = true;
+                                        result.summary
+                                    } else {
+                                        let summary =
+                                            format!("Tool `shell` failed: {}", result.summary);
+                                        trace.emit(TurnEvent::ToolFinished {
+                                            call_id,
+                                            tool_name: "shell".to_string(),
+                                            summary: summary.clone(),
+                                        });
+                                        append_evidence_item(
+                                            &mut loop_state.evidence_items,
+                                            EvidenceItem {
+                                                source: format!("command: {command}"),
+                                                snippet: trim_for_planner(&summary, 1_200),
                                                 rationale: decision.rationale.clone(),
                                                 rank: 0,
                                             },
                                             budget.max_evidence_items,
                                         );
                                         used_workspace_resources = true;
-                                        format!("inspected {command}")
+                                        stop_reason.get_or_insert_with(|| {
+                                            "workspace-action-failed".to_string()
+                                        });
+                                        summary
                                     }
                                 }
                                 Err(err) => {
-                                    trace.emit(TurnEvent::ToolFinished {
-                                        call_id,
-                                        tool_name: "inspect".to_string(),
-                                        summary: format!("inspect failed: {err:#}"),
-                                    });
-                                    format!("inspect failed: {err:#}")
-                                }
-                            }
-                        }
-                    }
-                    WorkspaceAction::Shell { command } => {
-                        let call_id = format!("planner-tool-{sequence}");
-                        trace.emit(TurnEvent::ToolCalled {
-                            call_id: call_id.clone(),
-                            tool_name: "shell".to_string(),
-                            invocation: command.clone(),
-                        });
-                        match run_planner_shell_command(
-                            &self.workspace_root,
-                            self.execution_hand_registry(),
-                            command,
-                            &call_id,
-                            trace.as_ref(),
-                        ) {
-                            Ok(result) => {
-                                emit_execution_governance_decision(
-                                    trace.as_ref(),
-                                    Some(&call_id),
-                                    Some("shell"),
-                                    result.governance_request,
-                                    result.governance_outcome,
-                                );
-                                if result.command_succeeded {
-                                    let summary = planner_terminal_tool_success_summary(
-                                        "shell",
-                                        &result.summary,
-                                    );
-                                    trace.emit(TurnEvent::ToolFinished {
-                                        call_id,
-                                        tool_name: "shell".to_string(),
-                                        summary,
-                                    });
-                                    append_evidence_item(
-                                        &mut loop_state.evidence_items,
-                                        EvidenceItem {
-                                            source: format!("command: {command}"),
-                                            snippet: trim_for_planner(&result.summary, 1_200),
-                                            rationale: decision.rationale.clone(),
-                                            rank: 0,
-                                        },
-                                        budget.max_evidence_items,
-                                    );
-                                    if let Some(frame) = instruction_frame.as_mut() {
-                                        frame.note_successful_workspace_action(action);
-                                    }
-                                    used_workspace_resources = true;
-                                    result.summary
-                                } else {
-                                    let summary =
-                                        format!("Tool `shell` failed: {}", result.summary);
+                                    let summary = format!("Tool `shell` failed: {err:#}");
                                     trace.emit(TurnEvent::ToolFinished {
                                         call_id,
                                         tool_name: "shell".to_string(),
@@ -3827,185 +3922,169 @@ impl MechSuitService {
                                     summary
                                 }
                             }
-                            Err(err) => {
-                                let summary = format!("Tool `shell` failed: {err:#}");
-                                trace.emit(TurnEvent::ToolFinished {
-                                    call_id,
-                                    tool_name: "shell".to_string(),
-                                    summary: summary.clone(),
-                                });
-                                append_evidence_item(
-                                    &mut loop_state.evidence_items,
-                                    EvidenceItem {
-                                        source: format!("command: {command}"),
-                                        snippet: trim_for_planner(&summary, 1_200),
-                                        rationale: decision.rationale.clone(),
-                                        rank: 0,
-                                    },
-                                    budget.max_evidence_items,
-                                );
-                                used_workspace_resources = true;
-                                stop_reason
-                                    .get_or_insert_with(|| "workspace-action-failed".to_string());
-                                summary
-                            }
                         }
-                    }
-                    WorkspaceAction::ExternalCapability { invocation } => {
-                        let call_id = format!("planner-tool-{sequence}");
-                        let broker = self.external_capability_broker();
-                        let descriptor = broker.descriptor(&invocation.capability_id);
-                        trace.emit(TurnEvent::ToolCalled {
-                            call_id: call_id.clone(),
-                            tool_name: action.label().to_string(),
-                            invocation: format_external_capability_invocation(
-                                descriptor.as_ref(),
-                                invocation,
-                            ),
-                        });
-                        let summary = execute_external_capability_action(
-                            broker,
-                            context
-                                .prepared
-                                .harness_profile()
-                                .active_execution_governance(),
-                            invocation,
-                            ExternalCapabilityExecutionFrame {
-                                rationale: decision.rationale.as_str(),
-                                evidence_limit: budget.max_evidence_items,
-                                evidence_items: &mut loop_state.evidence_items,
-                                call_id: &call_id,
-                                event_sink: trace.as_ref(),
-                            },
-                        );
-                        used_workspace_resources = true;
-                        summary
-                    }
-                    WorkspaceAction::Read { .. }
-                    | WorkspaceAction::ListFiles { .. }
-                    | WorkspaceAction::Diff { .. }
-                    | WorkspaceAction::WriteFile { .. }
-                    | WorkspaceAction::ReplaceInFile { .. }
-                    | WorkspaceAction::ApplyPatch { .. } => {
-                        let previous_resolution = loop_state.target_resolution.clone();
-                        maybe_promote_missing_resolution_for_mutation(
-                            &self.workspace_root,
-                            &context.initial_edit.candidate_files,
-                            &mut loop_state,
-                            action,
-                        );
-                        if previous_resolution != loop_state.target_resolution
-                            && let Some(outcome @ EntityResolutionOutcome::Resolved { .. }) =
-                                loop_state.target_resolution.as_ref()
-                        {
-                            trace.record_entity_resolution_outcome(outcome, "exact-mutation-path");
-                        }
-                        if let Some((reason, summary)) =
-                            unresolved_target_mutation_boundary(action, &loop_state)
-                        {
-                            trace.emit(TurnEvent::Fallback {
-                                stage: "entity-resolution".to_string(),
-                                reason: summary.clone(),
-                            });
-                            stop_reason = Some(reason);
-                            accepted_stop = true;
-                            summary
-                        } else if matches!(action, WorkspaceAction::Read { .. })
-                            && read_steps(&loop_state) >= budget.max_reads
-                        {
-                            stop_reason = Some("read-budget-exhausted".to_string());
-                            "planner read budget exhausted".to_string()
-                        } else {
+                        WorkspaceAction::ExternalCapability { invocation } => {
                             let call_id = format!("planner-tool-{sequence}");
+                            let broker = self.external_capability_broker();
+                            let descriptor = broker.descriptor(&invocation.capability_id);
                             trace.emit(TurnEvent::ToolCalled {
                                 call_id: call_id.clone(),
                                 tool_name: action.label().to_string(),
-                                invocation: action.describe(),
+                                invocation: format_external_capability_invocation(
+                                    descriptor.as_ref(),
+                                    invocation,
+                                ),
                             });
-                            match context.synthesizer_engine.execute_workspace_action(action) {
-                                Ok(result) => {
-                                    if let (Some(governance_request), Some(governance_outcome)) = (
-                                        result.governance_request.clone(),
-                                        result.governance_outcome.clone(),
-                                    ) {
-                                        emit_execution_governance_decision(
-                                            trace.as_ref(),
-                                            Some(&call_id),
-                                            Some(action.label()),
-                                            governance_request,
-                                            governance_outcome,
+                            let summary = execute_external_capability_action(
+                                broker,
+                                context
+                                    .prepared
+                                    .harness_profile()
+                                    .active_execution_governance(),
+                                invocation,
+                                ExternalCapabilityExecutionFrame {
+                                    rationale: decision.rationale.as_str(),
+                                    evidence_limit: budget.max_evidence_items,
+                                    evidence_items: &mut loop_state.evidence_items,
+                                    call_id: &call_id,
+                                    event_sink: trace.as_ref(),
+                                },
+                            );
+                            used_workspace_resources = true;
+                            summary
+                        }
+                        WorkspaceAction::Read { .. }
+                        | WorkspaceAction::ListFiles { .. }
+                        | WorkspaceAction::Diff { .. }
+                        | WorkspaceAction::WriteFile { .. }
+                        | WorkspaceAction::ReplaceInFile { .. }
+                        | WorkspaceAction::ApplyPatch { .. } => {
+                            let previous_resolution = loop_state.target_resolution.clone();
+                            maybe_promote_missing_resolution_for_mutation(
+                                &self.workspace_root,
+                                &context.initial_edit.candidate_files,
+                                &mut loop_state,
+                                action,
+                            );
+                            if previous_resolution != loop_state.target_resolution
+                                && let Some(outcome @ EntityResolutionOutcome::Resolved { .. }) =
+                                    loop_state.target_resolution.as_ref()
+                            {
+                                trace.record_entity_resolution_outcome(
+                                    outcome,
+                                    "exact-mutation-path",
+                                );
+                            }
+                            if let Some((reason, summary)) =
+                                unresolved_target_mutation_boundary(action, &loop_state)
+                            {
+                                trace.emit(TurnEvent::Fallback {
+                                    stage: "entity-resolution".to_string(),
+                                    reason: summary.clone(),
+                                });
+                                stop_reason = Some(reason);
+                                accepted_stop = true;
+                                summary
+                            } else if matches!(action, WorkspaceAction::Read { .. })
+                                && read_steps(&loop_state) >= budget.max_reads
+                            {
+                                stop_reason = Some("read-budget-exhausted".to_string());
+                                "planner read budget exhausted".to_string()
+                            } else {
+                                let call_id = format!("planner-tool-{sequence}");
+                                trace.emit(TurnEvent::ToolCalled {
+                                    call_id: call_id.clone(),
+                                    tool_name: action.label().to_string(),
+                                    invocation: action.describe(),
+                                });
+                                match context.synthesizer_engine.execute_workspace_action(action) {
+                                    Ok(result) => {
+                                        if let (
+                                            Some(governance_request),
+                                            Some(governance_outcome),
+                                        ) = (
+                                            result.governance_request.clone(),
+                                            result.governance_outcome.clone(),
+                                        ) {
+                                            emit_execution_governance_decision(
+                                                trace.as_ref(),
+                                                Some(&call_id),
+                                                Some(action.label()),
+                                                governance_request,
+                                                governance_outcome,
+                                            );
+                                        }
+                                        completed_exact_edit =
+                                            decision_is_exact_edit(&decision.action);
+                                        if let Some(frame) = instruction_frame.as_mut() {
+                                            frame.note_successful_workspace_action(action);
+                                        }
+                                        if let Some(edit) = result.applied_edit.clone() {
+                                            trace.emit(TurnEvent::WorkspaceEditApplied {
+                                                call_id,
+                                                tool_name: result.name.to_string(),
+                                                edit,
+                                            });
+                                        } else {
+                                            trace.emit(TurnEvent::ToolFinished {
+                                                call_id,
+                                                tool_name: result.name.to_string(),
+                                                summary: result.summary.clone(),
+                                            });
+                                        }
+                                        append_evidence_item(
+                                            &mut loop_state.evidence_items,
+                                            EvidenceItem {
+                                                source: workspace_action_evidence_source(action),
+                                                snippet: trim_for_planner(&result.summary, 1_200),
+                                                rationale: decision.rationale.clone(),
+                                                rank: 0,
+                                            },
+                                            budget.max_evidence_items,
                                         );
+                                        used_workspace_resources = true;
+                                        result.summary
                                     }
-                                    completed_exact_edit = decision_is_exact_edit(&decision.action);
-                                    if let Some(frame) = instruction_frame.as_mut() {
-                                        frame.note_successful_workspace_action(action);
-                                    }
-                                    if let Some(edit) = result.applied_edit.clone() {
-                                        trace.emit(TurnEvent::WorkspaceEditApplied {
-                                            call_id,
-                                            tool_name: result.name.to_string(),
-                                            edit,
-                                        });
-                                    } else {
+                                    Err(err) => {
+                                        let summary =
+                                            format!("Tool `{}` failed: {err:#}", action.label());
                                         trace.emit(TurnEvent::ToolFinished {
                                             call_id,
-                                            tool_name: result.name.to_string(),
-                                            summary: result.summary.clone(),
+                                            tool_name: action.label().to_string(),
+                                            summary: summary.clone(),
                                         });
+                                        append_evidence_item(
+                                            &mut loop_state.evidence_items,
+                                            EvidenceItem {
+                                                source: workspace_action_evidence_source(action),
+                                                snippet: trim_for_planner(&summary, 1_200),
+                                                rationale: decision.rationale.clone(),
+                                                rank: 0,
+                                            },
+                                            budget.max_evidence_items,
+                                        );
+                                        used_workspace_resources = true;
+                                        stop_reason.get_or_insert_with(|| {
+                                            "workspace-action-failed".to_string()
+                                        });
+                                        summary
                                     }
-                                    append_evidence_item(
-                                        &mut loop_state.evidence_items,
-                                        EvidenceItem {
-                                            source: workspace_action_evidence_source(action),
-                                            snippet: trim_for_planner(&result.summary, 1_200),
-                                            rationale: decision.rationale.clone(),
-                                            rank: 0,
-                                        },
-                                        budget.max_evidence_items,
-                                    );
-                                    used_workspace_resources = true;
-                                    result.summary
-                                }
-                                Err(err) => {
-                                    let summary =
-                                        format!("Tool `{}` failed: {err:#}", action.label());
-                                    trace.emit(TurnEvent::ToolFinished {
-                                        call_id,
-                                        tool_name: action.label().to_string(),
-                                        summary: summary.clone(),
-                                    });
-                                    append_evidence_item(
-                                        &mut loop_state.evidence_items,
-                                        EvidenceItem {
-                                            source: workspace_action_evidence_source(action),
-                                            snippet: trim_for_planner(&summary, 1_200),
-                                            rationale: decision.rationale.clone(),
-                                            rank: 0,
-                                        },
-                                        budget.max_evidence_items,
-                                    );
-                                    used_workspace_resources = true;
-                                    stop_reason.get_or_insert_with(|| {
-                                        "workspace-action-failed".to_string()
-                                    });
-                                    summary
                                 }
                             }
                         }
-                    }
-                },
-                PlannerAction::Refine {
-                    query,
-                    mode,
-                    strategy,
-                    retrievers,
-                    ..
-                } => {
-                    if search_steps(&loop_state) >= budget.max_searches {
-                        stop_reason = Some("search-budget-exhausted".to_string());
-                        "planner refine budget exhausted".to_string()
-                    } else {
-                        self.execute_planner_gather_step(
+                    },
+                    PlannerAction::Refine {
+                        query,
+                        mode,
+                        strategy,
+                        retrievers,
+                        ..
+                    } => {
+                        if search_steps(&loop_state) >= budget.max_searches {
+                            stop_reason = Some("search-budget-exhausted".to_string());
+                            "planner refine budget exhausted".to_string()
+                        } else {
+                            self.execute_planner_gather_step(
                             &context,
                             &mut loop_state,
                             trace.clone(),
@@ -4029,52 +4108,54 @@ impl MechSuitService {
                             &mut used_workspace_resources,
                         )
                         .await
-                    }
-                }
-                PlannerAction::Branch { branches, .. } => {
-                    for branch in branches.iter().take(budget.max_branch_factor) {
-                        let exists = loop_state
-                            .pending_branches
-                            .iter()
-                            .any(|pending| pending.label == *branch);
-                        if !exists {
-                            let branch_id = trace.session.next_branch_id();
-                            let branch_trace = trace.declare_branch(
-                                branch_id,
-                                branch,
-                                Some(decision.rationale.as_str()),
-                                None,
-                            );
-                            loop_state.pending_branches.push(branch_trace);
                         }
                     }
-                    format!(
-                        "queued {} planner branch(es)",
-                        branches.len().min(budget.max_branch_factor)
-                    )
-                }
-                PlannerAction::Stop { reason } => {
-                    if let Some(frame) = instruction_frame
-                        .as_ref()
-                        .filter(|frame| frame.has_pending_workspace_obligation())
-                    {
-                        let note = instruction_unsatisfied_note(frame);
-                        if !loop_state.notes.contains(&note) {
-                            loop_state.notes.push(note.clone());
+                    PlannerAction::Branch { branches, .. } => {
+                        for branch in branches.iter().take(budget.max_branch_factor) {
+                            let exists = loop_state
+                                .pending_branches
+                                .iter()
+                                .any(|pending| pending.label == *branch);
+                            if !exists {
+                                let branch_id = trace.session.next_branch_id();
+                                let branch_trace = trace.declare_branch(
+                                    branch_id,
+                                    branch,
+                                    Some(decision.rationale.as_str()),
+                                    None,
+                                );
+                                loop_state.pending_branches.push(branch_trace);
+                            }
                         }
-                        trace.emit(TurnEvent::Fallback {
-                            stage: "instruction-manifold".to_string(),
-                            reason: note.clone(),
-                        });
-                        direct_answer = None;
-                        stop_reason = Some("instruction-unsatisfied".to_string());
-                        "planner stop converted into a blocked reply because the requested applied edit is still unsatisfied"
+                        format!(
+                            "queued {} planner branch(es)",
+                            branches.len().min(budget.max_branch_factor)
+                        )
+                    }
+                    PlannerAction::Stop { reason } => {
+                        if let Some(frame) = instruction_frame
+                            .as_ref()
+                            .filter(|frame| frame.has_pending_workspace_obligation())
+                        {
+                            let note = instruction_unsatisfied_note(frame);
+                            if !loop_state.notes.contains(&note) {
+                                loop_state.notes.push(note.clone());
+                            }
+                            trace.emit(TurnEvent::Fallback {
+                                stage: "instruction-manifold".to_string(),
+                                reason: note.clone(),
+                            });
+                            direct_answer = None;
+                            stop_reason = Some("instruction-unsatisfied".to_string());
+                            "planner stop converted into a blocked reply because the requested applied edit is still unsatisfied"
                             .to_string()
-                    } else {
-                        direct_answer = stop_reason_direct_answer(reason, decision.answer.clone());
-                        stop_reason = Some(reason.clone());
-                        accepted_stop = true;
-                        format!("planner requested synthesis: {reason}")
+                        } else {
+                            direct_answer =
+                                stop_reason_direct_answer(reason, decision.answer.clone());
+                            stop_reason = Some(reason.clone());
+                            accepted_stop = true;
+                            format!("planner requested synthesis: {reason}")
+                        }
                     }
                 }
             };
@@ -5492,6 +5573,212 @@ fn execution_plan_from_initial_action(
     }
 }
 
+fn resolve_collaboration_mode_request(
+    request: Option<CollaborationModeRequest>,
+) -> CollaborationModeResult {
+    match request {
+        None => CollaborationModeResult::default(),
+        Some(request) => match request.target.clone() {
+            CollaborationModeRequestTarget::Known(mode) => {
+                CollaborationModeResult::applied(request, mode.state())
+            }
+            CollaborationModeRequestTarget::Unsupported(label) => CollaborationModeResult::invalid(
+                request,
+                CollaborationMode::Execution.state(),
+                format!("unsupported collaboration mode `{label}`; continuing in execution mode"),
+            ),
+        },
+    }
+}
+
+fn collaboration_runtime_notes(collaboration: &CollaborationModeResult) -> Vec<String> {
+    let mut notes = vec![format!(
+        "Collaboration mode: {} (status={}, mutation_posture={}, output_contract={}, clarification_policy={}).",
+        collaboration.active.mode.label(),
+        collaboration.status.label(),
+        collaboration.active.mutation_posture.label(),
+        collaboration.active.output_contract.label(),
+        collaboration.active.clarification_policy.label(),
+    )];
+    if !collaboration.detail.trim().is_empty() {
+        notes.push(format!("Mode detail: {}", collaboration.detail.trim()));
+    }
+
+    match collaboration.active.mode {
+        CollaborationMode::Planning => notes.push(
+            "Planning mode is read-only. Prefer search, list_files, read, inspect, or diff. If progress would require shell or file mutation, stop and ask for bounded clarification instead."
+                .to_string(),
+        ),
+        CollaborationMode::Execution => notes.push(
+            "Execution mode is the default mutation lane. Continue to honor execution governance and explicit instruction boundaries."
+                .to_string(),
+        ),
+        CollaborationMode::Review => notes.push(
+            "Review mode is read-only. Inspect local changes first with diff-backed evidence. Final output must list findings first with grounded file or line references, then residual risks or gaps."
+                .to_string(),
+        ),
+    }
+
+    notes
+}
+
+fn sanitize_initial_edit_instruction_for_collaboration(
+    collaboration: &CollaborationModeResult,
+    edit: InitialEditInstruction,
+) -> InitialEditInstruction {
+    if collaboration.active.mutation_posture.allows_mutation() {
+        edit
+    } else {
+        InitialEditInstruction {
+            known_edit: false,
+            candidate_files: edit.candidate_files,
+            resolution: edit.resolution,
+        }
+    }
+}
+
+fn sanitize_initial_action_decision_for_collaboration(
+    collaboration: &CollaborationModeResult,
+    mut decision: InitialActionDecision,
+) -> InitialActionDecision {
+    decision.edit =
+        sanitize_initial_edit_instruction_for_collaboration(collaboration, decision.edit);
+    decision
+}
+
+fn sanitize_recursive_planner_decision_for_collaboration(
+    collaboration: &CollaborationModeResult,
+    mut decision: RecursivePlannerDecision,
+) -> RecursivePlannerDecision {
+    decision.edit =
+        sanitize_initial_edit_instruction_for_collaboration(collaboration, decision.edit);
+    decision
+}
+
+fn bootstrap_review_initial_action(
+    decision: &InitialActionDecision,
+) -> Option<InitialActionDecision> {
+    if matches!(
+        decision.action,
+        InitialAction::Workspace {
+            action: WorkspaceAction::Diff { .. }
+        }
+    ) {
+        return None;
+    }
+
+    Some(InitialActionDecision {
+        action: InitialAction::Workspace {
+            action: WorkspaceAction::Diff { path: None },
+        },
+        rationale: "review mode requires local diff evidence before synthesis".to_string(),
+        answer: None,
+        edit: InitialEditInstruction::default(),
+        grounding: Some(GroundingRequirement {
+            domain: GroundingDomain::Repository,
+            reason: Some("review mode starts by inspecting local changes".to_string()),
+        }),
+    })
+}
+
+fn collaboration_boundary_for_action(
+    collaboration: &CollaborationModeResult,
+    action: &PlannerAction,
+    edit: &InitialEditInstruction,
+) -> Option<(String, AuthoredResponse, String)> {
+    let PlannerAction::Workspace { action } = action else {
+        return None;
+    };
+    if collaboration.active.mutation_posture.allows_mutation() || !action.is_mutating() {
+        return None;
+    }
+
+    let detail = format!(
+        "{} mode blocked mutating action `{}` and kept the harness read-only.",
+        collaboration.active.mode.label(),
+        action.summary()
+    );
+    match collaboration.active.mode {
+        CollaborationMode::Planning => {
+            let clarification = planning_mode_mutation_clarification_request(
+                action,
+                edit.candidate_files.as_slice(),
+            );
+            Some((
+                "collaboration-mode-blocked".to_string(),
+                AuthoredResponse::from_plain_text(
+                    ResponseMode::DirectAnswer,
+                    &render_structured_clarification_request(&clarification, &detail),
+                ),
+                detail,
+            ))
+        }
+        CollaborationMode::Review => Some((
+            "collaboration-mode-blocked".to_string(),
+            AuthoredResponse::from_plain_text(
+                ResponseMode::DirectAnswer,
+                &format!(
+                    "Review mode is read-only, so I stopped before `{}`.\n\nIf you want changes applied, rerun this request in execution mode.",
+                    action.summary()
+                ),
+            ),
+            detail,
+        )),
+        CollaborationMode::Execution => None,
+    }
+}
+
+fn planning_mode_mutation_clarification_request(
+    action: &WorkspaceAction,
+    candidate_files: &[String],
+) -> StructuredClarificationRequest {
+    let mut prompt = format!(
+        "Planning mode is read-only, so I stopped before `{}`.",
+        action.summary()
+    );
+    if !candidate_files.is_empty() {
+        prompt.push_str("\nLikely targets: ");
+        prompt.push_str(&candidate_files.join(", "));
+    }
+    StructuredClarificationRequest::new(
+        "planning-mode-clarification",
+        StructuredClarificationKind::Approval,
+        prompt,
+        vec![
+            StructuredClarificationOption::new(
+                "stay_in_planning",
+                "Stay in planning",
+                "Keep the turn read-only and return a plan or review of the required changes.",
+            ),
+            StructuredClarificationOption::new(
+                "switch_to_execution",
+                "Switch to execution",
+                "Rerun in execution mode so Paddles can apply the requested change.",
+            ),
+        ],
+        false,
+    )
+}
+
+fn render_structured_clarification_request(
+    request: &StructuredClarificationRequest,
+    detail: &str,
+) -> String {
+    let mut lines = vec![
+        "Need clarification before mutating.".to_string(),
+        request.prompt.clone(),
+        detail.to_string(),
+        "Options:".to_string(),
+    ];
+    lines.extend(
+        request
+            .options
+            .iter()
+            .map(|option| format!("- {}: {}", option.option_id, option.description.trim())),
+    );
+    lines.join("\n")
+}
+
 fn format_gatherer_capability(capability: &GathererCapability) -> String {
     match capability {
         GathererCapability::Available => "available".to_string(),
@@ -5515,8 +5802,10 @@ fn gatherer_readiness_label(capability: &GathererCapability) -> &'static str {
 fn planner_runtime_notes(
     gatherer: Option<&Arc<dyn ContextGatherer>>,
     specialist_notes: &[String],
+    collaboration: &CollaborationModeResult,
 ) -> Vec<String> {
-    let mut notes = specialist_notes.to_vec();
+    let mut notes = collaboration_runtime_notes(collaboration);
+    notes.extend(specialist_notes.iter().cloned());
     let Some(gatherer) = gatherer else {
         return notes;
     };
@@ -6272,11 +6561,13 @@ async fn review_decision_under_signals(
         context.interpretation.clone(),
         budget.clone(),
     )
+    .with_collaboration(context.collaboration.clone())
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
     .with_runtime_notes(planner_runtime_notes(
         context.gatherer.as_ref(),
         &context.specialist_runtime_notes,
+        &context.collaboration,
     ))
     .with_loop_state(review_loop_state)
     .with_resolver(context.resolver.clone())
@@ -8143,7 +8434,9 @@ mod tests {
         RuntimeLaneRole, StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
     };
     use crate::domain::model::{
-        AuthoredResponse, CompactionPlan, CompactionRequest, ControlOperation, ControlResultStatus,
+        AuthoredResponse, CollaborationMode, CollaborationModeRequest,
+        CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
+        CompactionPlan, CompactionRequest, ControlOperation, ControlResultStatus,
         ConversationReplayView, ResponseMode, TurnControlOperation,
     };
     use crate::domain::model::{
@@ -8898,6 +9191,7 @@ mod tests {
             interpretation: InterpretationContext::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
+            collaboration: CollaborationModeResult::default(),
             specialist_runtime_notes: Vec::new(),
             instruction_frame: super::instruction_frame_from_initial_edit(&initial_edit),
             initial_edit,
@@ -15296,6 +15590,294 @@ mod tests {
                 .as_ref()
                 .is_some_and(|grounding| grounding.requires_external()),
             "planner-declared external grounding should be preserved into synthesis"
+        );
+    }
+
+    #[test]
+    fn planning_mode_explores_read_only_then_requests_bounded_clarification_before_mutation() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "README.md".to_string(),
+                    },
+                },
+                "inspect the target file before changing it",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::WriteFile {
+                        path: "README.md".to_string(),
+                        content: "# Updated Workspace\n".to_string(),
+                    },
+                },
+                rationale: "apply the requested change".to_string(),
+                answer: None,
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["README.md".to_string()],
+                    resolution: None,
+                },
+                grounding: None,
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Plan the change before you edit README.md",
+                    session,
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Known(CollaborationMode::Planning),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("operator selected planning mode".to_string()),
+                    )),
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(reply.contains("Need clarification before mutating"));
+        assert!(reply.contains("stay_in_planning"));
+        assert!(reply.contains("switch_to_execution"));
+        assert_eq!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .clone(),
+            vec![WorkspaceAction::Read {
+                path: "README.md".to_string(),
+            }],
+            "planning mode should preserve read-only exploration and fail closed before mutation"
+        );
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "clarification should stop before synthesis"
+        );
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert_eq!(
+            requests[0].collaboration.active.mode,
+            CollaborationMode::Planning
+        );
+        assert_eq!(
+            requests[1].collaboration.active.mode,
+            CollaborationMode::Planning
+        );
+    }
+
+    #[test]
+    fn review_mode_bootstraps_local_diff_and_carries_findings_first_handoff() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "reply directly"),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "local diff evidence is sufficient for review synthesis".to_string(),
+                },
+                rationale: "hand off the review after diff inspection".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Review the current local changes",
+                    session,
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Known(CollaborationMode::Review),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("operator selected review mode".to_string()),
+                    )),
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Applied the bounded action.");
+        assert_eq!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .first()
+                .cloned(),
+            Some(WorkspaceAction::Diff { path: None }),
+            "review mode should inspect the local diff before synthesis"
+        );
+        let handoffs = synthesizer.handoffs.lock().expect("handoffs lock").clone();
+        let handoff = handoffs.last().expect("review handoff");
+        assert_eq!(handoff.collaboration.active.mode, CollaborationMode::Review);
+        assert_eq!(
+            handoff.collaboration.active.output_contract.label(),
+            "findings_first_review"
+        );
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert_eq!(
+            requests[0].collaboration.active.mode,
+            CollaborationMode::Review
+        );
+    }
+
+    #[test]
+    fn execution_mode_remains_the_default_mutation_path() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::WriteFile {
+                        path: "README.md".to_string(),
+                        content: "# Updated Workspace\n".to_string(),
+                    },
+                },
+                "apply the requested edit",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "the edit is complete".to_string(),
+                },
+                rationale: "handoff after the change".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer.clone(),
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "Update README.md",
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Applied the bounded action.");
+        assert_eq!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .first()
+                .cloned(),
+            Some(WorkspaceAction::WriteFile {
+                path: "README.md".to_string(),
+                content: "# Updated Workspace\n".to_string(),
+            }),
+            "execution mode should remain the default mutation lane"
+        );
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert_eq!(
+            requests[0].collaboration.active.mode,
+            CollaborationMode::Execution
         );
     }
 

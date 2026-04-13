@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-04-12T18:53:47.541964328-07:00
+mode: manual
+files: [".keel/stories/VGcvOsBRp/EVIDENCE/ac-3.log"]
+---
+
+--- File: ac-3.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 1 test
+test application::tests::execution_mode_remains_the_default_mutation_path ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 587 filtered out; finished in 0.27s
+
+

@@ -2786,12 +2786,44 @@ fn format_instruction_handoff(handoff: &SynthesisHandoff) -> String {
         None => "No explicit instruction obligations are active.".to_string(),
     };
 
+    let collaboration = format_collaboration_contract_section(handoff);
     let grounding = format_grounding_contract_section(handoff);
-    if grounding.is_empty() {
+    let extras = format!("{collaboration}{grounding}");
+    if extras.is_empty() {
         base
     } else {
-        format!("{base}\n\n{}", grounding.trim_end())
+        format!("{base}\n\n{}", extras.trim_end())
     }
+}
+
+fn format_collaboration_contract_section(handoff: &SynthesisHandoff) -> String {
+    let collaboration = &handoff.collaboration;
+    let mut lines = vec![format!(
+        "Collaboration contract:\nmode={} status={} mutation_posture={} output_contract={} clarification_policy={}",
+        collaboration.active.mode.label(),
+        collaboration.status.label(),
+        collaboration.active.mutation_posture.label(),
+        collaboration.active.output_contract.label(),
+        collaboration.active.clarification_policy.label(),
+    )];
+    if !collaboration.detail.trim().is_empty() {
+        lines.push(format!("detail={}", collaboration.detail.trim()));
+    }
+    match collaboration.active.mode {
+        crate::domain::model::CollaborationMode::Planning => lines.push(
+            "Stay read-only. If progress would require mutation, ask for bounded clarification instead of editing."
+                .to_string(),
+        ),
+        crate::domain::model::CollaborationMode::Execution => lines.push(
+            "Execution mode may mutate locally, but it must still honor execution governance."
+                .to_string(),
+        ),
+        crate::domain::model::CollaborationMode::Review => lines.push(
+            "Return findings first with grounded file or line references, then note residual risks or gaps."
+                .to_string(),
+        ),
+    }
+    format!("{}\n\n", lines.join("\n"))
 }
 
 fn format_grounding_contract_section(handoff: &SynthesisHandoff) -> String {

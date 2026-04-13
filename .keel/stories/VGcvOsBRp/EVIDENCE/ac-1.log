@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-04-12T18:53:42.701058529-07:00
+mode: manual
+files: [".keel/stories/VGcvOsBRp/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 1 test
+test application::tests::planning_mode_explores_read_only_then_requests_bounded_clarification_before_mutation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 587 filtered out; finished in 0.29s
+
+

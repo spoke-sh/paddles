@@ -4,11 +4,11 @@ use super::context_gathering::{
 use super::context_resolution::ContextResolver;
 use super::entity_resolution::{EntityResolutionOutcome, EntityResolver};
 pub use crate::domain::model::{
-    CompactionPlan, CompactionRequest, ConversationThread, GuidanceCategory,
-    InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
-    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
-    InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate, ThreadDecision,
-    TraceBranch, TraceBranchId, WorkspaceAction,
+    CollaborationModeResult, CompactionPlan, CompactionRequest, ConversationThread,
+    GuidanceCategory, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate,
+    ThreadDecision, TraceBranch, TraceBranchId, WorkspaceAction,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -170,6 +170,7 @@ pub struct PlannerRequest {
     pub user_prompt: String,
     pub workspace_root: PathBuf,
     pub interpretation: InterpretationContext,
+    pub collaboration: CollaborationModeResult,
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
     pub runtime_notes: Vec<String>,
@@ -190,6 +191,7 @@ impl PlannerRequest {
             user_prompt: user_prompt.into(),
             workspace_root: workspace_root.into(),
             interpretation,
+            collaboration: CollaborationModeResult::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
             runtime_notes: Vec::new(),
@@ -222,6 +224,11 @@ impl PlannerRequest {
 
     pub fn with_runtime_notes(mut self, runtime_notes: Vec<String>) -> Self {
         self.runtime_notes = runtime_notes;
+        self
+    }
+
+    pub fn with_collaboration(mut self, collaboration: CollaborationModeResult) -> Self {
+        self.collaboration = collaboration;
         self
     }
 

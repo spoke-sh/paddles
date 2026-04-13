@@ -267,6 +267,15 @@ impl CollaborationModeResult {
     }
 }
 
+impl Default for CollaborationModeResult {
+    fn default() -> Self {
+        Self::defaulted(
+            CollaborationMode::Execution.state(),
+            "no collaboration mode request supplied; using execution mode",
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuredClarificationKind {

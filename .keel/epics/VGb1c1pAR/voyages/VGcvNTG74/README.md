@@ -27,11 +27,11 @@ started_at: 2026-04-12T18:33:42
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Collaboration Mode And Clarification Contracts](../../../../stories/VGcvOrZRz/README.md) | feat | done |
-| [Route Planning And Review Behavior Through The Recursive Harness](../../../../stories/VGcvOsBRp/README.md) | feat | backlog |
+| [Route Planning And Review Behavior Through The Recursive Harness](../../../../stories/VGcvOsBRp/README.md) | feat | done |
 | [Project Mode State Findings And Clarification Across Surfaces](../../../../stories/VGcvOsjRh/README.md) | feat | backlog |
 <!-- END GENERATED -->

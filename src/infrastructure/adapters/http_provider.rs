@@ -1281,6 +1281,9 @@ impl SynthesizerEngine for HttpProviderAdapter {
             user_msg.push_str(summary);
             user_msg.push_str("\n\n");
         }
+        user_msg.push_str("## Collaboration Contract\n");
+        user_msg.push_str(&format_collaboration_contract(&handoff.collaboration));
+        user_msg.push_str("\n\n");
         if let Some(frame) = handoff.instruction_frame.as_ref() {
             user_msg.push_str("## Instruction Manifold\n");
             if frame.requires_applied_edit() && frame.requires_applied_commit() {
@@ -2702,6 +2705,37 @@ fn format_grounding_contract(grounding: &GroundingRequirement) -> String {
         .filter(|reason| !reason.trim().is_empty())
     {
         lines.push(format!("Reason: {}", reason.trim()));
+    }
+    lines.join("\n")
+}
+
+fn format_collaboration_contract(
+    collaboration: &crate::domain::model::CollaborationModeResult,
+) -> String {
+    let mut lines = vec![format!(
+        "mode={} status={} mutation_posture={} output_contract={} clarification_policy={}",
+        collaboration.active.mode.label(),
+        collaboration.status.label(),
+        collaboration.active.mutation_posture.label(),
+        collaboration.active.output_contract.label(),
+        collaboration.active.clarification_policy.label(),
+    )];
+    if !collaboration.detail.trim().is_empty() {
+        lines.push(format!("detail={}", collaboration.detail.trim()));
+    }
+    match collaboration.active.mode {
+        crate::domain::model::CollaborationMode::Planning => lines.push(
+            "Stay read-only. If progress would require mutation, ask for bounded clarification instead of editing."
+                .to_string(),
+        ),
+        crate::domain::model::CollaborationMode::Execution => lines.push(
+            "Execution mode may mutate locally, but it must still honor execution governance."
+                .to_string(),
+        ),
+        crate::domain::model::CollaborationMode::Review => lines.push(
+            "Return findings first with grounded file or line references, then note residual risks or gaps."
+                .to_string(),
+        ),
     }
     lines.join("\n")
 }
