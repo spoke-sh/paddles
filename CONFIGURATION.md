@@ -255,6 +255,16 @@ Current local model guidance on an 8 GB CUDA card:
 - `qwen3.5-2b` remains available as an opt-in heavier lane, not the default.
 - If `qwen3.5-2b` cannot complete its CUDA load or first generation step because of GPU OOM or a reduced-precision runtime mismatch, the runtime warns and retries on CPU instead of aborting the REPL.
 
+### Nix Build Lanes
+
+The Nix flake now keeps CPU as the default lane:
+
+- `nix develop` and `nix build .#paddles` stay CPU-only.
+- `nix develop .#cuda`, `nix build .#paddles-cuda`, and `nix build .#sift-cuda` are the explicit GPU opt-in paths on Linux.
+- `just paddles --cuda ...` still enables the Cargo `cuda` feature, but it should be run from the CUDA shell when GPU execution is actually intended.
+
+That keeps CI and downstream consumers from pulling the CUDA toolchain unless the operator intentionally chooses the GPU lane.
+
 ### Default Turn Observability
 
 The REPL now renders a default Codex-style action stream. Expect visible steps

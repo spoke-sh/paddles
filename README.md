@@ -440,7 +440,7 @@ The normal operator rhythm is:
 
 ## Development Setup
 
-Enter the dev shell:
+Enter the default CPU-first dev shell:
 
 ```bash
 nix develop
@@ -449,6 +449,12 @@ nix develop
 On Linux, the dev shell provides `chromium` for Playwright-driven browser tests.
 On macOS, nixpkgs does not ship that package, so Playwright uses its own managed
 browser download after `npm ci`.
+
+Use the explicit CUDA shell only when you actually want GPU builds or runtime:
+
+```bash
+nix develop .#cuda
+```
 
 Build and test:
 
@@ -468,6 +474,12 @@ keel flow --scene
 ```
 
 Run the interactive assistant:
+
+```bash
+just paddles
+```
+
+Opt into the GPU lane explicitly:
 
 ```bash
 just paddles --cuda

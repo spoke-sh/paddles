@@ -61,7 +61,7 @@ test:
 quality:
   just frontend-install
   cargo fmt --all --check
-  cargo clippy --all-targets --all-features -- -D warnings
+  cargo clippy --all-targets -- -D warnings
   just frontend-quality
 
 # Run the paddles CLI. Use --cuda to enable GPU support.

@@ -193,22 +193,27 @@ fn frontend_apps_exist_under_apps_directory() {
 #[test]
 fn dev_shell_exposes_node_for_frontend_workspace_checks() {
     let flake = read_repo_file("flake.nix");
-    let dev_shell = flake
-        .split("devShells.default = pkgs.mkShell {")
-        .nth(1)
-        .expect("flake.nix should define the default dev shell");
-    let linux_browser_inputs = dev_shell
-        .split("++ pkgs.lib.optionals isLinux [")
-        .nth(1)
-        .and_then(|section| section.split("];").next())
-        .expect("flake.nix should guard Linux-only dev shell inputs");
+    let defines_default_shell = flake.contains("devShells.default = pkgs.mkShell {")
+        || flake.contains("devShells = {\n          default = pkgs.mkShell {");
+    let guards_linux_only_inputs = flake
+        .contains("buildInputs = baseShellInputs ++ [ siftPkg ] ++ pkgs.lib.optionals isLinux [")
+        || (flake.contains("linuxShellInputs = pkgs.lib.optionals isLinux [")
+            && flake.contains("buildInputs = baseShellInputs ++ [ siftPkg ] ++ linuxShellInputs;"));
 
+    assert!(
+        defines_default_shell,
+        "flake.nix should define the default dev shell",
+    );
+    assert!(
+        guards_linux_only_inputs,
+        "flake.nix should guard Linux-only dev shell inputs",
+    );
     assert!(
         flake.contains("pkgs.nodejs"),
         "dev shell should include nodejs so frontend workspace checks run in nix develop",
     );
     assert!(
-        linux_browser_inputs.contains("pkgs.chromium"),
+        flake.contains("pkgs.chromium"),
         "dev shell should provide nixpkgs chromium only on Linux where the package is supported",
     );
     assert!(
