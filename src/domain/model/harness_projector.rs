@@ -91,6 +91,24 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             )
             .with_detail(result.detail.clone()),
         ),
+        TurnEvent::CollaborationModeChanged { result } => Some(
+            HarnessSnapshot::active(HarnessChamber::Routing).with_detail(format!(
+                "mode={} status={}",
+                result.active.mode.label(),
+                result.status.label()
+            )),
+        ),
+        TurnEvent::StructuredClarificationChanged { result } => Some(
+            HarnessSnapshot::intervening(
+                HarnessChamber::Governor,
+                format!(
+                    "clarification {} {}",
+                    result.request.kind.label(),
+                    result.status.label()
+                ),
+            )
+            .with_detail(result.request.prompt.clone()),
+        ),
         TurnEvent::PlannerStepProgress {
             step_number,
             step_limit,

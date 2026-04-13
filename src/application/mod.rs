@@ -1031,6 +1031,18 @@ impl TurnEventSink for StructuredTurnTrace {
             TurnEvent::ControlStateChanged { result } => {
                 self.record_control_result(&result);
             }
+            TurnEvent::CollaborationModeChanged { result } => {
+                self.record_kind(
+                    self.default_branch_id(),
+                    TraceRecordKind::CollaborationModeDeclared(result),
+                );
+            }
+            TurnEvent::StructuredClarificationChanged { result } => {
+                self.record_kind(
+                    self.default_branch_id(),
+                    TraceRecordKind::StructuredClarificationRecorded(result),
+                );
+            }
             TurnEvent::ToolCalled {
                 call_id,
                 tool_name,
@@ -1824,6 +1836,60 @@ fn render_turn_event(event: &TurnEvent) -> String {
             result.summary(),
             trim_event_detail(&result.detail, 2)
         ),
+        TurnEvent::CollaborationModeChanged { result } => {
+            let mut lines = vec![format!(
+                "• Collaboration: {} {}",
+                result.active.mode.label(),
+                result.status.label()
+            )];
+            if let Some(request) = &result.request {
+                lines.push(format!(
+                    "  └ requested={} via {}",
+                    request.target.label(),
+                    request.source.label()
+                ));
+            }
+            lines.push(format!(
+                "  └ posture={} output={} clarification={}",
+                result.active.mutation_posture.label(),
+                result.active.output_contract.label(),
+                result.active.clarification_policy.label()
+            ));
+            if !result.detail.trim().is_empty() {
+                lines.push(format!("  └ {}", trim_event_detail(&result.detail, 2)));
+            }
+            lines.join("\n")
+        }
+        TurnEvent::StructuredClarificationChanged { result } => {
+            let mut lines = vec![format!(
+                "• Clarification: {} {}",
+                result.request.kind.label(),
+                result.status.label()
+            )];
+            lines.push(format!(
+                "  └ {}",
+                trim_event_detail(&result.request.prompt, 2)
+            ));
+            if !result.request.options.is_empty() {
+                lines.push(format!(
+                    "  └ options: {}",
+                    trim_event_detail(
+                        &result
+                            .request
+                            .options
+                            .iter()
+                            .map(|option| format!("{} ({})", option.option_id, option.label))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        2
+                    )
+                ));
+            }
+            if !result.detail.trim().is_empty() {
+                lines.push(format!("  └ {}", trim_event_detail(&result.detail, 2)));
+            }
+            lines.join("\n")
+        }
         TurnEvent::GathererSummary {
             provider,
             summary,
@@ -2821,6 +2887,9 @@ impl MechSuitService {
                 active_thread.clone(),
             ));
             trace.record_turn_start(&current_prompt, &interpretation, &prepared);
+            trace.emit(TurnEvent::CollaborationModeChanged {
+                result: collaboration.clone(),
+            });
             let harness_profile = prepared.harness_profile();
             trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
                 snapshot: crate::domain::model::ExecutionGovernanceSnapshot::new(
@@ -3701,20 +3770,24 @@ impl MechSuitService {
 
             let mut accepted_stop = false;
             let mut completed_exact_edit = false;
-            let outcome = if let Some((reason, response, summary)) =
-                collaboration_boundary_for_action(
-                    &context.collaboration,
-                    &decision.action,
-                    &decision.edit,
-                ) {
+            let outcome = if let Some(outcome) = collaboration_boundary_for_action(
+                &context.collaboration,
+                &decision.action,
+                &decision.edit,
+            ) {
                 trace.emit(TurnEvent::Fallback {
                     stage: "collaboration-mode".to_string(),
-                    reason: summary.clone(),
+                    reason: outcome.summary.clone(),
                 });
-                direct_answer = Some(response);
-                stop_reason = Some(reason);
+                if let Some(clarification) = outcome.clarification.clone() {
+                    trace.emit(TurnEvent::StructuredClarificationChanged {
+                        result: clarification,
+                    });
+                }
+                direct_answer = Some(outcome.response);
+                stop_reason = Some(outcome.reason);
                 accepted_stop = true;
-                summary
+                outcome.summary
             } else {
                 match &decision.action {
                     PlannerAction::Workspace { action } => match action {
@@ -5685,7 +5758,7 @@ fn collaboration_boundary_for_action(
     collaboration: &CollaborationModeResult,
     action: &PlannerAction,
     edit: &InitialEditInstruction,
-) -> Option<(String, AuthoredResponse, String)> {
+) -> Option<CollaborationBoundaryOutcome> {
     let PlannerAction::Workspace { action } = action else {
         return None;
     };
@@ -5704,28 +5777,38 @@ fn collaboration_boundary_for_action(
                 action,
                 edit.candidate_files.as_slice(),
             );
-            Some((
-                "collaboration-mode-blocked".to_string(),
-                AuthoredResponse::from_plain_text(
+            Some(CollaborationBoundaryOutcome {
+                reason: "collaboration-mode-blocked".to_string(),
+                response: AuthoredResponse::from_plain_text(
                     ResponseMode::DirectAnswer,
                     &render_structured_clarification_request(&clarification, &detail),
                 ),
-                detail,
-            ))
+                summary: detail.clone(),
+                clarification: Some(clarification.requested(detail)),
+            })
         }
-        CollaborationMode::Review => Some((
-            "collaboration-mode-blocked".to_string(),
-            AuthoredResponse::from_plain_text(
+        CollaborationMode::Review => Some(CollaborationBoundaryOutcome {
+            reason: "collaboration-mode-blocked".to_string(),
+            response: AuthoredResponse::from_plain_text(
                 ResponseMode::DirectAnswer,
                 &format!(
                     "Review mode is read-only, so I stopped before `{}`.\n\nIf you want changes applied, rerun this request in execution mode.",
                     action.summary()
                 ),
             ),
-            detail,
-        )),
+            summary: detail,
+            clarification: None,
+        }),
         CollaborationMode::Execution => None,
     }
+}
+
+#[derive(Clone)]
+struct CollaborationBoundaryOutcome {
+    reason: String,
+    response: AuthoredResponse,
+    summary: String,
+    clarification: Option<crate::domain::model::StructuredClarificationResult>,
 }
 
 fn planning_mode_mutation_clarification_request(
@@ -8437,7 +8520,7 @@ mod tests {
         AuthoredResponse, CollaborationMode, CollaborationModeRequest,
         CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
         CompactionPlan, CompactionRequest, ControlOperation, ControlResultStatus,
-        ConversationReplayView, ResponseMode, TurnControlOperation,
+        ConversationReplayView, ResponseMode, StructuredClarificationStatus, TurnControlOperation,
     };
     use crate::domain::model::{
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
@@ -15793,6 +15876,188 @@ mod tests {
             requests[0].collaboration.active.mode,
             CollaborationMode::Review
         );
+    }
+
+    #[test]
+    fn planning_mode_records_mode_selection_and_structured_clarification_for_replay() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "README.md".to_string(),
+                    },
+                },
+                "inspect the target file before changing it",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::WriteFile {
+                        path: "README.md".to_string(),
+                        content: "# Updated Workspace\n".to_string(),
+                    },
+                },
+                rationale: "apply the requested change".to_string(),
+                answer: None,
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["README.md".to_string()],
+                    resolution: None,
+                },
+                grounding: None,
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Plan the change before you edit README.md",
+                    session.clone(),
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Known(CollaborationMode::Planning),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("operator selected planning mode".to_string()),
+                    )),
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(reply.contains("Need clarification before mutating"));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::CollaborationModeChanged { result }
+                if result.active.mode == CollaborationMode::Planning
+                    && result.status == crate::domain::model::CollaborationModeResultStatus::Applied
+        )));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::StructuredClarificationChanged { result }
+                if result.status == StructuredClarificationStatus::Requested
+                    && result.request.clarification_id == "planning-mode-clarification"
+        )));
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::CollaborationModeDeclared(result)
+                if result.active.mode == CollaborationMode::Planning
+        )));
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::StructuredClarificationRecorded(result)
+                if result.status == StructuredClarificationStatus::Requested
+                    && result.request.clarification_id == "planning-mode-clarification"
+        )));
+    }
+
+    #[test]
+    fn unsupported_mode_requests_emit_typed_collaboration_results_instead_of_silent_fallback() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "reply directly"),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "no recursion needed".to_string(),
+                },
+                rationale: "finish the turn".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Review this workspace",
+                    session.clone(),
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Unsupported("pairing".to_string()),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("unsupported request".to_string()),
+                    )),
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::CollaborationModeChanged { result }
+                if result.active.mode == CollaborationMode::Execution
+                    && result.status == crate::domain::model::CollaborationModeResultStatus::Invalid
+                    && result.detail.contains("unsupported collaboration mode `pairing`")
+        )));
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::CollaborationModeDeclared(result)
+                if result.active.mode == CollaborationMode::Execution
+                    && result.status == crate::domain::model::CollaborationModeResultStatus::Invalid
+        )));
     }
 
     #[test]

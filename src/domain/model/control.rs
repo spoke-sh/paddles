@@ -1,6 +1,7 @@
 use super::{
-    AppliedEdit, ConversationThreadRef, PlanChecklistItem, ThreadDecision, ThreadDecisionKind,
-    ThreadMergeRecord, TraceBranchId, TraceRecordKind, TurnEvent, TurnTraceId,
+    AppliedEdit, CollaborationModeResult, ConversationThreadRef, PlanChecklistItem,
+    StructuredClarificationResult, ThreadDecision, ThreadDecisionKind, ThreadMergeRecord,
+    TraceBranchId, TraceRecordKind, TurnEvent, TurnTraceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -154,6 +155,16 @@ pub struct ControlRuntimeItem {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CollaborationRuntimeItem {
+    pub result: CollaborationModeResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ClarificationRuntimeItem {
+    pub result: StructuredClarificationResult,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
 pub enum RuntimeItem {
     Plan(PlanRuntimeItem),
@@ -161,6 +172,8 @@ pub enum RuntimeItem {
     Command(CommandRuntimeItem),
     File(FileRuntimeItem),
     Control(ControlRuntimeItem),
+    Collaboration(CollaborationRuntimeItem),
+    Clarification(ClarificationRuntimeItem),
 }
 
 impl RuntimeItem {
@@ -171,6 +184,8 @@ impl RuntimeItem {
             Self::Command(_) => "command",
             Self::File(_) => "file",
             Self::Control(_) => "control",
+            Self::Collaboration(_) => "collaboration",
+            Self::Clarification(_) => "clarification",
         }
     }
 }
@@ -278,6 +293,16 @@ impl TurnEvent {
                     result: result.clone(),
                 })]
             }
+            Self::CollaborationModeChanged { result } => {
+                vec![RuntimeItem::Collaboration(CollaborationRuntimeItem {
+                    result: result.clone(),
+                })]
+            }
+            Self::StructuredClarificationChanged { result } => {
+                vec![RuntimeItem::Clarification(ClarificationRuntimeItem {
+                    result: result.clone(),
+                })]
+            }
             _ => Vec::new(),
         }
     }
@@ -351,14 +376,17 @@ fn thread_ref_from_stable_id(stable_id: &str) -> ConversationThreadRef {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandRuntimePhase, ControlOperation, ControlResultStatus, DiffRuntimeItem,
-        FileRuntimeItem, FileRuntimeOperation, RuntimeItem, ThreadControlOperation,
-        thread_control_operation, thread_control_result, trace_control_result,
+        ClarificationRuntimeItem, CollaborationRuntimeItem, CommandRuntimePhase, ControlOperation,
+        ControlResultStatus, DiffRuntimeItem, FileRuntimeItem, FileRuntimeOperation, RuntimeItem,
+        ThreadControlOperation, thread_control_operation, thread_control_result,
+        trace_control_result,
     };
     use crate::domain::model::{
-        AppliedEdit, ConversationThreadRef, PlanChecklistItem, PlanChecklistItemStatus,
-        ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, ThreadMergeRecord,
-        TraceRecordKind, TurnEvent,
+        AppliedEdit, CollaborationMode, CollaborationModeRequest, CollaborationModeRequestSource,
+        CollaborationModeRequestTarget, ConversationThreadRef, PlanChecklistItem,
+        PlanChecklistItemStatus, StructuredClarificationKind, StructuredClarificationOption,
+        StructuredClarificationRequest, ThreadCandidateId, ThreadDecision, ThreadDecisionId,
+        ThreadDecisionKind, ThreadMergeRecord, TraceRecordKind, TurnEvent,
     };
 
     #[test]
@@ -440,6 +468,54 @@ mod tests {
                     operation: FileRuntimeOperation::Updated,
                 }),
             ]
+        );
+
+        let collaboration = crate::domain::model::CollaborationModeResult::invalid(
+            CollaborationModeRequest::new(
+                CollaborationModeRequestTarget::Unsupported("pairing".to_string()),
+                CollaborationModeRequestSource::OperatorSurface,
+                Some("unsupported request".to_string()),
+            ),
+            CollaborationMode::Execution.state(),
+            "unsupported collaboration mode `pairing`; continuing in execution mode",
+        );
+        assert_eq!(
+            TurnEvent::CollaborationModeChanged {
+                result: collaboration.clone(),
+            }
+            .runtime_items(),
+            vec![RuntimeItem::Collaboration(CollaborationRuntimeItem {
+                result: collaboration,
+            })]
+        );
+
+        let clarification = StructuredClarificationRequest::new(
+            "planning-mode-clarification",
+            StructuredClarificationKind::Approval,
+            "Planning mode is read-only, so I stopped before `write_file README.md`.",
+            vec![
+                StructuredClarificationOption::new(
+                    "stay_in_planning",
+                    "Stay in planning",
+                    "Keep the turn read-only and return a plan.",
+                ),
+                StructuredClarificationOption::new(
+                    "switch_to_execution",
+                    "Switch to execution",
+                    "Rerun in execution mode so Paddles can apply the change.",
+                ),
+            ],
+            false,
+        )
+        .requested("planning mode blocked a mutating action");
+        assert_eq!(
+            TurnEvent::StructuredClarificationChanged {
+                result: clarification.clone(),
+            }
+            .runtime_items(),
+            vec![RuntimeItem::Clarification(ClarificationRuntimeItem {
+                result: clarification,
+            })]
         );
     }
 

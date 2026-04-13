@@ -362,6 +362,15 @@ impl StructuredClarificationRequest {
             detail: detail.into(),
         }
     }
+
+    pub fn requested(&self, detail: impl Into<String>) -> StructuredClarificationResult {
+        StructuredClarificationResult {
+            request: self.clone(),
+            response: None,
+            status: StructuredClarificationStatus::Requested,
+            detail: detail.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

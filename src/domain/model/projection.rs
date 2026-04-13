@@ -94,6 +94,20 @@ impl ConversationTraceGraph {
                     TraceRecordKind::ControlResultRecorded(result) => {
                         ("control".to_string(), result.summary())
                     }
+                    TraceRecordKind::CollaborationModeDeclared(result) => (
+                        "mode".to_string(),
+                        truncate(
+                            &format!("{} {}", result.active.mode.label(), result.status.label()),
+                            24,
+                        ),
+                    ),
+                    TraceRecordKind::StructuredClarificationRecorded(result) => (
+                        "clarification".to_string(),
+                        truncate(
+                            &format!("{} {}", result.request.kind.label(), result.status.label()),
+                            24,
+                        ),
+                    ),
                     TraceRecordKind::ThreadMerged(_) => ("merge".to_string(), "merge".to_string()),
                     TraceRecordKind::ThreadCandidateCaptured(_) => {
                         ("thread".to_string(), "candidate".to_string())

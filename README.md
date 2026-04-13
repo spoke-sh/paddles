@@ -209,6 +209,13 @@ and web projections replay those records as system policy rows, and downgraded
 profiles such as `prompt-envelope-safe-v1` surface their disabled features
 explicitly instead of silently pretending full parity.
 
+Collaboration mode follows the same projection rule. Planning, execution, and
+review requests now resolve into typed mode results with explicit `applied`,
+`defaulted`, `invalid`, or `unavailable` status. When planning mode halts
+before mutation, the structured clarification request is replayable as its own
+runtime/trace record instead of collapsing into an untyped conversational
+detour.
+
 External capability fabrics now follow the same rule. When the recursive
 harness discovers or invokes `web.search`, `mcp.tool`, or
 `connector.app_action`, the runtime projects one shared vocabulary across the
@@ -310,6 +317,7 @@ The recursive harness runs as a bounded local-first runtime:
 - **Separate synthesis** — a distinct synthesizer lane produces the final grounded answer from the accumulated evidence bundle
 - **Full-stream visibility** — a default TUI/event stream shows interpretation, first planner actions, retrieval, fallbacks, and grounded synthesis as they happen, while low-value direct-response bookkeeping stays behind higher verbosity
 - **Shared verbosity contract** — one resolved `0/1/2/3` verbosity level governs both the TUI transcript and the web event stream: `0` is the default operational view, `1` adds info-tier planner metadata, `2` adds debug-tier routing/capability detail, and `3` enables trace diagnostics
+- **Typed collaboration modes** — planning, execution, and review mode selection plus blocked-mutation clarification requests project through the same turn-event and durable-trace vocabulary instead of living only in prompts
 - **Steering-signal control** — context strain and budget boundary remain controller-owned, while premise challenge and action bias now trigger recursive planner review passes over the current sources instead of hard-coded redirects
 - **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary whose default runtime posture now prefers embedded `transit-core` and degrades to bounded in-memory recording only when persistence cannot be opened locally
 - **Session wake and slice contract** — the recorder boundary now defines how a harness wakes a prior task, resumes from checkpoints, and interrogates deterministic replay slices without falling back to ad hoc prompt summaries

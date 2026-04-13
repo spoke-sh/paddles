@@ -4,6 +4,7 @@ use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnap
 use super::harness::HarnessSnapshot;
 use super::interpretation::InterpretationContext;
 use super::traces::{TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase};
+use super::{CollaborationModeResult, StructuredClarificationResult};
 use paddles_conversation::TraceArtifactId;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -129,6 +130,12 @@ pub enum TurnEvent {
         mode: String,
         summary: Option<String>,
     },
+    CollaborationModeChanged {
+        result: CollaborationModeResult,
+    },
+    StructuredClarificationChanged {
+        result: StructuredClarificationResult,
+    },
     ControlStateChanged {
         result: ControlResult,
     },
@@ -234,6 +241,8 @@ impl TurnEvent {
             Self::ThreadCandidateCaptured { .. } => "thread_candidate_captured",
             Self::ThreadDecisionApplied { .. } => "thread_decision_applied",
             Self::ThreadMerged { .. } => "thread_merged",
+            Self::CollaborationModeChanged { .. } => "collaboration_mode_changed",
+            Self::StructuredClarificationChanged { .. } => "structured_clarification_changed",
             Self::ControlStateChanged { .. } => "control_state_changed",
             Self::PlannerStepProgress { .. } => "planner_step_progress",
             Self::GathererSearchProgress { .. } => "gatherer_search_progress",
@@ -270,6 +279,8 @@ impl TurnEvent {
             | Self::ToolFinished { .. }
             | Self::WorkspaceEditApplied { .. }
             | Self::ControlStateChanged { .. }
+            | Self::CollaborationModeChanged { .. }
+            | Self::StructuredClarificationChanged { .. }
             | Self::ExecutionGovernanceProfileApplied { .. }
             | Self::ExecutionGovernanceDecisionRecorded { .. }
             | Self::Fallback { .. }
@@ -327,6 +338,8 @@ impl TurnEvent {
             },
             Self::PlannerCapability { .. } => "Planning",
             Self::GathererCapability { .. } => "Gathering evidence",
+            Self::CollaborationModeChanged { .. } => "Routing",
+            Self::StructuredClarificationChanged { .. } => "Intervening",
             Self::ExecutionGovernanceProfileApplied { .. }
             | Self::ExecutionGovernanceDecisionRecorded { .. } => "Governing",
             Self::IntentClassified { .. } | Self::InterpretationContext { .. } => "Routing",

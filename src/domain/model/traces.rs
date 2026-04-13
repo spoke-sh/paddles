@@ -1,5 +1,6 @@
 use super::control::ControlResult;
 use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
+use super::{CollaborationModeResult, StructuredClarificationResult};
 use paddles_conversation::{
     ArtifactEnvelope, ConversationThreadRef, TaskTraceId, ThreadCandidate, ThreadDecision,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
@@ -392,6 +393,8 @@ pub enum TraceRecordKind {
     ThreadDecisionSelected(ThreadDecision),
     ThreadMerged(ThreadMergeRecord),
     ControlResultRecorded(ControlResult),
+    CollaborationModeDeclared(CollaborationModeResult),
+    StructuredClarificationRecorded(StructuredClarificationResult),
     ExecutionGovernanceProfileDeclared(ExecutionGovernanceSnapshot),
     ExecutionGovernanceDecisionRecorded(ExecutionGovernanceDecision),
     PlannerAction {

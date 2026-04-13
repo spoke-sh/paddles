@@ -1,4 +1,7 @@
-use super::{AppliedEdit, ExecutionGovernanceDecision, PlanChecklistItem, TurnEvent};
+use super::{
+    AppliedEdit, CollaborationModeResult, ExecutionGovernanceDecision, PlanChecklistItem,
+    StructuredClarificationResult, TurnEvent,
+};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -159,6 +162,32 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
                         .as_ref()
                         .map(|turn| turn.as_str().to_string()))
                     .unwrap_or_else(|| "session".to_string())
+            ),
+        },
+        TurnEvent::CollaborationModeChanged { result } => RuntimeEventPresentation {
+            badge: "mode".to_string(),
+            badge_class: "route".to_string(),
+            title: format!(
+                "• Collaboration: {} {}",
+                result.active.mode.label(),
+                result.status.label()
+            ),
+            detail: format_collaboration_mode_detail(result),
+            text: format!("{} · {}", result.active.mode.label(), result.status.label()),
+        },
+        TurnEvent::StructuredClarificationChanged { result } => RuntimeEventPresentation {
+            badge: "ask".to_string(),
+            badge_class: "planner".to_string(),
+            title: format!(
+                "• Clarification: {} {}",
+                result.request.kind.label(),
+                result.status.label()
+            ),
+            detail: format_structured_clarification_detail(result),
+            text: format!(
+                "{} · {}",
+                result.request.kind.label(),
+                result.status.label()
             ),
         },
         TurnEvent::PlannerStepProgress {
@@ -564,6 +593,38 @@ fn format_applied_edit_detail(edit: &AppliedEdit) -> String {
     }
 }
 
+fn format_collaboration_mode_detail(result: &CollaborationModeResult) -> String {
+    let mut lines = Vec::new();
+    if let Some(request) = &result.request {
+        lines.push(format!("requested={}", request.target.label()));
+        lines.push(format!("source={}", request.source.label()));
+        if let Some(detail) = request
+            .detail
+            .as_deref()
+            .filter(|detail| !detail.trim().is_empty())
+        {
+            lines.push(format!("request_detail={}", detail.trim()));
+        }
+    }
+    lines.push(format!("active={}", result.active.mode.label()));
+    lines.push(format!(
+        "mutation_posture={}",
+        result.active.mutation_posture.label()
+    ));
+    lines.push(format!(
+        "output_contract={}",
+        result.active.output_contract.label()
+    ));
+    lines.push(format!(
+        "clarification_policy={}",
+        result.active.clarification_policy.label()
+    ));
+    if !result.detail.trim().is_empty() {
+        lines.push(format!("detail={}", result.detail.trim()));
+    }
+    lines.join("\n")
+}
+
 fn format_plan_checklist_detail(items: &[PlanChecklistItem]) -> String {
     if items.is_empty() {
         return "No checklist items recorded.".to_string();
@@ -574,6 +635,35 @@ fn format_plan_checklist_detail(items: &[PlanChecklistItem]) -> String {
         .map(|item| format!("{} {}", item.status.marker(), item.label))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn format_structured_clarification_detail(result: &StructuredClarificationResult) -> String {
+    let mut lines = vec![
+        format!("id={}", result.request.clarification_id),
+        format!("status={}", result.status.label()),
+        result.request.prompt.clone(),
+    ];
+    if !result.request.options.is_empty() {
+        lines.push("Options:".to_string());
+        lines.extend(
+            result
+                .request
+                .options
+                .iter()
+                .map(|option| format!("- {}: {}", option.option_id, option.description.trim())),
+        );
+    }
+    if let Some(response) = &result.response {
+        lines.push(format!("response={}", response.summary()));
+    }
+    lines.push(format!(
+        "allow_free_form={}",
+        result.request.allow_free_form
+    ));
+    if !result.detail.trim().is_empty() {
+        lines.push(format!("detail={}", result.detail.trim()));
+    }
+    lines.join("\n")
 }
 
 fn format_applied_edit_text(tool_name: &str, edit: &AppliedEdit) -> String {
@@ -655,11 +745,13 @@ fn governance_badge_class(decision: &ExecutionGovernanceDecision) -> &'static st
 mod tests {
     use super::{RuntimeEventPresentation, project_runtime_event, project_runtime_event_for_tui};
     use crate::domain::model::{
-        AppliedEdit, ExecutionEscalationRequest, ExecutionGovernanceDecision,
-        ExecutionGovernanceOutcome, ExecutionHandKind, ExecutionPermission,
-        ExecutionPermissionRequest, ExecutionPermissionRequirement, ExecutionPermissionReuseScope,
-        GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
-        TurnEvent,
+        AppliedEdit, CollaborationMode, CollaborationModeRequest, CollaborationModeRequestSource,
+        CollaborationModeRequestTarget, CollaborationModeResult, ExecutionEscalationRequest,
+        ExecutionGovernanceDecision, ExecutionGovernanceOutcome, ExecutionHandKind,
+        ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
+        ExecutionPermissionReuseScope, GovernorState, HarnessChamber, HarnessSnapshot,
+        HarnessStatus, StructuredClarificationKind, StructuredClarificationOption,
+        StructuredClarificationRequest, TimeoutPhase, TimeoutState, TurnEvent,
     };
 
     #[test]
@@ -877,6 +969,69 @@ mod tests {
                 .detail
                 .contains("provenance=Release notes -> https://example.com/releases")
         );
+    }
+
+    #[test]
+    fn projects_collaboration_mode_changes_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::CollaborationModeChanged {
+            result: CollaborationModeResult::applied(
+                CollaborationModeRequest::new(
+                    CollaborationModeRequestTarget::Known(CollaborationMode::Planning),
+                    CollaborationModeRequestSource::OperatorSurface,
+                    Some("operator selected planning mode".to_string()),
+                ),
+                CollaborationMode::Planning.state(),
+            ),
+        });
+
+        assert_eq!(presentation.badge, "mode");
+        assert_eq!(presentation.badge_class, "route");
+        assert_eq!(presentation.title, "• Collaboration: planning applied");
+        assert!(presentation.detail.contains("requested=planning"));
+        assert!(presentation.detail.contains("source=operator_surface"));
+        assert!(
+            presentation
+                .detail
+                .contains("mutation_posture=fail_closed_read_only")
+        );
+        assert_eq!(presentation.text, "planning · applied");
+    }
+
+    #[test]
+    fn projects_structured_clarification_requests_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::StructuredClarificationChanged {
+            result: StructuredClarificationRequest::new(
+                "planning-mode-clarification",
+                StructuredClarificationKind::Approval,
+                "Planning mode is read-only, so I stopped before `write_file README.md`.",
+                vec![
+                    StructuredClarificationOption::new(
+                        "stay_in_planning",
+                        "Stay in planning",
+                        "Keep the turn read-only and return a plan.",
+                    ),
+                    StructuredClarificationOption::new(
+                        "switch_to_execution",
+                        "Switch to execution",
+                        "Rerun in execution mode so Paddles can apply the change.",
+                    ),
+                ],
+                false,
+            )
+            .requested("planning mode blocked a mutating action"),
+        });
+
+        assert_eq!(presentation.badge, "ask");
+        assert_eq!(presentation.badge_class, "planner");
+        assert_eq!(presentation.title, "• Clarification: approval requested");
+        assert!(
+            presentation
+                .detail
+                .contains("Planning mode is read-only, so I stopped before")
+        );
+        assert!(presentation.detail.contains("stay_in_planning"));
+        assert!(presentation.detail.contains("switch_to_execution"));
+        assert_eq!(presentation.text, "approval · requested");
     }
 
     #[test]

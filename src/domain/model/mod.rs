@@ -33,10 +33,11 @@ pub use collaboration::{
 pub use compaction::{CompactionBudget, CompactionDecision, CompactionPlan, CompactionRequest};
 pub use context_quality::{ContextStrain, StrainFactor, StrainLevel, StrainTracker};
 pub use control::{
-    CommandRuntimeItem, CommandRuntimePhase, ControlOperation, ControlResult, ControlResultStatus,
-    ControlRuntimeItem, ControlSubject, DiffRuntimeItem, FileRuntimeItem, FileRuntimeOperation,
-    PlanRuntimeItem, RuntimeItem, ThreadControlOperation, TurnControlOperation,
-    thread_control_operation, thread_control_result, trace_control_result,
+    ClarificationRuntimeItem, CollaborationRuntimeItem, CommandRuntimeItem, CommandRuntimePhase,
+    ControlOperation, ControlResult, ControlResultStatus, ControlRuntimeItem, ControlSubject,
+    DiffRuntimeItem, FileRuntimeItem, FileRuntimeOperation, PlanRuntimeItem, RuntimeItem,
+    ThreadControlOperation, TurnControlOperation, thread_control_operation, thread_control_result,
+    trace_control_result,
 };
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
