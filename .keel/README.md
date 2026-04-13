@@ -353,7 +353,11 @@
 |--------|--------|
 | [Establish A Typed External Capability Fabric Substrate](epics/VGb1c1XAL/voyages/VGcZRpCKi/) | done |
 
-### [Mode-Aware Planning And Review Workflows](epics/VGb1c1pAR/) (draft)
+### [Mode-Aware Planning And Review Workflows](epics/VGb1c1pAR/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Establish A Typed Collaboration Mode And Review Substrate](epics/VGb1c1pAR/voyages/VGcvNTG74/) | planned |
 
 ### [Role-Based Multi-Agent Delegation](epics/VGb1c2DBj/) (draft)
 
