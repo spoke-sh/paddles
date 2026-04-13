@@ -1,7 +1,9 @@
 use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
 use super::generative::ResponseMode;
 use super::render::RenderDocument;
-use super::traces::{TraceRecordKind, TraceReplay};
+use super::traces::{
+    TraceRecordKind, TraceReplay, TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
+};
 use super::{ControlResult, ControlSubject, trace_control_result};
 use paddles_conversation::{ArtifactEnvelope, TaskTraceId, TraceRecordId, TurnTraceId};
 use serde::{Deserialize, Serialize};
@@ -89,6 +91,36 @@ impl ConversationTranscript {
                         render: None,
                     });
                 }
+                TraceRecordKind::WorkerLifecycleRecorded(lifecycle) => {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format_worker_lifecycle(lifecycle),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
+                TraceRecordKind::WorkerArtifactRecorded(artifact) => {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format_worker_artifact(artifact),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
+                TraceRecordKind::WorkerIntegrationRecorded(integration) => {
+                    entries.push(ConversationTranscriptEntry {
+                        record_id: record.record_id.clone(),
+                        turn_id: record.lineage.turn_id.clone(),
+                        speaker: ConversationTranscriptSpeaker::System,
+                        content: format_worker_integration(integration),
+                        response_mode: None,
+                        render: None,
+                    });
+                }
                 TraceRecordKind::ToolCallRequested(tool)
                     if tool.tool_name == "external_capability" =>
                 {
@@ -172,6 +204,57 @@ fn format_control_result(result: &ControlResult) -> String {
     )
 }
 
+fn format_worker_lifecycle(lifecycle: &TraceWorkerLifecycle) -> String {
+    let worker_id = lifecycle
+        .result
+        .worker_id
+        .as_deref()
+        .or(lifecycle.request.worker_id.as_deref())
+        .unwrap_or("unassigned");
+    let role = lifecycle
+        .request
+        .contract
+        .as_ref()
+        .map(|contract| contract.role.label.as_str())
+        .unwrap_or("Worker");
+    let ownership = lifecycle
+        .request
+        .contract
+        .as_ref()
+        .map(|contract| contract.ownership.summary.as_str())
+        .unwrap_or("No ownership contract recorded.");
+
+    format!(
+        "delegation: {} {}\nworker={worker_id}\nrole={role}\nparent={}\nworker_thread={}\nownership={ownership}\n{}",
+        lifecycle.request.operation.label(),
+        lifecycle.result.status.label(),
+        lifecycle.parent_thread.stable_id(),
+        lifecycle.worker_thread.stable_id(),
+        lifecycle.result.detail
+    )
+}
+
+fn format_worker_artifact(artifact: &TraceWorkerArtifact) -> String {
+    format!(
+        "delegation artifact: {}\nworker={}\nlabel={}\nsummary={}",
+        artifact.record.kind.label(),
+        artifact.record.worker_id,
+        artifact.record.label,
+        artifact.record.summary
+    )
+}
+
+fn format_worker_integration(integration: &TraceWorkerIntegration) -> String {
+    format!(
+        "delegation: {}\nworker={}\nparent={}\nworker_thread={}\n{}",
+        integration.status.label(),
+        integration.worker_id,
+        integration.parent_thread.stable_id(),
+        integration.worker_thread.stable_id(),
+        integration.detail
+    )
+}
+
 fn control_subject_label(subject: &ControlSubject) -> String {
     subject
         .thread
@@ -207,16 +290,20 @@ mod tests {
     use super::{ConversationTranscript, ConversationTranscriptSpeaker};
     use crate::domain::model::{
         ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
+        DelegationEvidencePolicy, DelegationGovernancePolicy, DelegationIntegrationOwner,
         ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
         ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionGovernanceSnapshot,
         ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequest,
         ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
-        ResponseMode, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord,
-        TraceRecordKind, TraceReplay, TraceTaskRoot, TurnControlOperation,
+        ResponseMode, TraceBranchId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
+        TraceRecord, TraceRecordKind, TraceReplay, TraceTaskRoot, TraceWorkerIntegration,
+        TraceWorkerLifecycle, TurnControlOperation, WorkerArtifactKind, WorkerDelegationContract,
+        WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleOperation,
+        WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
     };
     use paddles_conversation::{
-        ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceCheckpointId,
-        TraceRecordId, TurnTraceId,
+        ArtifactEnvelope, ArtifactKind, ConversationThreadRef, TaskTraceId, TraceArtifactId,
+        TraceCheckpointId, TraceRecordId, TurnTraceId,
     };
 
     #[test]
@@ -539,5 +626,122 @@ mod tests {
                 .contains("planner lane is reconfiguring and cannot honor interrupt yet")
         );
         assert!(transcript.entries[1].content.contains(turn_id.as_str()));
+    }
+
+    #[test]
+    fn projects_delegation_records_into_system_transcript_entries() {
+        let task_id = TaskTraceId::new("task-4").expect("task");
+        let turn_id = TurnTraceId::new("task-4.turn-0001").expect("turn");
+        let worker_branch = TraceBranchId::new("worker-thread-1").expect("branch");
+        let replay = TraceReplay {
+            task_id: task_id.clone(),
+            records: vec![
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    sequence: 1,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: None,
+                    },
+                    kind: TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                        request: WorkerDelegationRequest::spawn(
+                            "Project delegated worker state",
+                            WorkerDelegationContract::new(
+                                WorkerRole::new(
+                                    "worker",
+                                    "Worker",
+                                    "Project delegated worker state across surfaces.",
+                                ),
+                                WorkerOwnership::new(
+                                    "Own delegation projection state",
+                                    vec!["src/domain/model".to_string()],
+                                    vec!["src/domain/model/projection.rs".to_string()],
+                                    DelegationIntegrationOwner::Parent,
+                                ),
+                                DelegationGovernancePolicy::inherit_from_parent(
+                                    &ExecutionGovernanceSnapshot::new(
+                                        "recursive-structured-v1",
+                                        "recursive-structured-v1",
+                                        ExecutionGovernanceProfile::new(
+                                            ExecutionSandboxMode::WorkspaceWrite,
+                                            ExecutionApprovalPolicy::OnRequest,
+                                            vec![
+                                                ExecutionPermissionReuseScope::Turn,
+                                                ExecutionPermissionReuseScope::Hand,
+                                            ],
+                                            None,
+                                        ),
+                                    ),
+                                    DelegationEvidencePolicy::new(
+                                        "Worker state stays visible to the parent.",
+                                        vec![
+                                            WorkerArtifactKind::ToolCall,
+                                            WorkerArtifactKind::ToolOutput,
+                                            WorkerArtifactKind::CompletionSummary,
+                                        ],
+                                    ),
+                                ),
+                            ),
+                        ),
+                        result: WorkerLifecycleResult::new(
+                            WorkerLifecycleOperation::Spawn,
+                            WorkerLifecycleResultStatus::Accepted,
+                            Some("worker-1".to_string()),
+                            "Spawned worker-1 on a child thread.",
+                        ),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: ConversationThreadRef::Branch(worker_branch.clone()),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    sequence: 2,
+                    lineage: TraceLineage {
+                        task_id,
+                        turn_id,
+                        branch_id: None,
+                        parent_record_id: Some(
+                            TraceRecordId::new("record-1").expect("parent record"),
+                        ),
+                    },
+                    kind: TraceRecordKind::WorkerIntegrationRecorded(TraceWorkerIntegration {
+                        worker_id: "worker-1".to_string(),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: ConversationThreadRef::Branch(worker_branch),
+                        status: WorkerIntegrationStatus::Integrated,
+                        detail: "Integrated the worker findings into the recursive harness."
+                            .to_string(),
+                        integrated_artifact_ids: Vec::new(),
+                    }),
+                },
+            ],
+        };
+
+        let transcript = ConversationTranscript::from_trace_replay(&replay);
+
+        assert_eq!(transcript.entries.len(), 2);
+        assert_eq!(
+            transcript.entries[0].speaker,
+            ConversationTranscriptSpeaker::System
+        );
+        assert!(
+            transcript.entries[0]
+                .content
+                .contains("delegation: spawn accepted")
+        );
+        assert!(transcript.entries[0].content.contains("role=Worker"));
+        assert!(
+            transcript.entries[0]
+                .content
+                .contains("ownership=Own delegation projection state")
+        );
+        assert!(
+            transcript.entries[1]
+                .content
+                .contains("delegation: integrated")
+        );
+        assert!(transcript.entries[1].content.contains("recursive harness"));
     }
 }

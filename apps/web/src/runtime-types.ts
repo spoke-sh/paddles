@@ -188,12 +188,47 @@ export interface ConversationTraceGraph {
   branches: ConversationTraceGraphBranch[];
 }
 
+export interface DelegatedWorkerProjection {
+  worker_id: string;
+  role_label: string;
+  ownership_summary: string;
+  read_scopes: string[];
+  write_scopes: string[];
+  parent_thread: string;
+  worker_thread: string;
+  status:
+    | 'running'
+    | 'waiting'
+    | 'awaiting_integration'
+    | 'integrated'
+    | 'closed'
+    | 'conflict'
+    | 'rejected'
+    | 'stale'
+    | 'unavailable';
+  progress_summary: string;
+  latest_detail: string;
+  artifact_count: number;
+  completion_recorded: boolean;
+  integration_status?: 'integrated' | 'rejected' | 'stale' | 'unavailable' | null;
+  degraded: boolean;
+}
+
+export interface ConversationDelegationProjection {
+  task_id: string;
+  harness_identity: string;
+  active_worker_count: number;
+  degraded_worker_count: number;
+  workers: DelegatedWorkerProjection[];
+}
+
 export interface ConversationProjectionSnapshot {
   task_id: string;
   transcript: ConversationTranscript;
   forensics: ConversationForensicProjection;
   manifold: ConversationManifoldProjection;
   trace_graph: ConversationTraceGraph;
+  delegation: ConversationDelegationProjection;
 }
 
 export interface ConversationProjectionUpdate {

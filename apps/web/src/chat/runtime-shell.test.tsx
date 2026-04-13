@@ -281,6 +281,71 @@ describe('Runtime shell and chat', () => {
     expect(systemMessage.closest('.msg')).not.toHaveClass('user');
   });
 
+  it('renders shared delegation cards from the projection snapshot', async () => {
+    const projectionWithDelegation: ConversationProjectionSnapshot = {
+      ...bootstrapProjection,
+      delegation: {
+        task_id: 'task-123',
+        harness_identity: 'recursive-harness',
+        active_worker_count: 1,
+        degraded_worker_count: 1,
+        workers: [
+          {
+            worker_id: 'worker-1',
+            role_label: 'Worker',
+            ownership_summary: 'Own src/domain/model/delegation.rs',
+            read_scopes: ['src/domain/model'],
+            write_scopes: ['src/domain/model/delegation.rs'],
+            parent_thread: 'mainline',
+            worker_thread: 'worker-thread-1',
+            status: 'awaiting_integration',
+            progress_summary: 'Completion ready with 2 artifacts visible to the parent.',
+            latest_detail: 'Delegated review complete.',
+            artifact_count: 2,
+            completion_recorded: true,
+            integration_status: null,
+            degraded: false,
+          },
+          {
+            worker_id: 'worker-2',
+            role_label: 'Worker',
+            ownership_summary: 'Own src/domain/model/delegation.rs',
+            read_scopes: ['src/domain/model'],
+            write_scopes: ['src/domain/model/delegation.rs'],
+            parent_thread: 'mainline',
+            worker_thread: 'worker-thread-2',
+            status: 'conflict',
+            progress_summary: 'Ownership conflict: src/domain/model/delegation.rs',
+            latest_detail: 'Ownership conflict: src/domain/model/delegation.rs',
+            artifact_count: 0,
+            completion_recorded: false,
+            integration_status: 'rejected',
+            degraded: true,
+          },
+        ],
+      },
+    };
+
+    stubRuntimeFetch({ projection: projectionWithDelegation });
+    renderAtPath('/');
+
+    expect(await screen.findByText('recursive harness')).toBeInTheDocument();
+    expect(screen.getAllByText(/^Worker$/, { selector: '.delegation-card__role' })).toHaveLength(
+      2
+    );
+    expect(screen.getByText('awaiting integration')).toBeInTheDocument();
+    expect(screen.getByText('pending')).toBeInTheDocument();
+    expect(screen.getByText('rejected')).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/^Own src\/domain\/model\/delegation\.rs$/, {
+        selector: '.delegation-card__ownership',
+      })
+    ).toHaveLength(2);
+    expect(
+      screen.getByText('Ownership conflict: src/domain/model/delegation.rs')
+    ).toBeInTheDocument();
+  });
+
   it('renders inline code spans in user and assistant transcript text', async () => {
     const inlineCodeProjection: ConversationProjectionSnapshot = {
       ...bootstrapProjection,

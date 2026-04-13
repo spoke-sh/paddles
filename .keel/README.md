@@ -359,11 +359,11 @@
 |--------|--------|
 | [Establish A Typed Collaboration Mode And Review Substrate](epics/VGb1c1pAR/voyages/VGcvNTG74/) | done |
 
-### [Role-Based Multi-Agent Delegation](epics/VGb1c2DBj/) (active)
+### [Role-Based Multi-Agent Delegation](epics/VGb1c2DBj/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Establish A Replayable Multi-Agent Delegation Substrate](epics/VGb1c2DBj/voyages/VGdaQAncW/) | in-progress |
+| [Establish A Replayable Multi-Agent Delegation Substrate](epics/VGb1c2DBj/voyages/VGdaQAncW/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

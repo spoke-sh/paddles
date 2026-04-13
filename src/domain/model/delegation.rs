@@ -3,7 +3,7 @@ use super::{
     ExecutionPermissionReuseScope, ExecutionSandboxMode, TraceRecordKind, TraceReplay,
     TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
 };
-use paddles_conversation::{ConversationThreadRef, TraceBranchId};
+use paddles_conversation::{ConversationThreadRef, TaskTraceId, TraceBranchId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -532,6 +532,137 @@ impl DelegationReplayView {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationDelegationProjection {
+    pub task_id: TaskTraceId,
+    pub harness_identity: String,
+    pub active_worker_count: usize,
+    pub degraded_worker_count: usize,
+    pub workers: Vec<DelegatedWorkerProjection>,
+}
+
+impl ConversationDelegationProjection {
+    pub fn empty(task_id: TaskTraceId) -> Self {
+        Self {
+            task_id,
+            harness_identity: "recursive-harness".to_string(),
+            active_worker_count: 0,
+            degraded_worker_count: 0,
+            workers: Vec::new(),
+        }
+    }
+
+    pub fn from_trace_replay(replay: &TraceReplay) -> Self {
+        let workers = DelegationReplayView::from_trace_replay(replay)
+            .workers
+            .into_iter()
+            .map(DelegatedWorkerProjection::from_snapshot)
+            .collect::<Vec<_>>();
+        let active_worker_count = workers.iter().filter(|worker| worker.is_active()).count();
+        let degraded_worker_count = workers.iter().filter(|worker| worker.degraded).count();
+
+        Self {
+            task_id: replay.task_id.clone(),
+            harness_identity: "recursive-harness".to_string(),
+            active_worker_count,
+            degraded_worker_count,
+            workers,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedWorkerProjection {
+    pub worker_id: String,
+    pub role_label: String,
+    pub ownership_summary: String,
+    pub read_scopes: Vec<String>,
+    pub write_scopes: Vec<String>,
+    pub parent_thread: String,
+    pub worker_thread: String,
+    pub status: DelegatedWorkerStatus,
+    pub progress_summary: String,
+    pub latest_detail: String,
+    pub artifact_count: usize,
+    pub completion_recorded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration_status: Option<WorkerIntegrationStatus>,
+    pub degraded: bool,
+}
+
+impl DelegatedWorkerProjection {
+    fn from_snapshot(snapshot: DelegatedWorkerSnapshot) -> Self {
+        let role_label = snapshot
+            .contract
+            .as_ref()
+            .map(|contract| contract.role.label.clone())
+            .unwrap_or_else(|| "Worker".to_string());
+        let ownership_summary = snapshot
+            .contract
+            .as_ref()
+            .map(|contract| contract.ownership.summary.clone())
+            .unwrap_or_else(|| "No ownership contract recorded.".to_string());
+        let read_scopes = snapshot
+            .contract
+            .as_ref()
+            .map(|contract| contract.ownership.read_scopes.clone())
+            .unwrap_or_default();
+        let write_scopes = snapshot
+            .contract
+            .as_ref()
+            .map(|contract| contract.ownership.write_scopes.clone())
+            .unwrap_or_default();
+        let artifact_count = snapshot.artifacts.len();
+        let completion_recorded = snapshot
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.record.kind == WorkerArtifactKind::CompletionSummary);
+        let integration_status = snapshot
+            .integrations
+            .last()
+            .map(|integration| integration.status);
+        let progress_summary = progress_summary_for_worker(
+            snapshot.status,
+            artifact_count,
+            integration_status,
+            snapshot.latest_detail.as_str(),
+        );
+        let degraded = matches!(
+            snapshot.status,
+            DelegatedWorkerStatus::Conflict
+                | DelegatedWorkerStatus::Rejected
+                | DelegatedWorkerStatus::Stale
+                | DelegatedWorkerStatus::Unavailable
+        );
+
+        Self {
+            worker_id: snapshot.worker_id,
+            role_label,
+            ownership_summary,
+            read_scopes,
+            write_scopes,
+            parent_thread: render_thread_ref(snapshot.parent_thread.as_ref()),
+            worker_thread: render_thread_ref(snapshot.worker_thread.as_ref()),
+            status: snapshot.status,
+            progress_summary,
+            latest_detail: snapshot.latest_detail,
+            artifact_count,
+            completion_recorded,
+            integration_status,
+            degraded,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.status,
+            DelegatedWorkerStatus::Running
+                | DelegatedWorkerStatus::Waiting
+                | DelegatedWorkerStatus::AwaitingIntegration
+        )
+    }
+}
+
 fn canonicalize_strings(mut values: Vec<String>) -> Vec<String> {
     values.sort();
     values.dedup();
@@ -574,6 +705,44 @@ fn thread_ref_from_branch_id(branch_id: Option<&TraceBranchId>) -> ConversationT
         .cloned()
         .map(ConversationThreadRef::Branch)
         .unwrap_or(ConversationThreadRef::Mainline)
+}
+
+fn render_thread_ref(thread: Option<&ConversationThreadRef>) -> String {
+    thread
+        .map(ConversationThreadRef::stable_id)
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn progress_summary_for_worker(
+    status: DelegatedWorkerStatus,
+    artifact_count: usize,
+    integration_status: Option<WorkerIntegrationStatus>,
+    latest_detail: &str,
+) -> String {
+    match status {
+        DelegatedWorkerStatus::Running => {
+            format!("{artifact_count} artifact(s) visible; parent may continue bounded local work.")
+        }
+        DelegatedWorkerStatus::Waiting => {
+            format!("{artifact_count} artifact(s) visible; parent is waiting on the worker.")
+        }
+        DelegatedWorkerStatus::AwaitingIntegration => {
+            format!("Completion ready with {artifact_count} artifact(s) visible to the parent.")
+        }
+        DelegatedWorkerStatus::Integrated => match integration_status {
+            Some(WorkerIntegrationStatus::Integrated) => {
+                "Integrated into the recursive harness.".to_string()
+            }
+            _ => "Integrated into the parent turn.".to_string(),
+        },
+        DelegatedWorkerStatus::Closed => {
+            "Worker closed without a new integration step.".to_string()
+        }
+        DelegatedWorkerStatus::Conflict
+        | DelegatedWorkerStatus::Rejected
+        | DelegatedWorkerStatus::Stale
+        | DelegatedWorkerStatus::Unavailable => latest_detail.to_string(),
+    }
 }
 
 fn normalize_scope(scope: &str) -> String {

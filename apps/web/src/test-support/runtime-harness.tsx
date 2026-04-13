@@ -232,6 +232,13 @@ export const bootstrapProjection: ConversationProjectionSnapshot = {
     edges: [{ from: 'record-1', to: 'record-2' }],
     branches: [],
   },
+  delegation: {
+    task_id: 'task-123',
+    harness_identity: 'recursive-harness',
+    active_worker_count: 0,
+    degraded_worker_count: 0,
+    workers: [],
+  },
 };
 
 export const bootstrapPromptHistory = ['first prompt', 'second prompt'];

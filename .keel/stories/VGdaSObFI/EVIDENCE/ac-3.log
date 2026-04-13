@@ -1,0 +1,13 @@
+
+> @paddles/web@0.0.0 test
+> vitest run --run src/chat/runtime-shell.test.tsx
+
+
+ RUN  v4.1.3 /home/alex/workspace/spoke-sh/paddles/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  21:02:10
+   Duration  1.88s (transform 367ms, setup 73ms, import 478ms, tests 648ms, environment 559ms)
+

@@ -1,7 +1,7 @@
 use super::{
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
-    ConversationTranscript, ConversationTranscriptUpdate, TaskTraceId, TraceRecordKind,
-    TraceReplay,
+    ConversationDelegationProjection, ConversationForensicProjection, ConversationForensicUpdate,
+    ConversationManifoldProjection, ConversationTranscript, ConversationTranscriptUpdate,
+    TaskTraceId, TraceRecordKind, TraceReplay,
 };
 use serde::{Deserialize, Serialize};
 
@@ -192,6 +192,7 @@ pub struct ConversationProjectionSnapshot {
     pub forensics: ConversationForensicProjection,
     pub manifold: ConversationManifoldProjection,
     pub trace_graph: ConversationTraceGraph,
+    pub delegation: ConversationDelegationProjection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

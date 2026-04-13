@@ -41,11 +41,12 @@ pub use control::{
     trace_control_result,
 };
 pub use delegation::{
-    DelegatedWorkerSnapshot, DelegatedWorkerStatus, DelegationEvidencePolicy,
-    DelegationGovernancePolicy, DelegationIntegrationOwner, DelegationReplayView,
-    WorkerArtifactKind, WorkerArtifactRecord, WorkerDelegationContract, WorkerDelegationRequest,
-    WorkerIntegrationStatus, WorkerLifecycleOperation, WorkerLifecycleResult,
-    WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
+    ConversationDelegationProjection, DelegatedWorkerProjection, DelegatedWorkerSnapshot,
+    DelegatedWorkerStatus, DelegationEvidencePolicy, DelegationGovernancePolicy,
+    DelegationIntegrationOwner, DelegationReplayView, WorkerArtifactKind, WorkerArtifactRecord,
+    WorkerDelegationContract, WorkerDelegationRequest, WorkerIntegrationStatus,
+    WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
+    WorkerRole,
 };
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,

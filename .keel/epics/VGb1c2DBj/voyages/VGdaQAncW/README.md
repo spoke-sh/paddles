@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VGdaQAncW
-status: in-progress
+status: done
 epic: VGb1c2DBj
 created_at: 2026-04-12T20:19:45
 # authored
@@ -9,6 +9,7 @@ title: Establish A Replayable Multi-Agent Delegation Substrate
 index: 1
 updated_at: 2026-04-12T20:23:48
 started_at: 2026-04-12T20:29:44
+completed_at: 2026-04-12T21:02:33
 ---
 
 # Establish A Replayable Multi-Agent Delegation Substrate
@@ -22,16 +23,18 @@ started_at: 2026-04-12T20:29:44
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Delegation Lifecycle And Ownership Contracts](../../../../stories/VGdaSNkFK/README.md) | feat | done |
 | [Wire Role-Based Worker Coordination Through Thread Lineage](../../../../stories/VGdaSO7FJ/README.md) | feat | done |
-| [Project Delegated Worker State Across Operator Surfaces](../../../../stories/VGdaSObFI/README.md) | feat | backlog |
+| [Project Delegated Worker State Across Operator Surfaces](../../../../stories/VGdaSObFI/README.md) | feat | done |
 <!-- END GENERATED -->

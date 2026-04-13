@@ -54,6 +54,31 @@ function transcriptSpeakerClass(speaker: 'user' | 'assistant' | 'system') {
   return 'user';
 }
 
+function delegationStatusLabel(
+  status:
+    | 'running'
+    | 'waiting'
+    | 'awaiting_integration'
+    | 'integrated'
+    | 'closed'
+    | 'conflict'
+    | 'rejected'
+    | 'stale'
+    | 'unavailable'
+) {
+  return status.split('_').join(' ');
+}
+
+function delegationIntegrationLabel(
+  status: 'integrated' | 'rejected' | 'stale' | 'unavailable' | null | undefined,
+  completionRecorded: boolean
+) {
+  if (status) {
+    return status.split('_').join(' ');
+  }
+  return completionRecorded ? 'pending' : 'not requested';
+}
+
 export function TranscriptPane({
   activeView,
   connected,
@@ -84,6 +109,87 @@ export function TranscriptPane({
       onScroll={onMessagesScroll}
       ref={messagesRef}
     >
+      {projection?.delegation.workers.length ? (
+        <section className="delegation-panel" id="delegation-panel">
+          <div className="delegation-panel__head">
+            <div>
+              <div className="delegation-panel__eyebrow">
+                {projection.delegation.harness_identity.split('-').join(' ')}
+              </div>
+              <strong>Delegation</strong>
+            </div>
+            <div className="delegation-panel__summary">
+              {projection.delegation.active_worker_count} active ·{' '}
+              {projection.delegation.degraded_worker_count} degraded
+            </div>
+          </div>
+          <div className="delegation-panel__cards">
+            {projection.delegation.workers.map((worker) => (
+              <article
+                className={`delegation-card is-${worker.status}${
+                  worker.degraded ? ' is-degraded' : ''
+                }`}
+                data-worker-id={worker.worker_id}
+                key={worker.worker_id}
+              >
+                <div className="delegation-card__top">
+                  <div>
+                    <div className="delegation-card__role">{worker.role_label}</div>
+                    <div className="delegation-card__worker-id">{worker.worker_id}</div>
+                  </div>
+                  <span className={`delegation-card__status is-${worker.status}`}>
+                    {delegationStatusLabel(worker.status)}
+                  </span>
+                </div>
+                <div className="delegation-card__progress">{worker.progress_summary}</div>
+                <div className="delegation-card__ownership">{worker.ownership_summary}</div>
+                {worker.latest_detail !== worker.progress_summary ? (
+                  <div className="delegation-card__detail">{worker.latest_detail}</div>
+                ) : null}
+                <dl className="delegation-card__meta">
+                  <div>
+                    <dt>Parent</dt>
+                    <dd>{worker.parent_thread}</dd>
+                  </div>
+                  <div>
+                    <dt>Worker</dt>
+                    <dd>{worker.worker_thread}</dd>
+                  </div>
+                  <div>
+                    <dt>Artifacts</dt>
+                    <dd>{worker.artifact_count}</dd>
+                  </div>
+                  <div>
+                    <dt>Completion</dt>
+                    <dd>{worker.completion_recorded ? 'recorded' : 'in flight'}</dd>
+                  </div>
+                  <div>
+                    <dt>Integration</dt>
+                    <dd>
+                      {delegationIntegrationLabel(
+                        worker.integration_status,
+                        worker.completion_recorded
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+                {worker.write_scopes.length ? (
+                  <div className="delegation-card__scopes">
+                    <span className="delegation-card__scope-label">write</span>
+                    {worker.write_scopes.join(', ')}
+                  </div>
+                ) : null}
+                {worker.read_scopes.length ? (
+                  <div className="delegation-card__scopes is-read">
+                    <span className="delegation-card__scope-label">read</span>
+                    {worker.read_scopes.join(', ')}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {projection?.transcript.entries.map((entry) => {
         const isTurnSelectable =
           activeView === 'manifold' && manifoldTurnIds.has(entry.turn_id);

@@ -2751,6 +2751,20 @@ impl MechSuitService {
         }
     }
 
+    pub fn replay_conversation_delegation(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<crate::domain::model::ConversationDelegationProjection> {
+        match self.replay_for_known_session(task_id)? {
+            Some(replay) => Ok(
+                crate::domain::model::ConversationDelegationProjection::from_trace_replay(&replay),
+            ),
+            None => {
+                Ok(crate::domain::model::ConversationDelegationProjection::empty(task_id.clone()))
+            }
+        }
+    }
+
     pub fn replay_conversation_projection(
         &self,
         task_id: &TaskTraceId,
@@ -2761,6 +2775,7 @@ impl MechSuitService {
             forensics: self.replay_conversation_forensics(task_id)?,
             manifold: self.replay_conversation_manifold(task_id)?,
             trace_graph: self.replay_conversation_trace_graph(task_id)?,
+            delegation: self.replay_conversation_delegation(task_id)?,
         })
     }
 
@@ -11430,6 +11445,104 @@ mod tests {
                 .nodes
                 .iter()
                 .any(|node| node.kind == "governance")
+        );
+    }
+
+    #[test]
+    fn replay_conversation_projection_includes_the_shared_delegation_surface() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let turn_id = session.allocate_turn_id();
+        let trace = Arc::new(StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            recorder,
+            Vec::new(),
+            session.clone(),
+            turn_id,
+            ConversationThreadRef::Mainline,
+        ));
+        let worker_branch = session.next_branch_id();
+        let worker_thread = ConversationThreadRef::Branch(worker_branch.clone());
+
+        trace.declare_branch(
+            worker_branch,
+            "delegated projection worker",
+            Some("project shared delegation state"),
+            None,
+        );
+        trace.record_worker_lifecycle(
+            &ConversationThreadRef::Mainline,
+            &worker_thread,
+            crate::domain::model::WorkerDelegationRequest::spawn(
+                "Project shared delegation state",
+                crate::domain::model::WorkerDelegationContract::new(
+                    crate::domain::model::WorkerRole::new(
+                        "worker",
+                        "Worker",
+                        "Project delegated worker state across shared surfaces.",
+                    ),
+                    crate::domain::model::WorkerOwnership::new(
+                        "Own src/domain/model/projection.rs",
+                        vec!["src/domain/model".to_string()],
+                        vec!["src/domain/model/projection.rs".to_string()],
+                        crate::domain::model::DelegationIntegrationOwner::Parent,
+                    ),
+                    crate::domain::model::DelegationGovernancePolicy::inherit_from_parent(
+                        &ExecutionGovernanceSnapshot::new(
+                            "recursive-structured-v1",
+                            "recursive-structured-v1",
+                            crate::domain::model::ExecutionGovernanceProfile::new(
+                                ExecutionSandboxMode::WorkspaceWrite,
+                                ExecutionApprovalPolicy::OnRequest,
+                                vec![
+                                    crate::domain::model::ExecutionPermissionReuseScope::Turn,
+                                    crate::domain::model::ExecutionPermissionReuseScope::Hand,
+                                ],
+                                None,
+                            ),
+                        ),
+                        crate::domain::model::DelegationEvidencePolicy::new(
+                            "Worker state stays visible to the parent.",
+                            vec![
+                                crate::domain::model::WorkerArtifactKind::ToolCall,
+                                crate::domain::model::WorkerArtifactKind::CompletionSummary,
+                            ],
+                        ),
+                    ),
+                ),
+            ),
+            crate::domain::model::WorkerLifecycleResult::new(
+                crate::domain::model::WorkerLifecycleOperation::Spawn,
+                crate::domain::model::WorkerLifecycleResultStatus::Accepted,
+                Some("worker-1".to_string()),
+                "Spawned worker-1 on a child thread.",
+            ),
+        );
+        trace.record_worker_artifact(
+            &worker_thread,
+            crate::domain::model::WorkerArtifactRecord::tool_call(
+                "worker-1",
+                "shell",
+                "rg delegation apps/web/src",
+            ),
+            "rg delegation apps/web/src",
+        );
+
+        let projection = service
+            .replay_conversation_projection(&session.task_id())
+            .expect("projection replay");
+
+        assert_eq!(projection.delegation.harness_identity, "recursive-harness");
+        assert_eq!(projection.delegation.active_worker_count, 1);
+        assert_eq!(projection.delegation.workers.len(), 1);
+        assert_eq!(projection.delegation.workers[0].role_label, "Worker");
+        assert_eq!(projection.delegation.workers[0].parent_thread, "mainline");
+        assert!(
+            projection.delegation.workers[0]
+                .progress_summary
+                .contains("parent may continue")
         );
     }
 

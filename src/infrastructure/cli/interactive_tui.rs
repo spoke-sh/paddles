@@ -6106,6 +6106,31 @@ mod tests {
     }
 
     #[test]
+    fn delegation_system_transcript_entries_sync_into_policy_rows() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::System,
+            "delegation: spawn accepted\nworker=worker-1\nrole=Worker\nownership=Own src/domain/model/projection.rs",
+        )]));
+
+        let last_row = app.rows.last().expect("system row exists");
+        assert_eq!(last_row.kind, TranscriptRowKind::Event);
+        assert_eq!(last_row.header, "Policy");
+        assert!(last_row.content.contains("delegation: spawn accepted"));
+        assert!(last_row.content.contains("worker=worker-1"));
+    }
+
+    #[test]
     fn app_recalls_loaded_prompt_history_across_instances() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(

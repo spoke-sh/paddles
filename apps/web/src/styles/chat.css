@@ -17,6 +17,156 @@
   flex-direction: column;
   gap: 14px;
 }
+.delegation-panel {
+  align-self: stretch;
+  padding: 16px 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(75, 115, 140, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(235, 242, 247, 0.92)),
+    linear-gradient(145deg, rgba(79, 161, 141, 0.08), rgba(45, 144, 200, 0.12));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.86),
+    0 14px 26px rgba(67, 90, 109, 0.12);
+}
+.delegation-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.delegation-panel__eyebrow {
+  margin-bottom: 4px;
+  color: #4f778a;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.delegation-panel__summary {
+  color: #50626f;
+  font-size: 12px;
+  font-weight: 600;
+}
+.delegation-panel__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.delegation-card {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(91, 111, 126, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.82), rgba(239, 244, 248, 0.94));
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,0.9),
+    0 8px 18px rgba(73, 91, 108, 0.1);
+}
+.delegation-card.is-awaiting_integration {
+  border-color: rgba(45, 144, 200, 0.28);
+}
+.delegation-card.is-integrated {
+  border-color: rgba(23, 149, 108, 0.26);
+}
+.delegation-card.is-degraded {
+  border-color: rgba(214, 95, 74, 0.26);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.8), rgba(250, 239, 236, 0.94));
+}
+.delegation-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.delegation-card__role {
+  color: #1d2c38;
+  font-size: 15px;
+  font-weight: 700;
+}
+.delegation-card__worker-id {
+  color: #5b6f7d;
+  font-family: "Iosevka Term", "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+.delegation-card__status {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid rgba(255,255,255,0.44);
+  color: #355063;
+  background: rgba(45, 144, 200, 0.12);
+}
+.delegation-card__status.is-integrated {
+  background: rgba(23, 149, 108, 0.16);
+  color: #166751;
+}
+.delegation-card__status.is-conflict,
+.delegation-card__status.is-rejected,
+.delegation-card__status.is-stale,
+.delegation-card__status.is-unavailable {
+  background: rgba(214, 95, 74, 0.16);
+  color: #9a4536;
+}
+.delegation-card__progress {
+  margin-top: 12px;
+  color: #20303b;
+  font-weight: 600;
+}
+.delegation-card__ownership,
+.delegation-card__detail {
+  margin-top: 8px;
+  color: #526673;
+  font-size: 12px;
+}
+.delegation-card__meta {
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+.delegation-card__meta div {
+  min-width: 0;
+}
+.delegation-card__meta dt {
+  color: #70818d;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.delegation-card__meta dd {
+  margin: 3px 0 0;
+  color: #243540;
+  font-size: 12px;
+  word-break: break-word;
+}
+.delegation-card__scopes {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 10px;
+  color: #324856;
+  font-size: 12px;
+}
+.delegation-card__scopes.is-read {
+  color: #556874;
+}
+.delegation-card__scope-label {
+  flex: 0 0 auto;
+  color: #70818d;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
 .msg {
   display: block;
   max-width: 85%;
@@ -170,6 +320,16 @@
 }
 .msg.user .msg-citations {
   color: rgba(248, 251, 253, 0.88);
+}
+
+@media (max-width: 720px) {
+  .delegation-panel__head {
+    flex-direction: column;
+  }
+
+  .delegation-card__meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .events-group { align-self: flex-start; width: 100%; }
