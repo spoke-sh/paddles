@@ -1,8 +1,11 @@
 use super::{
     ExecutionApprovalPolicy, ExecutionGovernanceSnapshot, ExecutionPermission,
-    ExecutionPermissionReuseScope, ExecutionSandboxMode,
+    ExecutionPermissionReuseScope, ExecutionSandboxMode, TraceRecordKind, TraceReplay,
+    TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
 };
+use paddles_conversation::{ConversationThreadRef, TraceBranchId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +33,7 @@ impl WorkerLifecycleOperation {
 #[serde(rename_all = "snake_case")]
 pub enum WorkerLifecycleResultStatus {
     Accepted,
+    Conflict,
     Rejected,
     Stale,
     Unavailable,
@@ -39,6 +43,7 @@ impl WorkerLifecycleResultStatus {
     pub fn label(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
+            Self::Conflict => "conflict",
             Self::Rejected => "rejected",
             Self::Stale => "stale",
             Self::Unavailable => "unavailable",
@@ -68,6 +73,10 @@ impl WorkerLifecycleResult {
             worker_id,
             detail: detail.into(),
         }
+    }
+
+    pub fn summary(&self) -> String {
+        format!("{} {}", self.operation.label(), self.status.label())
     }
 }
 
@@ -120,6 +129,28 @@ impl WorkerOwnership {
             integration_owner,
         }
     }
+
+    pub fn conflicting_write_scopes(&self, other: &Self) -> Vec<String> {
+        let mut conflicts = Vec::new();
+        for left in &self.write_scopes {
+            for right in &other.write_scopes {
+                let left = normalize_scope(left);
+                let right = normalize_scope(right);
+                if scopes_conflict(&left, &right) {
+                    conflicts.push(if left == right || right.starts_with(&format!("{left}/")) {
+                        left.clone()
+                    } else {
+                        right.clone()
+                    });
+                }
+            }
+        }
+        canonicalize_strings(conflicts)
+    }
+
+    pub fn conflicts_with(&self, other: &Self) -> bool {
+        !self.conflicting_write_scopes(other).is_empty()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -136,6 +167,26 @@ impl WorkerArtifactKind {
             Self::ToolCall => "tool_call",
             Self::ToolOutput => "tool_output",
             Self::CompletionSummary => "completion_summary",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerIntegrationStatus {
+    Integrated,
+    Rejected,
+    Stale,
+    Unavailable,
+}
+
+impl WorkerIntegrationStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Integrated => "integrated",
+            Self::Rejected => "rejected",
+            Self::Stale => "stale",
+            Self::Unavailable => "unavailable",
         }
     }
 }
@@ -326,6 +377,161 @@ impl WorkerArtifactRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegatedWorkerStatus {
+    Running,
+    Waiting,
+    AwaitingIntegration,
+    Integrated,
+    Closed,
+    Conflict,
+    Rejected,
+    Stale,
+    Unavailable,
+}
+
+impl DelegatedWorkerStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::AwaitingIntegration => "awaiting_integration",
+            Self::Integrated => "integrated",
+            Self::Closed => "closed",
+            Self::Conflict => "conflict",
+            Self::Rejected => "rejected",
+            Self::Stale => "stale",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelegatedWorkerSnapshot {
+    pub worker_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_thread: Option<ConversationThreadRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_thread: Option<ConversationThreadRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract: Option<WorkerDelegationContract>,
+    pub lifecycle: Vec<TraceWorkerLifecycle>,
+    pub artifacts: Vec<TraceWorkerArtifact>,
+    pub integrations: Vec<TraceWorkerIntegration>,
+    pub status: DelegatedWorkerStatus,
+    pub latest_detail: String,
+}
+
+impl DelegatedWorkerSnapshot {
+    fn new(worker_id: String) -> Self {
+        Self {
+            worker_id,
+            parent_thread: None,
+            worker_thread: None,
+            contract: None,
+            lifecycle: Vec::new(),
+            artifacts: Vec::new(),
+            integrations: Vec::new(),
+            status: DelegatedWorkerStatus::Running,
+            latest_detail: String::new(),
+        }
+    }
+
+    pub fn parent_can_continue(&self) -> bool {
+        !matches!(self.status, DelegatedWorkerStatus::Waiting)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DelegationReplayView {
+    pub workers: Vec<DelegatedWorkerSnapshot>,
+}
+
+impl DelegationReplayView {
+    pub fn from_trace_replay(replay: &TraceReplay) -> Self {
+        let mut workers = BTreeMap::<String, DelegatedWorkerSnapshot>::new();
+
+        for record in &replay.records {
+            match &record.kind {
+                TraceRecordKind::WorkerLifecycleRecorded(lifecycle) => {
+                    let Some(worker_id) = lifecycle
+                        .result
+                        .worker_id
+                        .clone()
+                        .or_else(|| lifecycle.request.worker_id.clone())
+                    else {
+                        continue;
+                    };
+
+                    let worker = workers
+                        .entry(worker_id.clone())
+                        .or_insert_with(|| DelegatedWorkerSnapshot::new(worker_id));
+                    worker
+                        .parent_thread
+                        .get_or_insert(lifecycle.parent_thread.clone());
+                    worker
+                        .worker_thread
+                        .get_or_insert(lifecycle.worker_thread.clone());
+                    if let Some(contract) = lifecycle.request.contract.clone() {
+                        worker.contract = Some(contract);
+                    }
+                    worker.latest_detail = lifecycle.result.detail.clone();
+                    worker.status = delegated_status_from_lifecycle(&lifecycle.result);
+                    worker.lifecycle.push(lifecycle.clone());
+                }
+                TraceRecordKind::WorkerArtifactRecorded(artifact) => {
+                    let worker = workers
+                        .entry(artifact.record.worker_id.clone())
+                        .or_insert_with(|| {
+                            DelegatedWorkerSnapshot::new(artifact.record.worker_id.clone())
+                        });
+                    if worker.worker_thread.is_none() {
+                        worker.worker_thread =
+                            Some(thread_ref_from_branch_id(record.lineage.branch_id.as_ref()));
+                    }
+                    worker.latest_detail = artifact.record.summary.clone();
+                    if artifact.record.kind == WorkerArtifactKind::CompletionSummary
+                        && !matches!(
+                            worker.status,
+                            DelegatedWorkerStatus::Integrated
+                                | DelegatedWorkerStatus::Conflict
+                                | DelegatedWorkerStatus::Rejected
+                                | DelegatedWorkerStatus::Stale
+                                | DelegatedWorkerStatus::Unavailable
+                        )
+                    {
+                        worker.status = DelegatedWorkerStatus::AwaitingIntegration;
+                    }
+                    worker.artifacts.push(artifact.clone());
+                }
+                TraceRecordKind::WorkerIntegrationRecorded(integration) => {
+                    let worker =
+                        workers
+                            .entry(integration.worker_id.clone())
+                            .or_insert_with(|| {
+                                DelegatedWorkerSnapshot::new(integration.worker_id.clone())
+                            });
+                    worker
+                        .parent_thread
+                        .get_or_insert(integration.parent_thread.clone());
+                    worker
+                        .worker_thread
+                        .get_or_insert(integration.worker_thread.clone());
+                    worker.latest_detail = integration.detail.clone();
+                    worker.status = delegated_status_from_integration(integration.status);
+                    worker.integrations.push(integration.clone());
+                }
+                _ => {}
+            }
+        }
+
+        Self {
+            workers: workers.into_values().collect(),
+        }
+    }
+}
+
 fn canonicalize_strings(mut values: Vec<String>) -> Vec<String> {
     values.sort();
     values.dedup();
@@ -338,12 +544,58 @@ fn canonicalize_ord<T: Ord>(mut values: Vec<T>) -> Vec<T> {
     values
 }
 
+fn delegated_status_from_lifecycle(result: &WorkerLifecycleResult) -> DelegatedWorkerStatus {
+    match result.status {
+        WorkerLifecycleResultStatus::Accepted => match result.operation {
+            WorkerLifecycleOperation::Spawn
+            | WorkerLifecycleOperation::FollowUpInput
+            | WorkerLifecycleOperation::Resume => DelegatedWorkerStatus::Running,
+            WorkerLifecycleOperation::Wait => DelegatedWorkerStatus::Waiting,
+            WorkerLifecycleOperation::Close => DelegatedWorkerStatus::Closed,
+        },
+        WorkerLifecycleResultStatus::Conflict => DelegatedWorkerStatus::Conflict,
+        WorkerLifecycleResultStatus::Rejected => DelegatedWorkerStatus::Rejected,
+        WorkerLifecycleResultStatus::Stale => DelegatedWorkerStatus::Stale,
+        WorkerLifecycleResultStatus::Unavailable => DelegatedWorkerStatus::Unavailable,
+    }
+}
+
+fn delegated_status_from_integration(status: WorkerIntegrationStatus) -> DelegatedWorkerStatus {
+    match status {
+        WorkerIntegrationStatus::Integrated => DelegatedWorkerStatus::Integrated,
+        WorkerIntegrationStatus::Rejected => DelegatedWorkerStatus::Rejected,
+        WorkerIntegrationStatus::Stale => DelegatedWorkerStatus::Stale,
+        WorkerIntegrationStatus::Unavailable => DelegatedWorkerStatus::Unavailable,
+    }
+}
+
+fn thread_ref_from_branch_id(branch_id: Option<&TraceBranchId>) -> ConversationThreadRef {
+    branch_id
+        .cloned()
+        .map(ConversationThreadRef::Branch)
+        .unwrap_or(ConversationThreadRef::Mainline)
+}
+
+fn normalize_scope(scope: &str) -> String {
+    scope.trim_matches('/').to_string()
+}
+
+fn scopes_conflict(left: &str, right: &str) -> bool {
+    left == right
+        || right.starts_with(&format!("{left}/"))
+        || left.starts_with(&format!("{right}/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::model::{
+        ArtifactEnvelope, ArtifactKind, ConversationThreadRef, DelegatedWorkerStatus,
         ExecutionApprovalPolicy, ExecutionGovernanceProfile, ExecutionGovernanceSnapshot,
-        ExecutionPermission, ExecutionPermissionReuseScope, ExecutionSandboxMode,
+        ExecutionPermission, ExecutionPermissionReuseScope, ExecutionSandboxMode, TaskTraceId,
+        TraceArtifactId, TraceBranchId, TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind,
+        TraceReplay, TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
+        TurnTraceId, WorkerIntegrationStatus,
     };
     use serde_json::json;
 
@@ -365,13 +617,17 @@ mod tests {
 
         let statuses = [
             WorkerLifecycleResultStatus::Accepted,
+            WorkerLifecycleResultStatus::Conflict,
             WorkerLifecycleResultStatus::Rejected,
             WorkerLifecycleResultStatus::Stale,
             WorkerLifecycleResultStatus::Unavailable,
         ]
         .map(WorkerLifecycleResultStatus::label);
 
-        assert_eq!(statuses, ["accepted", "rejected", "stale", "unavailable"]);
+        assert_eq!(
+            statuses,
+            ["accepted", "conflict", "rejected", "stale", "unavailable"]
+        );
 
         let contract = WorkerDelegationContract::new(
             WorkerRole::new(
@@ -501,6 +757,418 @@ mod tests {
             completion
                 .integration_hints
                 .contains(&"Parent integrates the findings into the main thread.".to_string())
+        );
+    }
+
+    #[test]
+    fn delegation_replay_preserves_wait_resume_and_integration_through_thread_lineage() {
+        let task_id = TaskTraceId::new("task-delegation").expect("task");
+        let turn_id = TurnTraceId::new("task-delegation.turn-0001").expect("turn");
+        let worker_branch = TraceBranchId::new("worker-branch-1").expect("branch");
+        let worker_thread = ConversationThreadRef::Branch(worker_branch.clone());
+        let contract = WorkerDelegationContract::new(
+            WorkerRole::new(
+                "worker",
+                "Worker",
+                "Investigate the parser and return bounded findings.",
+            ),
+            WorkerOwnership::new(
+                "Own parser traces",
+                vec!["src/domain/model".to_string()],
+                vec!["src/domain/model/delegation.rs".to_string()],
+                DelegationIntegrationOwner::Parent,
+            ),
+            DelegationGovernancePolicy::inherit_from_parent(
+                &sample_governance_snapshot(),
+                DelegationEvidencePolicy::new(
+                    "Tool calls, outputs, and summaries stay parent-visible.",
+                    vec![
+                        WorkerArtifactKind::ToolCall,
+                        WorkerArtifactKind::ToolOutput,
+                        WorkerArtifactKind::CompletionSummary,
+                    ],
+                ),
+            ),
+        );
+        let replay = TraceReplay {
+            task_id: task_id.clone(),
+            records: vec![
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    sequence: 1,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: None,
+                    },
+                    kind: TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                        request: WorkerDelegationRequest::spawn(
+                            "Audit parser threading",
+                            contract.clone(),
+                        ),
+                        result: WorkerLifecycleResult::new(
+                            WorkerLifecycleOperation::Spawn,
+                            WorkerLifecycleResultStatus::Accepted,
+                            Some("worker-1".to_string()),
+                            "Spawned the worker on a child thread.",
+                        ),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: worker_thread.clone(),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    sequence: 2,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: Some(TraceRecordId::new("record-1").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                        request: WorkerDelegationRequest::wait("worker-1"),
+                        result: WorkerLifecycleResult::new(
+                            WorkerLifecycleOperation::Wait,
+                            WorkerLifecycleResultStatus::Accepted,
+                            Some("worker-1".to_string()),
+                            "Parent yielded until the worker reached a checkpoint.",
+                        ),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: worker_thread.clone(),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-3").expect("record"),
+                    sequence: 3,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: Some(worker_branch.clone()),
+                        parent_record_id: Some(TraceRecordId::new("record-2").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerArtifactRecorded(TraceWorkerArtifact {
+                        record: WorkerArtifactRecord::tool_call(
+                            "worker-1",
+                            "shell",
+                            "rg parser src/domain/model",
+                        ),
+                        artifact: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-1").expect("artifact"),
+                            ArtifactKind::ToolInvocation,
+                            "worker tool call",
+                            "rg parser src/domain/model",
+                            256,
+                        ),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-4").expect("record"),
+                    sequence: 4,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: Some(worker_branch.clone()),
+                        parent_record_id: Some(TraceRecordId::new("record-3").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerArtifactRecorded(TraceWorkerArtifact {
+                        record: WorkerArtifactRecord::tool_output(
+                            "worker-1",
+                            "shell",
+                            "Found 6 parser-related trace sites.",
+                        ),
+                        artifact: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-2").expect("artifact"),
+                            ArtifactKind::ToolOutput,
+                            "worker tool output",
+                            "Found 6 parser-related trace sites.",
+                            256,
+                        ),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-5").expect("record"),
+                    sequence: 5,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: Some(TraceRecordId::new("record-4").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                        request: WorkerDelegationRequest::resume("worker-1"),
+                        result: WorkerLifecycleResult::new(
+                            WorkerLifecycleOperation::Resume,
+                            WorkerLifecycleResultStatus::Accepted,
+                            Some("worker-1".to_string()),
+                            "Parent resumed after the worker checkpoint.",
+                        ),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: worker_thread.clone(),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-6").expect("record"),
+                    sequence: 6,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: Some(worker_branch.clone()),
+                        parent_record_id: Some(TraceRecordId::new("record-5").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerArtifactRecorded(TraceWorkerArtifact {
+                        record: WorkerArtifactRecord::completion_summary(
+                            "worker-1",
+                            "Parser audit complete",
+                            vec!["Integrate the parser findings into the parent plan.".to_string()],
+                        ),
+                        artifact: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-3").expect("artifact"),
+                            ArtifactKind::Selection,
+                            "worker completion summary",
+                            "Parser audit complete",
+                            256,
+                        ),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-7").expect("record"),
+                    sequence: 7,
+                    lineage: TraceLineage {
+                        task_id,
+                        turn_id,
+                        branch_id: None,
+                        parent_record_id: Some(TraceRecordId::new("record-6").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerIntegrationRecorded(TraceWorkerIntegration {
+                        worker_id: "worker-1".to_string(),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: worker_thread.clone(),
+                        status: WorkerIntegrationStatus::Integrated,
+                        detail: "Integrated the worker findings into the parent turn.".to_string(),
+                        integrated_artifact_ids: vec![
+                            TraceArtifactId::new("artifact-3").expect("artifact"),
+                        ],
+                    }),
+                },
+            ],
+        };
+
+        let view = DelegationReplayView::from_trace_replay(&replay);
+        let worker = view.workers.first().expect("worker snapshot");
+
+        assert_eq!(view.workers.len(), 1);
+        assert_eq!(worker.worker_id, "worker-1");
+        assert_eq!(worker.parent_thread, Some(ConversationThreadRef::Mainline));
+        assert_eq!(worker.worker_thread, Some(worker_thread));
+        assert_eq!(worker.status, DelegatedWorkerStatus::Integrated);
+        assert_eq!(
+            worker
+                .lifecycle
+                .iter()
+                .map(|record| record.request.operation.label())
+                .collect::<Vec<_>>(),
+            vec!["spawn", "wait", "resume"]
+        );
+    }
+
+    #[test]
+    fn delegation_replay_keeps_worker_artifacts_parent_visible_before_integration() {
+        let task_id = TaskTraceId::new("task-worker-artifacts").expect("task");
+        let turn_id = TurnTraceId::new("task-worker-artifacts.turn-0001").expect("turn");
+        let worker_branch = TraceBranchId::new("worker-branch-artifacts").expect("branch");
+        let replay = TraceReplay {
+            task_id: task_id.clone(),
+            records: vec![
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    sequence: 1,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: None,
+                    },
+                    kind: TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                        request: WorkerDelegationRequest::spawn(
+                            "Inspect worker artifact replay",
+                            WorkerDelegationContract::new(
+                                WorkerRole::new(
+                                    "explorer",
+                                    "Explorer",
+                                    "Inspect and summarize delegated execution.",
+                                ),
+                                WorkerOwnership::new(
+                                    "Read-only delegated replay inspection.",
+                                    vec!["src/domain/model".to_string()],
+                                    Vec::new(),
+                                    DelegationIntegrationOwner::Parent,
+                                ),
+                                DelegationGovernancePolicy::inherit_from_parent(
+                                    &sample_governance_snapshot(),
+                                    DelegationEvidencePolicy::new(
+                                        "Worker artifacts stay parent-visible.",
+                                        vec![
+                                            WorkerArtifactKind::ToolCall,
+                                            WorkerArtifactKind::ToolOutput,
+                                            WorkerArtifactKind::CompletionSummary,
+                                        ],
+                                    ),
+                                ),
+                            ),
+                        ),
+                        result: WorkerLifecycleResult::new(
+                            WorkerLifecycleOperation::Spawn,
+                            WorkerLifecycleResultStatus::Accepted,
+                            Some("worker-9".to_string()),
+                            "Spawned delegated replay inspector.",
+                        ),
+                        parent_thread: ConversationThreadRef::Mainline,
+                        worker_thread: ConversationThreadRef::Branch(worker_branch.clone()),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    sequence: 2,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: Some(worker_branch.clone()),
+                        parent_record_id: Some(TraceRecordId::new("record-1").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerArtifactRecorded(TraceWorkerArtifact {
+                        record: WorkerArtifactRecord::tool_call(
+                            "worker-9",
+                            "shell",
+                            "cargo test delegation --quiet",
+                        ),
+                        artifact: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-call").expect("artifact"),
+                            ArtifactKind::ToolInvocation,
+                            "worker tool call",
+                            "cargo test delegation --quiet",
+                            256,
+                        ),
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-3").expect("record"),
+                    sequence: 3,
+                    lineage: TraceLineage {
+                        task_id,
+                        turn_id,
+                        branch_id: Some(worker_branch),
+                        parent_record_id: Some(TraceRecordId::new("record-2").expect("record")),
+                    },
+                    kind: TraceRecordKind::WorkerArtifactRecorded(TraceWorkerArtifact {
+                        record: WorkerArtifactRecord::completion_summary(
+                            "worker-9",
+                            "Delegated replay inspection complete",
+                            vec![
+                                "Integrate the visibility findings into the parent turn."
+                                    .to_string(),
+                            ],
+                        ),
+                        artifact: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-summary").expect("artifact"),
+                            ArtifactKind::Selection,
+                            "worker completion summary",
+                            "Delegated replay inspection complete",
+                            256,
+                        ),
+                    }),
+                },
+            ],
+        };
+
+        let view = DelegationReplayView::from_trace_replay(&replay);
+        let worker = view.workers.first().expect("worker snapshot");
+
+        assert_eq!(worker.status, DelegatedWorkerStatus::AwaitingIntegration);
+        assert_eq!(worker.artifacts.len(), 2);
+        assert!(
+            worker
+                .artifacts
+                .iter()
+                .all(|artifact| artifact.record.parent_visible)
+        );
+        assert_eq!(worker.latest_detail, "Delegated replay inspection complete");
+    }
+
+    #[test]
+    fn ownership_conflicts_and_conflicting_lifecycle_results_stay_explicit() {
+        let baseline = WorkerOwnership::new(
+            "Own delegation core",
+            vec!["src/domain/model".to_string()],
+            vec!["src/domain/model/delegation.rs".to_string()],
+            DelegationIntegrationOwner::Parent,
+        );
+        let conflicting = WorkerOwnership::new(
+            "Touch a nested delegation module",
+            vec!["src/domain/model".to_string()],
+            vec!["src/domain/model/delegation.rs/tests".to_string()],
+            DelegationIntegrationOwner::Parent,
+        );
+
+        assert_eq!(
+            baseline.conflicting_write_scopes(&conflicting),
+            vec!["src/domain/model/delegation.rs".to_string()]
+        );
+
+        let replay = TraceReplay {
+            task_id: TaskTraceId::new("task-conflict").expect("task"),
+            records: vec![TraceRecord {
+                record_id: TraceRecordId::new("record-1").expect("record"),
+                sequence: 1,
+                lineage: TraceLineage {
+                    task_id: TaskTraceId::new("task-conflict").expect("task"),
+                    turn_id: TurnTraceId::new("task-conflict.turn-0001").expect("turn"),
+                    branch_id: None,
+                    parent_record_id: None,
+                },
+                kind: TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                    request: WorkerDelegationRequest::spawn(
+                        "Take over the same write scope",
+                        WorkerDelegationContract::new(
+                            WorkerRole::new("worker", "Worker", "Attempt a conflicting write."),
+                            conflicting.clone(),
+                            DelegationGovernancePolicy::inherit_from_parent(
+                                &sample_governance_snapshot(),
+                                DelegationEvidencePolicy::new(
+                                    "Conflicting requests still stay visible.",
+                                    vec![WorkerArtifactKind::CompletionSummary],
+                                ),
+                            ),
+                        ),
+                    ),
+                    result: WorkerLifecycleResult::new(
+                        WorkerLifecycleOperation::Spawn,
+                        WorkerLifecycleResultStatus::Conflict,
+                        Some("worker-2".to_string()),
+                        "Ownership conflict: src/domain/model/delegation.rs",
+                    ),
+                    parent_thread: ConversationThreadRef::Mainline,
+                    worker_thread: ConversationThreadRef::Mainline,
+                }),
+            }],
+        };
+
+        let view = DelegationReplayView::from_trace_replay(&replay);
+        let worker = view.workers.first().expect("worker snapshot");
+
+        assert_eq!(worker.status, DelegatedWorkerStatus::Conflict);
+        assert_eq!(
+            worker
+                .contract
+                .as_ref()
+                .expect("contract")
+                .ownership
+                .write_scopes,
+            conflicting.write_scopes
+        );
+        assert_eq!(
+            worker.latest_detail,
+            "Ownership conflict: src/domain/model/delegation.rs"
         );
     }
 

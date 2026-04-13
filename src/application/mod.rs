@@ -44,6 +44,11 @@ use crate::domain::model::{
     TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink,
     TurnIntent, TurnTraceId,
 };
+#[cfg(test)]
+use crate::domain::model::{
+    TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle, WorkerArtifactKind,
+    WorkerArtifactRecord, WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleResult,
+};
 use crate::domain::ports::{
     ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
     EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest, EntityResolver,
@@ -667,6 +672,84 @@ impl StructuredTurnTrace {
         );
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_worker_lifecycle(
+        &self,
+        parent_thread: &ConversationThreadRef,
+        worker_thread: &ConversationThreadRef,
+        request: WorkerDelegationRequest,
+        result: WorkerLifecycleResult,
+    ) {
+        self.record_kind(
+            parent_thread
+                .branch_id()
+                .or_else(|| self.default_branch_id()),
+            TraceRecordKind::WorkerLifecycleRecorded(TraceWorkerLifecycle {
+                request,
+                result,
+                parent_thread: parent_thread.clone(),
+                worker_thread: worker_thread.clone(),
+            }),
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_worker_artifact(
+        &self,
+        worker_thread: &ConversationThreadRef,
+        record: WorkerArtifactRecord,
+        content: impl Into<String>,
+    ) -> TraceArtifactId {
+        let mut artifact = self
+            .text_artifact(
+                worker_artifact_payload_kind(record.kind),
+                format!("worker {} `{}`", record.kind.label(), record.label),
+                content,
+                1_000,
+            )
+            .with_label("paddles.worker_id", record.worker_id.clone())
+            .with_label("paddles.worker_artifact_kind", record.kind.label());
+        if !record.integration_hints.is_empty() {
+            artifact = artifact.with_label(
+                "paddles.worker_integration_hints",
+                record.integration_hints.join(" | "),
+            );
+        }
+        let artifact_id = artifact.artifact_id.clone();
+        self.record_kind(
+            worker_thread
+                .branch_id()
+                .or_else(|| self.default_branch_id()),
+            TraceRecordKind::WorkerArtifactRecorded(TraceWorkerArtifact { record, artifact }),
+        );
+        artifact_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_worker_integration(
+        &self,
+        parent_thread: &ConversationThreadRef,
+        worker_thread: &ConversationThreadRef,
+        worker_id: impl Into<String>,
+        status: WorkerIntegrationStatus,
+        detail: impl Into<String>,
+        integrated_artifact_ids: Vec<TraceArtifactId>,
+    ) {
+        self.record_kind(
+            parent_thread
+                .branch_id()
+                .or_else(|| self.default_branch_id()),
+            TraceRecordKind::WorkerIntegrationRecorded(TraceWorkerIntegration {
+                worker_id: worker_id.into(),
+                parent_thread: parent_thread.clone(),
+                worker_thread: worker_thread.clone(),
+                status,
+                detail: detail.into(),
+                integrated_artifact_ids,
+            }),
+        );
+    }
+
     fn remember_synthesis(
         &self,
         grounded: bool,
@@ -1207,6 +1290,15 @@ impl TurnEventSink for StructuredTurnTrace {
 
     fn forensic_trace_sink(&self) -> Option<&dyn ForensicTraceSink> {
         Some(self)
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn worker_artifact_payload_kind(kind: WorkerArtifactKind) -> ArtifactKind {
+    match kind {
+        WorkerArtifactKind::ToolCall => ArtifactKind::ToolInvocation,
+        WorkerArtifactKind::ToolOutput => ArtifactKind::ToolOutput,
+        WorkerArtifactKind::CompletionSummary => ArtifactKind::Selection,
     }
 }
 
@@ -12122,6 +12214,161 @@ mod tests {
         }));
         let replay_view = ConversationReplayView::from_trace_replay(&replay);
         assert_eq!(replay_view.threads.len(), 2);
+    }
+
+    #[test]
+    fn structured_turn_trace_records_worker_coordination_records_across_parent_and_worker_threads()
+    {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let session = service.shared_conversation_session();
+        let turn_id = session.allocate_turn_id();
+        let trace = Arc::new(StructuredTurnTrace::new(
+            Arc::new(RecordingTurnEventSink::default()),
+            recorder.clone(),
+            Vec::new(),
+            session.clone(),
+            turn_id,
+            ConversationThreadRef::Mainline,
+        ));
+        let worker_branch = session.next_branch_id();
+        let worker_thread = ConversationThreadRef::Branch(worker_branch.clone());
+        trace.declare_branch(
+            worker_branch.clone(),
+            "delegated parser audit",
+            Some("parallel bounded work"),
+            None,
+        );
+
+        let contract = crate::domain::model::WorkerDelegationContract::new(
+            crate::domain::model::WorkerRole::new(
+                "worker",
+                "Worker",
+                "Audit parser lineage and report bounded findings.",
+            ),
+            crate::domain::model::WorkerOwnership::new(
+                "Own parser lineage traces",
+                vec!["src/domain/model".to_string()],
+                vec!["src/domain/model/delegation.rs".to_string()],
+                crate::domain::model::DelegationIntegrationOwner::Parent,
+            ),
+            crate::domain::model::DelegationGovernancePolicy::inherit_from_parent(
+                &ExecutionGovernanceSnapshot::new(
+                    "recursive-structured-v1",
+                    "recursive-structured-v1",
+                    crate::domain::model::ExecutionGovernanceProfile::new(
+                        ExecutionSandboxMode::WorkspaceWrite,
+                        ExecutionApprovalPolicy::OnRequest,
+                        vec![
+                            crate::domain::model::ExecutionPermissionReuseScope::Turn,
+                            crate::domain::model::ExecutionPermissionReuseScope::Hand,
+                        ],
+                        None,
+                    ),
+                ),
+                crate::domain::model::DelegationEvidencePolicy::new(
+                    "Worker execution stays parent-visible.",
+                    vec![
+                        crate::domain::model::WorkerArtifactKind::ToolCall,
+                        crate::domain::model::WorkerArtifactKind::ToolOutput,
+                        crate::domain::model::WorkerArtifactKind::CompletionSummary,
+                    ],
+                ),
+            ),
+        );
+
+        trace.record_worker_lifecycle(
+            &ConversationThreadRef::Mainline,
+            &worker_thread,
+            crate::domain::model::WorkerDelegationRequest::spawn("Audit parser lineage", contract),
+            crate::domain::model::WorkerLifecycleResult::new(
+                crate::domain::model::WorkerLifecycleOperation::Spawn,
+                crate::domain::model::WorkerLifecycleResultStatus::Accepted,
+                Some("worker-1".to_string()),
+                "Spawned worker-1 on a child thread.",
+            ),
+        );
+        trace.record_worker_lifecycle(
+            &ConversationThreadRef::Mainline,
+            &worker_thread,
+            crate::domain::model::WorkerDelegationRequest::wait("worker-1"),
+            crate::domain::model::WorkerLifecycleResult::new(
+                crate::domain::model::WorkerLifecycleOperation::Wait,
+                crate::domain::model::WorkerLifecycleResultStatus::Accepted,
+                Some("worker-1".to_string()),
+                "Parent waited for worker-1 to reach a checkpoint.",
+            ),
+        );
+        let _tool_call = trace.record_worker_artifact(
+            &worker_thread,
+            crate::domain::model::WorkerArtifactRecord::tool_call(
+                "worker-1",
+                "shell",
+                "rg parser src/domain/model",
+            ),
+            "rg parser src/domain/model",
+        );
+        let _tool_output = trace.record_worker_artifact(
+            &worker_thread,
+            crate::domain::model::WorkerArtifactRecord::tool_output(
+                "worker-1",
+                "shell",
+                "Found parser lineage records.",
+            ),
+            "Found parser lineage records.",
+        );
+        trace.record_worker_lifecycle(
+            &ConversationThreadRef::Mainline,
+            &worker_thread,
+            crate::domain::model::WorkerDelegationRequest::resume("worker-1"),
+            crate::domain::model::WorkerLifecycleResult::new(
+                crate::domain::model::WorkerLifecycleOperation::Resume,
+                crate::domain::model::WorkerLifecycleResultStatus::Accepted,
+                Some("worker-1".to_string()),
+                "Parent resumed after the worker checkpoint.",
+            ),
+        );
+        let completion = trace.record_worker_artifact(
+            &worker_thread,
+            crate::domain::model::WorkerArtifactRecord::completion_summary(
+                "worker-1",
+                "Parser lineage audit complete",
+                vec!["Integrate the parser findings into the main thread.".to_string()],
+            ),
+            "Parser lineage audit complete",
+        );
+        trace.record_worker_integration(
+            &ConversationThreadRef::Mainline,
+            &worker_thread,
+            "worker-1",
+            crate::domain::model::WorkerIntegrationStatus::Integrated,
+            "Integrated the worker findings into the parent turn.",
+            vec![completion],
+        );
+
+        let replay = recorder.replay(&session.task_id()).expect("replay");
+        let delegation = crate::domain::model::DelegationReplayView::from_trace_replay(&replay);
+        let worker = delegation.workers.first().expect("worker");
+
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::WorkerLifecycleRecorded(_)
+        ) && record.lineage.branch_id.is_none()));
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::WorkerArtifactRecorded(_)
+        ) && record.lineage.branch_id.as_ref()
+            == Some(&worker_branch)));
+        assert!(replay.records.iter().any(|record| matches!(
+            &record.kind,
+            TraceRecordKind::WorkerIntegrationRecorded(_)
+        ) && record.lineage.branch_id.is_none()));
+        assert_eq!(
+            worker.status,
+            crate::domain::model::DelegatedWorkerStatus::Integrated
+        );
+        assert_eq!(worker.artifacts.len(), 3);
     }
 
     #[test]

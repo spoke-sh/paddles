@@ -1,4 +1,7 @@
 use super::control::ControlResult;
+use super::delegation::{
+    WorkerArtifactRecord, WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleResult,
+};
 use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
 use super::{CollaborationModeResult, StructuredClarificationResult};
 use paddles_conversation::{
@@ -77,6 +80,30 @@ pub struct TraceToolCall {
     pub tool_name: String,
     pub payload: ArtifactEnvelope,
     pub success: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceWorkerLifecycle {
+    pub request: WorkerDelegationRequest,
+    pub result: WorkerLifecycleResult,
+    pub parent_thread: ConversationThreadRef,
+    pub worker_thread: ConversationThreadRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceWorkerArtifact {
+    pub record: WorkerArtifactRecord,
+    pub artifact: ArtifactEnvelope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceWorkerIntegration {
+    pub worker_id: String,
+    pub parent_thread: ConversationThreadRef,
+    pub worker_thread: ConversationThreadRef,
+    pub status: WorkerIntegrationStatus,
+    pub detail: String,
+    pub integrated_artifact_ids: Vec<TraceArtifactId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,6 +420,9 @@ pub enum TraceRecordKind {
     ThreadDecisionSelected(ThreadDecision),
     ThreadMerged(ThreadMergeRecord),
     ControlResultRecorded(ControlResult),
+    WorkerLifecycleRecorded(TraceWorkerLifecycle),
+    WorkerArtifactRecorded(TraceWorkerArtifact),
+    WorkerIntegrationRecorded(TraceWorkerIntegration),
     CollaborationModeDeclared(CollaborationModeResult),
     StructuredClarificationRecorded(StructuredClarificationResult),
     ExecutionGovernanceProfileDeclared(ExecutionGovernanceSnapshot),

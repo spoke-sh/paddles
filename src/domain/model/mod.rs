@@ -41,10 +41,11 @@ pub use control::{
     trace_control_result,
 };
 pub use delegation::{
-    DelegationEvidencePolicy, DelegationGovernancePolicy, DelegationIntegrationOwner,
+    DelegatedWorkerSnapshot, DelegatedWorkerStatus, DelegationEvidencePolicy,
+    DelegationGovernancePolicy, DelegationIntegrationOwner, DelegationReplayView,
     WorkerArtifactKind, WorkerArtifactRecord, WorkerDelegationContract, WorkerDelegationRequest,
-    WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
-    WorkerRole,
+    WorkerIntegrationStatus, WorkerLifecycleOperation, WorkerLifecycleResult,
+    WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
 };
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
@@ -115,7 +116,7 @@ pub use traces::{
     TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
     TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
     TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
-    TraceTurnStarted,
+    TraceTurnStarted, TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
 };
 pub use transcript::{
     ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,

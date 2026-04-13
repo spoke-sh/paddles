@@ -94,6 +94,21 @@ impl ConversationTraceGraph {
                     TraceRecordKind::ControlResultRecorded(result) => {
                         ("control".to_string(), result.summary())
                     }
+                    TraceRecordKind::WorkerLifecycleRecorded(lifecycle) => (
+                        "worker".to_string(),
+                        truncate(&lifecycle.result.summary(), 24),
+                    ),
+                    TraceRecordKind::WorkerArtifactRecorded(artifact) => (
+                        "worker_artifact".to_string(),
+                        truncate(
+                            &format!("{} {}", artifact.record.kind.label(), artifact.record.label),
+                            24,
+                        ),
+                    ),
+                    TraceRecordKind::WorkerIntegrationRecorded(integration) => (
+                        "worker".to_string(),
+                        truncate(&format!("integrate {}", integration.status.label()), 24),
+                    ),
                     TraceRecordKind::CollaborationModeDeclared(result) => (
                         "mode".to_string(),
                         truncate(

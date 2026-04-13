@@ -27,11 +27,11 @@ started_at: 2026-04-12T20:29:44
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Delegation Lifecycle And Ownership Contracts](../../../../stories/VGdaSNkFK/README.md) | feat | done |
-| [Wire Role-Based Worker Coordination Through Thread Lineage](../../../../stories/VGdaSO7FJ/README.md) | feat | backlog |
+| [Wire Role-Based Worker Coordination Through Thread Lineage](../../../../stories/VGdaSO7FJ/README.md) | feat | done |
 | [Project Delegated Worker State Across Operator Surfaces](../../../../stories/VGdaSObFI/README.md) | feat | backlog |
 <!-- END GENERATED -->
