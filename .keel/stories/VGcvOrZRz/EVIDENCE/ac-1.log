@@ -1,0 +1,22 @@
+---
+recorded_at: 2026-04-12T18:37:33.885470220-07:00
+mode: manual
+files: [".keel/stories/VGcvOrZRz/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.11s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-07b921ab41e037e0)
+
+running 3 tests
+test domain::model::collaboration::tests::collaboration_mode_results_preserve_invalid_and_unavailable_requests ... ok
+test domain::model::collaboration::tests::clarification_contract_supports_bounded_options_and_free_form_answers ... ok
+test domain::model::collaboration::tests::collaboration_mode_states_stay_concise_and_fail_closed ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 582 filtered out; finished in 0.00s
+
+

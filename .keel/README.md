@@ -357,7 +357,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Establish A Typed Collaboration Mode And Review Substrate](epics/VGb1c1pAR/voyages/VGcvNTG74/) | planned |
+| [Establish A Typed Collaboration Mode And Review Substrate](epics/VGb1c1pAR/voyages/VGcvNTG74/) | in-progress |
 
 ### [Role-Based Multi-Agent Delegation](epics/VGb1c2DBj/) (draft)
 
