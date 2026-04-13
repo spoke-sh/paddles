@@ -1087,6 +1087,8 @@ struct InteractiveApp {
     pending_transcript_sync: bool,
     seen_transcript_record_ids: HashSet<String>,
     pending_turn_total_timing: Option<TranscriptTiming>,
+    pending_turn_result_fallback: Option<String>,
+    fallback_assistant_row: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1263,6 +1265,8 @@ impl InteractiveApp {
             pending_transcript_sync: false,
             seen_transcript_record_ids: HashSet::new(),
             pending_turn_total_timing: None,
+            pending_turn_result_fallback: None,
+            fallback_assistant_row: None,
         }
     }
 
@@ -1336,6 +1340,8 @@ impl InteractiveApp {
         self.active_turn_timing = None;
         self.pending_turn_total_timing = None;
         self.pending_reveal = None;
+        self.pending_turn_result_fallback = None;
+        self.fallback_assistant_row = None;
         self.last_event = None;
         self.emitted_in_flight = false;
         self.remove_in_flight_row();
@@ -2085,6 +2091,28 @@ impl InteractiveApp {
                 ConversationTranscriptSpeaker::Assistant => {
                     let wrapped = soft_wrap_prose(&entry.content, MAX_PROSE_WIDTH);
                     let render = entry.render.clone();
+                    self.pending_turn_result_fallback = None;
+                    if let Some(row_index) = self.matching_fallback_assistant_row(&wrapped) {
+                        if let Some(row) = self.rows.get_mut(row_index) {
+                            row.content = wrapped;
+                            if let Some(render) = render.clone() {
+                                row.render = Some(render);
+                            }
+                            if row.timing.is_none()
+                                && let Some(timing) = self.pending_turn_total_timing.take()
+                            {
+                                row.timing = Some(timing);
+                            }
+                        }
+                        if let Some(pending) = self.pending_reveal.as_mut()
+                            && pending.row_index == row_index
+                        {
+                            pending.render = render;
+                        }
+                        self.fallback_assistant_row = None;
+                        self.seen_transcript_record_ids.insert(record_id);
+                        continue;
+                    }
                     if animate_new_assistant {
                         let row_index = self.rows.len();
                         let mut row =
@@ -2129,6 +2157,7 @@ impl InteractiveApp {
         let prompt = self.queued_prompts.pop_front()?;
         self.busy = true;
         self.busy_phase = BusyPhase::Thinking;
+        self.fallback_assistant_row = None;
         self.active_turn_timing = Some(ActiveTurnTiming::new(started_at));
         Some(prompt)
     }
@@ -2198,6 +2227,13 @@ impl InteractiveApp {
         {
             pending.row_index -= 1;
         }
+        if let Some(fallback_index) = self.fallback_assistant_row {
+            if fallback_index == index {
+                self.fallback_assistant_row = None;
+            } else if fallback_index > index {
+                self.fallback_assistant_row = Some(fallback_index - 1);
+            }
+        }
         for slot in [
             &mut self.search_progress_row,
             &mut self.gathering_harness_row,
@@ -2261,6 +2297,55 @@ impl InteractiveApp {
         {
             pending.row_index += 1;
         }
+        if let Some(index) = self.fallback_assistant_row.as_mut()
+            && *index >= insert_at
+        {
+            *index += 1;
+        }
+    }
+
+    fn matching_fallback_assistant_row(&self, content: &str) -> Option<usize> {
+        let row_index = self.fallback_assistant_row?;
+        if row_index >= self.rows.len() {
+            return None;
+        }
+
+        if let Some(pending) = self.pending_reveal.as_ref()
+            && pending.row_index == row_index
+            && pending.full_text == content
+        {
+            return Some(row_index);
+        }
+
+        (self.rows[row_index].kind == TranscriptRowKind::Assistant
+            && self.rows[row_index].content == content)
+            .then_some(row_index)
+    }
+
+    fn queue_turn_result_fallback(&mut self, response: &str) {
+        let wrapped = soft_wrap_prose(response, MAX_PROSE_WIDTH);
+        if wrapped.trim().is_empty() {
+            self.pending_turn_result_fallback = None;
+            return;
+        }
+        self.pending_turn_result_fallback = Some(wrapped);
+    }
+
+    fn activate_pending_turn_result_fallback(&mut self) {
+        let Some(content) = self.pending_turn_result_fallback.take() else {
+            return;
+        };
+
+        let row_index = self.rows.len();
+        let mut row = TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "");
+        if let Some(timing) = self.pending_turn_total_timing.take() {
+            row = row.timed(timing);
+        }
+        self.rows.push(row);
+        self.pending_reveal = Some(PendingReveal::new(row_index, content, None));
+        self.fallback_assistant_row = Some(row_index);
+        self.busy = true;
+        self.busy_phase = BusyPhase::Rendering;
     }
 
     fn append_tool_output_row(
@@ -2466,11 +2551,12 @@ impl InteractiveApp {
                 self.last_event = None;
                 self.emitted_in_flight = false;
                 match result {
-                    Ok(_response) => {
+                    Ok(response) => {
                         let timing = self
                             .active_turn_timing
                             .take()
                             .map(|timing| timing.finish(occurred_at));
+                        self.queue_turn_result_fallback(&response);
                         self.pending_transcript_sync = true;
                         if let (Some(pending), Some(timing)) = (&self.pending_reveal, timing) {
                             if pending.row_index < self.rows.len() {
@@ -2560,6 +2646,10 @@ impl InteractiveApp {
 
     fn tick(&mut self) {
         self.spinner_index = (self.spinner_index + 1) % SPINNER_FRAMES.len();
+
+        if self.busy && self.busy_phase == BusyPhase::Rendering && self.pending_reveal.is_none() {
+            self.activate_pending_turn_result_fallback();
+        }
 
         // After IN_FLIGHT_SILENCE_THRESHOLD of silence during a busy turn,
         // insert a muted "working" row so the transcript doesn't look stalled.
@@ -4383,6 +4473,129 @@ mod tests {
             Some("hi there")
         );
         assert_eq!(app.busy_phase, BusyPhase::Idle);
+    }
+
+    #[test]
+    fn turn_finished_renders_fallback_when_transcript_sync_never_arrives() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "hello".to_string();
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("hello".to_string()))
+        );
+
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("hi there".to_string()),
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+
+        for _ in 0..16 {
+            if !app.busy {
+                break;
+            }
+            app.tick();
+        }
+
+        assert!(!app.busy, "fallback rendering should close the busy state");
+        assert_eq!(app.busy_phase, BusyPhase::Idle);
+        assert_eq!(
+            app.rows
+                .last()
+                .map(|row| (row.header.as_str(), row.content.as_str())),
+            Some(("Paddles", "hi there"))
+        );
+    }
+
+    #[test]
+    fn late_transcript_sync_reuses_fallback_assistant_row_without_duplicate() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "hello".to_string();
+        app.submit_prompt();
+        app.sync_transcript(&transcript(&[(
+            ConversationTranscriptSpeaker::User,
+            "hello",
+        )]));
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("hello".to_string()))
+        );
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("hi there".to_string()),
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+
+        for _ in 0..16 {
+            if !app.busy {
+                break;
+            }
+            app.tick();
+        }
+
+        let transcript = ConversationTranscript {
+            task_id: TaskTraceId::new("task-1").expect("task"),
+            entries: vec![
+                ConversationTranscriptEntry {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    turn_id: TurnTraceId::new("task-1.turn-0001").expect("turn"),
+                    speaker: ConversationTranscriptSpeaker::User,
+                    content: "hello".to_string(),
+                    response_mode: None,
+                    render: None,
+                },
+                ConversationTranscriptEntry {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    turn_id: TurnTraceId::new("task-1.turn-0002").expect("turn"),
+                    speaker: ConversationTranscriptSpeaker::Assistant,
+                    content: "hi there".to_string(),
+                    response_mode: None,
+                    render: Some(RenderDocument {
+                        blocks: vec![RenderBlock::Paragraph {
+                            text: "hi there".to_string(),
+                        }],
+                    }),
+                },
+            ],
+        };
+
+        app.sync_transcript(&transcript);
+
+        let assistant_rows = app
+            .rows
+            .iter()
+            .filter(|row| row.kind == TranscriptRowKind::Assistant)
+            .collect::<Vec<_>>();
+        assert_eq!(assistant_rows.len(), 1);
+        assert_eq!(assistant_rows[0].content, "hi there");
+        assert_eq!(
+            assistant_rows[0]
+                .render
+                .as_ref()
+                .map(|render| render.blocks.len()),
+            Some(1)
+        );
     }
 
     #[test]
