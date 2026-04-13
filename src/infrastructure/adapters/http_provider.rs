@@ -1048,7 +1048,7 @@ Rules:
                     invocation: ExternalCapabilityInvocation::new(
                         envelope.capability_id.unwrap_or_default(),
                         envelope.purpose.unwrap_or_default(),
-                        envelope.payload.unwrap_or_else(|| json!({})),
+                        normalize_external_capability_payload(envelope.payload),
                     ),
                 },
             },
@@ -1937,8 +1937,8 @@ fn planner_action_json_schema() -> Value {
                 "description": "Required when `action` is `external_capability`."
             },
             "payload": {
-                "type": "object",
-                "description": "Optional JSON payload when `action` is `external_capability`."
+                "type": "string",
+                "description": "Optional JSON-encoded payload when `action` is `external_capability`."
             },
             "mode": {
                 "type": "string",
@@ -2109,6 +2109,14 @@ fn make_openai_object_schema_require_all_properties(schema: &mut Value) {
 
     if let Some(object) = schema.as_object_mut() {
         object.insert("required".to_string(), Value::Array(required));
+    }
+}
+
+fn normalize_external_capability_payload(payload: Option<Value>) -> Value {
+    match payload {
+        Some(Value::String(raw)) => serde_json::from_str(&raw).unwrap_or(Value::String(raw)),
+        Some(value) => value,
+        None => json!({}),
     }
 }
 
@@ -3694,6 +3702,45 @@ mod tests {
     }
 
     #[test]
+    fn parse_planner_action_supports_stringified_external_capability_payloads() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai/v1/chat/completions",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+
+        let decision = adapter
+            .parse_planner_action(
+                r#"{"action":"external_capability","capability_id":"web.search","purpose":"find the latest docs","payload":"{\"query\":\"paddles docs\"}","rationale":"ground the answer with a current external source","edit":"no","candidate_files":[]}"#,
+            )
+            .expect("planner decision");
+
+        assert_eq!(
+            decision,
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::ExternalCapability {
+                        invocation: ExternalCapabilityInvocation::new(
+                            "web.search",
+                            "find the latest docs",
+                            json!({ "query": "paddles docs" }),
+                        ),
+                    },
+                },
+                rationale: "ground the answer with a current external source".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }
+        );
+    }
+
+    #[test]
     fn parse_planner_action_accepts_pretty_printed_multiline_json() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
@@ -4150,6 +4197,15 @@ mod tests {
         assert!(schema["properties"].get("capability_id").is_some());
         assert!(schema["properties"].get("purpose").is_some());
         assert!(schema["properties"].get("payload").is_some());
+        assert_eq!(
+            schema["properties"]["payload"]["type"][0].as_str(),
+            Some("string")
+        );
+        assert_eq!(
+            schema["properties"]["payload"]["type"][1].as_str(),
+            Some("null")
+        );
+        assert!(schema["properties"]["payload"]["additionalProperties"].is_null());
     }
 
     #[tokio::test(flavor = "multi_thread")]
