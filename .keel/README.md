@@ -363,7 +363,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Establish A Replayable Multi-Agent Delegation Substrate](epics/VGb1c2DBj/voyages/VGdaQAncW/) | planned |
+| [Establish A Replayable Multi-Agent Delegation Substrate](epics/VGb1c2DBj/voyages/VGdaQAncW/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

@@ -4,6 +4,7 @@ pub mod collaboration;
 pub mod compaction;
 pub mod context_quality;
 pub mod control;
+pub mod delegation;
 pub mod execution_hand;
 pub mod external_capability;
 pub mod forensics;
@@ -38,6 +39,12 @@ pub use control::{
     DiffRuntimeItem, FileRuntimeItem, FileRuntimeOperation, PlanRuntimeItem, RuntimeItem,
     ThreadControlOperation, TurnControlOperation, thread_control_operation, thread_control_result,
     trace_control_result,
+};
+pub use delegation::{
+    DelegationEvidencePolicy, DelegationGovernancePolicy, DelegationIntegrationOwner,
+    WorkerArtifactKind, WorkerArtifactRecord, WorkerDelegationContract, WorkerDelegationRequest,
+    WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
+    WorkerRole,
 };
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,

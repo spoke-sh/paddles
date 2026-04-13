@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGdaQAncW
-status: planned
+status: in-progress
 epic: VGb1c2DBj
 created_at: 2026-04-12T20:19:45
 # authored
 title: Establish A Replayable Multi-Agent Delegation Substrate
 index: 1
 updated_at: 2026-04-12T20:23:48
+started_at: 2026-04-12T20:29:44
 ---
 
 # Establish A Replayable Multi-Agent Delegation Substrate
@@ -26,11 +27,11 @@ updated_at: 2026-04-12T20:23:48
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Delegation Lifecycle And Ownership Contracts](../../../../stories/VGdaSNkFK/README.md) | feat | backlog |
+| [Define Delegation Lifecycle And Ownership Contracts](../../../../stories/VGdaSNkFK/README.md) | feat | done |
 | [Wire Role-Based Worker Coordination Through Thread Lineage](../../../../stories/VGdaSO7FJ/README.md) | feat | backlog |
 | [Project Delegated Worker State Across Operator Surfaces](../../../../stories/VGdaSObFI/README.md) | feat | backlog |
 <!-- END GENERATED -->
