@@ -22,8 +22,8 @@ mission: VGb1Yx7RP
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/3 stories done
+**Progress:** 1/1 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Establish A Typed Collaboration Mode And Review Substrate](voyages/VGcvNTG74/) | in-progress | 2/3 |
+| [Establish A Typed Collaboration Mode And Review Substrate](voyages/VGcvNTG74/) | done | 3/3 |
 <!-- END GENERATED -->
