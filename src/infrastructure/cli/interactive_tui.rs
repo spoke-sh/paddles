@@ -737,41 +737,9 @@ impl TranscriptRow {
         self
     }
 
-    fn estimated_height(&self, width: usize) -> usize {
-        let width = width.max(8);
-        let body_width = width.saturating_sub(4).max(1);
-        let mut lines = wrapped_line_count(&self.display_header(), width);
-        if self.content.is_empty() {
-            if let Some(render) = &self.render {
-                return lines + assistant_render_line_count(render, body_width) + 1;
-            }
-            return lines + 1;
-        }
-
-        for line in self.display_content().lines() {
-            lines += wrapped_line_count(line, body_width);
-        }
-        lines + 1
-    }
-
     fn timed(mut self, timing: TranscriptTiming) -> Self {
         self.timing = Some(timing);
         self
-    }
-
-    fn display_content(&self) -> String {
-        self.render
-            .as_ref()
-            .map(RenderDocument::to_plain_text)
-            .filter(|content| !content.is_empty())
-            .unwrap_or_else(|| self.content.clone())
-    }
-
-    fn display_header(&self) -> String {
-        match self.timing {
-            Some(timing) => format!("{} · {}", self.header, timing.label()),
-            None => self.header.clone(),
-        }
     }
 }
 
@@ -796,11 +764,6 @@ impl TranscriptTiming {
     fn delta_label(&self) -> Option<String> {
         self.delta
             .map(|delta| format!(" (+{})", format_duration_compact(delta)))
-    }
-
-    fn label(&self) -> String {
-        let delta = self.delta_label().unwrap_or_default();
-        format!("{}{delta}", self.elapsed_label())
     }
 }
 
@@ -2813,7 +2776,11 @@ impl InteractiveApp {
             }
         }
 
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false })
+        let scroll_y = rendered_lines_height(&lines, inner_width).saturating_sub(inner_height);
+
+        Paragraph::new(Text::from(lines))
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_y as u16, 0))
     }
 
     fn render_input(&self) -> Paragraph<'static> {
@@ -3021,7 +2988,7 @@ impl InteractiveApp {
         }
 
         let visible_rows = self.visible_live_rows(width, max_height);
-        rendered_rows_height(&visible_rows, width).min(max_height) as u16
+        rendered_rows_height(&visible_rows, &self.palette, width).min(max_height) as u16
     }
 
     fn visible_live_rows(&self, width: usize, height: usize) -> Vec<TranscriptRow> {
@@ -3030,7 +2997,7 @@ impl InteractiveApp {
         let live_rows = &self.rows[self.flushed_row_count..];
 
         for row in live_rows.iter().rev() {
-            let row_height = row.estimated_height(width);
+            let row_height = row_rendered_height(row, &self.palette, width);
             let rendered_height = row_height + usize::from(!visible.is_empty());
             if !visible.is_empty() && used + rendered_height > height {
                 break;
@@ -3095,10 +3062,10 @@ fn flush_scrollback_rows<B: Backend>(
     let palette = app.palette;
 
     for row in app.take_scrollback_rows() {
-        let height = row.estimated_height(width) as u16;
+        let mut lines = render_row_lines(&row, &palette);
+        lines.push(Line::default());
+        let height = rendered_lines_height(&lines, width) as u16;
         terminal.insert_before(height, |buffer| {
-            let mut lines = render_row_lines(&row, &palette);
-            lines.push(Line::default());
             Paragraph::new(Text::from(lines))
                 .wrap(Wrap { trim: false })
                 .render(buffer.area, buffer);
@@ -3168,10 +3135,10 @@ fn inline_multiline_text(input: &str) -> String {
     })
 }
 
-fn rendered_rows_height(rows: &[TranscriptRow], width: usize) -> usize {
+fn rendered_rows_height(rows: &[TranscriptRow], palette: &Palette, width: usize) -> usize {
     rows.iter()
         .enumerate()
-        .map(|(index, row)| row.estimated_height(width) + usize::from(index > 0))
+        .map(|(index, row)| row_rendered_height(row, palette, width) + usize::from(index > 0))
         .sum()
 }
 
@@ -3274,11 +3241,24 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
     lines
 }
 
-fn assistant_render_line_count(render: &RenderDocument, width: usize) -> usize {
-    assistant_render_line_specs(render)
+fn row_rendered_height(row: &TranscriptRow, palette: &Palette, width: usize) -> usize {
+    let mut lines = render_row_lines(row, palette);
+    lines.push(Line::default());
+    rendered_lines_height(&lines, width)
+}
+
+fn rendered_lines_height(lines: &[Line<'_>], width: usize) -> usize {
+    lines
         .iter()
-        .map(|spec| wrapped_line_count(&spec.text, width))
+        .map(|line| wrapped_line_count(&flatten_rendered_line(line), width))
         .sum()
+}
+
+fn flatten_rendered_line(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
 }
 
 #[derive(Clone, Copy)]
@@ -4891,6 +4871,48 @@ mod tests {
             vec!["  └ Summary".to_string(), "    Body".to_string()]
         );
         assert!(row.render.is_some());
+    }
+
+    #[test]
+    fn live_transcript_keeps_tail_of_tall_assistant_rows_visible() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let _ = app.take_scrollback_rows();
+
+        app.rows.push(
+            TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "").with_render(
+                RenderDocument {
+                    blocks: vec![
+                        RenderBlock::Paragraph {
+                            text: "Best next integration opportunities for hq with spoke are:"
+                                .to_string(),
+                        },
+                        RenderBlock::BulletList {
+                            items: vec![
+                                "Consume a Radar-derived social graph as an input to HQ prioritization.".to_string(),
+                                "Make HQ a control-plane over Spoke social primitives.".to_string(),
+                                "Feed HQ state back into Spoke.".to_string(),
+                                "Start with a thin integration seam.".to_string(),
+                                "Relationship radar: who around this mission matters most right now?".to_string(),
+                            ],
+                        },
+                    ],
+                },
+            ),
+        );
+
+        let buffer = render_buffer(&app, 72, 9);
+        let rendered = buffer_text(&buffer);
+
+        assert!(rendered.contains("Relationship radar"));
     }
 
     #[test]

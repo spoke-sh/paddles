@@ -81,6 +81,9 @@ Rules:\n\
 - A `paragraph` block must include `text`.\n\
 - Use `bullet_list` for short flat lists.\n\
 - A `bullet_list` block must include `items`.\n\
+- Prefer a `heading` or `paragraph` intro followed by one `bullet_list` for grouped recommendations.\n\
+- Each `bullet_list` item must be a complete standalone point.\n\
+- Nested lists are not supported; fold sub-points into the parent item text instead of emitting an intro bullet followed by more bullets.\n\
 - Use `code_block` only for literal code or terminal output.\n\
 - A `code_block` block must include `code`.\n\
 - Do not use markdown headings, `**bold**`, or list markers inside `paragraph` text; use `heading` or `bullet_list` blocks instead.\n\
@@ -465,6 +468,8 @@ mod tests {
         assert!(prompt.contains("Return exactly one complete JSON object"));
         assert!(prompt.contains("Do not emit partial blocks"));
         assert!(prompt.contains("Use `heading` for short section titles"));
+        assert!(prompt.contains("Each `bullet_list` item must be a complete standalone point"));
+        assert!(prompt.contains("Nested lists are not supported"));
     }
 
     #[test]

@@ -374,6 +374,7 @@ fn parse_plain_text_render_document(input: &str) -> Option<RenderDocument> {
     let mut blocks = Vec::new();
     let mut paragraph_lines = Vec::<String>::new();
     let mut bullet_items = Vec::<String>::new();
+    let mut pending_bullet_gap = false;
     let mut in_code_block = false;
     let mut code_language = None::<String>;
     let mut code_lines = Vec::<String>::new();
@@ -384,6 +385,7 @@ fn parse_plain_text_render_document(input: &str) -> Option<RenderDocument> {
         if let Some(fence) = trimmed.strip_prefix("```") {
             flush_paragraph(&mut blocks, &mut paragraph_lines);
             flush_bullets(&mut blocks, &mut bullet_items);
+            pending_bullet_gap = false;
             if in_code_block {
                 blocks.push(RenderBlock::CodeBlock {
                     language: code_language.take(),
@@ -405,9 +407,16 @@ fn parse_plain_text_render_document(input: &str) -> Option<RenderDocument> {
 
         if trimmed.is_empty() {
             flush_paragraph(&mut blocks, &mut paragraph_lines);
-            flush_bullets(&mut blocks, &mut bullet_items);
+            if !bullet_items.is_empty() {
+                pending_bullet_gap = true;
+            }
             continue;
         }
+
+        if pending_bullet_gap && !trimmed.starts_with("- ") {
+            flush_bullets(&mut blocks, &mut bullet_items);
+        }
+        pending_bullet_gap = false;
 
         if let Some(text) = parse_heading_line(trimmed) {
             flush_paragraph(&mut blocks, &mut paragraph_lines);
@@ -429,6 +438,7 @@ fn parse_plain_text_render_document(input: &str) -> Option<RenderDocument> {
             continue;
         }
 
+        flush_bullets(&mut blocks, &mut bullet_items);
         paragraph_lines.push(strip_balanced_marker_pairs(line, "**"));
     }
 
@@ -437,6 +447,9 @@ fn parse_plain_text_render_document(input: &str) -> Option<RenderDocument> {
             language: code_language.take(),
             code: code_lines.join("\n"),
         });
+    }
+    if pending_bullet_gap {
+        flush_bullets(&mut blocks, &mut bullet_items);
     }
     flush_paragraph(&mut blocks, &mut paragraph_lines);
     flush_bullets(&mut blocks, &mut bullet_items);
@@ -919,6 +932,33 @@ mod tests {
         assert_eq!(
             document.to_plain_text(),
             "**Summary**\nBody\n\n**Checklist**\n- Ship it."
+        );
+    }
+
+    #[test]
+    fn merges_blank_line_separated_bullets_into_one_list() {
+        let document = RenderDocument::from_assistant_plain_text(
+            "Concrete product ideas:\n\n- Relationship radar\n\n- Warm-intro queue\n\n- Mission coverage view",
+        );
+
+        assert_eq!(
+            document.blocks,
+            vec![
+                RenderBlock::Paragraph {
+                    text: "Concrete product ideas:".to_string(),
+                },
+                RenderBlock::BulletList {
+                    items: vec![
+                        "Relationship radar".to_string(),
+                        "Warm-intro queue".to_string(),
+                        "Mission coverage view".to_string(),
+                    ],
+                },
+            ]
+        );
+        assert_eq!(
+            document.to_plain_text(),
+            "Concrete product ideas:\n\n- Relationship radar\n- Warm-intro queue\n- Mission coverage view"
         );
     }
 }
