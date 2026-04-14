@@ -1,4 +1,5 @@
 use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
+use crate::domain::model::render::uses_compact_block_separator;
 use crate::domain::model::{
     ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
     RenderBlock, RenderDocument, RuntimeEventPresentation, RuntimeItem, ThreadCandidate,
@@ -861,6 +862,12 @@ struct PendingReveal {
     render: Option<RenderDocument>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingTurnResultFallback {
+    content: String,
+    render: Option<RenderDocument>,
+}
+
 impl PendingReveal {
     fn new(row_index: usize, full_text: String, render: Option<RenderDocument>) -> Self {
         Self {
@@ -1087,7 +1094,7 @@ struct InteractiveApp {
     pending_transcript_sync: bool,
     seen_transcript_record_ids: HashSet<String>,
     pending_turn_total_timing: Option<TranscriptTiming>,
-    pending_turn_result_fallback: Option<String>,
+    pending_turn_result_fallback: Option<PendingTurnResultFallback>,
     fallback_assistant_row: Option<usize>,
 }
 
@@ -2323,16 +2330,22 @@ impl InteractiveApp {
     }
 
     fn queue_turn_result_fallback(&mut self, response: &str) {
-        let wrapped = soft_wrap_prose(response, MAX_PROSE_WIDTH);
+        let render = RenderDocument::canonicalize_assistant_response(response);
+        let wrapped = soft_wrap_prose(&render.to_plain_text(), MAX_PROSE_WIDTH);
         if wrapped.trim().is_empty() {
             self.pending_turn_result_fallback = None;
             return;
         }
-        self.pending_turn_result_fallback = Some(wrapped);
+        self.pending_turn_result_fallback = Some(PendingTurnResultFallback {
+            content: wrapped,
+            render: Some(render),
+        });
     }
 
     fn activate_pending_turn_result_fallback(&mut self) {
-        let Some(content) = self.pending_turn_result_fallback.take() else {
+        let Some(PendingTurnResultFallback { content, render }) =
+            self.pending_turn_result_fallback.take()
+        else {
             return;
         };
 
@@ -2342,7 +2355,7 @@ impl InteractiveApp {
             row = row.timed(timing);
         }
         self.rows.push(row);
-        self.pending_reveal = Some(PendingReveal::new(row_index, content, None));
+        self.pending_reveal = Some(PendingReveal::new(row_index, content, render));
         self.fallback_assistant_row = Some(row_index);
         self.busy = true;
         self.busy_phase = BusyPhase::Rendering;
@@ -3219,6 +3232,7 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
             render,
             AssistantTextStyles {
                 base: body_style,
+                heading: palette.assistant_heading,
                 code: palette.code,
                 citation: palette.citation,
                 list_marker: palette.list_marker,
@@ -3241,6 +3255,7 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
                 line,
                 AssistantTextStyles {
                     base: body_style,
+                    heading: palette.assistant_heading,
                     code: palette.code,
                     citation: palette.citation,
                     list_marker: palette.list_marker,
@@ -3288,6 +3303,7 @@ struct AssistantRenderLine {
 #[derive(Clone, Copy)]
 struct AssistantTextStyles {
     base: Style,
+    heading: Style,
     code: Style,
     citation: Style,
     list_marker: Style,
@@ -3362,8 +3378,7 @@ fn assistant_render_line_specs(render: &RenderDocument) -> Vec<AssistantRenderLi
 }
 
 fn assistant_block_separator(previous: &RenderBlock, next: &RenderBlock) -> bool {
-    !(matches!(previous, RenderBlock::Paragraph { text } if is_ordered_section_label_text(text))
-        && matches!(next, RenderBlock::BulletList { .. }))
+    !uses_compact_block_separator(previous, next)
 }
 
 fn render_assistant_document_lines(
@@ -3378,7 +3393,7 @@ fn render_assistant_document_lines(
             match spec.kind {
                 AssistantRenderLineKind::Heading => Line::from(vec![
                     Span::styled(prefix.to_string(), styles.base),
-                    Span::styled(spec.text, styles.base.add_modifier(Modifier::BOLD)),
+                    Span::styled(spec.text, styles.heading),
                 ]),
                 AssistantRenderLineKind::Paragraph => {
                     render_assistant_prose_line(prefix, &spec.text, styles)
@@ -3481,14 +3496,6 @@ fn split_list_marker(line: &str) -> Option<(&str, AssistantListMarkerKind, &str,
         &trimmed[..marker_end],
         &trimmed[marker_end..],
     ))
-}
-
-fn is_ordered_section_label_text(text: &str) -> bool {
-    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
-    matches!(
-        (lines.next(), lines.next()),
-        (Some(line), None) if ordered_marker_end(line.trim()).is_some()
-    )
 }
 
 fn ordered_marker_end(line: &str) -> Option<usize> {
@@ -3828,6 +3835,7 @@ struct Palette {
     user_body: Style,
     assistant_header: Style,
     assistant_body: Style,
+    assistant_heading: Style,
     event_header: Style,
     event_body: Style,
     command_notice_header: Style,
@@ -3859,6 +3867,9 @@ fn detect_palette() -> Palette {
             user_body: Style::default().fg(Color::Rgb(35, 43, 54)).bg(prompt_bg),
             assistant_header: Style::default().fg(Color::Rgb(0, 120, 102)),
             assistant_body: Style::default().fg(Color::Rgb(24, 33, 45)),
+            assistant_heading: Style::default()
+                .fg(Color::Rgb(18, 74, 140))
+                .add_modifier(Modifier::BOLD),
             event_header: Style::default().fg(Color::Rgb(138, 87, 0)),
             event_body: Style::default().fg(Color::Rgb(72, 77, 84)),
             command_notice_header: Style::default().fg(Color::Rgb(0, 92, 184)),
@@ -3890,6 +3901,9 @@ fn detect_palette() -> Palette {
             user_body: Style::default().fg(Color::Rgb(224, 229, 236)).bg(prompt_bg),
             assistant_header: Style::default().fg(Color::Rgb(111, 231, 183)),
             assistant_body: Style::default().fg(Color::Rgb(234, 240, 247)),
+            assistant_heading: Style::default()
+                .fg(Color::Rgb(126, 204, 255))
+                .add_modifier(Modifier::BOLD),
             event_header: Style::default().fg(Color::Rgb(255, 202, 92)),
             event_body: Style::default().fg(Color::Rgb(182, 191, 204)),
             command_notice_header: Style::default().fg(Color::Rgb(126, 204, 255)),
@@ -4136,6 +4150,66 @@ mod tests {
         assert_eq!(lines[1].spans[1].style, palette.ordered_marker);
         assert_eq!(lines[2].spans[1].content.as_ref(), "- ");
         assert_eq!(lines[2].spans[1].style, palette.list_marker);
+    }
+
+    #[test]
+    fn assistant_rows_keep_headings_tight_with_following_content() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "").with_render(
+            RenderDocument {
+                blocks: vec![
+                    RenderBlock::Heading {
+                        text: "Summary".to_string(),
+                    },
+                    RenderBlock::Paragraph {
+                        text: "Body".to_string(),
+                    },
+                    RenderBlock::Heading {
+                        text: "Checklist".to_string(),
+                    },
+                    RenderBlock::BulletList {
+                        items: vec!["Ship it.".to_string()],
+                    },
+                ],
+            },
+        );
+
+        let lines = render_row_lines(&row, &palette);
+        let rendered = lines
+            .iter()
+            .skip(1)
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rendered,
+            vec![
+                "  └ Summary".to_string(),
+                "    Body".to_string(),
+                "    ".to_string(),
+                "    Checklist".to_string(),
+                "    - Ship it.".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn assistant_rows_style_headings_distinctly_from_body_bold() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "").with_render(
+            RenderDocument {
+                blocks: vec![RenderBlock::Heading {
+                    text: "Summary".to_string(),
+                }],
+            },
+        );
+
+        let lines = render_row_lines(&row, &palette);
+
+        assert_ne!(
+            lines[1].spans[1].style,
+            palette.assistant_body.add_modifier(Modifier::BOLD)
+        );
     }
 
     #[test]
@@ -4770,6 +4844,53 @@ mod tests {
                 .map(|render| render.blocks.len()),
             Some(1)
         );
+    }
+
+    #[test]
+    fn fallback_reveal_normalizes_heading_render_without_waiting_for_transcript_sync() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "hello".to_string();
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("hello".to_string()))
+        );
+
+        app.handle_message(super::UiMessage::TurnFinished {
+            result: Ok("**Summary**\n\n\nBody".to_string()),
+            occurred_at: Instant::now(),
+            work_id: None,
+        });
+
+        for _ in 0..16 {
+            if !app.busy {
+                break;
+            }
+            app.tick();
+        }
+
+        let row = app.rows.last().expect("assistant row");
+        let rendered = render_row_lines(row, &palette)
+            .iter()
+            .skip(1)
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rendered,
+            vec!["  └ Summary".to_string(), "    Body".to_string()]
+        );
+        assert!(row.render.is_some());
     }
 
     #[test]

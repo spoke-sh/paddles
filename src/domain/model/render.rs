@@ -680,11 +680,20 @@ fn render_types_for_blocks(blocks: &[RenderBlock]) -> Vec<RenderType> {
 }
 
 fn block_separator(previous: &RenderBlock, next: &RenderBlock) -> &'static str {
-    if paragraph_continues_into_bullets(previous, next) {
+    if uses_compact_block_separator(previous, next) {
         "\n"
     } else {
         "\n\n"
     }
+}
+
+pub(crate) fn uses_compact_block_separator(previous: &RenderBlock, next: &RenderBlock) -> bool {
+    heading_continues_into_content(previous, next)
+        || paragraph_continues_into_bullets(previous, next)
+}
+
+fn heading_continues_into_content(previous: &RenderBlock, next: &RenderBlock) -> bool {
+    matches!(previous, RenderBlock::Heading { .. }) && !matches!(next, RenderBlock::Heading { .. })
 }
 
 fn paragraph_continues_into_bullets(previous: &RenderBlock, next: &RenderBlock) -> bool {
@@ -825,7 +834,7 @@ mod tests {
                 }
             ]
         );
-        assert_eq!(parsed.to_plain_text(), "**Summary**\n\nHello.");
+        assert_eq!(parsed.to_plain_text(), "**Summary**\nHello.");
     }
 
     #[test]
@@ -885,6 +894,31 @@ mod tests {
         assert_eq!(
             document.to_plain_text(),
             "1. Shared contract surfaces\n- Define what HQ owns vs what spoke owns.\n- Promote shared schemas.\n\n2. Tighter dev workflow integration\n- Make it easy to test HQ changes locally."
+        );
+    }
+
+    #[test]
+    fn keeps_headings_tight_with_following_content() {
+        let document = RenderDocument {
+            blocks: vec![
+                RenderBlock::Heading {
+                    text: "Summary".to_string(),
+                },
+                RenderBlock::Paragraph {
+                    text: "Body".to_string(),
+                },
+                RenderBlock::Heading {
+                    text: "Checklist".to_string(),
+                },
+                RenderBlock::BulletList {
+                    items: vec!["Ship it.".to_string()],
+                },
+            ],
+        };
+
+        assert_eq!(
+            document.to_plain_text(),
+            "**Summary**\nBody\n\n**Checklist**\n- Ship it."
         );
     }
 }

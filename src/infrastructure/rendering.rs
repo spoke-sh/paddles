@@ -400,7 +400,7 @@ mod tests {
         );
         assert_eq!(
             parsed.to_plain_text(),
-            "**Summary**\n\nThe board is ready.\n\n- Ship the slice\n- Update the board\n\n```sh\ngit status --short\n```\n\nSources: README.md, ARCHITECTURE.md"
+            "**Summary**\nThe board is ready.\n\n- Ship the slice\n- Update the board\n\n```sh\ngit status --short\n```\n\nSources: README.md, ARCHITECTURE.md"
         );
     }
 
@@ -637,6 +637,6 @@ mod tests {
         let document = crate::domain::model::RenderDocument::parse_assistant_response(response)
             .expect("nullable fields should still parse");
 
-        assert_eq!(document.to_plain_text(), "**Overview**\n\nStill works.");
+        assert_eq!(document.to_plain_text(), "**Overview**\nStill works.");
     }
 }
