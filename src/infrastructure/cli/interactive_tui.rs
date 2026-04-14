@@ -3195,10 +3195,6 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
 
     let mut lines = vec![Line::from(header_spans)];
 
-    if row.content.is_empty() {
-        return lines;
-    }
-
     if let Some(tool_name) = row.header.strip_prefix("• Applied ").map(str::trim)
         && is_mutation_tool_name(tool_name)
     {
@@ -3221,10 +3217,18 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
     {
         lines.extend(render_assistant_document_lines(
             render,
-            body_style,
-            palette.code,
-            palette.citation,
+            AssistantTextStyles {
+                base: body_style,
+                code: palette.code,
+                citation: palette.citation,
+                list_marker: palette.list_marker,
+                ordered_marker: palette.ordered_marker,
+            },
         ));
+        return lines;
+    }
+
+    if row.content.is_empty() {
         return lines;
     }
 
@@ -3235,9 +3239,13 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
             TranscriptRowKind::Assistant => render_assistant_line(
                 prefix,
                 line,
-                body_style,
-                palette.code,
-                palette.citation,
+                AssistantTextStyles {
+                    base: body_style,
+                    code: palette.code,
+                    citation: palette.citation,
+                    list_marker: palette.list_marker,
+                    ordered_marker: palette.ordered_marker,
+                },
                 &mut in_code_block,
             ),
             _ => Line::from(vec![
@@ -3266,15 +3274,30 @@ enum AssistantRenderLineKind {
     Citations,
 }
 
+#[derive(Clone, Copy)]
+enum AssistantListMarkerKind {
+    Bullet,
+    Ordered,
+}
+
 struct AssistantRenderLine {
     kind: AssistantRenderLineKind,
     text: String,
 }
 
+#[derive(Clone, Copy)]
+struct AssistantTextStyles {
+    base: Style,
+    code: Style,
+    citation: Style,
+    list_marker: Style,
+    ordered_marker: Style,
+}
+
 fn assistant_render_line_specs(render: &RenderDocument) -> Vec<AssistantRenderLine> {
     let mut lines = Vec::new();
     for (index, block) in render.blocks.iter().enumerate() {
-        if index > 0 {
+        if index > 0 && assistant_block_separator(&render.blocks[index - 1], block) {
             lines.push(AssistantRenderLine {
                 kind: AssistantRenderLineKind::Paragraph,
                 text: String::new(),
@@ -3338,27 +3361,37 @@ fn assistant_render_line_specs(render: &RenderDocument) -> Vec<AssistantRenderLi
     lines
 }
 
+fn assistant_block_separator(previous: &RenderBlock, next: &RenderBlock) -> bool {
+    !(matches!(previous, RenderBlock::Paragraph { text } if is_ordered_section_label_text(text))
+        && matches!(next, RenderBlock::BulletList { .. }))
+}
+
 fn render_assistant_document_lines(
     render: &RenderDocument,
-    base_style: Style,
-    code_style: Style,
-    citation_style: Style,
+    styles: AssistantTextStyles,
 ) -> Vec<Line<'static>> {
     assistant_render_line_specs(render)
         .into_iter()
         .enumerate()
         .map(|(index, spec)| {
             let prefix = if index == 0 { "  └ " } else { "    " };
-            let style = match spec.kind {
-                AssistantRenderLineKind::Heading => base_style.add_modifier(Modifier::BOLD),
-                AssistantRenderLineKind::Paragraph => base_style,
-                AssistantRenderLineKind::Code => code_style,
-                AssistantRenderLineKind::Citations => citation_style,
-            };
-            Line::from(vec![
-                Span::styled(prefix.to_string(), base_style),
-                Span::styled(spec.text, style),
-            ])
+            match spec.kind {
+                AssistantRenderLineKind::Heading => Line::from(vec![
+                    Span::styled(prefix.to_string(), styles.base),
+                    Span::styled(spec.text, styles.base.add_modifier(Modifier::BOLD)),
+                ]),
+                AssistantRenderLineKind::Paragraph => {
+                    render_assistant_prose_line(prefix, &spec.text, styles)
+                }
+                AssistantRenderLineKind::Code => Line::from(vec![
+                    Span::styled(prefix.to_string(), styles.base),
+                    Span::styled(spec.text, styles.code),
+                ]),
+                AssistantRenderLineKind::Citations => Line::from(vec![
+                    Span::styled(prefix.to_string(), styles.base),
+                    Span::styled(spec.text, styles.citation),
+                ]),
+            }
         })
         .collect()
 }
@@ -3366,43 +3399,111 @@ fn render_assistant_document_lines(
 fn render_assistant_line(
     prefix: &str,
     line: &str,
-    base_style: Style,
-    code_style: Style,
-    citation_style: Style,
+    styles: AssistantTextStyles,
     in_code_block: &mut bool,
 ) -> Line<'static> {
     let trimmed = line.trim_start();
     if trimmed.starts_with("```") {
         *in_code_block = !*in_code_block;
         return Line::from(vec![
-            Span::styled(prefix.to_string(), base_style),
-            Span::styled(line.to_string(), code_style),
+            Span::styled(prefix.to_string(), styles.base),
+            Span::styled(line.to_string(), styles.code),
         ]);
     }
 
     if *in_code_block {
         return Line::from(vec![
-            Span::styled(prefix.to_string(), base_style),
-            Span::styled(line.to_string(), code_style),
+            Span::styled(prefix.to_string(), styles.base),
+            Span::styled(line.to_string(), styles.code),
         ]);
     }
 
     if trimmed.starts_with("Sources:") {
         return Line::from(vec![
-            Span::styled(prefix.to_string(), base_style),
-            Span::styled(line.to_string(), citation_style),
+            Span::styled(prefix.to_string(), styles.base),
+            Span::styled(line.to_string(), styles.citation),
         ]);
     }
 
-    let mut spans = vec![Span::styled(prefix.to_string(), base_style)];
+    render_assistant_prose_line(prefix, line, styles)
+}
+
+fn render_assistant_prose_line(
+    prefix: &str,
+    line: &str,
+    styles: AssistantTextStyles,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled(prefix.to_string(), styles.base)];
+
+    if let Some((leading, marker_kind, marker, remainder)) = split_list_marker(line) {
+        if !leading.is_empty() {
+            spans.push(Span::styled(leading.to_string(), styles.base));
+        }
+        let marker_style = match marker_kind {
+            AssistantListMarkerKind::Bullet => styles.list_marker,
+            AssistantListMarkerKind::Ordered => styles.ordered_marker,
+        };
+        spans.push(Span::styled(marker.to_string(), marker_style));
+        append_inline_code_spans(&mut spans, remainder, styles.base, styles.code);
+    } else {
+        append_inline_code_spans(&mut spans, line, styles.base, styles.code);
+    }
+
+    Line::from(spans)
+}
+
+fn append_inline_code_spans(
+    spans: &mut Vec<Span<'static>>,
+    text: &str,
+    base_style: Style,
+    code_style: Style,
+) {
     let mut code_segment = false;
-    for segment in line.split('`') {
+    for segment in text.split('`') {
         let style = if code_segment { code_style } else { base_style };
         spans.push(Span::styled(segment.to_string(), style));
         code_segment = !code_segment;
     }
+}
 
-    Line::from(spans)
+fn split_list_marker(line: &str) -> Option<(&str, AssistantListMarkerKind, &str, &str)> {
+    let trimmed = line.trim_start();
+    let leading = &line[..line.len() - trimmed.len()];
+
+    if let Some(remainder) = trimmed.strip_prefix("- ") {
+        return Some((leading, AssistantListMarkerKind::Bullet, "- ", remainder));
+    }
+
+    let marker_end = ordered_marker_end(trimmed)?;
+    Some((
+        leading,
+        AssistantListMarkerKind::Ordered,
+        &trimmed[..marker_end],
+        &trimmed[marker_end..],
+    ))
+}
+
+fn is_ordered_section_label_text(text: &str) -> bool {
+    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+    matches!(
+        (lines.next(), lines.next()),
+        (Some(line), None) if ordered_marker_end(line.trim()).is_some()
+    )
+}
+
+fn ordered_marker_end(line: &str) -> Option<usize> {
+    let digit_count = line
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digit_count == 0 {
+        return None;
+    }
+
+    let marker_end = digit_count + 2;
+    (line.as_bytes().get(digit_count) == Some(&b'.')
+        && line.as_bytes().get(digit_count + 1) == Some(&b' '))
+    .then_some(marker_end)
 }
 
 fn format_turn_event_row(event: TurnEvent, verbose: u8) -> TranscriptRow {
@@ -3740,6 +3841,8 @@ struct Palette {
     input_bg: Color,
     code: Style,
     citation: Style,
+    list_marker: Style,
+    ordered_marker: Style,
     pace_fast: Style,
     pace_slow: Style,
 }
@@ -3769,6 +3872,10 @@ fn detect_palette() -> Palette {
             input_bg: prompt_bg,
             code: Style::default().fg(Color::Rgb(87, 56, 130)),
             citation: Style::default().fg(Color::Rgb(94, 66, 0)),
+            list_marker: Style::default().fg(Color::Rgb(0, 120, 102)),
+            ordered_marker: Style::default()
+                .fg(Color::Rgb(18, 74, 140))
+                .add_modifier(Modifier::BOLD),
             pace_fast: Style::default().fg(Color::Rgb(165, 171, 180)),
             pace_slow: Style::default().fg(Color::Rgb(191, 105, 25)),
         }
@@ -3796,6 +3903,10 @@ fn detect_palette() -> Palette {
             input_bg: prompt_bg,
             code: Style::default().fg(Color::Rgb(204, 171, 255)),
             citation: Style::default().fg(Color::Rgb(255, 216, 130)),
+            list_marker: Style::default().fg(Color::Rgb(111, 231, 183)),
+            ordered_marker: Style::default()
+                .fg(Color::Rgb(115, 197, 255))
+                .add_modifier(Modifier::BOLD),
             pace_fast: Style::default().fg(Color::Rgb(90, 98, 112)),
             pace_slow: Style::default().fg(Color::Rgb(255, 180, 80)),
         }
@@ -3836,7 +3947,7 @@ mod tests {
     use crate::infrastructure::step_timing::Pace;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::style::Modifier;
-    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, prelude::Rect};
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer, prelude::Rect, text::Line};
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
@@ -3886,6 +3997,13 @@ mod tests {
             .map(|y| buffer_line(buffer, y))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn rendered_line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
     }
 
     fn provider_availability(
@@ -3962,6 +4080,62 @@ mod tests {
         let rendered = buffer_text(&buffer);
         assert!(rendered.contains("Summary"));
         assert!(!rendered.contains("**Summary**"));
+    }
+
+    #[test]
+    fn assistant_rows_keep_numbered_section_labels_tight_with_following_bullets() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "").with_render(
+            RenderDocument {
+                blocks: vec![
+                    RenderBlock::Paragraph {
+                        text: "1. Shared contract surfaces".to_string(),
+                    },
+                    RenderBlock::BulletList {
+                        items: vec!["Define what HQ owns vs what spoke owns.".to_string()],
+                    },
+                ],
+            },
+        );
+
+        let lines = render_row_lines(&row, &palette);
+        let rendered = lines
+            .iter()
+            .skip(1)
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rendered,
+            vec![
+                "  └ 1. Shared contract surfaces".to_string(),
+                "    - Define what HQ owns vs what spoke owns.".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn assistant_rows_style_ordered_and_bullet_markers_distinctly() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "").with_render(
+            RenderDocument {
+                blocks: vec![
+                    RenderBlock::Paragraph {
+                        text: "1. Shared contract surfaces".to_string(),
+                    },
+                    RenderBlock::BulletList {
+                        items: vec!["Define what HQ owns vs what spoke owns.".to_string()],
+                    },
+                ],
+            },
+        );
+
+        let lines = render_row_lines(&row, &palette);
+
+        assert_eq!(lines[1].spans[1].content.as_ref(), "1. ");
+        assert_eq!(lines[1].spans[1].style, palette.ordered_marker);
+        assert_eq!(lines[2].spans[1].content.as_ref(), "- ");
+        assert_eq!(lines[2].spans[1].style, palette.list_marker);
     }
 
     #[test]

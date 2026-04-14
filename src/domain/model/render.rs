@@ -37,12 +37,24 @@ impl RenderDocument {
     }
 
     pub fn to_plain_text(&self) -> String {
-        self.blocks
-            .iter()
-            .map(RenderBlock::to_plain_text)
-            .filter(|block| !block.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n")
+        let mut rendered = String::new();
+        let mut previous = None::<&RenderBlock>;
+
+        for block in &self.blocks {
+            let block_text = block.to_plain_text();
+            if block_text.trim().is_empty() {
+                continue;
+            }
+
+            if let Some(previous_block) = previous {
+                rendered.push_str(block_separator(previous_block, block));
+            }
+
+            rendered.push_str(&block_text);
+            previous = Some(block);
+        }
+
+        rendered
     }
 
     fn parse_json_envelope(json: &str) -> Option<Self> {
@@ -667,6 +679,42 @@ fn render_types_for_blocks(blocks: &[RenderBlock]) -> Vec<RenderType> {
     ordered
 }
 
+fn block_separator(previous: &RenderBlock, next: &RenderBlock) -> &'static str {
+    if paragraph_continues_into_bullets(previous, next) {
+        "\n"
+    } else {
+        "\n\n"
+    }
+}
+
+fn paragraph_continues_into_bullets(previous: &RenderBlock, next: &RenderBlock) -> bool {
+    matches!(previous, RenderBlock::Paragraph { text } if is_ordered_section_label(text))
+        && matches!(next, RenderBlock::BulletList { .. })
+}
+
+fn is_ordered_section_label(text: &str) -> bool {
+    let mut lines = text.lines().filter(|line| !line.trim().is_empty());
+    matches!(
+        (lines.next(), lines.next()),
+        (Some(line), None) if ordered_marker_end(line.trim()).is_some()
+    )
+}
+
+fn ordered_marker_end(line: &str) -> Option<usize> {
+    let digit_count = line
+        .bytes()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digit_count == 0 {
+        return None;
+    }
+
+    let marker_end = digit_count + 2;
+    (line.as_bytes().get(digit_count) == Some(&b'.')
+        && line.as_bytes().get(digit_count + 1) == Some(&b' '))
+    .then_some(marker_end)
+}
+
 fn strip_balanced_marker_pairs(input: &str, marker: &str) -> String {
     if marker.is_empty() {
         return input.to_string();
@@ -809,6 +857,34 @@ mod tests {
             vec![RenderBlock::Paragraph {
                 text: "The next item is HTTP API Design For Paddles.".to_string()
             }]
+        );
+    }
+
+    #[test]
+    fn keeps_numbered_section_labels_tight_with_following_bullets() {
+        let document = RenderDocument {
+            blocks: vec![
+                RenderBlock::Paragraph {
+                    text: "1. Shared contract surfaces".to_string(),
+                },
+                RenderBlock::BulletList {
+                    items: vec![
+                        "Define what HQ owns vs what spoke owns.".to_string(),
+                        "Promote shared schemas.".to_string(),
+                    ],
+                },
+                RenderBlock::Paragraph {
+                    text: "2. Tighter dev workflow integration".to_string(),
+                },
+                RenderBlock::BulletList {
+                    items: vec!["Make it easy to test HQ changes locally.".to_string()],
+                },
+            ],
+        };
+
+        assert_eq!(
+            document.to_plain_text(),
+            "1. Shared contract surfaces\n- Define what HQ owns vs what spoke owns.\n- Promote shared schemas.\n\n2. Tighter dev workflow integration\n- Make it easy to test HQ changes locally."
         );
     }
 }
