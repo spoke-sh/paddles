@@ -1,0 +1,188 @@
+.wrap {
+  --turn-divider-height: 6.7rem;
+  --turn-divider-step-width: 2.56rem;
+  --turn-divider-step-height: 2.3rem;
+  --turn-divider-trail-width: min(13.8rem, 18vw);
+
+  position: relative;
+  min-height: var(--turn-divider-height);
+  margin-top: var(--keel-space-7);
+}
+
+.compact {
+  --turn-divider-height: 5.5rem;
+  --turn-divider-step-width: 2.04rem;
+  --turn-divider-step-height: 1.82rem;
+  --turn-divider-trail-width: min(10.4rem, 22vw);
+
+  margin: var(--keel-space-6) 0;
+}
+
+.trail {
+  position: relative;
+  width: var(--turn-divider-trail-width);
+  min-height: var(--turn-divider-height);
+}
+
+.left .trail {
+  margin-right: auto;
+}
+
+.right .trail {
+  margin-left: auto;
+}
+
+.step {
+  --step-cursor-scale: 1;
+  --step-delay: 0ms;
+  --step-rotate: 0deg;
+  --step-surface: rgba(var(--keel-shell-rgb), 0.94);
+  --step-x: 50%;
+  --step-y: 50%;
+
+  position: absolute;
+  left: var(--step-x);
+  top: var(--step-y);
+  width: var(--turn-divider-step-width);
+  height: var(--turn-divider-step-height);
+  display: block;
+  padding: 0;
+  appearance: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  clip-path: polygon(25% 6.7%, 75% 6.7%, 100% 50%, 75% 93.3%, 25% 93.3%, 0 50%);
+  border: 1px solid rgba(var(--keel-accent-rgb), 0.28);
+  background: var(--step-surface);
+  box-shadow: var(--keel-shadow-pill);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+  transform:
+    translate(-50%, -50%)
+    rotate(var(--step-rotate))
+    scale(var(--step-cursor-scale));
+  animation: turnstepCadence var(--keel-motion-duration-turnstep)
+    var(--keel-motion-ease-turnstep) infinite;
+  animation-delay: var(--step-delay);
+}
+
+.step:hover {
+  border-color: rgba(var(--keel-accent-rgb), 0.42);
+}
+
+.step:focus-visible {
+  outline: none;
+  border-color: rgba(var(--keel-accent-rgb), 0.52);
+  box-shadow:
+    var(--keel-shadow-pill),
+    0 0 0 0.2rem rgba(var(--keel-accent-rgb), 0.18);
+}
+
+.step:active {
+  box-shadow:
+    inset 0 1px 0 rgba(var(--keel-shell-rgb), 0.38),
+    inset 0 -2px 0 rgba(var(--keel-accent-rgb), 0.12);
+}
+
+.step::after {
+  content: '';
+  position: absolute;
+  inset: 0.14rem;
+  clip-path: inherit;
+  background: rgba(var(--keel-accent-rgb), 0.12);
+  opacity: 0.42;
+  animation: turnstepInset var(--keel-motion-duration-turnstep)
+    var(--keel-motion-ease-turnstep) infinite;
+  animation-delay: var(--step-delay);
+}
+
+.step[data-step='2'] {
+  --step-surface: rgba(var(--keel-harbor-rgb), 0.94);
+}
+
+.step[data-step='3'] {
+  --step-surface: rgba(var(--keel-harbor-strong-rgb), 0.95);
+}
+
+.step[data-step='4'] {
+  --step-surface: rgba(var(--keel-harbor-deep-rgb), 0.98);
+}
+
+@keyframes turnstepCadence {
+  0%,
+  58%,
+  100% {
+    border-color: rgba(var(--keel-accent-rgb), 0.24);
+    box-shadow: var(--keel-shadow-pill);
+    opacity: 0.88;
+    transform:
+      translate(-50%, -50%)
+      rotate(var(--step-rotate))
+      scale(var(--step-cursor-scale));
+  }
+
+  14% {
+    border-color: rgba(var(--keel-accent-rgb), 0.38);
+    box-shadow: -6px 9px 14px rgba(var(--keel-ink-rgb), 0.12);
+    opacity: 1;
+    transform:
+      translate(-50%, calc(-50% - var(--keel-motion-turnstep-rise)))
+      rotate(var(--step-rotate))
+      scale(var(--step-cursor-scale))
+      scale(1.035);
+  }
+
+  24% {
+    border-color: rgba(var(--keel-accent-rgb), 0.34);
+    box-shadow: -5px 8px 12px rgba(var(--keel-ink-rgb), 0.1);
+    opacity: 0.96;
+    transform:
+      translate(-50%, calc(-50% - calc(var(--keel-motion-turnstep-rise) * 0.5)))
+      rotate(var(--step-rotate))
+      scale(var(--step-cursor-scale))
+      scale(1.018);
+  }
+}
+
+@keyframes turnstepInset {
+  0%,
+  58%,
+  100% {
+    opacity: 0.34;
+  }
+
+  14% {
+    opacity: 0.72;
+  }
+
+  24% {
+    opacity: 0.54;
+  }
+}
+
+@media (max-width: 996px) {
+  .wrap {
+    --turn-divider-height: 5.8rem;
+    --turn-divider-step-width: 2.12rem;
+    --turn-divider-step-height: 1.9rem;
+    --turn-divider-trail-width: min(9rem, 20vw);
+  }
+}
+
+@media (max-width: 640px) {
+  .wrap,
+  .compact {
+    --turn-divider-height: 4.4rem;
+    --turn-divider-step-width: 1.66rem;
+    --turn-divider-step-height: 1.48rem;
+    --turn-divider-trail-width: 6.4rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step,
+  .step::after {
+    animation: none;
+  }
+}

@@ -34,7 +34,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: 'docs',
-          editUrl: `${repoUrl}/tree/main/website/`,
+          editUrl: `${repoUrl}/tree/main/apps/docs/`,
           showLastUpdateAuthor: false,
           showLastUpdateTime: true,
         },
@@ -55,7 +55,8 @@ const config: Config = {
       title: 'Paddles',
       items: [
         {
-          to: '/docs/intro',
+          type: 'doc',
+          docId: 'intro',
           label: 'Docs',
           position: 'left',
         },

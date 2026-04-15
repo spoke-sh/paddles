@@ -1,0 +1,157 @@
+.grid {
+  display: grid;
+  gap: var(--keel-space-5);
+}
+
+.docs {
+  gap: var(--keel-space-4);
+}
+
+.twoColumns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.threeColumns {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.card,
+.cardLink {
+  display: block;
+  height: 100%;
+}
+
+.card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  display: grid;
+  gap: var(--keel-space-3);
+  padding: calc(var(--keel-card-padding) + 0.08rem);
+  border-radius: var(--keel-radius-md);
+  background: var(--keel-surface-raised);
+  border: 1px solid;
+  border-color: var(--keel-raised-border-top) var(--keel-raised-border-right)
+    var(--keel-raised-border-bottom) var(--keel-raised-border-left);
+  box-shadow: var(--keel-shadow-card);
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0.88rem;
+  right: 1rem;
+  width: 38%;
+  height: 1px;
+  border-radius: 999px;
+  background: var(--keel-acrylic-line);
+  opacity: 0.88;
+}
+
+.card::after {
+  content: '';
+  position: absolute;
+  top: 0.88rem;
+  right: 0.92rem;
+  width: 1px;
+  height: 28%;
+  border-radius: 999px;
+  background: var(--keel-acrylic-line-soft);
+  opacity: 0.74;
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.cardLink {
+  --magnetic-x: 0px;
+  --magnetic-y: 0px;
+
+  color: inherit;
+  text-decoration: none;
+  transform: translate(var(--magnetic-x), var(--magnetic-y));
+  transition: transform 180ms var(--keel-motion-ease-lift);
+  will-change: transform;
+}
+
+.cardLink:hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cardLink:hover .card {
+  border-color: var(--keel-raised-border-strong-top)
+    var(--keel-raised-border-strong-right)
+    var(--keel-raised-border-strong-bottom)
+    var(--keel-raised-border-strong-left);
+  box-shadow: var(--keel-shadow-card-hover);
+}
+
+.docs .card {
+  padding: var(--keel-card-padding);
+  background: var(--keel-surface);
+  box-shadow: var(--keel-shadow-card-doc);
+}
+
+.docs .card::before,
+.docs .card::after {
+  display: none;
+}
+
+.docs .cardLink {
+  transition: color 150ms ease;
+  will-change: auto;
+}
+
+.docs .cardLink:hover .card {
+  border-color: var(--keel-sky-border-strong);
+  box-shadow: var(--keel-shadow-card-doc);
+}
+
+.docs .eyebrow {
+  color: var(--keel-ink-soft);
+}
+
+.docs .card h3 {
+  font-size: 1.22rem;
+}
+
+.docs .linkText {
+  margin-top: var(--keel-space-3);
+}
+
+.eyebrow {
+  margin: 0 0 var(--keel-space-2);
+  font-size: 0.78rem;
+  font-weight: 760;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--keel-sea);
+}
+
+.card h3 {
+  margin: 0 0 var(--keel-space-2);
+  font-size: 1.36rem;
+  line-height: 1.08;
+}
+
+.card p {
+  margin: 0;
+  color: var(--keel-ink-soft);
+}
+
+.linkText {
+  display: inline-block;
+  margin-top: var(--keel-space-4);
+  font-weight: 640;
+  color: var(--ifm-link-color);
+}
+
+@media (max-width: 996px) {
+  .twoColumns,
+  .threeColumns {
+    grid-template-columns: 1fr;
+  }
+}
