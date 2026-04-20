@@ -23,6 +23,7 @@ pub struct PaddlesConfig {
     pub provider: String,
     pub provider_url: Option<String>,
     pub model: String,
+    pub thinking_mode: Option<String>,
     pub synthesizer_provider: Option<String>,
     pub synthesizer_model: Option<String>,
     pub planner_model: Option<String>,
@@ -45,6 +46,7 @@ pub struct PaddlesConfig {
 struct ModelLaneOverlay {
     provider: Option<String>,
     model: Option<String>,
+    thinking_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -77,6 +79,7 @@ struct PaddlesConfigOverlay {
     provider: Option<String>,
     provider_url: Option<String>,
     model: Option<String>,
+    thinking_mode: Option<String>,
     shared: Option<ModelLaneOverlay>,
     synthesizer: Option<ModelLaneOverlay>,
     planner: Option<ModelLaneOverlay>,
@@ -101,6 +104,7 @@ impl Default for PaddlesConfig {
             provider: "sift".to_string(),
             provider_url: None,
             model: "qwen-1.5b".to_string(),
+            thinking_mode: None,
             synthesizer_provider: None,
             synthesizer_model: None,
             planner_model: None,
@@ -194,12 +198,18 @@ impl PaddlesConfig {
         if let Some(model) = overlay.model.filter(|value| !value.trim().is_empty()) {
             self.model = model;
         }
+        if let Some(thinking_mode) = overlay.thinking_mode {
+            self.thinking_mode = normalize_optional_string(thinking_mode);
+        }
         if let Some(shared) = overlay.shared {
             if let Some(provider) = shared.provider.filter(|value| !value.trim().is_empty()) {
                 self.provider = provider;
             }
             if let Some(model) = shared.model.filter(|value| !value.trim().is_empty()) {
                 self.model = model;
+            }
+            if let Some(thinking_mode) = shared.thinking_mode {
+                self.thinking_mode = normalize_optional_string(thinking_mode);
             }
         }
         if let Some(synthesizer) = overlay.synthesizer {
@@ -277,6 +287,11 @@ impl PaddlesConfig {
         {
             self.model = model.clone();
         }
+        self.thinking_mode = preferences
+            .thinking_mode
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned();
         self.synthesizer_provider = None;
         self.synthesizer_model = None;
         self.planner_provider = None;
@@ -530,8 +545,9 @@ port = 8080
             dir.path().join("paddles.toml"),
             r#"
 [shared]
-provider = "moonshot"
-model = "kimi-k2.5"
+provider = "openai"
+model = "gpt-5.4"
+thinking_mode = "high"
 
 [synthesizer]
 model = "gpt-4o-mini"
@@ -544,8 +560,9 @@ model = "claude-sonnet-4-20250514"
         .expect("write config");
 
         let config = PaddlesConfig::load(dir.path());
-        assert_eq!(config.provider, "moonshot");
-        assert_eq!(config.model, "kimi-k2.5");
+        assert_eq!(config.provider, "openai");
+        assert_eq!(config.model, "gpt-5.4");
+        assert_eq!(config.thinking_mode.as_deref(), Some("high"));
         assert_eq!(config.synthesizer_provider, None);
         assert_eq!(config.synthesizer_model.as_deref(), Some("gpt-4o-mini"));
         assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
@@ -631,6 +648,7 @@ port = 9090
         let preferences = RuntimeLanePreferences {
             provider: Some("inception".to_string()),
             model: Some("mercury-2".to_string()),
+            thinking_mode: Some("high".to_string()),
             planner_provider: Some("anthropic".to_string()),
             planner_model: Some("claude-sonnet-4-20250514".to_string()),
         };
@@ -644,6 +662,7 @@ port = 9090
 
         assert_eq!(config.provider, "inception");
         assert_eq!(config.model, "mercury-2");
+        assert_eq!(config.thinking_mode.as_deref(), Some("high"));
         assert!(config.synthesizer_provider.is_none());
         assert!(config.synthesizer_model.is_none());
         assert!(config.planner_provider.is_none());
@@ -667,6 +686,7 @@ model = "gpt-4o"
         let preferences = RuntimeLanePreferences {
             provider: Some("inception".to_string()),
             model: Some("mercury-2".to_string()),
+            thinking_mode: None,
             planner_provider: None,
             planner_model: None,
         };
@@ -707,6 +727,7 @@ model = "claude-sonnet-4-20250514"
         let preferences = RuntimeLanePreferences {
             provider: Some("inception".to_string()),
             model: Some("mercury-2".to_string()),
+            thinking_mode: None,
             planner_provider: Some("anthropic".to_string()),
             planner_model: Some("claude-sonnet-4-20250514".to_string()),
         };

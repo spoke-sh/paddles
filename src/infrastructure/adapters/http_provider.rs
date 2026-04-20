@@ -438,14 +438,16 @@ impl HttpProviderAdapter {
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
         );
-        let body = serde_json::json!({
-            "model": self.model_id,
+        let model_id = self.request_model_id();
+        let mut body = serde_json::json!({
+            "model": model_id,
             "messages": [
                 { "role": "system", "content": system },
                 { "role": "user", "content": user },
             ],
             "max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS,
         });
+        self.apply_openai_reasoning_effort(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -488,8 +490,9 @@ impl HttpProviderAdapter {
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
         );
-        let body = json!({
-            "model": self.model_id,
+        let model_id = self.request_model_id();
+        let mut body = json!({
+            "model": model_id,
             "messages": [
                 { "role": "system", "content": system },
                 { "role": "user", "content": user },
@@ -504,6 +507,7 @@ impl HttpProviderAdapter {
                 }
             }
         });
+        self.apply_openai_reasoning_effort(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -544,8 +548,9 @@ impl HttpProviderAdapter {
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
         );
-        let body = json!({
-            "model": self.model_id,
+        let model_id = self.request_model_id();
+        let mut body = json!({
+            "model": model_id,
             "messages": [
                 { "role": "system", "content": system },
                 { "role": "user", "content": user },
@@ -567,6 +572,7 @@ impl HttpProviderAdapter {
                 }
             }
         });
+        self.apply_openai_reasoning_effort(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -627,6 +633,28 @@ impl HttpProviderAdapter {
             capture,
         )
         .await
+    }
+
+    fn request_model_id(&self) -> String {
+        ModelProvider::from_name(&self.provider_name)
+            .map(|provider| provider.runtime_model_id(&self.model_id))
+            .unwrap_or_else(|| self.model_id.clone())
+    }
+
+    fn apply_openai_reasoning_effort(&self, body: &mut Value) {
+        let Some(provider) = ModelProvider::from_name(&self.provider_name) else {
+            return;
+        };
+        let Some(reasoning_effort) = provider.runtime_model_thinking_mode(&self.model_id) else {
+            return;
+        };
+        let Some(body_object) = body.as_object_mut() else {
+            return;
+        };
+        body_object.insert(
+            "reasoning_effort".to_string(),
+            Value::String(reasoning_effort),
+        );
     }
 
     async fn send_anthropic(
@@ -2867,6 +2895,16 @@ mod tests {
         body: String,
     }
 
+    fn setup_workspace_with_agents() -> Result<tempfile::TempDir> {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nUse the remote provider planner before answering.\n",
+        )
+        .expect("write AGENTS.md");
+        Ok(workspace)
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     struct RecordedRequest {
         uri: String,
@@ -3344,6 +3382,54 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_gpt_5_4_thinking_mode_maps_to_reasoning_effort_in_chat_completions() {
+        let workspace = setup_workspace_with_agents().expect("workspace");
+        let final_answer = &structured_answer_json("Mocked final answer.");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::OpenAi, final_answer),
+            },
+        ])
+        .await;
+
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Openai,
+            ApiFormat::OpenAi,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai)
+            .with_synthesizer_thinking_mode(Some("high".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Openai,
+            ))
+            .with_planner_model_id(Some("gpt-5.4".to_string()));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let response = service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+        let requests = server.recorded_requests();
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests[0].body["model"].as_str(), Some("gpt-5.4"));
+        assert_eq!(requests[0].body["reasoning_effort"].as_str(), Some("high"));
+        assert_eq!(requests[1].body["model"].as_str(), Some("gpt-5.4"));
+        assert_eq!(requests[1].body["reasoning_effort"].as_str(), Some("high"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

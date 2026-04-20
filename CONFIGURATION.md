@@ -140,7 +140,8 @@ lane selection rather than single-model-only routing:
 ```toml
 [shared]
 provider = "openai"
-model = "gpt-4o"
+model = "gpt-5.4"
+thinking_mode = "high"
 
 [synthesizer]
 model = "gpt-4o-mini"
@@ -149,6 +150,9 @@ model = "gpt-4o-mini"
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 ```
+
+`thinking_mode` is optional and currently only applies when the selected
+provider/model catalog exposes an extra thinking-mode stage.
 
 When `[synthesizer]` or `[planner]` is omitted, that lane falls back to
 `[shared]`. CLI flags still win over everything:
@@ -387,7 +391,10 @@ the last selected shared runtime model across restarts without mutating
 authored `paddles.toml` files. Runtime lane state is applied after authored
 config for the model lane fields, so the last `/model` selection is restored
 even when a project-local `./paddles.toml` also sets shared/planner/synthesizer
-models. When older runtime lane state still points at OpenAI Responses-only
+models. When the selected shared model exposes provider-specific thinking
+controls, the same machine-managed file also stores `thinking_mode = "..."`
+next to the shared provider/model pair so `/model` restores that third-stage
+selection on restart. When older runtime lane state still points at OpenAI Responses-only
 `*-pro` variants such as `gpt-5.4-pro`, Paddles rewrites that machine-managed
 state onto the corresponding chat-completions model during startup, and any
 older machine-managed planner split is dropped so `/model` remains a single
@@ -432,8 +439,11 @@ with structured JSON/tool calls. Responses-only OpenAI models such as
 `gpt-5.4-pro`, `gpt-5-pro`, and `gpt-5.2-pro` are rejected up front; use
 `gpt-5.4`, `gpt-5.4-mini`, or `gpt-4o` instead.
 
-For Moonshot, the current API model id is `kimi-k2.5`. Legacy configs using
-`kimi-2.5` are normalized to `kimi-k2.5` at runtime for compatibility.
+For Moonshot, Paddles currently recognizes the Kimi API model ids
+`kimi-k2.5`, `kimi-k2`, `kimi-k2-0905-preview`, `kimi-k2-0711-preview`,
+`kimi-k2-turbo-preview`, `kimi-k2-thinking`, and `kimi-k2-thinking-turbo`.
+Legacy configs using `kimi-2.5` are normalized to `kimi-k2.5` at runtime for
+compatibility.
 
 For Inception, the supported core model path is `mercury-2`. Authenticate with
 `/login inception`, then select it with `/model inception mercury-2`. That chat-completions compatibility

@@ -276,6 +276,11 @@ async fn main() -> Result<()> {
             .clone()
             .unwrap_or_else(|| config.model.clone())
     });
+    let mut thinking_mode = if cli.provider.is_some() || cli.model.is_some() {
+        None
+    } else {
+        config.thinking_mode.clone()
+    };
     let credits = cli.credits.unwrap_or(config.credits);
     let weights = cli.weights.unwrap_or(config.weights);
     let biases = cli.biases.unwrap_or(config.biases);
@@ -310,6 +315,18 @@ async fn main() -> Result<()> {
             "[WARN] Model `{model}` is no longer valid for provider `{provider_name}`; using `{normalized_model}` instead."
         );
         model = normalized_model;
+    }
+    if let Some(requested_thinking_mode) = thinking_mode.clone()
+        && !provider
+            .thinking_modes(&model)
+            .iter()
+            .any(|mode| mode.thinking_mode == Some(requested_thinking_mode.as_str()))
+    {
+        eprintln!(
+            "[WARN] Thinking mode `{requested_thinking_mode}` is not valid for `{}`; clearing it.",
+            provider.qualified_model_label(&model)
+        );
+        thinking_mode = None;
     }
     let normalized_planner_provider = explicit_planner_provider.unwrap_or(shared_provider);
     let effective_planner_model = planner_model.take().unwrap_or_else(|| shared_model.clone());
@@ -527,6 +544,7 @@ async fn main() -> Result<()> {
     }
     let runtime_lanes = RuntimeLaneConfig::new(model.clone(), gatherer_model.clone())
         .with_synthesizer_provider(provider)
+        .with_synthesizer_thinking_mode(thinking_mode)
         .with_planner_model_id(planner_model.clone())
         .with_planner_provider(planner_provider)
         .with_gatherer_provider(gatherer_provider)

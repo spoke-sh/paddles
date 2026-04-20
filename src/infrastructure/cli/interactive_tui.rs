@@ -114,12 +114,7 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         insert_text: "/model",
         usage: "/model",
-        description: "show the model catalog and auth state",
-    },
-    SlashCommandSpec {
-        insert_text: "/model ",
-        usage: "/model <provider> <model>",
-        description: "switch the shared runtime model",
+        description: "choose the shared runtime model",
     },
 ];
 
@@ -297,6 +292,7 @@ fn drain_messages(app: &mut InteractiveApp, rx: &mut UnboundedReceiver<UiMessage
 
 fn handle_paste_event(app: &mut InteractiveApp, text: &str) {
     let normalized = normalize_pasted_text(text);
+    app.clear_model_selection();
     if app.is_masked_input() || !should_compress_pasted_text(&normalized) {
         app.insert_text_at_cursor(&normalized);
         return;
@@ -319,6 +315,7 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
         if app.input.is_empty() && !app.has_composer_parts() {
             return true;
         }
+        app.clear_model_selection();
         app.composer_parts.clear();
         app.input.clear();
         app.cursor_pos = 0;
@@ -332,6 +329,8 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
                 app.cursor_pos = 0;
                 app.input_mode = InputMode::Normal;
                 app.push_event("Login cancelled", "Returned to normal input.");
+                false
+            } else if app.cancel_model_selection() || app.dismiss_slash_popup() {
                 false
             } else {
                 if app.busy {
@@ -356,6 +355,9 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             }
         }
         KeyCode::Enter => {
+            if app.submit_model_selection() {
+                return false;
+            }
             app.submit_prompt();
             false
         }
@@ -364,6 +366,7 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Backspace => {
+            app.clear_model_selection();
             if app.input.is_empty() && app.has_composer_parts() {
                 app.pop_composer_part();
                 return false;
@@ -388,6 +391,7 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Delete => {
+            app.clear_model_selection();
             if app.input.is_empty() && app.has_composer_parts() {
                 app.pop_composer_part();
                 return false;
@@ -412,12 +416,14 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Left => {
+            app.clear_model_selection();
             if app.cursor_pos > 0 {
                 app.cursor_pos -= 1;
             }
             false
         }
         KeyCode::Right => {
+            app.clear_model_selection();
             let char_count = app.input.chars().count();
             if app.cursor_pos < char_count {
                 app.cursor_pos += 1;
@@ -425,14 +431,19 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Home => {
+            app.clear_model_selection();
             app.cursor_pos = 0;
             false
         }
         KeyCode::End => {
+            app.clear_model_selection();
             app.cursor_pos = app.input.chars().count();
             false
         }
         KeyCode::Up => {
+            if app.cycle_model_selection(-1) {
+                return false;
+            }
             if app.cycle_slash_suggestion(-1) {
                 return false;
             }
@@ -442,6 +453,9 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Down => {
+            if app.cycle_model_selection(1) {
+                return false;
+            }
             if app.cycle_slash_suggestion(1) {
                 return false;
             }
@@ -451,20 +465,24 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
             false
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_model_selection();
             app.input.clear();
             app.cursor_pos = 0;
             app.reset_slash_suggestion_selection();
             false
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_model_selection();
             app.cursor_pos = 0;
             false
         }
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_model_selection();
             app.cursor_pos = app.input.chars().count();
             false
         }
         KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_model_selection();
             let byte_pos = app
                 .input
                 .char_indices()
@@ -479,6 +497,7 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
         }
         KeyCode::Char(ch) => {
             if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                app.clear_model_selection();
                 let byte_pos = app
                     .input
                     .char_indices()
@@ -1050,6 +1069,7 @@ struct InteractiveApp {
     step_timing_path: PathBuf,
     verbose: u8,
     cursor_pos: usize,
+    slash_popup_dismissed: bool,
     prompt_history: Vec<String>,
     history_cursor: Option<usize>,
     history_draft: String,
@@ -1079,6 +1099,25 @@ enum BusyPhase {
 enum InputMode {
     Normal,
     MaskedKey { provider: String },
+    ModelSelection(ModelSelectionState),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ModelSelectionStage {
+    Provider,
+    Model {
+        provider: ModelProvider,
+    },
+    ThinkingMode {
+        provider: ModelProvider,
+        model: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModelSelectionState {
+    stage: ModelSelectionStage,
+    selected_index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -1095,16 +1134,31 @@ struct PendingRuntimeUpdate {
 }
 
 fn runtime_lane_summary(runtime_lanes: &RuntimeLaneConfig) -> String {
+    let synthesizer_label = runtime_lanes
+        .synthesizer_provider()
+        .qualified_model_label_with_thinking(
+            runtime_lanes.synthesizer_model_id(),
+            runtime_lanes.synthesizer_thinking_mode(),
+        );
+    let planner_thinking_mode = (runtime_lanes.planner_provider()
+        == runtime_lanes.synthesizer_provider()
+        && runtime_lanes
+            .planner_model_id()
+            .unwrap_or(runtime_lanes.synthesizer_model_id())
+            == runtime_lanes.synthesizer_model_id())
+    .then(|| runtime_lanes.synthesizer_thinking_mode())
+    .flatten();
     format!(
         "P {} · S {}",
-        runtime_lanes.planner_provider().qualified_model_label(
-            runtime_lanes
-                .planner_model_id()
-                .unwrap_or(runtime_lanes.synthesizer_model_id()),
-        ),
         runtime_lanes
-            .synthesizer_provider()
-            .qualified_model_label(runtime_lanes.synthesizer_model_id())
+            .planner_provider()
+            .qualified_model_label_with_thinking(
+                runtime_lanes
+                    .planner_model_id()
+                    .unwrap_or(runtime_lanes.synthesizer_model_id()),
+                planner_thinking_mode,
+            ),
+        synthesizer_label
     )
 }
 
@@ -1168,15 +1222,15 @@ impl InteractiveApp {
                 "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
                  Type `/login {provider}` to set or replace its API key.\n\
-                 Type `/model` to inspect lanes or switch the shared runtime model.\n\
-                 Slash commands open a popup; Tab accepts the active completion.",
+                 Type `/model`, then Enter, to choose the shared runtime model.\n\
+                 Other slash commands open a popup; Tab accepts the active completion.",
             ),
             None => format!(
                 "Enter to send, Ctrl+C to quit.\n\
                  {credential_status}\n\
                  Type `/login <provider>` for any remote provider.\n\
-                 Type `/model` to inspect lanes or switch the shared runtime model.\n\
-                 Slash commands open a popup; Tab accepts the active completion.",
+                 Type `/model`, then Enter, to choose the shared runtime model.\n\
+                 Other slash commands open a popup; Tab accepts the active completion.",
             ),
         };
         let current_task_id = session.task_id().as_str().to_string();
@@ -1228,6 +1282,7 @@ impl InteractiveApp {
             step_timing_path: step_timing_cache_path(),
             verbose,
             cursor_pos: 0,
+            slash_popup_dismissed: false,
             prompt_history: Vec::new(),
             history_cursor: None,
             history_draft: String::new(),
@@ -1266,6 +1321,342 @@ impl InteractiveApp {
 
     fn reset_slash_suggestion_selection(&mut self) {
         self.slash_suggestion_index = 0;
+        self.slash_popup_dismissed = false;
+    }
+
+    fn dismiss_slash_popup(&mut self) -> bool {
+        if self.slash_popup_dismissed || self.slash_command_suggestions().is_empty() {
+            return false;
+        }
+        self.slash_popup_dismissed = true;
+        true
+    }
+
+    fn model_selection_state(&self) -> Option<&ModelSelectionState> {
+        match &self.input_mode {
+            InputMode::ModelSelection(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    fn clear_model_selection(&mut self) -> bool {
+        if matches!(self.input_mode, InputMode::ModelSelection(_)) {
+            self.input_mode = InputMode::Normal;
+            return true;
+        }
+        false
+    }
+
+    fn start_model_provider_selection(&mut self) {
+        let selected_index = ModelProvider::all()
+            .iter()
+            .position(|provider| *provider == self.runtime_lanes.synthesizer_provider())
+            .unwrap_or(0);
+        self.input = "/model".to_string();
+        self.cursor_pos = self.input.chars().count();
+        self.input_mode = InputMode::ModelSelection(ModelSelectionState {
+            stage: ModelSelectionStage::Provider,
+            selected_index,
+        });
+    }
+
+    fn start_model_id_selection(&mut self, provider: ModelProvider) {
+        let current_model = self.runtime_lanes.synthesizer_model_id();
+        let selected_index = if self.runtime_lanes.synthesizer_provider() == provider {
+            provider
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| {
+                    provider.selectable_model_matches_runtime_model(model_id, current_model)
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        self.input = format!("/model {}", provider.name());
+        self.cursor_pos = self.input.chars().count();
+        self.input_mode = InputMode::ModelSelection(ModelSelectionState {
+            stage: ModelSelectionStage::Model { provider },
+            selected_index,
+        });
+    }
+
+    fn start_model_thinking_mode_selection(&mut self, provider: ModelProvider, model: &str) {
+        let current_model = self.runtime_lanes.synthesizer_model_id();
+        let current_thinking_mode = self.runtime_lanes.synthesizer_thinking_mode();
+        let selected_index = if self.runtime_lanes.synthesizer_provider() == provider {
+            provider
+                .thinking_mode_index_for_runtime_model(model, current_model, current_thinking_mode)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        self.input = format!("/model {} {}", provider.name(), model);
+        self.cursor_pos = self.input.chars().count();
+        self.input_mode = InputMode::ModelSelection(ModelSelectionState {
+            stage: ModelSelectionStage::ThinkingMode {
+                provider,
+                model: model.to_string(),
+            },
+            selected_index,
+        });
+    }
+
+    fn model_selection_option_count(&self) -> usize {
+        let Some(state) = self.model_selection_state() else {
+            return 0;
+        };
+        match &state.stage {
+            ModelSelectionStage::Provider => ModelProvider::all().len(),
+            ModelSelectionStage::Model { provider } => provider.selectable_model_ids().len(),
+            ModelSelectionStage::ThinkingMode { provider, model } => {
+                provider.thinking_modes(model).len()
+            }
+        }
+    }
+
+    fn cycle_model_selection(&mut self, delta: isize) -> bool {
+        let option_count = self.model_selection_option_count();
+        if option_count == 0 {
+            return false;
+        }
+        let len = option_count as isize;
+        if let InputMode::ModelSelection(state) = &mut self.input_mode {
+            let next = (state.selected_index as isize + delta).rem_euclid(len);
+            state.selected_index = next as usize;
+            return true;
+        }
+        false
+    }
+
+    fn cancel_model_selection(&mut self) -> bool {
+        let Some(state) = self.model_selection_state().cloned() else {
+            return false;
+        };
+        match state.stage {
+            ModelSelectionStage::Provider => {
+                self.input_mode = InputMode::Normal;
+                self.input = "/model".to_string();
+                self.cursor_pos = self.input.chars().count();
+            }
+            ModelSelectionStage::Model { provider } => {
+                let selected_index = ModelProvider::all()
+                    .iter()
+                    .position(|candidate| *candidate == provider)
+                    .unwrap_or(0);
+                self.input = "/model".to_string();
+                self.cursor_pos = self.input.chars().count();
+                self.input_mode = InputMode::ModelSelection(ModelSelectionState {
+                    stage: ModelSelectionStage::Provider,
+                    selected_index,
+                });
+            }
+            ModelSelectionStage::ThinkingMode { provider, model } => {
+                let selected_index = provider
+                    .selectable_model_ids()
+                    .iter()
+                    .position(|candidate| *candidate == model)
+                    .unwrap_or(0);
+                self.input = format!("/model {}", provider.name());
+                self.cursor_pos = self.input.chars().count();
+                self.input_mode = InputMode::ModelSelection(ModelSelectionState {
+                    stage: ModelSelectionStage::Model { provider },
+                    selected_index,
+                });
+            }
+        }
+        true
+    }
+
+    fn submit_model_selection(&mut self) -> bool {
+        let Some(state) = self.model_selection_state().cloned() else {
+            return false;
+        };
+        match state.stage {
+            ModelSelectionStage::Provider => {
+                let Some(provider) = ModelProvider::all().get(state.selected_index).copied() else {
+                    return true;
+                };
+                let availability = self.provider_availability_for(provider);
+                if !availability.enabled {
+                    self.push_error(
+                        "Model unavailable",
+                        format!(
+                            "Provider `{}` is disabled: {}.",
+                            provider.name(),
+                            availability.detail
+                        ),
+                    );
+                    return true;
+                }
+                if provider.supports_freeform_model_id() {
+                    self.input_mode = InputMode::Normal;
+                    self.input = format!("/model {} ", provider.name());
+                    self.cursor_pos = self.input.chars().count();
+                    self.push_event(
+                        "Model selection",
+                        format!(
+                            "`{}` accepts freeform model ids. Type `/model {} <model>` and press Enter.",
+                            provider.name(),
+                            provider.name()
+                        ),
+                    );
+                } else {
+                    self.start_model_id_selection(provider);
+                }
+            }
+            ModelSelectionStage::Model { provider } => {
+                let Some(model_id) = provider
+                    .selectable_model_ids()
+                    .get(state.selected_index)
+                    .map(ToString::to_string)
+                else {
+                    return true;
+                };
+                if provider.thinking_modes(&model_id).is_empty() {
+                    if self.queue_model_selection(provider, &model_id, None) {
+                        self.input.clear();
+                        self.cursor_pos = 0;
+                        self.input_mode = InputMode::Normal;
+                        self.reset_slash_suggestion_selection();
+                    }
+                } else {
+                    self.start_model_thinking_mode_selection(provider, &model_id);
+                }
+            }
+            ModelSelectionStage::ThinkingMode { provider, model } => {
+                let Some(thinking_mode) = provider
+                    .thinking_modes(&model)
+                    .get(state.selected_index)
+                    .copied()
+                else {
+                    return true;
+                };
+                let resolved_model_id = thinking_mode.model_override.unwrap_or(model.as_str());
+                if self.queue_model_selection(
+                    provider,
+                    resolved_model_id,
+                    thinking_mode.thinking_mode,
+                ) {
+                    self.input.clear();
+                    self.cursor_pos = 0;
+                    self.input_mode = InputMode::Normal;
+                    self.reset_slash_suggestion_selection();
+                }
+            }
+        }
+        true
+    }
+
+    fn model_selection_lines(&self) -> Option<Vec<Line<'static>>> {
+        let state = self.model_selection_state()?;
+        let mut lines = Vec::new();
+        let selected_style = self.palette.header_title.add_modifier(Modifier::BOLD);
+        let selected_index = state.selected_index;
+
+        match &state.stage {
+            ModelSelectionStage::Provider => {
+                let providers = ModelProvider::all();
+                for offset in 0..providers.len() {
+                    let index = (selected_index + offset) % providers.len();
+                    let provider = providers[index];
+                    let is_selected = offset == 0;
+                    let line_style = if is_selected {
+                        selected_style
+                    } else {
+                        self.palette.input_text
+                    };
+                    let mut meta = Vec::new();
+                    if provider == self.runtime_lanes.synthesizer_provider() {
+                        meta.push("current");
+                    }
+                    if !self.provider_availability_for(provider).enabled {
+                        meta.push("disabled");
+                    }
+                    let mut spans = vec![
+                        Span::styled(
+                            if is_selected { "> " } else { "  " }.to_string(),
+                            line_style,
+                        ),
+                        Span::styled(provider.name().to_string(), line_style),
+                    ];
+                    if !meta.is_empty() {
+                        spans.push(Span::styled(
+                            format!(" · {}", meta.join(" · ")),
+                            self.palette.input_hint,
+                        ));
+                    }
+                    lines.push(Line::from(spans));
+                }
+            }
+            ModelSelectionStage::Model { provider } => {
+                let model_ids = provider.selectable_model_ids();
+                let current_model = self.runtime_lanes.synthesizer_model_id();
+                for offset in 0..model_ids.len() {
+                    let index = (selected_index + offset) % model_ids.len();
+                    let model_id = model_ids[index];
+                    let is_selected = offset == 0;
+                    let line_style = if is_selected {
+                        selected_style
+                    } else {
+                        self.palette.input_text
+                    };
+                    let mut spans = vec![
+                        Span::styled(
+                            if is_selected { "> " } else { "  " }.to_string(),
+                            line_style,
+                        ),
+                        Span::styled(model_id.to_string(), line_style),
+                    ];
+                    if self.runtime_lanes.synthesizer_provider() == *provider
+                        && provider.selectable_model_matches_runtime_model(model_id, current_model)
+                    {
+                        spans.push(Span::styled(
+                            " · current".to_string(),
+                            self.palette.input_hint,
+                        ));
+                    }
+                    lines.push(Line::from(spans));
+                }
+            }
+            ModelSelectionStage::ThinkingMode { provider, model } => {
+                let thinking_modes = provider.thinking_modes(model);
+                let current_model = self.runtime_lanes.synthesizer_model_id();
+                let current_thinking_mode = self.runtime_lanes.synthesizer_thinking_mode();
+                for offset in 0..thinking_modes.len() {
+                    let index = (selected_index + offset) % thinking_modes.len();
+                    let thinking_mode = thinking_modes[index];
+                    let is_selected = offset == 0;
+                    let line_style = if is_selected {
+                        selected_style
+                    } else {
+                        self.palette.input_text
+                    };
+                    let mut spans = vec![
+                        Span::styled(
+                            if is_selected { "> " } else { "  " }.to_string(),
+                            line_style,
+                        ),
+                        Span::styled(thinking_mode.label.to_string(), line_style),
+                    ];
+                    if self.runtime_lanes.synthesizer_provider() == *provider
+                        && provider.thinking_mode_index_for_runtime_model(
+                            model,
+                            current_model,
+                            current_thinking_mode,
+                        ) == Some(index)
+                    {
+                        spans.push(Span::styled(
+                            " · current".to_string(),
+                            self.palette.input_hint,
+                        ));
+                    }
+                    lines.push(Line::from(spans));
+                }
+            }
+        }
+
+        Some(lines)
     }
 
     fn next_work_id(&mut self) -> u64 {
@@ -1353,61 +1744,20 @@ impl InteractiveApp {
         true
     }
 
-    fn dynamic_model_slash_suggestions(&self, query: &str) -> Option<Vec<SlashSuggestion>> {
-        const MODEL_PREFIX: &str = "/model ";
-
-        let remainder = query.strip_prefix(MODEL_PREFIX)?;
-        let prefix = MODEL_PREFIX;
-
-        if let Some((provider_name, model_query)) = remainder.split_once(' ') {
-            let provider = ModelProvider::from_name(provider_name)?;
-            if provider.supports_freeform_model_id() {
-                return Some(Vec::new());
-            }
-            return Some(
-                provider
-                    .known_model_ids()
-                    .iter()
-                    .copied()
-                    .filter(|model_id| model_id.starts_with(model_query))
-                    .map(|model_id| SlashSuggestion {
-                        insert_text: format!("{prefix}{provider_name} {model_id}"),
-                        usage: format!("{prefix}{provider_name} {model_id}"),
-                        description: format!(
-                            "select {} for both runtime lanes",
-                            provider.qualified_model_label(model_id)
-                        ),
-                    })
-                    .collect(),
-            );
-        }
-
-        Some(
-            ModelProvider::all()
-                .iter()
-                .copied()
-                .filter(|provider| provider.name().starts_with(remainder))
-                .map(|provider| SlashSuggestion {
-                    insert_text: format!("{prefix}{} ", provider.name()),
-                    usage: format!("{prefix}{} ", provider.name()),
-                    description: format!(
-                        "choose {} for the shared runtime selection",
-                        provider.display_name()
-                    ),
-                })
-                .collect(),
-        )
-    }
-
     fn slash_command_suggestions(&self) -> Vec<SlashSuggestion> {
         if self.is_masked_input()
+            || matches!(self.input_mode, InputMode::ModelSelection(_))
             || self.has_composer_parts()
             || self.input.contains('\n')
             || !self.input.starts_with('/')
+            || self.slash_popup_dismissed
         {
             return Vec::new();
         }
         let query = self.input.to_ascii_lowercase();
+        if query == "/model" || query.starts_with("/model ") {
+            return Vec::new();
+        }
         if let Some(provider_query) = query.strip_prefix("/login ") {
             return ModelProvider::all()
                 .iter()
@@ -1420,9 +1770,6 @@ impl InteractiveApp {
                     description: format!("store or replace a {} API key", provider.display_name()),
                 })
                 .collect();
-        }
-        if let Some(suggestions) = self.dynamic_model_slash_suggestions(&query) {
-            return suggestions;
         }
         SLASH_COMMANDS
             .iter()
@@ -1863,29 +2210,21 @@ impl InteractiveApp {
     fn handle_model_command(&mut self, raw: &str) {
         let parts = raw.split_whitespace().collect::<Vec<_>>();
         if parts.len() == 1 {
-            self.push_event("Model catalog", self.render_model_catalog());
+            self.start_model_provider_selection();
             return;
         }
-        if parts.len() < 3 {
-            self.push_error(
-                "Model command invalid",
-                "Use `/model` or `/model <provider> <model>`.",
-            );
-            return;
-        }
+        self.push_error(
+            "Model command invalid",
+            "Use `/model`, then press Enter to choose from the selector.",
+        );
+    }
 
-        let provider_name = parts[1].to_ascii_lowercase();
-        let model_id = parts[2..].join(" ");
-        let provider = match ModelProvider::from_name(&provider_name) {
-            Some(provider) => provider,
-            None => {
-                self.push_error(
-                    "Model command invalid",
-                    format!("Unknown provider `{provider_name}`."),
-                );
-                return;
-            }
-        };
+    fn queue_model_selection(
+        &mut self,
+        provider: ModelProvider,
+        model_id: &str,
+        thinking_mode: Option<&str>,
+    ) -> bool {
         let availability = self.provider_availability_for(provider);
         if !availability.enabled {
             self.push_error(
@@ -1896,9 +2235,13 @@ impl InteractiveApp {
                     availability.detail
                 ),
             );
-            return;
+            return false;
         }
-        let normalized_model = provider.normalize_model_alias(&model_id);
+        let normalized_model = provider.normalize_model_alias(model_id);
+        let normalized_thinking_mode = thinking_mode
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
         if !provider.accepts_model(&normalized_model) {
             let accepted = if provider.supports_freeform_model_id() {
                 "any model id".to_string()
@@ -1914,7 +2257,31 @@ impl InteractiveApp {
                     accepted
                 ),
             );
-            return;
+            return false;
+        }
+        if let Some(requested_thinking_mode) = normalized_thinking_mode.as_deref()
+            && !provider
+                .thinking_modes(&normalized_model)
+                .iter()
+                .any(|mode| mode.thinking_mode == Some(requested_thinking_mode))
+        {
+            let accepted = provider
+                .thinking_modes(&normalized_model)
+                .iter()
+                .filter_map(|mode| mode.thinking_mode)
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.push_error(
+                "Model command invalid",
+                format!(
+                    "Provider `{}` does not recognize thinking mode `{}` for model `{}`. Accepted: {}.",
+                    provider.name(),
+                    requested_thinking_mode,
+                    normalized_model,
+                    accepted
+                ),
+            );
+            return false;
         }
         if self.pending_runtime_update.is_some()
             || matches!(self.busy_phase, BusyPhase::Reconfiguring)
@@ -1923,7 +2290,7 @@ impl InteractiveApp {
                 "Model selection busy",
                 "Another runtime lane activation is already in progress.",
             );
-            return;
+            return false;
         }
 
         let runtime_lanes = RuntimeLaneConfig::new(
@@ -1931,6 +2298,7 @@ impl InteractiveApp {
             self.runtime_lanes.gatherer_model_id().map(str::to_string),
         )
         .with_synthesizer_provider(provider)
+        .with_synthesizer_thinking_mode(normalized_thinking_mode.clone())
         .with_gatherer_provider(self.runtime_lanes.gatherer_provider())
         .with_context1_harness_ready(self.runtime_lanes.context1_harness_ready());
         self.pending_runtime_update = Some(PendingRuntimeUpdate {
@@ -1938,63 +2306,13 @@ impl InteractiveApp {
             runtime_lanes,
             summary: format!(
                 "Runtime lanes now target `{}`.",
-                provider.qualified_model_label(&normalized_model)
-            ),
-        });
-    }
-
-    fn render_model_catalog(&self) -> String {
-        let mut lines = vec![
-            format!("Active: {}", runtime_lane_summary(&self.runtime_lanes)),
-            format!(
-                "Planner: {}",
-                self.runtime_lanes.planner_provider().qualified_model_label(
-                    self.runtime_lanes
-                        .planner_model_id()
-                        .unwrap_or(self.runtime_lanes.synthesizer_model_id()),
+                provider.qualified_model_label_with_thinking(
+                    &normalized_model,
+                    normalized_thinking_mode.as_deref(),
                 )
             ),
-            format!(
-                "Synthesizer: {}",
-                self.runtime_lanes
-                    .synthesizer_provider()
-                    .qualified_model_label(self.runtime_lanes.synthesizer_model_id())
-            ),
-            String::new(),
-            "Providers:".to_string(),
-        ];
-        for provider in ModelProvider::all() {
-            let availability = self.provider_availability_for(*provider);
-            let models = if provider.supports_freeform_model_id() {
-                "<freeform model id>".to_string()
-            } else {
-                provider.known_model_ids().join(", ")
-            };
-            let status = if availability.enabled {
-                "enabled"
-            } else {
-                "disabled"
-            };
-            lines.push(format!(
-                "- [{status}] {}: {} ({})",
-                provider.name(),
-                models,
-                availability.detail
-            ));
-        }
-        lines.push(String::new());
-        if let Some(path) = &self.runtime_preference_path {
-            lines.push(format!("Runtime lane state: {}", path.display()));
-            lines.push(
-                "Machine-managed runtime state overrides authored model-lane config until you clear it."
-                    .to_string(),
-            );
-            lines.push(String::new());
-        }
-        lines.push(
-            "Use `/model <provider> <model>` to switch the shared runtime model.".to_string(),
-        );
-        lines.join("\n")
+        });
+        true
     }
 
     fn provider_availability_for(&self, provider: ModelProvider) -> ProviderAvailability {
@@ -2677,7 +2995,8 @@ impl InteractiveApp {
         let area = frame.area();
         let input_height = self.input_area_height(area.width);
         let activity_height = u16::from(self.busy && !self.is_masked_input());
-        let fixed_bottom = input_height + activity_height + 1;
+        let status_height = u16::from(self.model_selection_state().is_none());
+        let fixed_bottom = input_height + activity_height + status_height;
         let transcript_height = self.live_tail_height(
             usize::from(area.width.max(1)),
             usize::from(area.height.saturating_sub(fixed_bottom)),
@@ -2688,7 +3007,7 @@ impl InteractiveApp {
                 Constraint::Min(transcript_height),
                 Constraint::Length(activity_height),
                 Constraint::Length(input_height),
-                Constraint::Length(1),
+                Constraint::Length(status_height),
             ])
             .split(area);
 
@@ -2701,10 +3020,12 @@ impl InteractiveApp {
         frame.render_widget(self.render_input(), layout[2]);
         if let Some(popup_area) = self.command_popup_area(area, layout[2]) {
             frame.render_widget(Clear, popup_area);
-            frame.render_widget(self.render_command_popup(), popup_area);
+            frame.render_widget(self.render_command_popup(popup_area), popup_area);
         }
         frame.set_cursor_position(self.cursor_position(layout[2]));
-        frame.render_widget(self.render_status_bar(), layout[3]);
+        if status_height > 0 {
+            frame.render_widget(self.render_status_bar(), layout[3]);
+        }
     }
 
     fn render_status_bar(&self) -> Paragraph<'static> {
@@ -2785,10 +3106,25 @@ impl InteractiveApp {
 
     fn render_input(&self) -> Paragraph<'static> {
         let lines = self.input_render_lines();
+        let title = match self.model_selection_state() {
+            Some(ModelSelectionState {
+                stage: ModelSelectionStage::Provider,
+                ..
+            }) => " Select provider ".to_string(),
+            Some(ModelSelectionState {
+                stage: ModelSelectionStage::Model { provider },
+                ..
+            }) => format!(" Select model · {} ", provider.name()),
+            Some(ModelSelectionState {
+                stage: ModelSelectionStage::ThinkingMode { model, .. },
+                ..
+            }) => format!(" Select thinking mode · {} ", model),
+            None => " Prompt ".to_string(),
+        };
         Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
-                    .title(" Prompt ")
+                    .title(title)
                     .borders(Borders::ALL)
                     .border_style(self.palette.border)
                     .style(Style::default().bg(self.palette.input_bg)),
@@ -2797,6 +3133,10 @@ impl InteractiveApp {
     }
 
     fn input_render_lines(&self) -> Vec<Line<'static>> {
+        if let Some(lines) = self.model_selection_lines() {
+            return lines;
+        }
+
         if self.has_composer_parts() {
             let mut lines = self.composer_prefix_lines();
             if self.input.is_empty() {
@@ -2830,15 +3170,48 @@ impl InteractiveApp {
             .collect()
     }
 
-    fn render_command_popup(&self) -> Paragraph<'static> {
+    fn visible_slash_suggestion_window(&self, visible_rows: usize) -> (usize, usize) {
         let suggestions = self.slash_command_suggestions();
+        if suggestions.is_empty() || visible_rows == 0 {
+            return (0, 0);
+        }
         let selected = self
             .slash_suggestion_index
             .min(suggestions.len().saturating_sub(1));
-        let lines = suggestions
+        let end = (selected + 1).max(visible_rows).min(suggestions.len());
+        let start = end.saturating_sub(visible_rows);
+        (start, end)
+    }
+
+    fn truncate_popup_text(text: &str, max_chars: usize) -> String {
+        if max_chars == 0 {
+            return String::new();
+        }
+        let char_count = text.chars().count();
+        if char_count <= max_chars {
+            return text.to_string();
+        }
+        if max_chars == 1 {
+            return "…".to_string();
+        }
+        let mut truncated = text.chars().take(max_chars - 1).collect::<String>();
+        truncated.push('…');
+        truncated
+    }
+
+    fn render_command_popup(&self, area: Rect) -> Paragraph<'static> {
+        let suggestions = self.slash_command_suggestions();
+        let visible_rows = area.height.saturating_sub(2) as usize;
+        let (start, end) = self.visible_slash_suggestion_window(visible_rows);
+        let inner_width = area.width.saturating_sub(2) as usize;
+        let selected = self
+            .slash_suggestion_index
+            .min(suggestions.len().saturating_sub(1));
+        let lines = suggestions[start..end]
             .iter()
             .enumerate()
-            .map(|(index, command)| {
+            .map(|(offset, command)| {
+                let index = start + offset;
                 let is_selected = index == selected;
                 let usage_style = if is_selected {
                     self.palette.header_title.add_modifier(Modifier::BOLD)
@@ -2850,18 +3223,28 @@ impl InteractiveApp {
                 } else {
                     self.palette.input_hint
                 };
-                Line::from(vec![
-                    Span::styled(command.usage.clone(), usage_style),
-                    Span::raw("  "),
-                    Span::styled(command.description.clone(), desc_style),
-                ])
+                let usage = Self::truncate_popup_text(&command.usage, inner_width);
+                let usage_width = usage.chars().count();
+                let desc_budget = inner_width.saturating_sub(usage_width + 2);
+                let description = Self::truncate_popup_text(&command.description, desc_budget);
+                let mut spans = vec![Span::styled(usage, usage_style)];
+                if !description.is_empty() {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(description, desc_style));
+                }
+                Line::from(spans)
             })
             .collect::<Vec<_>>();
+        let title = if start > 0 || end < suggestions.len() {
+            " Commands (scroll) "
+        } else {
+            " Commands "
+        };
 
         Paragraph::new(Text::from(lines))
             .block(
                 Block::default()
-                    .title(" Commands ")
+                    .title(title)
                     .borders(Borders::ALL)
                     .border_style(self.palette.border)
                     .style(Style::default().bg(self.palette.input_bg)),
@@ -2874,6 +3257,10 @@ impl InteractiveApp {
         if suggestions.is_empty() {
             return None;
         }
+        let max_height_above = input_area.y.saturating_sub(frame_area.y);
+        if max_height_above < 3 {
+            return None;
+        }
         let content_width = suggestions
             .iter()
             .map(|command| command.usage.len() + command.description.len() + 2)
@@ -2881,17 +3268,9 @@ impl InteractiveApp {
             .unwrap_or(24)
             .min(usize::from(frame_area.width.saturating_sub(4)));
         let width = ((content_width as u16).max(28) + 2).min(frame_area.width.saturating_sub(2));
-        let height = (suggestions.len() as u16 + 2).min(frame_area.height.saturating_sub(1));
-        let x = input_area
-            .x
-            .saturating_add(2)
-            .min(frame_area.right().saturating_sub(width));
-        let space_above = input_area.y.saturating_sub(frame_area.y);
-        let y = if space_above >= height {
-            input_area.y - height
-        } else {
-            frame_area.y
-        };
+        let height = (suggestions.len() as u16 + 2).min(max_height_above);
+        let x = input_area.x.min(frame_area.right().saturating_sub(width));
+        let y = input_area.y - height;
         Some(Rect::new(x, y, width, height))
     }
 
@@ -2939,6 +3318,15 @@ impl InteractiveApp {
     }
 
     fn cursor_position(&self, area: Rect) -> (u16, u16) {
+        if self.model_selection_state().is_some() {
+            let x = area.x.saturating_add(3).min(area.right().saturating_sub(1));
+            let y = area
+                .y
+                .saturating_add(1)
+                .min(area.bottom().saturating_sub(1));
+            return (x, y);
+        }
+
         let inner_width = area.width.saturating_sub(2).max(1) as usize;
         let mut row = self.composer_prefix_height(inner_width) as u16;
         let mut col = 0usize;
@@ -2970,15 +3358,23 @@ impl InteractiveApp {
 
     fn input_area_height(&self, width: u16) -> u16 {
         let inner_width = width.saturating_sub(2).max(1) as usize;
+        if self.model_selection_state().is_some() {
+            let content_lines =
+                self.composer_prefix_height(inner_width) + self.model_selection_option_count();
+            return (content_lines as u16) + 2;
+        }
+
+        let input_lines = if self.input.is_empty() {
+            1
+        } else {
+            self.input
+                .split('\n')
+                .map(|line| wrapped_line_count(line, inner_width).max(1))
+                .sum()
+        };
         let content_lines = self.composer_prefix_height(inner_width)
-            + if self.input.is_empty() {
-                1
-            } else {
-                self.input
-                    .split('\n')
-                    .map(|line| wrapped_line_count(line, inner_width).max(1))
-                    .sum()
-            };
+            + input_lines
+            + self.model_selection_option_count();
         (content_lines as u16) + 2 // content + top/bottom border
     }
 
@@ -3926,8 +4322,8 @@ mod tests {
         PendingReveal, QueuedPrompt, RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind,
         TranscriptTiming, TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
         format_duration_compact, format_turn_event_row, inline_multiline_text,
-        inline_viewport_height_for_terminal, render_row_lines, runtime_lane_summary,
-        select_interactive_frontend, web_server_ready_row,
+        inline_viewport_height_for_terminal, render_row_lines, select_interactive_frontend,
+        web_server_ready_row,
     };
     use crate::application::{ConversationSession, RuntimeLaneConfig};
     use crate::domain::model::{
@@ -5203,7 +5599,7 @@ mod tests {
     }
 
     #[test]
-    fn model_command_lists_enabled_and_disabled_provider_catalog_entries() {
+    fn model_command_lists_enabled_and_disabled_provider_selector_entries() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5234,20 +5630,66 @@ mod tests {
 
         app.submit_prompt();
 
-        let row = app.rows.last().expect("catalog row");
-        assert_eq!(row.kind, TranscriptRowKind::CommandNotice);
-        assert_eq!(row.header, "• Model catalog");
-        assert!(row.content.contains(&runtime_lane_summary(&runtime_lanes)));
-        assert!(row.content.contains("[enabled] openai"));
-        assert!(row.content.contains("[disabled] anthropic"));
+        assert!(matches!(app.input_mode, InputMode::ModelSelection(_)));
+        let rendered = app
+            .model_selection_lines()
+            .expect("provider selector lines")
+            .iter()
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|line| line.contains("> openai")));
         assert!(
-            row.content
-                .contains("[disabled] inception: mercury-2 (login required)")
+            rendered
+                .iter()
+                .any(|line| line.contains("anthropic") && line.contains("disabled"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("inception") && line.contains("disabled"))
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("moonshot") && line.contains("disabled"))
         );
     }
 
     #[test]
-    fn model_command_queues_runtime_update_for_enabled_provider() {
+    fn model_provider_selector_wraps_visible_order_from_active_selection() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model".to_string();
+        app.submit_prompt();
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::all().len() - 1;
+        }
+
+        let rendered = app
+            .model_selection_lines()
+            .expect("provider selector lines")
+            .iter()
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+
+        assert!(
+            rendered
+                .first()
+                .is_some_and(|line| line.contains("> ollama"))
+        );
+        assert!(rendered.get(1).is_some_and(|line| line.contains("sift")));
+    }
+
+    #[test]
+    fn model_command_requires_selector_instead_of_direct_provider_and_model_args() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5270,26 +5712,13 @@ mod tests {
 
         app.submit_prompt();
 
-        let update = app
-            .take_pending_runtime_update()
-            .expect("pending runtime update");
-        assert_eq!(
-            update.runtime_lanes.synthesizer_provider(),
-            ModelProvider::Openai
-        );
-        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
-        assert!(update.runtime_lanes.planner_provider_override().is_none());
-        assert!(update.runtime_lanes.planner_model_id().is_none());
-        assert_eq!(
-            update.persisted_preferences.provider.as_deref(),
-            Some("openai")
-        );
-        assert_eq!(
-            update.persisted_preferences.model.as_deref(),
-            Some("gpt-4o")
-        );
-        assert!(update.persisted_preferences.planner_provider.is_none());
-        assert!(update.persisted_preferences.planner_model.is_none());
+        assert!(app.take_pending_runtime_update().is_none());
+        assert!(app.rows.iter().any(|row| {
+            row.header == "• Model command invalid"
+                && row
+                    .content
+                    .contains("Use `/model`, then press Enter to choose from the selector.")
+        }));
     }
 
     #[test]
@@ -5312,8 +5741,27 @@ mod tests {
                 provider_availability(ModelProvider::Openai, true, "using local credential store"),
             ],
         );
-        app.input = "/model openai gpt-4o".to_string();
+        app.input = "/model".to_string();
         app.submit_prompt();
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::all()
+                .iter()
+                .position(|provider| *provider == ModelProvider::Openai)
+                .expect("openai index");
+        }
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Openai
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| *model_id == "gpt-4o")
+                .expect("openai gpt-4o index");
+        }
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
 
         let started_at = Instant::now();
         let update = app
@@ -5411,8 +5859,27 @@ mod tests {
         app.busy = true;
         app.busy_phase = BusyPhase::Reconfiguring;
 
-        app.input = "/model openai gpt-4o".to_string();
+        app.input = "/model".to_string();
         app.submit_prompt();
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::all()
+                .iter()
+                .position(|provider| *provider == ModelProvider::Openai)
+                .expect("openai index");
+        }
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Openai
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| *model_id == "gpt-4o")
+                .expect("openai gpt-4o index");
+        }
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
 
         assert!(
             app.rows
@@ -5442,9 +5909,18 @@ mod tests {
                 provider_availability(ModelProvider::Anthropic, false, "login required"),
             ],
         );
-        app.input = "/model anthropic claude-sonnet-4-20250514".to_string();
+        app.input = "/model".to_string();
 
         app.submit_prompt();
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::all()
+                .iter()
+                .position(|provider| *provider == ModelProvider::Anthropic)
+                .expect("anthropic index");
+        }
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
 
         assert!(app.take_pending_runtime_update().is_none());
         assert!(
@@ -5453,43 +5929,6 @@ mod tests {
                 .any(|row| row.kind == TranscriptRowKind::Error
                     && row.header == "• Model unavailable"
                     && row.content.contains("disabled"))
-        );
-    }
-
-    #[test]
-    fn model_catalog_mentions_runtime_lane_state_file() {
-        let palette = detect_palette();
-        let mut app = InteractiveApp::new(
-            "qwen-1.5b".to_string(),
-            palette,
-            session(),
-            "sift".to_string(),
-            None,
-            "Provider: `sift` (local-first). Auth: not required.".to_string(),
-            2,
-        );
-        app.set_runtime_preference_path(PathBuf::from(
-            "/home/alex/.local/state/paddles/runtime-lanes.toml",
-        ));
-        app.set_runtime_catalog(
-            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
-                .with_synthesizer_provider(ModelProvider::Sift),
-            vec![provider_availability(
-                ModelProvider::Sift,
-                true,
-                "auth not required",
-            )],
-        );
-        app.input = "/model".to_string();
-
-        app.submit_prompt();
-
-        let row = app.rows.last().expect("catalog row");
-        assert!(row.content.contains("Runtime lane state"));
-        assert!(row.content.contains("runtime-lanes.toml"));
-        assert!(
-            row.content
-                .contains("Machine-managed runtime state overrides")
         );
     }
 
@@ -5518,7 +5957,7 @@ mod tests {
 
         assert!(rendered.contains("Commands"));
         assert!(rendered.contains("/model"));
-        assert_eq!(suggestions, vec!["/model", "/model <provider> <model>"]);
+        assert_eq!(suggestions, vec!["/model"]);
     }
 
     #[test]
@@ -5550,7 +5989,7 @@ mod tests {
     }
 
     #[test]
-    fn slash_command_popup_renders_model_provider_suggestions() {
+    fn model_command_enters_provider_selection_in_prompt_box() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5561,48 +6000,250 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model inc".to_string();
+        app.input = "/model".to_string();
         app.cursor_pos = app.input.chars().count();
+
+        app.submit_prompt();
 
         let buffer = render_buffer(&app, 120, 18);
         let rendered = buffer_text(&buffer);
-        let suggestions = app
-            .slash_command_suggestions()
-            .into_iter()
-            .map(|command| command.usage)
-            .collect::<Vec<_>>();
 
-        assert!(rendered.contains("Commands"));
-        assert!(rendered.contains("/model inception "));
-        assert_eq!(suggestions, vec!["/model inception "]);
+        assert!(matches!(app.input_mode, InputMode::ModelSelection(_)));
+        assert_eq!(app.input, "/model");
+        assert!(rendered.contains("> sift"));
+        assert!(!rendered.contains("Commands"));
+        assert_eq!(
+            app.input_area_height(120),
+            ModelProvider::all().len() as u16 + 2
+        );
     }
 
     #[test]
-    fn slash_command_popup_renders_model_id_suggestions() {
+    fn model_provider_selection_advances_to_model_list_in_prompt_box() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
-            "qwen-1.5b".to_string(),
+            "mercury-2".to_string(),
             palette,
             session(),
-            "sift".to_string(),
+            "inception".to_string(),
             None,
-            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            "Provider: `inception`. Auth: using local credential store.".to_string(),
             2,
         );
-        app.input = "/model inception m".to_string();
-        app.cursor_pos = app.input.chars().count();
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("mercury-2".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Inception),
+            vec![provider_availability(
+                ModelProvider::Inception,
+                true,
+                "using local credential store",
+            )],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         let buffer = render_buffer(&app, 120, 18);
         let rendered = buffer_text(&buffer);
-        let suggestions = app
-            .slash_command_suggestions()
-            .into_iter()
-            .map(|command| command.usage)
-            .collect::<Vec<_>>();
 
-        assert!(rendered.contains("Commands"));
-        assert!(rendered.contains("/model inception mercury-2"));
-        assert_eq!(suggestions, vec!["/model inception mercury-2"]);
+        assert!(!should_exit);
+        assert!(matches!(app.input_mode, InputMode::ModelSelection(_)));
+        assert_eq!(app.input, "/model inception");
+        assert!(rendered.contains("> mercury-2"));
+        assert!(!rendered.contains("Commands"));
+    }
+
+    #[test]
+    fn moonshot_model_selection_advances_to_thinking_mode_list_when_available() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "kimi-k2.5".to_string(),
+            palette,
+            session(),
+            "moonshot".to_string(),
+            None,
+            "Provider: `moonshot`. Auth: using local credential store.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Moonshot),
+            vec![provider_availability(
+                ModelProvider::Moonshot,
+                true,
+                "using local credential store",
+            )],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Moonshot
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| *model_id == "kimi-k2")
+                .expect("kimi-k2 index");
+        }
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let buffer = render_buffer(&app, 120, 18);
+        let rendered = buffer_text(&buffer);
+
+        assert!(!should_exit);
+        assert_eq!(app.input, "/model moonshot kimi-k2");
+        assert!(rendered.contains("Select thinking mode"));
+        assert!(rendered.contains("> Default"));
+        assert!(rendered.contains("Thinking"));
+    }
+
+    #[test]
+    fn moonshot_thinking_mode_selection_queues_runtime_update_from_prompt_box() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "kimi-k2.5".to_string(),
+            palette,
+            session(),
+            "moonshot".to_string(),
+            None,
+            "Provider: `moonshot`. Auth: using local credential store.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Moonshot),
+            vec![provider_availability(
+                ModelProvider::Moonshot,
+                true,
+                "using local credential store",
+            )],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Moonshot
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| *model_id == "kimi-k2")
+                .expect("kimi-k2 index");
+        }
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Moonshot
+                .thinking_modes("kimi-k2")
+                .iter()
+                .position(|mode| mode.model_override == Some("kimi-k2-thinking"))
+                .expect("thinking mode index");
+        }
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.input, "");
+        let update = app
+            .take_pending_runtime_update()
+            .expect("pending runtime update");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_model_id(),
+            "kimi-k2-thinking"
+        );
+        assert!(update.runtime_lanes.synthesizer_thinking_mode().is_none());
+    }
+
+    #[test]
+    fn openai_gpt_5_4_thinking_mode_selection_queues_runtime_update_from_prompt_box() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "gpt-4o".to_string(),
+            palette,
+            session(),
+            "openai".to_string(),
+            None,
+            "Provider: `openai`. Auth: using local credential store.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Openai),
+            vec![provider_availability(
+                ModelProvider::Openai,
+                true,
+                "using local credential store",
+            )],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Openai
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| *model_id == "gpt-5.4")
+                .expect("gpt-5.4 index");
+        }
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let buffer = render_buffer(&app, 120, 18);
+        let rendered = buffer_text(&buffer);
+
+        assert!(!should_exit);
+        assert_eq!(app.input, "/model openai gpt-5.4");
+        assert!(rendered.contains("Select thinking mode"));
+        assert!(rendered.contains("> None"));
+        assert!(rendered.contains("High"));
+
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::Openai
+                .thinking_modes("gpt-5.4")
+                .iter()
+                .position(|mode| mode.thinking_mode == Some("high"))
+                .expect("high thinking mode index");
+        }
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.input, "");
+        let update = app
+            .take_pending_runtime_update()
+            .expect("pending runtime update");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_provider(),
+            ModelProvider::Openai
+        );
+        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-5.4");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_thinking_mode(),
+            Some("high")
+        );
+        assert_eq!(
+            update.persisted_preferences.thinking_mode.as_deref(),
+            Some("high")
+        );
     }
 
     #[test]
@@ -5624,7 +6265,7 @@ mod tests {
     }
 
     #[test]
-    fn slash_command_model_suggestions_do_not_fake_freeform_model_ids() {
+    fn slash_command_model_suggestions_are_disabled() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5635,7 +6276,7 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model ollama ".to_string();
+        app.input = "/model inception mercury".to_string();
         app.cursor_pos = app.input.chars().count();
 
         assert!(app.slash_command_suggestions().is_empty());
@@ -5794,7 +6435,7 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        app.input = "/model".to_string();
+        app.input = "/login i".to_string();
         app.cursor_pos = app.input.chars().count();
 
         let frame_area = Rect::new(0, 41, 239, 9);
@@ -5805,6 +6446,126 @@ mod tests {
 
         assert!(popup.y >= frame_area.y);
         assert!(popup.bottom() <= frame_area.bottom());
+        assert!(popup.bottom() <= input_area.y);
+    }
+
+    #[test]
+    fn slash_command_popup_aligns_with_input_body() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login i".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let frame_area = Rect::new(0, 40, 120, 10);
+        let input_area = Rect::new(4, 47, 100, 2);
+        let popup = app
+            .command_popup_area(frame_area, input_area)
+            .expect("popup area");
+
+        assert_eq!(popup.x, input_area.x);
+        assert_eq!(popup.bottom(), input_area.y);
+    }
+
+    #[test]
+    fn escape_hides_slash_command_popup_without_clearing_input() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/login i".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let frame_area = Rect::new(0, 41, 120, 9);
+        let input_area = Rect::new(0, 48, 120, 2);
+        assert!(app.command_popup_area(frame_area, input_area).is_some());
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input, "/login i");
+        assert_eq!(app.cursor_pos, "/login i".chars().count());
+        assert!(app.command_popup_area(frame_area, input_area).is_none());
+    }
+
+    #[test]
+    fn escape_cancels_model_provider_selection_without_exiting() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/model".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        app.submit_prompt();
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input, "/model");
+        assert_eq!(app.cursor_pos, "/model".chars().count());
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn freeform_model_provider_selection_returns_manual_input() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Ollama, true, "auth not required"),
+            ],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+        if let InputMode::ModelSelection(state) = &mut app.input_mode {
+            state.selected_index = ModelProvider::all()
+                .iter()
+                .position(|provider| *provider == ModelProvider::Ollama)
+                .expect("ollama index");
+        }
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.input, "/model ollama ");
+        assert!(
+            app.rows.iter().any(|row| row.header == "• Model selection"
+                && row.content.contains("freeform model ids"))
+        );
     }
 
     #[test]
@@ -5828,22 +6589,39 @@ mod tests {
     }
 
     #[test]
-    fn slash_command_completion_can_target_subcommands() {
+    fn model_selection_queues_runtime_update_from_prompt_box() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
-            "qwen-1.5b".to_string(),
+            "mercury-2".to_string(),
             palette,
             session(),
-            "sift".to_string(),
+            "inception".to_string(),
             None,
-            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            "Provider: `inception`. Auth: using local credential store.".to_string(),
             2,
         );
-        app.input = "/model i".to_string();
-        app.cursor_pos = app.input.chars().count();
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("mercury-2".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Inception),
+            vec![provider_availability(
+                ModelProvider::Inception,
+                true,
+                "using local credential store",
+            )],
+        );
+        app.input = "/model".to_string();
 
-        assert!(app.accept_selected_slash_completion());
-        assert_eq!(app.input, "/model inception ");
+        app.submit_prompt();
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!should_exit);
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert_eq!(app.input, "");
+        assert!(app.take_pending_runtime_update().is_some());
     }
 
     #[test]
@@ -5867,7 +6645,7 @@ mod tests {
     }
 
     #[test]
-    fn slash_command_completion_can_target_model_provider() {
+    fn slash_command_completion_does_not_expand_model_provider_or_model_ids() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5881,29 +6659,16 @@ mod tests {
         app.input = "/model inc".to_string();
         app.cursor_pos = app.input.chars().count();
 
-        assert!(app.accept_selected_slash_completion());
-        assert_eq!(app.input, "/model inception ");
-        assert_eq!(app.cursor_pos, "/model inception ".chars().count());
-    }
+        assert!(!app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/model inc");
+        assert_eq!(app.cursor_pos, "/model inc".chars().count());
 
-    #[test]
-    fn slash_command_completion_can_target_model_id() {
-        let palette = detect_palette();
-        let mut app = InteractiveApp::new(
-            "qwen-1.5b".to_string(),
-            palette,
-            session(),
-            "sift".to_string(),
-            None,
-            "Provider: `sift` (local-first). Auth: not required.".to_string(),
-            2,
-        );
         app.input = "/model inception mer".to_string();
         app.cursor_pos = app.input.chars().count();
 
-        assert!(app.accept_selected_slash_completion());
-        assert_eq!(app.input, "/model inception mercury-2");
-        assert_eq!(app.cursor_pos, "/model inception mercury-2".chars().count());
+        assert!(!app.accept_selected_slash_completion());
+        assert_eq!(app.input, "/model inception mer");
+        assert_eq!(app.cursor_pos, "/model inception mer".chars().count());
     }
 
     #[test]

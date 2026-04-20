@@ -59,6 +59,14 @@ pub struct ModelCapabilitySurface {
     pub transport_support: ProviderTransportSupport,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModelThinkingMode {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub model_override: Option<&'static str>,
+    pub thinking_mode: Option<&'static str>,
+}
+
 const OPENAI_MODELS: &[&str] = &[
     "gpt-4.1-mini",
     "gpt-4.1",
@@ -87,7 +95,81 @@ const OPENAI_RESPONSES_ONLY_MODELS: &[&str] = &["gpt-5.4-pro", "gpt-5-pro", "gpt
 const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
 const GOOGLE_MODELS: &[&str] = &["gemini-2.5-flash"];
-const MOONSHOT_MODELS: &[&str] = &["kimi-k2.5"];
+const MOONSHOT_MODELS: &[&str] = &[
+    "kimi-k2.5",
+    "kimi-k2",
+    "kimi-k2-0905-preview",
+    "kimi-k2-0711-preview",
+    "kimi-k2-turbo-preview",
+    "kimi-k2-thinking",
+    "kimi-k2-thinking-turbo",
+];
+const NO_THINKING_MODES: &[ModelThinkingMode] = &[];
+const MOONSHOT_SELECTABLE_MODELS: &[&str] = &[
+    "kimi-k2.5",
+    "kimi-k2",
+    "kimi-k2-0905-preview",
+    "kimi-k2-0711-preview",
+];
+const MOONSHOT_K2_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "default",
+        label: "Default",
+        model_override: Some("kimi-k2"),
+        thinking_mode: None,
+    },
+    ModelThinkingMode {
+        key: "turbo-preview",
+        label: "Turbo preview",
+        model_override: Some("kimi-k2-turbo-preview"),
+        thinking_mode: None,
+    },
+    ModelThinkingMode {
+        key: "thinking",
+        label: "Thinking",
+        model_override: Some("kimi-k2-thinking"),
+        thinking_mode: None,
+    },
+    ModelThinkingMode {
+        key: "thinking-turbo",
+        label: "Thinking turbo",
+        model_override: Some("kimi-k2-thinking-turbo"),
+        thinking_mode: None,
+    },
+];
+const OPENAI_GPT_5_4_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+    },
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+    },
+    ModelThinkingMode {
+        key: "xhigh",
+        label: "XHigh",
+        model_override: None,
+        thinking_mode: Some("xhigh"),
+    },
+];
+const OPENAI_RUNTIME_THINKING_DELIMITER: &str = "@@thinking=";
 
 impl ModelProvider {
     pub const ALL: [Self; 7] = [
@@ -202,8 +284,68 @@ impl ModelProvider {
         matches!(self, Self::Ollama)
     }
 
+    pub fn selectable_model_ids(self) -> &'static [&'static str] {
+        match self {
+            Self::Moonshot => MOONSHOT_SELECTABLE_MODELS,
+            _ => self.known_model_ids(),
+        }
+    }
+
+    pub fn thinking_modes(self, model: &str) -> &'static [ModelThinkingMode] {
+        let normalized_model = self.runtime_model_id(model);
+        match (self, normalized_model.as_str()) {
+            (Self::Moonshot, "kimi-k2") => MOONSHOT_K2_THINKING_MODES,
+            (Self::Openai, "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano") => {
+                OPENAI_GPT_5_4_THINKING_MODES
+            }
+            _ => NO_THINKING_MODES,
+        }
+    }
+
+    pub fn selectable_model_matches_runtime_model(
+        self,
+        selectable_model: &str,
+        runtime_model: &str,
+    ) -> bool {
+        let normalized_runtime = self.runtime_model_id(runtime_model);
+        let normalized_selectable = self.normalize_model_alias(selectable_model);
+        normalized_runtime == normalized_selectable
+            || self
+                .thinking_modes(&normalized_selectable)
+                .iter()
+                .filter_map(|mode| mode.model_override)
+                .any(|model_override| model_override == normalized_runtime)
+    }
+
+    pub fn thinking_mode_index_for_runtime_model(
+        self,
+        selectable_model: &str,
+        runtime_model: &str,
+        runtime_thinking_mode: Option<&str>,
+    ) -> Option<usize> {
+        let normalized_runtime = self.runtime_model_id(runtime_model);
+        let normalized_runtime_thinking_mode = runtime_thinking_mode
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        self.thinking_modes(selectable_model)
+            .iter()
+            .position(|mode| {
+                if let Some(model_override) = mode.model_override {
+                    return model_override == normalized_runtime;
+                }
+                normalized_runtime == self.normalize_model_alias(selectable_model)
+                    && match (mode.thinking_mode, normalized_runtime_thinking_mode) {
+                        (Some("none"), None) => true,
+                        (Some(mode), Some(current)) => mode == current,
+                        _ => false,
+                    }
+            })
+    }
+
     pub fn accepts_model(self, model: &str) -> bool {
-        self.supports_freeform_model_id() || self.known_model_ids().contains(&model)
+        let runtime_model_id = self.runtime_model_id(model);
+        self.supports_freeform_model_id()
+            || self.known_model_ids().contains(&runtime_model_id.as_str())
     }
 
     pub fn supports_paddles_http_transport(self, model: &str) -> bool {
@@ -221,7 +363,7 @@ impl ModelProvider {
     }
 
     pub fn capability_surface(self, model: &str) -> ModelCapabilitySurface {
-        let normalized_model = self.normalize_model_alias(model);
+        let normalized_model = self.runtime_model_id(model);
         let transport_support = match self {
             Self::Openai if OPENAI_RESPONSES_ONLY_MODELS.contains(&normalized_model.as_str()) => {
                 ProviderTransportSupport::Unsupported {
@@ -265,8 +407,70 @@ impl ModelProvider {
         }
     }
 
+    pub fn prepare_runtime_model_id(self, model: &str, thinking_mode: Option<&str>) -> String {
+        let normalized_model = self.normalize_model_alias(model);
+        let normalized_thinking_mode = thinking_mode
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        match (self, normalized_thinking_mode) {
+            (Self::Openai, Some(thinking_mode))
+                if self
+                    .thinking_modes(&normalized_model)
+                    .iter()
+                    .any(|mode| mode.thinking_mode == Some(thinking_mode)) =>
+            {
+                format!("{normalized_model}{OPENAI_RUNTIME_THINKING_DELIMITER}{thinking_mode}")
+            }
+            _ => normalized_model,
+        }
+    }
+
+    pub fn runtime_model_id(self, model: &str) -> String {
+        if self == Self::Openai
+            && let Some((model_id, _)) = model.split_once(OPENAI_RUNTIME_THINKING_DELIMITER)
+        {
+            return self.normalize_model_alias(model_id);
+        }
+        self.normalize_model_alias(model)
+    }
+
+    pub fn runtime_model_thinking_mode(self, model: &str) -> Option<String> {
+        if self == Self::Openai
+            && let Some((_, thinking_mode)) = model.split_once(OPENAI_RUNTIME_THINKING_DELIMITER)
+        {
+            let thinking_mode = thinking_mode.trim();
+            if !thinking_mode.is_empty() {
+                return Some(thinking_mode.to_string());
+            }
+        }
+        None
+    }
+
+    pub fn qualified_model_label_with_thinking(
+        self,
+        model: &str,
+        thinking_mode: Option<&str>,
+    ) -> String {
+        let normalized_model = self.normalize_model_alias(model);
+        let normalized_thinking_mode = thinking_mode
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let suffix = normalized_thinking_mode
+            .and_then(|mode| {
+                self.thinking_modes(&normalized_model)
+                    .iter()
+                    .find(|candidate| candidate.thinking_mode == Some(mode))
+            })
+            .map(|mode| format!(" ({})", mode.label))
+            .unwrap_or_default();
+        format!("{}:{}{}", self.name(), normalized_model, suffix)
+    }
+
     pub fn qualified_model_label(self, model: &str) -> String {
-        format!("{}:{}", self.name(), self.normalize_model_alias(model))
+        self.qualified_model_label_with_thinking(
+            &self.runtime_model_id(model),
+            self.runtime_model_thinking_mode(model).as_deref(),
+        )
     }
 }
 
@@ -292,8 +496,8 @@ pub fn known_state_space_models() -> Vec<KnownModel> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiFormat, ModelProvider, PlannerToolCallCapability, ProviderAuthRequirement,
-        ProviderTransportSupport, known_state_space_models,
+        ApiFormat, ModelProvider, ModelThinkingMode, PlannerToolCallCapability,
+        ProviderAuthRequirement, ProviderTransportSupport, known_state_space_models,
     };
     use crate::infrastructure::rendering::RenderCapability;
 
@@ -306,6 +510,131 @@ mod tests {
         assert_eq!(
             ModelProvider::Moonshot.normalize_model_alias("kimi-k2.5"),
             "kimi-k2.5"
+        );
+    }
+
+    #[test]
+    fn moonshot_provider_exposes_current_kimi_model_ids() {
+        assert_eq!(
+            ModelProvider::Moonshot.known_model_ids(),
+            [
+                "kimi-k2.5",
+                "kimi-k2",
+                "kimi-k2-0905-preview",
+                "kimi-k2-0711-preview",
+                "kimi-k2-turbo-preview",
+                "kimi-k2-thinking",
+                "kimi-k2-thinking-turbo",
+            ]
+        );
+    }
+
+    #[test]
+    fn moonshot_selectable_models_group_thinking_variants_under_kimi_k2() {
+        assert_eq!(
+            ModelProvider::Moonshot.selectable_model_ids(),
+            [
+                "kimi-k2.5",
+                "kimi-k2",
+                "kimi-k2-0905-preview",
+                "kimi-k2-0711-preview",
+            ]
+        );
+        assert_eq!(
+            ModelProvider::Moonshot.thinking_modes("kimi-k2"),
+            [
+                ModelThinkingMode {
+                    key: "default",
+                    label: "Default",
+                    model_override: Some("kimi-k2"),
+                    thinking_mode: None,
+                },
+                ModelThinkingMode {
+                    key: "turbo-preview",
+                    label: "Turbo preview",
+                    model_override: Some("kimi-k2-turbo-preview"),
+                    thinking_mode: None,
+                },
+                ModelThinkingMode {
+                    key: "thinking",
+                    label: "Thinking",
+                    model_override: Some("kimi-k2-thinking"),
+                    thinking_mode: None,
+                },
+                ModelThinkingMode {
+                    key: "thinking-turbo",
+                    label: "Thinking turbo",
+                    model_override: Some("kimi-k2-thinking-turbo"),
+                    thinking_mode: None,
+                },
+            ]
+        );
+        assert!(
+            ModelProvider::Moonshot
+                .selectable_model_matches_runtime_model("kimi-k2", "kimi-k2-thinking")
+        );
+        assert_eq!(
+            ModelProvider::Moonshot.thinking_mode_index_for_runtime_model(
+                "kimi-k2",
+                "kimi-k2-thinking",
+                None
+            ),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn openai_gpt_5_4_models_expose_parameterized_thinking_modes() {
+        assert_eq!(
+            ModelProvider::Openai.thinking_modes("gpt-5.4"),
+            [
+                ModelThinkingMode {
+                    key: "none",
+                    label: "None",
+                    model_override: None,
+                    thinking_mode: Some("none"),
+                },
+                ModelThinkingMode {
+                    key: "low",
+                    label: "Low",
+                    model_override: None,
+                    thinking_mode: Some("low"),
+                },
+                ModelThinkingMode {
+                    key: "medium",
+                    label: "Medium",
+                    model_override: None,
+                    thinking_mode: Some("medium"),
+                },
+                ModelThinkingMode {
+                    key: "high",
+                    label: "High",
+                    model_override: None,
+                    thinking_mode: Some("high"),
+                },
+                ModelThinkingMode {
+                    key: "xhigh",
+                    label: "XHigh",
+                    model_override: None,
+                    thinking_mode: Some("xhigh"),
+                },
+            ]
+        );
+        assert_eq!(
+            ModelProvider::Openai.thinking_mode_index_for_runtime_model(
+                "gpt-5.4",
+                "gpt-5.4",
+                Some("high")
+            ),
+            Some(3)
+        );
+        assert_eq!(
+            ModelProvider::Openai.prepare_runtime_model_id("gpt-5.4", Some("high")),
+            "gpt-5.4@@thinking=high"
+        );
+        assert_eq!(
+            ModelProvider::Openai.qualified_model_label("gpt-5.4@@thinking=high"),
+            "openai:gpt-5.4 (High)"
         );
     }
 
@@ -444,6 +773,12 @@ mod tests {
         }));
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Moonshot && model.model_id == "kimi-k2.5"
+        }));
+        assert!(models.iter().any(|model| {
+            model.provider == ModelProvider::Moonshot && model.model_id == "kimi-k2"
+        }));
+        assert!(models.iter().any(|model| {
+            model.provider == ModelProvider::Moonshot && model.model_id == "kimi-k2-thinking-turbo"
         }));
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Inception && model.model_id == "mercury-2"

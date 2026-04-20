@@ -13,6 +13,7 @@ const RUNTIME_LANE_PREFERENCES_FILE: &str = "runtime-lanes.toml";
 pub struct RuntimeLanePreferences {
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub thinking_mode: Option<String>,
     pub planner_provider: Option<String>,
     pub planner_model: Option<String>,
 }
@@ -25,6 +26,9 @@ impl RuntimeLanePreferences {
         Self {
             provider: Some(synthesizer_provider.name().to_string()),
             model: Some(synthesizer_model.to_string()),
+            thinking_mode: runtime_lanes
+                .synthesizer_thinking_mode()
+                .map(ToString::to_string),
             planner_provider: None,
             planner_model: None,
         }
@@ -33,6 +37,7 @@ impl RuntimeLanePreferences {
     pub fn is_empty(&self) -> bool {
         self.provider.is_none()
             && self.model.is_none()
+            && self.thinking_mode.is_none()
             && self.planner_provider.is_none()
             && self.planner_model.is_none()
     }
@@ -219,6 +224,7 @@ mod tests {
         let preferences = RuntimeLanePreferences {
             provider: Some("inception".to_string()),
             model: Some("mercury-2".to_string()),
+            thinking_mode: None,
             planner_provider: None,
             planner_model: None,
         };
@@ -268,5 +274,18 @@ planner_model = "gpt-5.2-pro"
     fn default_runtime_lane_preference_path_targets_machine_state() {
         let path = default_runtime_lane_preference_path();
         assert!(path.ends_with("paddles/runtime-lanes.toml"));
+    }
+
+    #[test]
+    fn runtime_lane_preferences_capture_shared_thinking_mode() {
+        let runtime_lanes = RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Openai)
+            .with_synthesizer_thinking_mode(Some("high".to_string()));
+
+        let preferences = RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes);
+
+        assert_eq!(preferences.provider.as_deref(), Some("openai"));
+        assert_eq!(preferences.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(preferences.thinking_mode.as_deref(), Some("high"));
     }
 }

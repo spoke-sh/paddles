@@ -141,6 +141,7 @@ pub struct RuntimeLaneConfig {
     planner_model_id: Option<String>,
     planner_provider: Option<ModelProvider>,
     synthesizer_model_id: String,
+    synthesizer_thinking_mode: Option<String>,
     gatherer_model_id: Option<String>,
     gatherer_provider: GathererProvider,
     context1_harness_ready: bool,
@@ -153,6 +154,7 @@ impl RuntimeLaneConfig {
             planner_model_id: None,
             planner_provider: None,
             synthesizer_model_id: synthesizer_model_id.into(),
+            synthesizer_thinking_mode: None,
             gatherer_model_id,
             gatherer_provider: GathererProvider::SiftDirect,
             context1_harness_ready: false,
@@ -166,6 +168,11 @@ impl RuntimeLaneConfig {
 
     pub fn with_synthesizer_provider(mut self, provider: ModelProvider) -> Self {
         self.synthesizer_provider = provider;
+        self
+    }
+
+    pub fn with_synthesizer_thinking_mode(mut self, thinking_mode: Option<String>) -> Self {
+        self.synthesizer_thinking_mode = thinking_mode;
         self
     }
 
@@ -186,6 +193,10 @@ impl RuntimeLaneConfig {
 
     pub fn synthesizer_model_id(&self) -> &str {
         &self.synthesizer_model_id
+    }
+
+    pub fn synthesizer_thinking_mode(&self) -> Option<&str> {
+        self.synthesizer_thinking_mode.as_deref()
     }
 
     pub fn synthesizer_provider(&self) -> ModelProvider {
@@ -2836,6 +2847,10 @@ impl MechSuitService {
         &self,
         config: &RuntimeLaneConfig,
     ) -> Result<PreparedRuntimeLanes> {
+        let synthesizer_prepared_model_id = config.synthesizer_provider().prepare_runtime_model_id(
+            config.synthesizer_model_id(),
+            config.synthesizer_thinking_mode(),
+        );
         let synthesizer_paths = if config.synthesizer_provider() == ModelProvider::Sift {
             Some(
                 self.registry
@@ -2850,6 +2865,12 @@ impl MechSuitService {
             .unwrap_or(config.synthesizer_model_id())
             .to_string();
         let planner_provider = config.planner_provider();
+        let planner_thinking_mode = (planner_provider == config.synthesizer_provider()
+            && planner_model_id == config.synthesizer_model_id())
+        .then(|| config.synthesizer_thinking_mode())
+        .flatten();
+        let planner_prepared_model_id =
+            planner_provider.prepare_runtime_model_id(&planner_model_id, planner_thinking_mode);
         let planner_paths = if planner_provider != ModelProvider::Sift {
             None
         } else if planner_model_id == config.synthesizer_model_id() {
@@ -2860,13 +2881,13 @@ impl MechSuitService {
         let planner = Self::build_lane(
             RuntimeLaneRole::Planner,
             planner_provider,
-            &planner_model_id,
+            planner_prepared_model_id,
             planner_paths,
         );
         let synthesizer = Self::build_lane(
             RuntimeLaneRole::Synthesizer,
             config.synthesizer_provider(),
-            config.synthesizer_model_id(),
+            synthesizer_prepared_model_id,
             synthesizer_paths,
         );
 
