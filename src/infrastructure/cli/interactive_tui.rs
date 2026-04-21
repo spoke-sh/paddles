@@ -55,7 +55,8 @@ const PASTE_PREVIEW_LIMIT: usize = 48;
 
 fn normalize_pasted_text(text: &str) -> String {
     text.replace("\r\n", "\n")
-        .trim_start_matches('\n')
+        .replace('\r', "\n")
+        .trim_start_matches(&['\n', '\r'][..])
         .to_string()
 }
 
@@ -3141,9 +3142,7 @@ impl InteractiveApp {
 
         if self.has_composer_parts() {
             let mut lines = self.composer_prefix_lines();
-            if self.input.is_empty() {
-                lines.push(Line::from(Span::raw("")));
-            } else {
+            if !self.input.is_empty() {
                 lines.extend(self.input.split('\n').map(|line| {
                     Line::from(Span::styled(line.to_string(), self.palette.input_text))
                 }));
@@ -7572,5 +7571,62 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>();
         assert_eq!(rendered, vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn multiline_compacted_paste_is_not_prefixed_with_a_blank_line() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        super::handle_paste_event(&mut app, "\r\nhello\r\nworld\r\n");
+
+        assert_eq!(
+            app.composer_parts,
+            vec![ComposerPart::Paste {
+                text: "hello\nworld\n".to_string(),
+                lines: 2,
+                preview: "hello".to_string(),
+            }]
+        );
+        let rendered = app
+            .input_render_lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(rendered[0], "[2 lines pasted] hello");
+    }
+
+    #[test]
+    fn compacted_paste_chip_renders_without_an_extra_empty_line() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        super::handle_paste_event(&mut app, "• Fell back · 201ms\nsecond line");
+
+        let rendered = app
+            .input_render_lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rendered,
+            vec!["[2 lines pasted] • Fell back · 201ms".to_string()]
+        );
     }
 }
