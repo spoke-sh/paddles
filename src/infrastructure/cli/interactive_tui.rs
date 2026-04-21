@@ -55,6 +55,8 @@ const PASTE_PREVIEW_LIMIT: usize = 48;
 
 fn normalize_pasted_text(text: &str) -> String {
     text.replace("\r\n", "\n")
+        .trim_start_matches('\n')
+        .to_string()
 }
 
 fn pasted_line_count(text: &str) -> usize {
@@ -7545,5 +7547,30 @@ mod tests {
 
         assert_eq!(app.input, "hello world");
         assert!(app.composer_parts.is_empty());
+    }
+
+    #[test]
+    fn pasted_text_is_not_prefixed_with_an_extra_leading_newline() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        super::handle_paste_event(&mut app, "\nhello");
+
+        assert_eq!(app.input, "hello");
+        assert!(app.composer_parts.is_empty());
+        let rendered = app
+            .input_render_lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec!["hello".to_string()]);
     }
 }
