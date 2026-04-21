@@ -382,10 +382,15 @@ impl ModelProvider {
                 RenderCapability::PromptEnvelope,
                 PlannerToolCallCapability::PromptEnvelope,
             ),
-            Self::Openai | Self::Inception | Self::Moonshot | Self::Ollama => (
+            Self::Openai | Self::Inception | Self::Ollama => (
                 Some(ApiFormat::OpenAi),
                 RenderCapability::OpenAiJsonSchema,
                 PlannerToolCallCapability::NativeFunctionTool,
+            ),
+            Self::Moonshot => (
+                Some(ApiFormat::OpenAi),
+                RenderCapability::OpenAiJsonSchema,
+                PlannerToolCallCapability::StructuredJsonEnvelope,
             ),
             Self::Anthropic => (
                 Some(ApiFormat::Anthropic),
@@ -728,6 +733,17 @@ mod tests {
         assert_eq!(gemini.render_capability, RenderCapability::GeminiJsonSchema);
         assert_eq!(
             gemini.planner_tool_call,
+            PlannerToolCallCapability::StructuredJsonEnvelope
+        );
+
+        let moonshot = ModelProvider::Moonshot.capability_surface("kimi-k2.5");
+        assert_eq!(moonshot.http_format, Some(ApiFormat::OpenAi));
+        assert_eq!(
+            moonshot.render_capability,
+            RenderCapability::OpenAiJsonSchema
+        );
+        assert_eq!(
+            moonshot.planner_tool_call,
             PlannerToolCallCapability::StructuredJsonEnvelope
         );
 

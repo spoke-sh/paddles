@@ -984,10 +984,30 @@ Rules:
                 self.send_openai_planner_tool_call(system, user, capture)
                     .await
             }
-            PlannerToolCallCapability::StructuredJsonEnvelope => {
-                self.send_gemini_json_schema(system, user, planner_action_json_schema(), capture)
+            PlannerToolCallCapability::StructuredJsonEnvelope => match self.format {
+                ApiFormat::OpenAi => {
+                    self.send_openai_json_schema(
+                        system,
+                        user,
+                        "planner_action",
+                        planner_action_json_schema(),
+                        capture,
+                    )
                     .await
-            }
+                }
+                ApiFormat::Gemini => {
+                    self.send_gemini_json_schema(
+                        system,
+                        user,
+                        planner_action_json_schema(),
+                        capture,
+                    )
+                    .await
+                }
+                ApiFormat::Anthropic => {
+                    bail!("planner structured-json transport is unsupported for Anthropic format")
+                }
+            },
             PlannerToolCallCapability::PromptEnvelope => {
                 self.send_anthropic(system, user, capture).await
             }
@@ -3430,6 +3450,46 @@ mod tests {
         assert_eq!(requests[0].body["reasoning_effort"].as_str(), Some("high"));
         assert_eq!(requests[1].body["model"].as_str(), Some("gpt-5.4"));
         assert_eq!(requests[1].body["reasoning_effort"].as_str(), Some("high"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn moonshot_provider_executes_full_turn_without_planner_tool_choice() {
+        let model_id = "kimi-k2.5";
+        let (requests, events, response) = run_mocked_turn(
+            ApiFormat::OpenAi,
+            crate::infrastructure::providers::ModelProvider::Moonshot,
+            model_id,
+            &structured_answer_json("Mocked final answer."),
+        )
+        .await;
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].uri, "/v1/chat/completions");
+        assert_eq!(requests[1].uri, "/v1/chat/completions");
+        assert_eq!(requests[0].body["model"].as_str(), Some(model_id));
+        assert!(requests[0].body.get("tools").is_none());
+        assert!(requests[0].body.get("tool_choice").is_none());
+        assert_eq!(
+            requests[0].body["response_format"]["type"].as_str(),
+            Some("json_schema")
+        );
+        assert!(
+            requests[0].body["messages"][0]["content"]
+                .as_str()
+                .expect("planner system prompt")
+                .contains("Action Schema")
+        );
+        assert!(
+            requests[0].body["messages"][1]["content"]
+                .as_str()
+                .expect("planner user prompt")
+                .contains("User prompt: Sup dawg")
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerCapability { provider, .. } if provider == model_id
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread")]
