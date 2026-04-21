@@ -3180,7 +3180,7 @@ impl InteractiveApp {
         let mut lines = Vec::new();
 
         for (index, row) in visible_rows.iter().enumerate() {
-            lines.extend(render_row_lines(row, &self.palette));
+            lines.extend(render_row_lines_for_width(row, &self.palette, inner_width));
             if index + 1 < visible_rows.len() {
                 lines.push(Line::default());
             }
@@ -3545,7 +3545,7 @@ fn flush_scrollback_rows<B: Backend>(
     let palette = app.palette;
 
     for row in app.take_scrollback_rows() {
-        let mut lines = render_row_lines(&row, &palette);
+        let mut lines = render_row_lines_for_width(&row, &palette, width);
         lines.push(Line::default());
         let height = rendered_lines_height(&lines, width) as u16;
         terminal.insert_before(height, |buffer| {
@@ -3623,6 +3623,17 @@ fn rendered_rows_height(rows: &[TranscriptRow], palette: &Palette, width: usize)
         .enumerate()
         .map(|(index, row)| row_rendered_height(row, palette, width) + usize::from(index > 0))
         .sum()
+}
+
+fn render_row_lines_for_width(
+    row: &TranscriptRow,
+    palette: &Palette,
+    width: usize,
+) -> Vec<Line<'static>> {
+    if row.kind == TranscriptRowKind::User {
+        return render_full_width_user_row_lines(row, palette, width);
+    }
+    render_row_lines(row, palette)
 }
 
 fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>> {
@@ -3724,8 +3735,61 @@ fn render_row_lines(row: &TranscriptRow, palette: &Palette) -> Vec<Line<'static>
     lines
 }
 
+fn render_full_width_user_row_lines(
+    row: &TranscriptRow,
+    palette: &Palette,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut header_spans = vec![Span::styled(
+        row.header.clone(),
+        palette.user_header.add_modifier(Modifier::BOLD),
+    )];
+    if let Some(timing) = row.timing {
+        header_spans.push(Span::styled(
+            format!(" · {}", timing.elapsed_label()),
+            palette.user_body,
+        ));
+        if let Some(delta_label) = timing.delta_label() {
+            let delta_style = match timing.pace {
+                Pace::Fast => palette.pace_fast.bg(palette.input_bg),
+                Pace::Normal => palette.user_body,
+                Pace::Slow => palette.pace_slow.bg(palette.input_bg),
+            };
+            header_spans.push(Span::styled(delta_label, delta_style));
+        }
+    }
+    pad_spans_to_width(&mut header_spans, palette.user_body, width);
+
+    let mut lines = vec![Line::from(header_spans)];
+    if row.content.is_empty() {
+        return lines;
+    }
+
+    let content_width = width.saturating_sub(4).max(1);
+    for (line_index, line) in row.content.lines().enumerate() {
+        let first_prefix = if line_index == 0 { "  └ " } else { "    " };
+        for (segment_index, segment) in wrap_exact_segments(line, content_width)
+            .into_iter()
+            .enumerate()
+        {
+            let prefix = if segment_index == 0 {
+                first_prefix
+            } else {
+                "    "
+            };
+            lines.push(Line::from(Span::styled(
+                pad_to_width(&format!("{prefix}{segment}"), width),
+                palette.user_body,
+            )));
+        }
+    }
+
+    lines
+}
+
 fn row_rendered_height(row: &TranscriptRow, palette: &Palette, width: usize) -> usize {
-    let mut lines = render_row_lines(row, palette);
+    let mut lines = render_row_lines_for_width(row, palette, width);
     lines.push(Line::default());
     rendered_lines_height(&lines, width)
 }
@@ -3742,6 +3806,51 @@ fn flatten_rendered_line(line: &Line<'_>) -> String {
         .iter()
         .map(|span| span.content.as_ref())
         .collect::<String>()
+}
+
+fn pad_spans_to_width(spans: &mut Vec<Span<'static>>, fill_style: Style, width: usize) {
+    let current_width = spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>();
+    if current_width < width {
+        spans.push(Span::styled(" ".repeat(width - current_width), fill_style));
+    }
+}
+
+fn pad_to_width(text: &str, width: usize) -> String {
+    let text_width = text.chars().count();
+    if text_width >= width {
+        return text.to_string();
+    }
+    let mut padded = String::with_capacity(text.len() + (width - text_width));
+    padded.push_str(text);
+    padded.push_str(&" ".repeat(width - text_width));
+    padded
+}
+
+fn wrap_exact_segments(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for ch in text.chars() {
+        if current_width == width {
+            segments.push(current);
+            current = String::new();
+            current_width = 0;
+        }
+        current.push(ch);
+        current_width += 1;
+    }
+    if !current.is_empty() {
+        segments.push(current);
+    }
+    segments
 }
 
 #[derive(Clone, Copy)]
@@ -7525,6 +7634,30 @@ mod tests {
             app.dispatch_next_prompt(),
             Some(QueuedPrompt::Prompt("hello".to_string()))
         );
+    }
+
+    #[test]
+    fn user_stream_rows_expand_to_full_transcript_width() {
+        let palette = detect_palette();
+        let row = TranscriptRow::new(
+            TranscriptRowKind::User,
+            "User",
+            "Why is the trace-recorder falling back?",
+        );
+
+        let rendered = super::render_row_lines_for_width(&row, &palette, 24);
+        let text = rendered.iter().map(rendered_line_text).collect::<Vec<_>>();
+
+        assert!(text.iter().all(|line| line.chars().count() == 24));
+        assert_eq!(
+            rendered[0].spans.last().and_then(|span| span.style.bg),
+            Some(palette.input_bg)
+        );
+        assert!(rendered.iter().skip(1).all(|line| {
+            line.spans
+                .iter()
+                .all(|span| span.style.bg == Some(palette.input_bg))
+        }));
     }
 
     #[test]
