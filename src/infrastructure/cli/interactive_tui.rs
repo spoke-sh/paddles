@@ -712,6 +712,7 @@ struct TranscriptRow {
     kind: TranscriptRowKind,
     header: String,
     content: String,
+    transcript_record_id: Option<String>,
     render: Option<RenderDocument>,
     timing: Option<TranscriptTiming>,
     runtime_items: Vec<RuntimeItem>,
@@ -743,10 +744,16 @@ impl TranscriptRow {
             kind,
             header: header.into(),
             content: content.into(),
+            transcript_record_id: None,
             render: None,
             timing: None,
             runtime_items: Vec::new(),
         }
+    }
+
+    fn with_transcript_record_id(mut self, record_id: impl Into<String>) -> Self {
+        self.transcript_record_id = Some(record_id.into());
+        self
     }
 
     fn with_render(mut self, render: RenderDocument) -> Self {
@@ -2101,6 +2108,12 @@ impl InteractiveApp {
             return;
         }
 
+        self.rows.push(TranscriptRow::new(
+            TranscriptRowKind::User,
+            "User",
+            raw.clone(),
+        ));
+
         // Normal prompt submission.
         let was_busy = self.busy || self.pending_reveal.is_some();
         if was_busy && self.session.request_turn_steer(raw.clone()).is_ok() {
@@ -2373,11 +2386,17 @@ impl InteractiveApp {
 
             match entry.speaker {
                 ConversationTranscriptSpeaker::User => {
-                    self.rows.push(TranscriptRow::new(
-                        TranscriptRowKind::User,
-                        "User",
-                        entry.content.clone(),
-                    ));
+                    if let Some(row_index) = self.matching_pending_user_row(&entry.content) {
+                        if let Some(row) = self.rows.get_mut(row_index) {
+                            row.transcript_record_id = Some(record_id.clone());
+                        }
+                        self.seen_transcript_record_ids.insert(record_id);
+                        continue;
+                    }
+                    self.rows.push(
+                        TranscriptRow::new(TranscriptRowKind::User, "User", entry.content.clone())
+                            .with_transcript_record_id(record_id.clone()),
+                    );
                 }
                 ConversationTranscriptSpeaker::Assistant => {
                     let wrapped = soft_wrap_prose(&entry.content, MAX_PROSE_WIDTH);
@@ -2467,6 +2486,14 @@ impl InteractiveApp {
         self.runtime_update_started_at = Some(started_at);
         self.push_event("Activating runtime lanes", update.summary.clone());
         Some(update)
+    }
+
+    fn matching_pending_user_row(&self, content: &str) -> Option<usize> {
+        self.rows.iter().position(|row| {
+            row.kind == TranscriptRowKind::User
+                && row.content == content
+                && row.transcript_record_id.is_none()
+        })
     }
 
     fn should_show_event(&self, event: &TurnEvent, pace: Pace, is_first_step: bool) -> bool {
@@ -5158,10 +5185,24 @@ mod tests {
 
         app.input = "hello".to_string();
         app.submit_prompt();
+        let submitted_user_rows = app
+            .rows
+            .iter()
+            .filter(|row| row.kind == TranscriptRowKind::User)
+            .collect::<Vec<_>>();
+        assert_eq!(submitted_user_rows.len(), 1);
+        assert_eq!(submitted_user_rows[0].content, "hello");
         app.sync_transcript(&transcript(&[(
             ConversationTranscriptSpeaker::User,
             "hello",
         )]));
+        let synced_user_rows = app
+            .rows
+            .iter()
+            .filter(|row| row.kind == TranscriptRowKind::User)
+            .collect::<Vec<_>>();
+        assert_eq!(synced_user_rows.len(), 1);
+        assert_eq!(synced_user_rows[0].content, "hello");
         assert_eq!(
             app.dispatch_next_prompt(),
             Some(QueuedPrompt::Prompt("hello".to_string()))
@@ -7399,6 +7440,32 @@ mod tests {
         let last_row = app.rows.last().expect("user row exists");
         assert_eq!(last_row.kind, TranscriptRowKind::User);
         assert_eq!(last_row.content, "line one\nline two\nline three");
+    }
+
+    #[test]
+    fn submit_prompt_immediately_adds_user_row_to_stream() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "hello".to_string();
+        app.submit_prompt();
+
+        let last_row = app.rows.last().expect("user row exists");
+        assert_eq!(last_row.kind, TranscriptRowKind::User);
+        assert_eq!(last_row.header, "User");
+        assert_eq!(last_row.content, "hello");
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("hello".to_string()))
+        );
     }
 
     #[test]
