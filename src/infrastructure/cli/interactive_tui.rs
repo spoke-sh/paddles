@@ -54,10 +54,48 @@ const MULTILINE_INLINE_SEPARATOR: &str = " ⏎ ";
 const PASTE_PREVIEW_LIMIT: usize = 48;
 
 fn normalize_pasted_text(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .trim_start_matches(&['\n', '\r'][..])
-        .to_string()
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut trimmed_prefix_len = 0usize;
+
+    for segment in normalized.split_inclusive('\n') {
+        if segment.trim().is_empty() {
+            trimmed_prefix_len += segment.len();
+            continue;
+        }
+        break;
+    }
+
+    let trimmed = &normalized[trimmed_prefix_len..];
+    let had_trailing_newline = trimmed.ends_with('\n');
+    let mut lines = Vec::new();
+    let split_lines = trimmed.split('\n').collect::<Vec<_>>();
+
+    for (index, line) in split_lines.iter().enumerate() {
+        if had_trailing_newline && index + 1 == split_lines.len() && line.is_empty() {
+            continue;
+        }
+        let trimmed_line = line.trim();
+        if trimmed_line != "```"
+            && !trimmed_line.starts_with("```")
+            && trimmed_line.ends_with("```")
+            && let Some(fence_index) = line.rfind("```")
+        {
+            let content = line[..fence_index].trim_end();
+            if !content.is_empty() {
+                lines.push(content.to_string());
+            }
+            lines.push("```".to_string());
+            continue;
+        }
+
+        lines.push(line.to_string());
+    }
+
+    let mut result = lines.join("\n");
+    if had_trailing_newline && !result.is_empty() {
+        result.push('\n');
+    }
+    result
 }
 
 fn pasted_line_count(text: &str) -> usize {
@@ -1948,10 +1986,19 @@ impl InteractiveApp {
 
     fn composer_prefix_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
-        for part in &self.composer_parts {
+        for (index, part) in self.composer_parts.iter().enumerate() {
             match part {
                 ComposerPart::Text(text) => {
-                    for line in text.split('\n') {
+                    let mut text_lines = text.split('\n').collect::<Vec<_>>();
+                    if matches!(
+                        self.composer_parts.get(index + 1),
+                        Some(ComposerPart::Paste { .. })
+                    ) && text.ends_with('\n')
+                        && !text_lines.is_empty()
+                    {
+                        text_lines.pop();
+                    }
+                    for line in text_lines {
                         lines.push(Line::from(Span::styled(
                             line.to_string(),
                             self.palette.input_text,
@@ -1981,11 +2028,23 @@ impl InteractiveApp {
     fn composer_prefix_height(&self, width: usize) -> usize {
         self.composer_parts
             .iter()
-            .map(|part| match part {
-                ComposerPart::Text(text) => text
-                    .split('\n')
-                    .map(|line| wrapped_line_count(line, width).max(1))
-                    .sum::<usize>(),
+            .enumerate()
+            .map(|(index, part)| match part {
+                ComposerPart::Text(text) => {
+                    let mut text_lines = text.split('\n').collect::<Vec<_>>();
+                    if matches!(
+                        self.composer_parts.get(index + 1),
+                        Some(ComposerPart::Paste { .. })
+                    ) && text.ends_with('\n')
+                        && !text_lines.is_empty()
+                    {
+                        text_lines.pop();
+                    }
+                    text_lines
+                        .into_iter()
+                        .map(|line| wrapped_line_count(line, width).max(1))
+                        .sum::<usize>()
+                }
                 ComposerPart::Paste { .. } => Self::composer_part_summary(part)
                     .map(|summary| wrapped_line_count(&summary, width).max(1))
                     .unwrap_or(0),
@@ -7694,6 +7753,96 @@ mod tests {
         assert_eq!(
             rendered,
             vec!["[2 lines pasted] • Fell back · 201ms".to_string()]
+        );
+    }
+
+    #[test]
+    fn compacted_paste_after_a_typed_newline_does_not_render_a_blank_line_before_the_chip() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "Why is the trace-recorder falling back?\n".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        super::handle_paste_event(
+            &mut app,
+            "\n```\n• Fell back · 197ms\n  └ trace-recorder: trace recording failed: stream 'paddles.task.task-000001.root' already exists```",
+        );
+
+        let rendered = app
+            .input_render_lines()
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rendered,
+            vec![
+                "Why is the trace-recorder falling back?".to_string(),
+                "[4 lines pasted] ```".to_string(),
+            ]
+        );
+
+        app.submit_prompt();
+        let last_row = app.rows.last().expect("user row exists");
+        assert_eq!(
+            last_row.content,
+            "Why is the trace-recorder falling back?\n```\n• Fell back · 197ms\n  └ trace-recorder: trace recording failed: stream 'paddles.task.task-000001.root' already exists\n```"
+        );
+        let rendered = render_row_lines(last_row, &palette)
+            .iter()
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rendered,
+            vec![
+                "User".to_string(),
+                "  └ Why is the trace-recorder falling back?".to_string(),
+                "    ```".to_string(),
+                "    • Fell back · 197ms".to_string(),
+                "      └ trace-recorder: trace recording failed: stream 'paddles.task.task-000001.root' already exists".to_string(),
+                "    ```".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn multiline_paste_drops_leading_blank_lines_before_submission() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        super::handle_paste_event(&mut app, "\n   \n```\n• Fell back · 197ms\n```");
+
+        assert_eq!(
+            app.composer_parts,
+            vec![ComposerPart::Paste {
+                text: "```\n• Fell back · 197ms\n```".to_string(),
+                lines: 3,
+                preview: "```".to_string(),
+            }]
+        );
+
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt(
+                "```\n• Fell back · 197ms\n```".to_string()
+            ))
         );
     }
 }
