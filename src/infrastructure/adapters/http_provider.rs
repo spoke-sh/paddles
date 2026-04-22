@@ -13,7 +13,8 @@ use crate::domain::ports::{
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
-    ApiFormat, ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability,
+    ApiFormat, DeliberationCapabilitySurface, DeliberationState, DeliberationStateContract,
+    DeliberationSupport, ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability,
     ProviderTransportSupport,
 };
 use crate::infrastructure::rendering::{
@@ -52,6 +53,31 @@ struct ExchangeArtifactRecord {
     mime_type: String,
     parent_artifact_id: Option<TraceArtifactId>,
     labels: BTreeMap<String, String>,
+}
+
+struct ProviderTurnRequest<'a> {
+    system: &'a str,
+    user: &'a str,
+    capture: Option<ExchangeCapture<'a>>,
+    deliberation_state: Option<DeliberationState>,
+}
+
+struct ProviderTurnResponse {
+    content: String,
+    raw_response_artifact_id: Option<TraceArtifactId>,
+    deliberation_state: Option<DeliberationState>,
+}
+
+impl ProviderTurnResponse {
+    fn into_plain_response(self) -> (String, Option<TraceArtifactId>) {
+        let Self {
+            content,
+            raw_response_artifact_id,
+            deliberation_state,
+        } = self;
+        let _had_deliberation_state = deliberation_state.is_some();
+        (content, raw_response_artifact_id)
+    }
 }
 
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
@@ -111,6 +137,10 @@ fn negotiated_capability_surface(
             ApiFormat::Anthropic => PlannerToolCallCapability::PromptEnvelope,
         },
         transport_support: ProviderTransportSupport::Supported,
+        deliberation: DeliberationCapabilitySurface {
+            support: DeliberationSupport::Unsupported,
+            state_contract: DeliberationStateContract::None,
+        },
     }
 }
 
@@ -192,12 +222,16 @@ impl HttpProviderAdapter {
         }
     }
 
-    async fn send_async(
+    async fn send_deliberating_async(
         &self,
-        system: &str,
-        user: &str,
-        capture: Option<ExchangeCapture<'_>>,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+        request: ProviderTurnRequest<'_>,
+    ) -> Result<ProviderTurnResponse> {
+        let ProviderTurnRequest {
+            system,
+            user,
+            capture,
+            deliberation_state,
+        } = request;
         let verbose = self.verbose.load(Ordering::Relaxed);
         if verbose >= 2 {
             eprintln!("[HTTP] Sending to {} ({})", self.base_url, self.model_id);
@@ -224,7 +258,11 @@ impl HttpProviderAdapter {
             );
         }
 
-        Ok(response)
+        Ok(ProviderTurnResponse {
+            content: response.0,
+            raw_response_artifact_id: response.1,
+            deliberation_state,
+        })
     }
 
     fn send_structured_answer_blocking(
@@ -236,32 +274,71 @@ impl HttpProviderAdapter {
     ) -> Result<(String, Option<TraceArtifactId>)> {
         let rt = tokio::runtime::Handle::try_current()
             .map_err(|_| anyhow!("no tokio runtime for HTTP provider"))?;
-        tokio::task::block_in_place(|| {
-            rt.block_on(self.send_structured_answer_async(system, user, require_citations, capture))
-        })
+        let response = tokio::task::block_in_place(|| {
+            rt.block_on(self.send_structured_deliberating_async(
+                ProviderTurnRequest {
+                    system,
+                    user,
+                    capture,
+                    deliberation_state: None,
+                },
+                require_citations,
+            ))
+        })?;
+        Ok(response.into_plain_response())
     }
 
-    async fn send_structured_answer_async(
+    async fn send_structured_deliberating_async(
         &self,
-        system: &str,
-        user: &str,
+        request: ProviderTurnRequest<'_>,
         require_citations: bool,
-        capture: Option<ExchangeCapture<'_>>,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+    ) -> Result<ProviderTurnResponse> {
+        let ProviderTurnRequest {
+            system,
+            user,
+            capture,
+            deliberation_state,
+        } = request;
         match self.capabilities.render_capability {
             RenderCapability::OpenAiJsonSchema => {
-                self.send_openai_structured_answer(system, user, require_citations, capture)
-                    .await
+                let (content, raw_response_artifact_id) = self
+                    .send_openai_structured_answer(system, user, require_citations, capture)
+                    .await?;
+                Ok(ProviderTurnResponse {
+                    content,
+                    raw_response_artifact_id,
+                    deliberation_state,
+                })
             }
             RenderCapability::AnthropicToolUse => {
-                self.send_anthropic_structured_answer(system, user, require_citations, capture)
-                    .await
+                let (content, raw_response_artifact_id) = self
+                    .send_anthropic_structured_answer(system, user, require_citations, capture)
+                    .await?;
+                Ok(ProviderTurnResponse {
+                    content,
+                    raw_response_artifact_id,
+                    deliberation_state,
+                })
             }
             RenderCapability::GeminiJsonSchema => {
-                self.send_gemini_structured_answer(system, user, require_citations, capture)
-                    .await
+                let (content, raw_response_artifact_id) = self
+                    .send_gemini_structured_answer(system, user, require_citations, capture)
+                    .await?;
+                Ok(ProviderTurnResponse {
+                    content,
+                    raw_response_artifact_id,
+                    deliberation_state,
+                })
             }
-            RenderCapability::PromptEnvelope => self.send_async(system, user, capture).await,
+            RenderCapability::PromptEnvelope => {
+                self.send_deliberating_async(ProviderTurnRequest {
+                    system,
+                    user,
+                    capture,
+                    deliberation_state,
+                })
+                .await
+            }
         }
     }
 
@@ -2722,6 +2799,7 @@ mod tests {
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+    use crate::infrastructure::providers::{DeliberationState, ModelProvider};
     use crate::infrastructure::rendering::{ANTHROPIC_RENDER_TOOL_NAME, RenderCapability};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
@@ -2767,6 +2845,33 @@ mod tests {
         fn emit(&self, event: TurnEvent) {
             self.events.lock().expect("event lock").push(event);
         }
+    }
+
+    #[test]
+    fn provider_turn_request_and_response_keep_deliberation_state_separate_from_content() {
+        let state = DeliberationState::new(
+            ModelProvider::Moonshot,
+            "kimi-k2.6".to_string(),
+            json!({ "reasoning_content": "opaque" }),
+        );
+        let request = super::ProviderTurnRequest {
+            system: "system",
+            user: "user",
+            capture: None,
+            deliberation_state: Some(state.clone()),
+        };
+        let response = super::ProviderTurnResponse {
+            content: "final answer".to_string(),
+            raw_response_artifact_id: None,
+            deliberation_state: Some(state.clone()),
+        };
+
+        assert_eq!(request.system, "system");
+        assert_eq!(request.user, "user");
+        assert_eq!(request.deliberation_state.as_ref(), Some(&state));
+        assert_eq!(response.content, "final answer");
+        assert_eq!(response.raw_response_artifact_id, None);
+        assert_eq!(response.deliberation_state.as_ref(), Some(&state));
     }
 
     #[derive(Clone, Debug)]
@@ -4131,12 +4236,17 @@ mod tests {
             RenderCapability::PromptEnvelope,
         );
 
-        let (response, _) = adapter
-            .send_async("System prompt", "User prompt", None)
+        let response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "User prompt",
+                capture: None,
+                deliberation_state: None,
+            })
             .await
             .expect("plain response");
 
-        assert_eq!(response, "Mocked plain response.");
+        assert_eq!(response.content, "Mocked plain response.");
 
         let requests = server.recorded_requests();
         assert_eq!(requests.len(), 1);

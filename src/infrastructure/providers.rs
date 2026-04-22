@@ -1,5 +1,6 @@
 use crate::infrastructure::rendering::RenderCapability;
 use clap::ValueEnum;
+use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
 pub enum ModelProvider {
@@ -40,6 +41,55 @@ pub enum PlannerToolCallCapability {
     PromptEnvelope,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliberationSupport {
+    NativeContinuation,
+    SummaryOnly,
+    ToggleOnly,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliberationStateContract {
+    OpaqueRoundTrip,
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeliberationCapabilitySurface {
+    pub support: DeliberationSupport,
+    pub state_contract: DeliberationStateContract,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeliberationState {
+    provider: ModelProvider,
+    runtime_model_id: String,
+    payload: Value,
+}
+
+impl DeliberationState {
+    pub fn new(
+        provider: ModelProvider,
+        runtime_model_id: impl Into<String>,
+        payload: Value,
+    ) -> Self {
+        Self {
+            provider,
+            runtime_model_id: runtime_model_id.into(),
+            payload,
+        }
+    }
+
+    pub fn provider(&self) -> ModelProvider {
+        self.provider
+    }
+
+    pub fn runtime_model_id(&self) -> &str {
+        &self.runtime_model_id
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderTransportSupport {
     Supported,
@@ -57,6 +107,7 @@ pub struct ModelCapabilitySurface {
     pub render_capability: RenderCapability,
     pub planner_tool_call: PlannerToolCallCapability,
     pub transport_support: ProviderTransportSupport,
+    pub deliberation: DeliberationCapabilitySurface,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,6 +429,40 @@ impl ModelProvider {
             }
             _ => ProviderTransportSupport::Supported,
         };
+        let deliberation = match self {
+            Self::Sift => DeliberationCapabilitySurface {
+                support: DeliberationSupport::Unsupported,
+                state_contract: DeliberationStateContract::None,
+            },
+            Self::Openai if OPENAI_RESPONSES_ONLY_MODELS.contains(&normalized_model.as_str()) => {
+                DeliberationCapabilitySurface {
+                    support: DeliberationSupport::NativeContinuation,
+                    state_contract: DeliberationStateContract::OpaqueRoundTrip,
+                }
+            }
+            Self::Openai if normalized_model.starts_with("gpt-5") => {
+                DeliberationCapabilitySurface {
+                    support: DeliberationSupport::ToggleOnly,
+                    state_contract: DeliberationStateContract::None,
+                }
+            }
+            Self::Openai => DeliberationCapabilitySurface {
+                support: DeliberationSupport::Unsupported,
+                state_contract: DeliberationStateContract::None,
+            },
+            Self::Inception => DeliberationCapabilitySurface {
+                support: DeliberationSupport::ToggleOnly,
+                state_contract: DeliberationStateContract::None,
+            },
+            Self::Anthropic | Self::Google | Self::Moonshot => DeliberationCapabilitySurface {
+                support: DeliberationSupport::NativeContinuation,
+                state_contract: DeliberationStateContract::OpaqueRoundTrip,
+            },
+            Self::Ollama => DeliberationCapabilitySurface {
+                support: DeliberationSupport::Unsupported,
+                state_contract: DeliberationStateContract::None,
+            },
+        };
 
         let (http_format, render_capability, planner_tool_call) = match self {
             Self::Sift => (
@@ -412,6 +497,7 @@ impl ModelProvider {
             render_capability,
             planner_tool_call,
             transport_support,
+            deliberation,
         }
     }
 
@@ -504,8 +590,9 @@ pub fn known_state_space_models() -> Vec<KnownModel> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiFormat, ModelProvider, ModelThinkingMode, PlannerToolCallCapability,
-        ProviderAuthRequirement, ProviderTransportSupport, known_state_space_models,
+        ApiFormat, DeliberationStateContract, DeliberationSupport, ModelProvider,
+        ModelThinkingMode, PlannerToolCallCapability, ProviderAuthRequirement,
+        ProviderTransportSupport, known_state_space_models,
     };
     use crate::infrastructure::rendering::RenderCapability;
 
@@ -766,6 +853,83 @@ mod tests {
         assert_eq!(
             sift.planner_tool_call,
             PlannerToolCallCapability::PromptEnvelope
+        );
+    }
+
+    #[test]
+    fn capability_surface_classifies_deliberation_support_for_runtime_provider_paths() {
+        let sift = ModelProvider::Sift.capability_surface("qwen-1.5b");
+        assert_eq!(sift.deliberation.support, DeliberationSupport::Unsupported);
+        assert_eq!(
+            sift.deliberation.state_contract,
+            DeliberationStateContract::None
+        );
+
+        let openai = ModelProvider::Openai.capability_surface("gpt-5.4");
+        assert_eq!(openai.deliberation.support, DeliberationSupport::ToggleOnly);
+        assert_eq!(
+            openai.deliberation.state_contract,
+            DeliberationStateContract::None
+        );
+
+        let openai_responses = ModelProvider::Openai.capability_surface("gpt-5.4-pro");
+        assert_eq!(
+            openai_responses.deliberation.support,
+            DeliberationSupport::NativeContinuation
+        );
+        assert_eq!(
+            openai_responses.deliberation.state_contract,
+            DeliberationStateContract::OpaqueRoundTrip
+        );
+
+        let inception = ModelProvider::Inception.capability_surface("mercury-2");
+        assert_eq!(
+            inception.deliberation.support,
+            DeliberationSupport::ToggleOnly
+        );
+        assert_eq!(
+            inception.deliberation.state_contract,
+            DeliberationStateContract::None
+        );
+
+        let anthropic = ModelProvider::Anthropic.capability_surface("claude-sonnet-4-20250514");
+        assert_eq!(
+            anthropic.deliberation.support,
+            DeliberationSupport::NativeContinuation
+        );
+        assert_eq!(
+            anthropic.deliberation.state_contract,
+            DeliberationStateContract::OpaqueRoundTrip
+        );
+
+        let google = ModelProvider::Google.capability_surface("gemini-2.5-flash");
+        assert_eq!(
+            google.deliberation.support,
+            DeliberationSupport::NativeContinuation
+        );
+        assert_eq!(
+            google.deliberation.state_contract,
+            DeliberationStateContract::OpaqueRoundTrip
+        );
+
+        let moonshot = ModelProvider::Moonshot.capability_surface("kimi-k2.6");
+        assert_eq!(
+            moonshot.deliberation.support,
+            DeliberationSupport::NativeContinuation
+        );
+        assert_eq!(
+            moonshot.deliberation.state_contract,
+            DeliberationStateContract::OpaqueRoundTrip
+        );
+
+        let ollama = ModelProvider::Ollama.capability_surface("qwen3");
+        assert_eq!(
+            ollama.deliberation.support,
+            DeliberationSupport::Unsupported
+        );
+        assert_eq!(
+            ollama.deliberation.state_contract,
+            DeliberationStateContract::None
         );
     }
 

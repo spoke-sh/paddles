@@ -22,10 +22,10 @@ mission: VHXJWPyFE
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 0/10 stories done
+**Progress:** 0/3 voyages complete, 1/10 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Deliberation Substrate And Continuation Contracts](voyages/VHXJipEBj/) | in-progress | 0/3 |
+| [Deliberation Substrate And Continuation Contracts](voyages/VHXJipEBj/) | in-progress | 1/3 |
 | [Cross-Provider Deliberation Rollout And Verification](voyages/VHXJipyBc/) | planned | 0/4 |
 | [Normalized Deliberation Signals And Rationale Compilation](voyages/VHXJiqMD1/) | planned | 0/3 |
 <!-- END GENERATED -->
