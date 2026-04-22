@@ -88,6 +88,10 @@ impl DeliberationState {
     pub fn runtime_model_id(&self) -> &str {
         &self.runtime_model_id
     }
+
+    pub fn payload(&self) -> &Value {
+        &self.payload
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

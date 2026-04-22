@@ -27,11 +27,11 @@ started_at: 2026-04-22T09:14:11
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Deliberation Capability Surface And Adapter State](../../../../stories/VHXK90tXf/README.md) | feat | done |
 | [Record Debug-Scoped Deliberation Artifacts Without Polluting Rationale](../../../../stories/VHXK91IXg/README.md) | feat | backlog |
-| [Preserve Moonshot Reasoning Continuity Across Tool Turns](../../../../stories/VHXK91nXh/README.md) | feat | backlog |
+| [Preserve Moonshot Reasoning Continuity Across Tool Turns](../../../../stories/VHXK91nXh/README.md) | feat | done |
 <!-- END GENERATED -->

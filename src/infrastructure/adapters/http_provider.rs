@@ -25,7 +25,7 @@ use crate::infrastructure::rendering::{
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -60,6 +60,45 @@ struct ProviderTurnRequest<'a> {
     user: &'a str,
     capture: Option<ExchangeCapture<'a>>,
     deliberation_state: Option<DeliberationState>,
+    tool_results: Vec<ProviderToolResult>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ProviderToolResult {
+    tool_call_id: String,
+    content: Value,
+    name: Option<String>,
+}
+
+impl ProviderToolResult {
+    #[cfg(test)]
+    fn new(tool_call_id: impl Into<String>, content: Value) -> Self {
+        Self {
+            tool_call_id: tool_call_id.into(),
+            content,
+            name: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    fn as_openai_message(&self) -> Value {
+        let mut message = serde_json::Map::new();
+        message.insert("role".to_string(), Value::String("tool".to_string()));
+        message.insert(
+            "tool_call_id".to_string(),
+            Value::String(self.tool_call_id.clone()),
+        );
+        if let Some(name) = &self.name {
+            message.insert("name".to_string(), Value::String(name.clone()));
+        }
+        message.insert("content".to_string(), self.content.clone());
+        Value::Object(message)
+    }
 }
 
 struct ProviderTurnResponse {
@@ -231,6 +270,7 @@ impl HttpProviderAdapter {
             user,
             capture,
             deliberation_state,
+            tool_results,
         } = request;
         let verbose = self.verbose.load(Ordering::Relaxed);
         if verbose >= 2 {
@@ -242,27 +282,48 @@ impl HttpProviderAdapter {
         }
 
         let response = match self.format {
-            ApiFormat::OpenAi => self.send_openai(system, user, capture).await?,
-            ApiFormat::Anthropic => self.send_anthropic(system, user, capture).await?,
-            ApiFormat::Gemini => self.send_gemini(system, user, capture).await?,
+            ApiFormat::OpenAi => {
+                self.send_openai(
+                    system,
+                    user,
+                    capture,
+                    deliberation_state.as_ref(),
+                    &tool_results,
+                )
+                .await?
+            }
+            ApiFormat::Anthropic => {
+                let (content, raw_response_artifact_id) =
+                    self.send_anthropic(system, user, capture).await?;
+                ProviderTurnResponse {
+                    content,
+                    raw_response_artifact_id,
+                    deliberation_state: None,
+                }
+            }
+            ApiFormat::Gemini => {
+                let (content, raw_response_artifact_id) =
+                    self.send_gemini(system, user, capture).await?;
+                ProviderTurnResponse {
+                    content,
+                    raw_response_artifact_id,
+                    deliberation_state: None,
+                }
+            }
         };
 
         if verbose >= 2 {
             eprintln!(
                 "[HTTP] Response: {}",
-                if response.0.len() > 200 {
-                    format!("{}...", &response.0[..200])
+                if response.content.len() > 200 {
+                    format!("{}...", &response.content[..200])
                 } else {
-                    response.0.clone()
+                    response.content.clone()
                 }
             );
         }
 
-        Ok(ProviderTurnResponse {
-            content: response.0,
-            raw_response_artifact_id: response.1,
-            deliberation_state,
-        })
+        Ok(response)
     }
 
     fn send_structured_answer_blocking(
@@ -281,6 +342,7 @@ impl HttpProviderAdapter {
                     user,
                     capture,
                     deliberation_state: None,
+                    tool_results: Vec::new(),
                 },
                 require_citations,
             ))
@@ -298,6 +360,7 @@ impl HttpProviderAdapter {
             user,
             capture,
             deliberation_state,
+            tool_results,
         } = request;
         match self.capabilities.render_capability {
             RenderCapability::OpenAiJsonSchema => {
@@ -307,7 +370,7 @@ impl HttpProviderAdapter {
                 Ok(ProviderTurnResponse {
                     content,
                     raw_response_artifact_id,
-                    deliberation_state,
+                    deliberation_state: None,
                 })
             }
             RenderCapability::AnthropicToolUse => {
@@ -317,7 +380,7 @@ impl HttpProviderAdapter {
                 Ok(ProviderTurnResponse {
                     content,
                     raw_response_artifact_id,
-                    deliberation_state,
+                    deliberation_state: None,
                 })
             }
             RenderCapability::GeminiJsonSchema => {
@@ -327,7 +390,7 @@ impl HttpProviderAdapter {
                 Ok(ProviderTurnResponse {
                     content,
                     raw_response_artifact_id,
-                    deliberation_state,
+                    deliberation_state: None,
                 })
             }
             RenderCapability::PromptEnvelope => {
@@ -336,10 +399,88 @@ impl HttpProviderAdapter {
                     user,
                     capture,
                     deliberation_state,
+                    tool_results,
                 })
                 .await
             }
         }
+    }
+
+    fn build_openai_messages(
+        &self,
+        system: &str,
+        user: &str,
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<Vec<Value>> {
+        let mut messages = vec![
+            json!({ "role": "system", "content": system }),
+            json!({ "role": "user", "content": user }),
+        ];
+        self.append_openai_deliberation_context(&mut messages, deliberation_state)?;
+        messages.extend(
+            tool_results
+                .iter()
+                .map(ProviderToolResult::as_openai_message),
+        );
+        Ok(messages)
+    }
+
+    fn append_openai_deliberation_context(
+        &self,
+        messages: &mut Vec<Value>,
+        deliberation_state: Option<&DeliberationState>,
+    ) -> Result<()> {
+        let Some(deliberation_state) = deliberation_state else {
+            return Ok(());
+        };
+        if deliberation_state.provider() != ModelProvider::Moonshot {
+            return Ok(());
+        }
+        if self.provider_name != ModelProvider::Moonshot.name() {
+            return Ok(());
+        }
+        if deliberation_state.runtime_model_id() != self.model_id {
+            bail!(
+                "moonshot deliberation state model mismatch: expected {}, got {}",
+                self.model_id,
+                deliberation_state.runtime_model_id()
+            );
+        }
+        let assistant_message = deliberation_state
+            .payload()
+            .get("assistant")
+            .cloned()
+            .ok_or_else(|| anyhow!("moonshot deliberation state missing assistant payload"))?;
+        messages.push(assistant_message);
+        Ok(())
+    }
+
+    fn capture_openai_deliberation_state(
+        &self,
+        message: &OpenAiMessage,
+    ) -> Option<DeliberationState> {
+        if self.provider_name != ModelProvider::Moonshot.name() {
+            return None;
+        }
+        if self.capabilities.deliberation.support != DeliberationSupport::NativeContinuation {
+            return None;
+        }
+        let tool_calls = message.tool_calls.as_ref()?;
+        let reasoning_content = message.reasoning_content.as_ref()?;
+        Some(DeliberationState::new(
+            ModelProvider::Moonshot,
+            self.model_id.clone(),
+            json!({
+                "kind": "moonshot_openai_chat_completion",
+                "assistant": {
+                    "role": "assistant",
+                    "content": message.content,
+                    "reasoning_content": reasoning_content,
+                    "tool_calls": tool_calls,
+                }
+            }),
+        ))
     }
 
     fn provider_label(&self) -> &'static str {
@@ -498,18 +639,19 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         capture: Option<ExchangeCapture<'_>>,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<ProviderTurnResponse> {
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
         );
         let model_id = self.request_model_id();
+        let messages =
+            self.build_openai_messages(system, user, deliberation_state, tool_results)?;
         let mut body = serde_json::json!({
             "model": model_id,
-            "messages": [
-                { "role": "system", "content": system },
-                { "role": "user", "content": user },
-            ],
+            "messages": messages,
             "max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS,
         });
         self.apply_openai_reasoning_effort(&mut body);
@@ -535,12 +677,20 @@ impl HttpProviderAdapter {
             .await?;
 
         let parsed: OpenAiResponse = serde_json::from_str(&text)?;
-        let content = parsed
+        let message = parsed
             .choices
             .first()
-            .and_then(|c| c.message.content.clone())
+            .map(|choice| &choice.message)
             .ok_or_else(|| anyhow!("empty OpenAI response"))?;
-        Ok((content, raw_response_artifact_id))
+        let content = message.content.clone().unwrap_or_default();
+        if content.is_empty() && message.tool_calls.is_none() {
+            return Err(anyhow!("empty OpenAI response"));
+        }
+        Ok(ProviderTurnResponse {
+            content,
+            raw_response_artifact_id,
+            deliberation_state: self.capture_openai_deliberation_state(message),
+        })
     }
 
     async fn send_openai_json_schema(
@@ -1751,32 +1901,36 @@ fn is_secretish_key(key: &str) -> bool {
 
 // --- API response types ---
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct OpenAiResponse {
     choices: Vec<OpenAiChoice>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct OpenAiChoice {
     message: OpenAiMessage,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct OpenAiMessage {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
     tool_calls: Option<Vec<OpenAiToolCall>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct OpenAiToolCall {
+    #[serde(default)]
+    id: Option<String>,
     #[serde(rename = "type", default)]
     kind: Option<String>,
     function: OpenAiFunctionCall,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct OpenAiFunctionCall {
     name: String,
     arguments: String,
@@ -2859,6 +3013,7 @@ mod tests {
             user: "user",
             capture: None,
             deliberation_state: Some(state.clone()),
+            tool_results: Vec::new(),
         };
         let response = super::ProviderTurnResponse {
             content: "final answer".to_string(),
@@ -2869,6 +3024,7 @@ mod tests {
         assert_eq!(request.system, "system");
         assert_eq!(request.user, "user");
         assert_eq!(request.deliberation_state.as_ref(), Some(&state));
+        assert!(request.tool_results.is_empty());
         assert_eq!(response.content, "final answer");
         assert_eq!(response.raw_response_artifact_id, None);
         assert_eq!(response.deliberation_state.as_ref(), Some(&state));
@@ -3027,6 +3183,34 @@ mod tests {
                 {
                     "message": {
                         "content": null,
+                        "tool_calls": [
+                            {
+                                "id": "call_test",
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": arguments
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn moonshot_reasoning_tool_call_response(
+        reasoning_content: &str,
+        name: &str,
+        arguments: &str,
+    ) -> String {
+        json!({
+            "choices": [
+                {
+                    "message": {
+                        "content": null,
+                        "reasoning_content": reasoning_content,
                         "tool_calls": [
                             {
                                 "id": "call_test",
@@ -4242,6 +4426,7 @@ mod tests {
                 user: "User prompt",
                 capture: None,
                 deliberation_state: None,
+                tool_results: Vec::new(),
             })
             .await
             .expect("plain response");
@@ -4255,6 +4440,160 @@ mod tests {
             Some(4096)
         );
         assert!(requests[0].body.get("max_tokens").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn moonshot_prompt_envelope_captures_reasoning_tool_state_without_exposing_it_as_content()
+    {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: moonshot_reasoning_tool_call_response(
+                "inspect trace recorder fallback state",
+                "search",
+                r#"{"query":"trace recorder fallback"}"#,
+            ),
+        }])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "moonshot",
+            "kimi-k2.6",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::PromptEnvelope,
+        );
+
+        let response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("moonshot tool response");
+
+        assert!(response.content.is_empty());
+        assert_eq!(
+            response.deliberation_state.as_ref(),
+            Some(&DeliberationState::new(
+                ModelProvider::Moonshot,
+                "kimi-k2.6",
+                json!({
+                    "kind": "moonshot_openai_chat_completion",
+                    "assistant": {
+                        "role": "assistant",
+                        "content": null,
+                        "reasoning_content": "inspect trace recorder fallback state",
+                        "tool_calls": [
+                            {
+                                "id": "call_test",
+                                "type": "function",
+                                "function": {
+                                    "name": "search",
+                                    "arguments": "{\"query\":\"trace recorder fallback\"}"
+                                }
+                            }
+                        ]
+                    }
+                })
+            ))
+        );
+        assert!(
+            !response
+                .content
+                .contains("inspect trace recorder fallback state")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn moonshot_prompt_envelope_replays_reasoning_state_before_tool_results() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: moonshot_reasoning_tool_call_response(
+                    "inspect trace recorder fallback state",
+                    "search",
+                    r#"{"query":"trace recorder fallback"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, "Recovered final answer."),
+            },
+        ])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "moonshot",
+            "kimi-k2.6",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::PromptEnvelope,
+        );
+
+        let first_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("moonshot tool response");
+
+        let second_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: first_response.deliberation_state.clone(),
+                tool_results: vec![
+                    super::ProviderToolResult::new(
+                        "call_test",
+                        json!("stream 'paddles.task.task-000001.root' already exists"),
+                    )
+                    .with_name("search"),
+                ],
+            })
+            .await
+            .expect("moonshot follow-up response");
+
+        assert_eq!(second_response.content, "Recovered final answer.");
+        assert!(second_response.deliberation_state.is_none());
+
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1].body["messages"][2]["reasoning_content"].as_str(),
+            Some("inspect trace recorder fallback state")
+        );
+        assert_eq!(
+            requests[1].body["messages"][2]["tool_calls"][0]["id"].as_str(),
+            Some("call_test")
+        );
+        assert_eq!(
+            requests[1].body["messages"][3]["role"].as_str(),
+            Some("tool")
+        );
+        assert_eq!(
+            requests[1].body["messages"][3]["tool_call_id"].as_str(),
+            Some("call_test")
+        );
+        assert_eq!(
+            requests[1].body["messages"][3]["name"].as_str(),
+            Some("search")
+        );
+        assert_eq!(
+            requests[1].body["messages"][3]["content"],
+            json!("stream 'paddles.task.task-000001.root' already exists")
+        );
     }
 
     #[test]
