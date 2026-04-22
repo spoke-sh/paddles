@@ -234,6 +234,8 @@ export interface ConversationProjectionSnapshot {
 export interface ConversationProjectionUpdate {
   task_id: string;
   kind: 'transcript' | 'forensic';
+  reducer: 'replace_snapshot';
+  version: number;
   transcript_update?: { task_id: string } | null;
   forensic_update?: { task_id: string; turn_id: string; record_id: string } | null;
   snapshot: ConversationProjectionSnapshot;

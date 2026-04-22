@@ -1,5 +1,4 @@
 import type {
-  ConversationProjectionSnapshot,
   ConversationProjectionUpdate,
   ProjectionTurnEvent,
   TurnEvent,
@@ -9,7 +8,7 @@ import { runtimeUrl } from './runtime-client';
 interface ProjectionStreamHandlers {
   onConnected: () => void;
   onDisconnected: () => void;
-  onProjection: (snapshot: ConversationProjectionSnapshot) => void;
+  onProjection: (update: ConversationProjectionUpdate) => void;
   onTurnEvent: (payload: ProjectionTurnEvent | TurnEvent) => void;
 }
 
@@ -25,7 +24,7 @@ export function mountProjectionStream(
     const update = JSON.parse(
       (message as MessageEvent<string>).data
     ) as ConversationProjectionUpdate;
-    handlers.onProjection(update.snapshot);
+    handlers.onProjection(update);
   });
 
   projectionSource.addEventListener('turn_event', (message) => {

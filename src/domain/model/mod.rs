@@ -101,9 +101,9 @@ pub use paddles_conversation::{
     TurnTraceId,
 };
 pub use projection::{
-    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationProjectionUpdateKind,
-    ConversationTraceGraph, ConversationTraceGraphBranch, ConversationTraceGraphEdge,
-    ConversationTraceGraphNode,
+    ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
+    ConversationTraceGraphEdge, ConversationTraceGraphNode,
 };
 pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
 pub use runtime_events::{

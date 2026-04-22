@@ -195,6 +195,54 @@ pub struct ConversationProjectionSnapshot {
     pub delegation: ConversationDelegationProjection,
 }
 
+impl ConversationProjectionSnapshot {
+    pub fn empty(task_id: TaskTraceId) -> Self {
+        Self {
+            transcript: ConversationTranscript {
+                task_id: task_id.clone(),
+                entries: Vec::new(),
+            },
+            forensics: ConversationForensicProjection {
+                task_id: task_id.clone(),
+                turns: Vec::new(),
+            },
+            manifold: ConversationManifoldProjection {
+                task_id: task_id.clone(),
+                turns: Vec::new(),
+            },
+            trace_graph: ConversationTraceGraph::empty(task_id.clone()),
+            delegation: ConversationDelegationProjection::empty(task_id.clone()),
+            task_id,
+        }
+    }
+
+    pub fn from_trace_replay(replay: &TraceReplay) -> Self {
+        Self {
+            task_id: replay.task_id.clone(),
+            transcript: ConversationTranscript::from_trace_replay(replay),
+            forensics: ConversationForensicProjection::from_trace_replay(replay),
+            manifold: ConversationManifoldProjection::from_trace_replay(replay),
+            trace_graph: ConversationTraceGraph::from_trace_replay(replay),
+            delegation: ConversationDelegationProjection::from_trace_replay(replay),
+        }
+    }
+
+    pub fn version(&self) -> u64 {
+        self.trace_graph
+            .nodes
+            .iter()
+            .map(|node| node.sequence)
+            .max()
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationProjectionReducer {
+    ReplaceSnapshot,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationProjectionUpdateKind {
@@ -206,9 +254,28 @@ pub enum ConversationProjectionUpdateKind {
 pub struct ConversationProjectionUpdate {
     pub task_id: TaskTraceId,
     pub kind: ConversationProjectionUpdateKind,
+    pub reducer: ConversationProjectionReducer,
+    pub version: u64,
     pub transcript_update: Option<ConversationTranscriptUpdate>,
     pub forensic_update: Option<ConversationForensicUpdate>,
     pub snapshot: ConversationProjectionSnapshot,
+}
+
+impl ConversationProjectionUpdate {
+    pub fn reduce(
+        &self,
+        current: Option<&ConversationProjectionSnapshot>,
+    ) -> ConversationProjectionSnapshot {
+        match current {
+            Some(snapshot)
+                if snapshot.task_id == self.task_id && self.version <= snapshot.version() =>
+            {
+                snapshot.clone()
+            }
+            Some(snapshot) if snapshot.task_id != self.task_id => snapshot.clone(),
+            _ => self.snapshot.clone(),
+        }
+    }
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -247,10 +314,15 @@ fn trace_tool_graph_label(tool: &crate::domain::model::TraceToolCall, completed:
 
 #[cfg(test)]
 mod tests {
-    use super::ConversationTraceGraph;
+    use super::{
+        ConversationProjectionSnapshot, ConversationProjectionUpdate,
+        ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphNode,
+    };
     use crate::domain::model::{
-        TaskTraceId, TraceBranch, TraceBranchId, TraceBranchStatus, TraceLineage, TraceRecord,
-        TraceRecordId, TraceRecordKind, TraceReplay, TraceSignalSnapshot, TurnTraceId,
+        ConversationDelegationProjection, ConversationForensicProjection,
+        ConversationManifoldProjection, ConversationTranscript, TaskTraceId, TraceBranch,
+        TraceBranchId, TraceBranchStatus, TraceLineage, TraceRecord, TraceRecordId,
+        TraceRecordKind, TraceReplay, TraceSignalSnapshot, TurnTraceId,
     };
     use paddles_conversation::{ArtifactEnvelope, ArtifactKind, TraceArtifactId};
 
@@ -362,5 +434,75 @@ mod tests {
         assert!(graph.nodes.iter().any(|node| node.kind == "signal"));
         assert_eq!(graph.edges.len(), 2);
         assert_eq!(graph.branches.len(), 1);
+    }
+
+    #[test]
+    fn projection_snapshot_version_tracks_latest_trace_sequence() {
+        let snapshot = snapshot_with_sequence(7, "latest");
+
+        assert_eq!(snapshot.version(), 7);
+    }
+
+    #[test]
+    fn projection_updates_replace_snapshots_only_when_they_are_newer() {
+        let current = snapshot_with_sequence(3, "current");
+        let stale_snapshot = snapshot_with_sequence(2, "stale");
+        let fresh_snapshot = snapshot_with_sequence(4, "fresh");
+        let stale_update = ConversationProjectionUpdate {
+            task_id: TaskTraceId::new("task-1").expect("task"),
+            kind: ConversationProjectionUpdateKind::Transcript,
+            reducer: super::ConversationProjectionReducer::ReplaceSnapshot,
+            version: stale_snapshot.version(),
+            transcript_update: None,
+            forensic_update: None,
+            snapshot: stale_snapshot,
+        };
+        let fresh_update = ConversationProjectionUpdate {
+            task_id: TaskTraceId::new("task-1").expect("task"),
+            kind: ConversationProjectionUpdateKind::Forensic,
+            reducer: super::ConversationProjectionReducer::ReplaceSnapshot,
+            version: fresh_snapshot.version(),
+            transcript_update: None,
+            forensic_update: None,
+            snapshot: fresh_snapshot.clone(),
+        };
+
+        assert_eq!(stale_update.reduce(Some(&current)), current);
+        assert_eq!(
+            fresh_update.reduce(Some(&snapshot_with_sequence(3, "current"))),
+            fresh_snapshot
+        );
+    }
+
+    fn snapshot_with_sequence(sequence: u64, label: &str) -> ConversationProjectionSnapshot {
+        let task_id = TaskTraceId::new("task-1").expect("task");
+        ConversationProjectionSnapshot {
+            task_id: task_id.clone(),
+            transcript: ConversationTranscript {
+                task_id: task_id.clone(),
+                entries: Vec::new(),
+            },
+            forensics: ConversationForensicProjection {
+                task_id: task_id.clone(),
+                turns: Vec::new(),
+            },
+            manifold: ConversationManifoldProjection {
+                task_id: task_id.clone(),
+                turns: Vec::new(),
+            },
+            trace_graph: ConversationTraceGraph {
+                task_id: task_id.clone(),
+                nodes: vec![ConversationTraceGraphNode {
+                    id: format!("record-{sequence}"),
+                    kind: "checkpoint".to_string(),
+                    label: label.to_string(),
+                    branch_id: None,
+                    sequence,
+                }],
+                edges: Vec::new(),
+                branches: Vec::new(),
+            },
+            delegation: ConversationDelegationProjection::empty(task_id),
+        }
     }
 }

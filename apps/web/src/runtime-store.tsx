@@ -15,6 +15,10 @@ import {
   sanitizePromptHistory,
   type RuntimeEventRow,
 } from './store/event-log';
+import {
+  reduceProjectionSnapshot,
+  reduceProjectionUpdate,
+} from './store/projection-state';
 import { mountProjectionStream as openProjectionStream } from './store/projection-stream';
 import { fetchBootstrap, fetchProjection, postTurn } from './store/runtime-client';
 
@@ -47,7 +51,7 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
     async function refreshProjection(nextSessionId: string) {
       const snapshot = await fetchProjection(nextSessionId);
       if (!closed) {
-        setProjection(snapshot);
+        setProjection((current) => reduceProjectionSnapshot(current, snapshot));
       }
     }
 
@@ -60,8 +64,8 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
         onDisconnected: () => {
           setConnected(false);
         },
-        onProjection: (snapshot) => {
-          setProjection(snapshot);
+        onProjection: (update) => {
+          setProjection((current) => reduceProjectionUpdate(current, update));
         },
         onTurnEvent: (payload) => {
           setEvents((current) => reduceRuntimeTurnEvent(current, payload));
@@ -116,7 +120,7 @@ export function RuntimeStoreProvider({ children }: { children: React.ReactNode }
     try {
       await postTurn(sessionId, text);
       const nextProjection = await fetchProjection(sessionId);
-      setProjection(nextProjection);
+      setProjection((current) => reduceProjectionSnapshot(current, nextProjection));
     } catch (sendError) {
       setError(
         sendError instanceof Error ? sendError.message : 'Failed to submit conversation turn.'

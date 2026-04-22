@@ -2783,26 +2783,25 @@ impl MechSuitService {
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationProjectionSnapshot> {
-        Ok(ConversationProjectionSnapshot {
-            task_id: task_id.clone(),
-            transcript: self.replay_conversation_transcript(task_id)?,
-            forensics: self.replay_conversation_forensics(task_id)?,
-            manifold: self.replay_conversation_manifold(task_id)?,
-            trace_graph: self.replay_conversation_trace_graph(task_id)?,
-            delegation: self.replay_conversation_delegation(task_id)?,
-        })
+        match self.replay_for_known_session(task_id)? {
+            Some(replay) => Ok(ConversationProjectionSnapshot::from_trace_replay(&replay)),
+            None => Ok(ConversationProjectionSnapshot::empty(task_id.clone())),
+        }
     }
 
     pub fn projection_update_for_transcript(
         &self,
         update: &ConversationTranscriptUpdate,
     ) -> Result<ConversationProjectionUpdate> {
+        let snapshot = self.replay_conversation_projection(&update.task_id)?;
         Ok(ConversationProjectionUpdate {
             task_id: update.task_id.clone(),
             kind: ConversationProjectionUpdateKind::Transcript,
+            reducer: crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot,
+            version: snapshot.version(),
             transcript_update: Some(update.clone()),
             forensic_update: None,
-            snapshot: self.replay_conversation_projection(&update.task_id)?,
+            snapshot,
         })
     }
 
@@ -2810,12 +2809,15 @@ impl MechSuitService {
         &self,
         update: &ConversationForensicUpdate,
     ) -> Result<ConversationProjectionUpdate> {
+        let snapshot = self.replay_conversation_projection(&update.task_id)?;
         Ok(ConversationProjectionUpdate {
             task_id: update.task_id.clone(),
             kind: ConversationProjectionUpdateKind::Forensic,
+            reducer: crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot,
+            version: snapshot.version(),
             transcript_update: None,
             forensic_update: Some(update.clone()),
-            snapshot: self.replay_conversation_projection(&update.task_id)?,
+            snapshot,
         })
     }
 
@@ -11665,6 +11667,11 @@ mod tests {
             transcript_projection_update.kind,
             crate::domain::model::ConversationProjectionUpdateKind::Transcript
         );
+        assert_eq!(
+            transcript_projection_update.reducer,
+            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+        );
+        assert_eq!(transcript_projection_update.version, expected.version());
         assert_eq!(transcript_projection_update.snapshot, expected);
         assert_eq!(
             transcript_projection_update.transcript_update.as_ref(),
@@ -11679,6 +11686,11 @@ mod tests {
             forensic_projection_update.kind,
             crate::domain::model::ConversationProjectionUpdateKind::Forensic
         );
+        assert_eq!(
+            forensic_projection_update.reducer,
+            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+        );
+        assert_eq!(forensic_projection_update.version, expected.version());
         assert_eq!(forensic_projection_update.snapshot, expected);
         assert_eq!(
             forensic_projection_update.forensic_update.as_ref(),

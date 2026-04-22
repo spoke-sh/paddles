@@ -27,11 +27,11 @@ started_at: 2026-04-21T21:22:59
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Persist Typed Authored Responses In Completion Records](../../../../stories/VHUS75D3e/README.md) | feat | done |
-| [Make Projection Updates Reducer-Driven And Versioned](../../../../stories/VHUS8gdih/README.md) | feat | backlog |
+| [Make Projection Updates Reducer-Driven And Versioned](../../../../stories/VHUS8gdih/README.md) | feat | done |
 | [Prove Live And Replay Render Convergence](../../../../stories/VHUS8h4jI/README.md) | feat | backlog |
 <!-- END GENERATED -->

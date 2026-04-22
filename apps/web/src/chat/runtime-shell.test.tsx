@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConversationProjectionSnapshot } from '../runtime-types';
+import { projectionVersion } from '../store/projection-state';
 import {
   FakeEventSource,
   bootstrapProjection,
@@ -53,6 +54,8 @@ describe('Runtime shell and chat', () => {
     stream.dispatch('projection_update', {
       task_id: 'task-123',
       kind: 'forensic',
+      reducer: 'replace_snapshot',
+      version: projectionVersion(bootstrapProjection) + 1,
       transcript_update: null,
       forensic_update: {
         task_id: 'task-123',
@@ -88,6 +91,45 @@ describe('Runtime shell and chat', () => {
     expect(
       await screen.findByText('Projection stream delivered the externally injected turn.')
     ).toBeInTheDocument();
+  });
+
+  it('ignores stale projection snapshots from the live stream', async () => {
+    renderAtPath('/');
+
+    expect(
+      await screen.findByText('Mock provider completed the turn after local inspection.')
+    ).toBeInTheDocument();
+
+    const [stream] = FakeEventSource.instances;
+    stream.dispatch('projection_update', {
+      task_id: 'task-123',
+      kind: 'forensic',
+      reducer: 'replace_snapshot',
+      version: projectionVersion(bootstrapProjection) - 1,
+      transcript_update: null,
+      forensic_update: null,
+      snapshot: {
+        ...bootstrapProjection,
+        transcript: {
+          ...bootstrapProjection.transcript,
+          entries: [
+            ...bootstrapProjection.transcript.entries,
+            {
+              record_id: 'record-stale',
+              turn_id: 'task-123.turn-0002',
+              speaker: 'assistant',
+              content: 'Stale projection should not replace the current transcript.',
+            },
+          ],
+        },
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('Stale projection should not replace the current transcript.')
+      ).not.toBeInTheDocument();
+    });
   });
 
   it('renders applied edit diffs from the live runtime stream', async () => {

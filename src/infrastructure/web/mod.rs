@@ -1993,10 +1993,18 @@ mod tests {
             transcript_payload.kind,
             ConversationProjectionUpdateKind::Transcript
         );
+        assert_eq!(
+            transcript_payload.reducer,
+            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+        );
         assert_eq!(transcript_payload.task_id, task_id);
         assert_eq!(
             transcript_payload.transcript_update,
             Some(transcript_update)
+        );
+        assert_eq!(
+            transcript_payload.version,
+            transcript_payload.snapshot.version()
         );
         assert_eq!(transcript_payload.snapshot.transcript.entries.len(), 3);
         assert!(
@@ -2017,8 +2025,16 @@ mod tests {
             forensic_payload.kind,
             ConversationProjectionUpdateKind::Forensic
         );
+        assert_eq!(
+            forensic_payload.reducer,
+            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+        );
         assert_eq!(forensic_payload.task_id, task_id);
         assert_eq!(forensic_payload.forensic_update, Some(forensic_update));
+        assert_eq!(
+            forensic_payload.version,
+            forensic_payload.snapshot.version()
+        );
         assert_eq!(forensic_payload.snapshot.forensics.turns.len(), 1);
         assert_eq!(forensic_payload.snapshot.manifold.turns.len(), 1);
         assert!(!forensic_payload.snapshot.trace_graph.nodes.is_empty());
