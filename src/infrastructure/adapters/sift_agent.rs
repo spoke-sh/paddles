@@ -2367,22 +2367,6 @@ impl SiftAgentAdapter {
         }
     }
 
-    pub(crate) fn run_workspace_action(&self, action: &WorkspaceAction) -> Result<ToolResult> {
-        let tool_call = tool_call_from_workspace_action(action).ok_or_else(|| {
-            anyhow!(
-                "workspace action `{}` is not executable via the tool adapter",
-                action.label()
-            )
-        })?;
-        self.execute_tool(
-            &tool_call,
-            "planner-workspace-action",
-            &[],
-            &[],
-            &NullTurnEventSink,
-        )
-    }
-
     fn expand_interpretation_guidance_graph(
         &self,
         request: &InterpretationRequest,
@@ -2519,20 +2503,6 @@ impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
 
     fn recent_turn_summaries(&self) -> Result<Vec<String>> {
         SiftAgentAdapter::recent_turn_summaries(self)
-    }
-
-    fn execute_workspace_action(
-        &self,
-        action: &WorkspaceAction,
-    ) -> Result<crate::domain::ports::WorkspaceActionResult> {
-        let result = self.run_workspace_action(action)?;
-        Ok(crate::domain::ports::WorkspaceActionResult {
-            name: result.name.to_string(),
-            summary: result.summary,
-            applied_edit: result.applied_edit,
-            governance_request: result.governance_request,
-            governance_outcome: result.governance_outcome,
-        })
     }
 }
 
@@ -5257,43 +5227,6 @@ fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
         new_thread_label: None,
         merge_mode: None,
         merge_summary: None,
-    }
-}
-
-fn tool_call_from_workspace_action(action: &WorkspaceAction) -> Option<ToolCall> {
-    match action {
-        WorkspaceAction::Search { query, intent, .. } => Some(ToolCall::Search {
-            query: query.clone(),
-            intent: intent.clone(),
-        }),
-        WorkspaceAction::ListFiles { pattern } => Some(ToolCall::ListFiles {
-            pattern: pattern.clone(),
-        }),
-        WorkspaceAction::Read { path } => Some(ToolCall::ReadFile { path: path.clone() }),
-        WorkspaceAction::Inspect { .. } => None,
-        WorkspaceAction::Shell { command } => Some(ToolCall::Shell {
-            command: command.clone(),
-        }),
-        WorkspaceAction::Diff { path } => Some(ToolCall::Diff { path: path.clone() }),
-        WorkspaceAction::WriteFile { path, content } => Some(ToolCall::WriteFile {
-            path: path.clone(),
-            content: content.clone(),
-        }),
-        WorkspaceAction::ReplaceInFile {
-            path,
-            old,
-            new,
-            replace_all,
-        } => Some(ToolCall::ReplaceInFile {
-            path: path.clone(),
-            old: old.clone(),
-            new: new.clone(),
-            replace_all: *replace_all,
-        }),
-        WorkspaceAction::ApplyPatch { patch } => Some(ToolCall::ApplyPatch {
-            patch: patch.clone(),
-        }),
-        WorkspaceAction::ExternalCapability { .. } => None,
     }
 }
 

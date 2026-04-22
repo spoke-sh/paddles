@@ -9339,10 +9339,13 @@ mod tests {
         fn recent_turn_summaries(&self) -> Result<Vec<String>> {
             Ok(Vec::new())
         }
+    }
 
+    impl WorkspaceActionExecutor for RecordingSynthesizer {
         fn execute_workspace_action(
             &self,
             action: &WorkspaceAction,
+            _frame: WorkspaceActionExecutionFrame<'_>,
         ) -> Result<crate::domain::ports::WorkspaceActionResult> {
             self.executed_actions
                 .lock()
@@ -9355,16 +9358,6 @@ mod tests {
                 governance_request: None,
                 governance_outcome: None,
             })
-        }
-    }
-
-    impl WorkspaceActionExecutor for RecordingSynthesizer {
-        fn execute_workspace_action(
-            &self,
-            action: &WorkspaceAction,
-            _frame: WorkspaceActionExecutionFrame<'_>,
-        ) -> Result<crate::domain::ports::WorkspaceActionResult> {
-            SynthesizerEngine::execute_workspace_action(self, action)
         }
     }
 
@@ -11843,13 +11836,6 @@ mod tests {
 
             fn recent_turn_summaries(&self) -> Result<Vec<String>> {
                 Ok(Vec::new())
-            }
-
-            fn execute_workspace_action(
-                &self,
-                _action: &WorkspaceAction,
-            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
-                Err(anyhow!("workspace execution not used in convergence test"))
             }
         }
 
@@ -14539,10 +14525,13 @@ mod tests {
             fn recent_turn_summaries(&self) -> Result<Vec<String>> {
                 Ok(Vec::new())
             }
+        }
 
+        impl WorkspaceActionExecutor for GovernedWriteSynthesizer {
             fn execute_workspace_action(
                 &self,
                 action: &WorkspaceAction,
+                _frame: WorkspaceActionExecutionFrame<'_>,
             ) -> Result<crate::domain::ports::WorkspaceActionResult> {
                 Ok(crate::domain::ports::WorkspaceActionResult {
                     name: action.label().to_string(),
@@ -14573,16 +14562,6 @@ mod tests {
                         ],
                     )),
                 })
-            }
-        }
-
-        impl WorkspaceActionExecutor for GovernedWriteSynthesizer {
-            fn execute_workspace_action(
-                &self,
-                action: &WorkspaceAction,
-                _frame: WorkspaceActionExecutionFrame<'_>,
-            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
-                SynthesizerEngine::execute_workspace_action(self, action)
             }
         }
 
@@ -14674,16 +14653,6 @@ mod tests {
 
             fn recent_turn_summaries(&self) -> Result<Vec<String>> {
                 Ok(Vec::new())
-            }
-
-            fn execute_workspace_action(
-                &self,
-                action: &WorkspaceAction,
-            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
-                panic!(
-                    "synthesizer should not execute planner workspace action: {}",
-                    action.label()
-                );
             }
         }
 
@@ -17499,13 +17468,6 @@ mod tests {
 
             fn recent_turn_summaries(&self) -> Result<Vec<String>> {
                 Ok(vec!["synth fallback".to_string()])
-            }
-
-            fn execute_workspace_action(
-                &self,
-                _action: &WorkspaceAction,
-            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
-                Err(anyhow!("unused"))
             }
         }
 

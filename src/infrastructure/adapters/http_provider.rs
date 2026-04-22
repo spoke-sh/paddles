@@ -1,7 +1,7 @@
 use crate::domain::model::ForensicArtifactCapture;
 use crate::domain::model::{
     CompactionDecision, CompactionPlan, CompactionRequest, ExternalCapabilityInvocation,
-    NullTurnEventSink, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceArtifactId,
+    ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceArtifactId,
     TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent,
     TurnEventSink, TurnIntent,
 };
@@ -10,11 +10,6 @@ use crate::domain::ports::{
     InitialEditInstruction, InterpretationContext, InterpretationRequest, PlannerAction,
     PlannerCapability, PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
     RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction,
-    WorkspaceActionResult, WorkspaceEditor,
-};
-use crate::infrastructure::adapters::local_workspace_editor::LocalWorkspaceEditor;
-use crate::infrastructure::execution_governance::{
-    GovernedTerminalCommandResult, summarize_governance_outcome,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
@@ -26,7 +21,6 @@ use crate::infrastructure::rendering::{
     ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
 };
-use crate::infrastructure::terminal::run_background_terminal_command_with_runtime_mediator;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
@@ -87,9 +81,6 @@ async fn send_with_retry(
 
 /// HTTP-based model provider implementing SynthesizerEngine.
 pub struct HttpProviderAdapter {
-    workspace_root: PathBuf,
-    execution_hand_registry: Arc<ExecutionHandRegistry>,
-    transport_mediator: Arc<TransportToolMediator>,
     client: reqwest::Client,
     provider_name: String,
     api_key: String,
@@ -174,9 +165,9 @@ impl HttpProviderAdapter {
 
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_runtime_mediator(
-        workspace_root: impl Into<PathBuf>,
-        execution_hand_registry: Arc<ExecutionHandRegistry>,
-        transport_mediator: Arc<TransportToolMediator>,
+        _workspace_root: impl Into<PathBuf>,
+        _execution_hand_registry: Arc<ExecutionHandRegistry>,
+        _transport_mediator: Arc<TransportToolMediator>,
         provider_name: impl Into<String>,
         model_id: impl Into<String>,
         api_key: impl Into<String>,
@@ -189,9 +180,6 @@ impl HttpProviderAdapter {
         let capabilities =
             negotiated_capability_surface(&provider_name, &model_id, format, render_capability);
         Self {
-            workspace_root: workspace_root.into(),
-            execution_hand_registry,
-            transport_mediator,
             client: reqwest::Client::new(),
             provider_name,
             api_key: api_key.into(),
@@ -1168,132 +1156,6 @@ Rules:
             grounding: envelope.grounding,
         })
     }
-
-    fn execute_local_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
-        let workspace_editor = LocalWorkspaceEditor::with_runtime_mediator(
-            self.workspace_root.clone(),
-            Arc::clone(&self.execution_hand_registry),
-            Arc::clone(&self.transport_mediator),
-        );
-        match action {
-            WorkspaceAction::Read { path } => {
-                let full = self.workspace_root.join(path);
-                let content = std::fs::read_to_string(&full)
-                    .unwrap_or_else(|e| format!("failed to read {path}: {e}"));
-                Ok(WorkspaceActionResult {
-                    name: "read".to_string(),
-                    summary: truncate(&content, 4000),
-                    applied_edit: None,
-                    governance_request: None,
-                    governance_outcome: None,
-                })
-            }
-            WorkspaceAction::ListFiles { pattern } => {
-                let pat = pattern.as_deref().unwrap_or("*");
-                let output = run_background_terminal_command_with_runtime_mediator(
-                    &self.workspace_root,
-                    &format!("find . -name '{pat}' -type f | head -100"),
-                    "list_files",
-                    "http-provider-list-files",
-                    &NullTurnEventSink,
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )?;
-                match output {
-                    GovernedTerminalCommandResult::Executed {
-                        output,
-                        governance_request,
-                        governance_outcome,
-                    } => Ok(WorkspaceActionResult {
-                        name: "list_files".to_string(),
-                        summary: String::from_utf8_lossy(&output.stdout).to_string(),
-                        applied_edit: None,
-                        governance_request: Some(governance_request),
-                        governance_outcome: Some(governance_outcome),
-                    }),
-                    GovernedTerminalCommandResult::Blocked {
-                        governance_request,
-                        governance_outcome,
-                    } => Ok(WorkspaceActionResult {
-                        name: "list_files".to_string(),
-                        summary: summarize_governance_outcome(&governance_outcome),
-                        applied_edit: None,
-                        governance_request: Some(governance_request),
-                        governance_outcome: Some(governance_outcome),
-                    }),
-                }
-            }
-            WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command } => {
-                let tool_name = if matches!(action, WorkspaceAction::Inspect { .. }) {
-                    "inspect"
-                } else {
-                    "shell"
-                };
-                let output = run_background_terminal_command_with_runtime_mediator(
-                    &self.workspace_root,
-                    command,
-                    tool_name,
-                    "http-provider-workspace-action",
-                    &NullTurnEventSink,
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )?;
-                match output {
-                    GovernedTerminalCommandResult::Executed {
-                        output,
-                        governance_request,
-                        governance_outcome,
-                    } => {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        Ok(WorkspaceActionResult {
-                            name: tool_name.to_string(),
-                            summary: if stderr.trim().is_empty() {
-                                truncate(&stdout, 4000)
-                            } else {
-                                truncate(&format!("{stdout}\n{stderr}"), 4000)
-                            },
-                            applied_edit: None,
-                            governance_request: Some(governance_request),
-                            governance_outcome: Some(governance_outcome),
-                        })
-                    }
-                    GovernedTerminalCommandResult::Blocked {
-                        governance_request,
-                        governance_outcome,
-                    } => Ok(WorkspaceActionResult {
-                        name: tool_name.to_string(),
-                        summary: summarize_governance_outcome(&governance_outcome),
-                        applied_edit: None,
-                        governance_request: Some(governance_request),
-                        governance_outcome: Some(governance_outcome),
-                    }),
-                }
-            }
-            WorkspaceAction::Search { query, .. } => Ok(WorkspaceActionResult {
-                name: "search".to_string(),
-                summary: format!("search not available via HTTP provider for: {query}"),
-                applied_edit: None,
-                governance_request: None,
-                governance_outcome: None,
-            }),
-            WorkspaceAction::Diff { path } => workspace_editor.diff(path.as_deref()),
-            WorkspaceAction::WriteFile { path, content } => {
-                workspace_editor.write_file(path, content)
-            }
-            WorkspaceAction::ReplaceInFile {
-                path,
-                old,
-                new,
-                replace_all,
-            } => workspace_editor.replace_in_file(path, old, new, *replace_all),
-            WorkspaceAction::ApplyPatch { patch } => workspace_editor.apply_patch(patch),
-            WorkspaceAction::ExternalCapability { invocation } => Err(anyhow!(
-                "external capability `{}` must be routed through the recursive harness control plane",
-                invocation.capability_id
-            )),
-        }
-    }
 }
 
 impl SynthesizerEngine for HttpProviderAdapter {
@@ -1440,10 +1302,6 @@ impl SynthesizerEngine for HttpProviderAdapter {
 
     fn recent_turn_summaries(&self) -> Result<Vec<String>> {
         Ok(self.turn_history.lock().expect("turn history lock").clone())
-    }
-
-    fn execute_workspace_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
-        self.execute_local_action(action)
     }
 }
 
@@ -2850,18 +2708,20 @@ mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::{
-        ExternalCapabilityInvocation, TraceModelExchangeCategory, TraceModelExchangeLane,
-        TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
+        ExternalCapabilityInvocation, NullTurnEventSink, TraceModelExchangeCategory,
+        TraceModelExchangeLane, TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink,
+        TurnIntent,
     };
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
         InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
         PlannerBudget, PlannerLoopState, PlannerRequest, RecursivePlanner,
         RecursivePlannerDecision, RetrieverOption, SynthesisHandoff, SynthesizerEngine,
-        TraceRecorder, WorkspaceAction,
+        TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::execution_hand::ExecutionHandRegistry;
     use crate::infrastructure::rendering::{ANTHROPIC_RENDER_TOOL_NAME, RenderCapability};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
@@ -4431,29 +4291,30 @@ mod tests {
         }])
         .await;
 
-        let adapter = super::HttpProviderAdapter::new(
+        let executor = crate::infrastructure::adapters::local_workspace_action_executor::LocalWorkspaceActionExecutor::with_execution_hand_registry(
             workspace.path(),
-            "inception",
-            "mercury-2",
-            "test-key",
-            server.base_url.clone(),
-            ApiFormat::OpenAi,
-            RenderCapability::OpenAiJsonSchema,
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
         );
 
-        let result = adapter
-            .execute_workspace_action(&WorkspaceAction::ApplyPatch {
-                patch: concat!(
-                    "--- a/sample.rs\n",
-                    "+++ b/sample.rs\n",
-                    "@@ -1,3 +1,3 @@\n",
-                    " fn greet() {\n",
-                    "-    println!(\"hello\");\n",
-                    "+    println!(\"hi\");\n",
-                    " }\n",
-                )
-                .to_string(),
-            })
+        let result = executor
+            .execute_workspace_action(
+                &WorkspaceAction::ApplyPatch {
+                    patch: concat!(
+                        "--- a/sample.rs\n",
+                        "+++ b/sample.rs\n",
+                        "@@ -1,3 +1,3 @@\n",
+                        " fn greet() {\n",
+                        "-    println!(\"hello\");\n",
+                        "+    println!(\"hi\");\n",
+                        " }\n",
+                    )
+                    .to_string(),
+                },
+                crate::domain::ports::WorkspaceActionExecutionFrame {
+                    call_id: "http-provider-apply-patch-test",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
             .expect("apply patch");
 
         assert_eq!(result.name, "apply_patch");

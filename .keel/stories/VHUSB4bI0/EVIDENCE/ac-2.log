@@ -1,0 +1,47 @@
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.14s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-6e1a86015c5cb772)
+
+running 1 test
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Planner step 1: read `README.md`
+  └ Rationale: read the workspace artifact before answering
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action read `README.md`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Carry the remaining turn work to completion and summarize the result.
+• Step 1/12: read `README.md` — README.md [0 evidence]
+• Ran read
+  └ read `README.md`
+• Completed read
+  └ executed read `README.md`
+• Planner step 2: stop (workspace read was enough)
+  └ Rationale: stop after the bounded action
+• Step 2/12: stop (workspace read was enough) — workspace read was enough [1 evidence]
+• Updated Plan
+  └ ✓ Carry the remaining turn work to completion and summarize the result.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=2, steps=2, stop=workspace read was enough, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+test application::tests::planner_workspace_actions_route_through_application_owned_executor_boundary ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 638 filtered out; finished in 0.75s
+
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-368fd65f357d3f27)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+

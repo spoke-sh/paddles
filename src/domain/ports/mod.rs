@@ -42,14 +42,16 @@ pub use planning::{
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,
 };
-pub use synthesis::{SynthesisHandoff, SynthesizerEngine, WorkspaceActionResult};
+pub use synthesis::{SynthesisHandoff, SynthesizerEngine};
 pub use trace_recording::{
     NoopTraceRecorder, TraceRecorder, TraceRecorderCapability, TraceReplaySlice,
     TraceReplaySliceAnchor, TraceReplaySliceDirection, TraceReplaySliceRequest,
     TraceSessionCheckpointCursor, TraceSessionContextQuery, TraceSessionContextSlice,
     TraceSessionWake,
 };
-pub use workspace_action_execution::{WorkspaceActionExecutionFrame, WorkspaceActionExecutor};
+pub use workspace_action_execution::{
+    WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceActionResult,
+};
 pub use workspace_editing::WorkspaceEditor;
 
 /// Port for model discovery and acquisition.

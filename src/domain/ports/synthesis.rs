@@ -1,21 +1,8 @@
-use crate::domain::model::{
-    AppliedEdit, CollaborationModeResult, ExecutionGovernanceOutcome, ExecutionPermissionRequest,
-    InstructionFrame, TurnEventSink, TurnIntent,
-};
+use crate::domain::model::{CollaborationModeResult, InstructionFrame, TurnEventSink, TurnIntent};
 use crate::domain::ports::context_gathering::EvidenceBundle;
-use crate::domain::ports::planning::{GroundingRequirement, WorkspaceAction};
+use crate::domain::ports::planning::GroundingRequirement;
 use anyhow::Result;
 use std::sync::Arc;
-
-/// Result from executing a workspace action through the synthesizer engine.
-#[derive(Debug)]
-pub struct WorkspaceActionResult {
-    pub name: String,
-    pub summary: String,
-    pub applied_edit: Option<AppliedEdit>,
-    pub governance_request: Option<ExecutionPermissionRequest>,
-    pub governance_outcome: Option<ExecutionGovernanceOutcome>,
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SynthesisHandoff {
@@ -26,7 +13,7 @@ pub struct SynthesisHandoff {
     pub grounding: Option<GroundingRequirement>,
 }
 
-/// Port for the synthesizer engine that drives conversation turns and workspace actions.
+/// Port for the synthesizer engine that authors final responses for a turn.
 pub trait SynthesizerEngine: Send + Sync {
     fn set_verbose(&self, level: u8);
 
@@ -40,6 +27,4 @@ pub trait SynthesizerEngine: Send + Sync {
     ) -> Result<String>;
 
     fn recent_turn_summaries(&self) -> Result<Vec<String>>;
-
-    fn execute_workspace_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult>;
 }

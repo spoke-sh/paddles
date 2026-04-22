@@ -27,11 +27,11 @@ started_at: 2026-04-21T21:55:55
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Introduce A Workspace Action Executor Boundary](../../../../stories/VHUS9rF4d/README.md) | feat | done |
-| [Make Synthesizer Engines Author Responses Only](../../../../stories/VHUSB4bI0/README.md) | refactor | backlog |
+| [Make Synthesizer Engines Author Responses Only](../../../../stories/VHUSB4bI0/README.md) | refactor | done |
 | [Remove Nested Tool Loops From Model Adapters](../../../../stories/VHUSBjLxJ/README.md) | refactor | backlog |
 <!-- END GENERATED -->

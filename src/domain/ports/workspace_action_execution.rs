@@ -1,6 +1,17 @@
-use super::{planning::WorkspaceAction, synthesis::WorkspaceActionResult};
-use crate::domain::model::TurnEventSink;
+use super::planning::WorkspaceAction;
+use crate::domain::model::{
+    AppliedEdit, ExecutionGovernanceOutcome, ExecutionPermissionRequest, TurnEventSink,
+};
 use anyhow::Result;
+
+#[derive(Debug)]
+pub struct WorkspaceActionResult {
+    pub name: String,
+    pub summary: String,
+    pub applied_edit: Option<AppliedEdit>,
+    pub governance_request: Option<ExecutionPermissionRequest>,
+    pub governance_outcome: Option<ExecutionGovernanceOutcome>,
+}
 
 pub struct WorkspaceActionExecutionFrame<'a> {
     pub call_id: &'a str,
