@@ -1,6 +1,6 @@
-use super::{
-    TaskTraceId, TraceModelExchangeArtifact, TraceRecord, TraceRecordId, TraceRecordKind,
-    TraceReplay, TurnTraceId,
+use crate::domain::model::{
+    TaskTraceId, TraceLineageEdge, TraceModelExchangeArtifact, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceReplay, TurnTraceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -153,7 +153,7 @@ fn superseded_by_record(
     }
 }
 
-fn extract_superseded_exchange_id(edge: &super::TraceLineageEdge) -> Option<&str> {
+fn extract_superseded_exchange_id(edge: &TraceLineageEdge) -> Option<&str> {
     [edge.source.id.as_str(), edge.target.id.as_str()]
         .into_iter()
         .find_map(|id| id.strip_prefix("model-call:"))

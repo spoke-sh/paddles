@@ -1,0 +1,1029 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-6e1a86015c5cb772)
+
+running 113 tests
+test application::tests::action_bias_targets_code_files_before_docs ... ok
+test application::tests::action_bias_targets_ignore_non_authored_workspace_paths ... ok
+test application::tests::answer_initial_actions_route_to_direct_responses ... ok
+test application::tests::action_bias_rejects_repeated_list_files_in_edit_turn ... ok
+test application::tests::action_bias_redirects_non_file_actions_before_any_search_step ... ok
+test application::tests::application_read_model_exports_projection_types ... ok
+test application::tests::context1_boundary_can_be_prepared_without_local_model_paths ... ok
+test application::tests::action_bias_falls_back_to_prompt_derived_file_candidates ... ok
+test application::tests::action_bias_escalates_to_exact_diff_after_target_file_has_been_read ... ok
+test application::tests::action_bias_targets_ignore_gitignored_workspace_paths ... ok
+test application::tests::compaction_engine_executes_plan_and_preserves_locators ... ok
+test application::tests::explicit_workspace_initial_actions_route_to_the_planner_loop ... ok
+test application::tests::execution_pressure_prefers_resolved_targets_over_repeated_search ... ok
+test application::tests::external_capability_enrichment_adds_discovery_hints_and_grounding_procedure ... ok
+test application::tests::finalize_turn_response_records_shared_completion_side_effects ... ok
+test application::tests::known_edit_bootstrap_uses_deterministic_resolution ... ok
+test application::tests::known_edit_bootstrap_discards_node_modules_hints_and_prefers_authored_files ... ok
+test application::tests::known_edit_bootstrap_discards_gitignored_generated_artifacts ... ok
+test application::tests::plain_turn_event_rendering_uses_hunting_language_for_gatherer_progress ... ok
+test application::tests::premise_challenge_stops_redundant_plain_ci_run_list_probe ... ok
+test application::tests::prepare_runtime_lanes_downgrades_harness_profile_when_prompt_envelopes_are_required ... ok
+test application::tests::local_harness_enrichment_adds_general_github_hint_and_ci_procedure_when_available ... ok
+test application::tests::prepare_runtime_lanes_mix_provider_selection_and_only_resolve_sift_paths ... ok
+test application::tests::planner_can_carry_resolver_outcomes_from_edit_signal_into_instruction_frame ... ok
+test application::tests::prepare_runtime_lanes_resolves_structured_harness_profile_without_downgrade ... ok
+test application::tests::local_harness_enrichment_no_longer_uses_prompt_intent_to_gate_github_hints ... ok
+test application::tests::premise_challenge_fallback_reason_keeps_noop_review_readable ... ok
+test application::tests::premise_challenge_stops_redundant_ci_probe_after_non_failing_run_evidence ... ok
+test application::tests::known_edit_planner_budget_preserves_workspace_editor_headroom ... ok
+test application::tests::prepared_runtime_lanes_keep_synthesizer_as_default_response_lane ... ok
+test application::tests::local_harness_enrichment_adds_tool_preferences_and_workspace_procedure ... ok
+test application::tests::prepare_runtime_lanes_treats_inception_as_remote_http_lane_without_local_paths ... ok
+test application::tests::recent_turn_summaries_prefer_session_context_slice_before_history_or_synth_fallback ... ok
+test application::tests::replay_conversation_forensics_projects_superseded_and_final_records ... ok
+test application::tests::replay_conversation_projection_includes_the_shared_delegation_surface ... ok
+test application::tests::execute_planner_gather_step_reuses_request_and_merge_path ... ok
+test application::tests::execute_planner_gather_step_refuses_warming_retrieval_without_invoking_gatherer ... ok
+test application::tests::replay_conversation_transcript_returns_empty_for_known_session_without_trace_records ... ok
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• execution posture recursive-structured-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, command_prefix, hand]
+test application::tests::process_prompt_interrupts_at_a_safe_checkpoint_and_records_the_control_result ... ok
+test application::tests::repository_grounding_heuristic_flags_our_generative_layer_followup ... ok
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ gpt-5.4: available
+• Planner step 1: answer directly
+  └ Rationale: answer directly
+• Classified turn
+  └ direct-response
+• Routed turn
+  └ model selected a direct response; controller will render it directly
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+test application::tests::process_prompt_emits_transcript_updates_for_prompt_and_completion ... ok
+test application::tests::resource_initial_actions_route_to_the_planner_loop ... ok
+test application::tests::process_prompt_records_steering_control_and_hands_off_to_the_steered_prompt ... ok
+test application::tests::live_projection_updates_converge_with_replayed_transcript_render_state ... ok
+test application::tests::resolver_never_promotes_non_authored_targets ... ok
+test application::tests::degraded_external_capability_results_project_honest_state_across_trace_and_transcript ... ok
+test application::tests::replay_conversation_transcript_projects_prompt_and_completion_records ... ok
+test application::tests::runtime_lane_config_defaults_to_synthesizer_responses ... ok
+test application::tests::chamber_services_compose_turn_execution_and_projection_replay ... ok
+test application::tests::later_interrupts_mark_older_turn_controls_stale_instead_of_mutating_hidden_state ... ok
+test application::tests::service_new_exposes_default_execution_hand_diagnostics_surface ... ok
+test application::tests::planner_requests_include_specialist_brain_runtime_notes ... ok
+test application::tests::process_prompt_records_trace_contract_records_beside_turn_events ... ok
+test application::tests::replay_conversation_projection_packages_all_shared_session_surfaces ... ok
+test application::tests::service_new_exposes_default_external_capability_catalog_surface ... ok
+test application::tests::planning_mode_records_mode_selection_and_structured_clarification_for_replay ... ok
+test application::tests::process_prompt_emits_forensic_updates_for_recorded_trace_artifacts ... ok
+test application::tests::conversation_projection_updates_are_derived_from_authoritative_replay_state ... ok
+test application::tests::sift_direct_boundary_can_be_prepared_without_local_model_paths ... ok
+test application::tests::stop_initial_actions_fall_back_to_direct_responses ... ok
+test application::tests::structured_turn_trace_records_governance_profile_and_decision_artifacts ... ok
+test application::tests::shared_conversation_session_reuses_live_session_state ... ok
+test application::tests::service_new_uses_persistent_trace_recorder_posture_by_default ... ok
+test application::tests::structured_turn_trace_records_lineage_edges_for_model_calls_and_outputs ... ok
+test application::tests::validate_inspect_allows_safe_read_only_commands ... ok
+test application::tests::validate_inspect_rejects_empty_commands ... ok
+test application::tests::validate_inspect_rejects_chained_commands ... ok
+test application::tests::workspace_editor_boundary_budget_signal_credits_boundary_source ... ok
+test application::tests::structured_turn_trace_records_signal_snapshots_with_contribution_estimates ... ok
+test application::tests::structured_turn_trace_records_worker_coordination_records_across_parent_and_worker_threads ... ok
+test application::tests::task_root_trace_records_resolved_harness_profile_selection ... ok
+test application::tests::steering_into_a_child_thread_preserves_replayable_thread_lineage ... ok
+test application::tests::unresolved_targets_fail_closed_before_workspace_mutation ... ok
+test application::tests::process_prompt_emits_plan_updates_and_containment_notes_for_edit_turns ... ok
+test application::tests::unsupported_mode_requests_emit_typed_collaboration_results_instead_of_silent_fallback ... ok
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• Collaboration: execution defaulted
+  └ posture=default_execution output=execute clarification=disabled
+  └ no collaboration mode request supplied; using execution mode
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• execution posture recursive-structured-v1 -> prompt-envelope-safe-v1 (sandbox=workspace_write, approval=on_request)
+  └ permissions=[read_workspace, write_workspace, run_workspace_command], reuse=[turn, hand], downgrade=prompt-envelope-safe-v1 disables bounded command-prefix escalation reuse
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Fell back
+  └ action-bias: controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; candidate files: apps/web/src/runtime-shell.css · action-bias: controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; candidate files: apps/web/src/runtime-shell.css
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [1 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 1 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+    Sources: AGENTS.md, paddles-harness, external-capability-catalog
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-store.tsx``; candidate files: apps/web/src/runtime-store.tsx, apps/web/src/runtime-app.tsx, apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-store.tsx``; candidate files: apps/web/src/runtime-store.tsx, apps/web/src/runtime-app.tsx, apps/web/src/runtime-shell.css · known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-store.tsx``; candidate files: apps/web/src/runtime-store.tsx, apps/web/src/runtime-app.tsx, apps/web/src/runtime-shell.css
+• Planner step 1: inspect `git status --short`
+  └ Rationale: inspect the local workspace before deciding
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ claude-sonnet-4-20250514: available
+• Checked planner capability
+  └ planner: available
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Planner step 1: search `planner loop edit target` [linear / bm25]
+  └ Rationale: start with one bounded search
+• Planner step 1: answer directly
+  └ Rationale: answer directly
+• Planner step 1: stop (refusal)
+  └ Rationale: the user requested disallowed automotive repair instructions
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Checked planner capability
+  └ planner: available
+• Planner step 1: inspect `git status --short`
+  └ Rationale: inspect the local workspace before answering
+• Planner step 1: answer directly
+  └ Rationale: the prompt is a direct diagram request, so no workspace action is required
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `src/application/mod.rs``; candidate files: src/application/mod.rs, README.md
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `src/application/mod.rs``; candidate files: src/application/mod.rs, README.md · known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `src/application/mod.rs``; candidate files: src/application/mod.rs, README.md
+• Planner step 1: answer directly
+  └ Rationale: this can be answered directly
+• Assembled interpretation context [0 docs, 7 hints, 3 procedures]
+  └ test interpretation assembled from 0 operator-memory document(s).
+    
+    Paddles can execute local workspace actions through the harness. Available local tools: git, rg, gh, cargo, just, nix, keel.
+    …
+• Checked planner capability
+  └ planner: available
+• Fell back
+  └ commit-bootstrap: commit-oriented turn bypassed initial `answer directly` and forced `inspect `git status --short`` to inspect workspace status before committing
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=commit-bootstrap: commit-oriented turn bypassed initial `answer directly` and forced `inspect `git status --short`` to inspect workspace status before committing · commit-bootstrap: commit-oriented turn bypassed initial `answer directly` and forced `inspect `git status --short`` to inspect workspace status before committing
+• Fell back
+  └ action-bias: controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; candidate files: apps/web/src/runtime-shell.css · action-bias: controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; candidate files: apps/web/src/runtime-shell.css
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css · known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css · known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css · known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Planner step 1: read `README.md`
+  └ Rationale: read the workspace artifact before answering
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `search `find the edit target` [linear / bm25]` and forced `read `src/two.rs``; candidate files: src/two.rs, src/one.rs
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `search `find the edit target` [linear / bm25]` and forced `read `src/two.rs``; candidate files: src/two.rs, src/one.rs · known-edit-bootstrap: known edit turn bypassed initial `search `find the edit target` [linear / bm25]` and forced `read `src/two.rs``; candidate files: src/two.rs, src/one.rs
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action inspect `git status --short`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Carry the remaining turn work to completion and summarize the result.
+• Step 1/12: inspect `git status --short` — git status --short [0 evidence]
+• Ran inspect
+  └ git status --short
+• Classified turn
+  └ direct-response
+• Routed turn
+  └ model selected a direct response; controller will render it directly
+• Classified turn
+  └ planned
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Routed turn
+  └ model selected initial planner action search `planner loop edit target` [linear / bm25]; turn will use planner lane 'planner' with gatherer backend 'sift-direct' (SiftDirect) before synthesizer lane 'synth'
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Classified turn
+  └ direct-response
+• Routed turn
+  └ model selected a direct response; controller will render it directly
+• Classified turn
+  └ planned
+• Classified turn
+  └ direct-response
+• Routed turn
+  └ model selected initial planner action inspect `git status --short`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Routed turn
+  └ model selected stop before recursive resource use (refusal); controller will render the direct response
+• Classified turn
+  └ direct-response
+• Step 1/10: search `planner loop edit target` [linear / bm25] — planner loop edit target [0 evidence]
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Updated Plan
+  └ □ Carry the remaining turn work to completion and summarize the result.
+• Routed turn
+  └ model selected a direct response; controller will render it directly
+• Checked gatherer capability
+  └ sift-direct: available
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Gathered context with sift-direct
+  └ Found likely implementation targets.
+    Sources: src/application/mod.rs, README.md
+• Step 1/12: inspect `git status --short` — git status --short [0 evidence]
+• Ran inspect
+  └ git status --short
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action read `README.md`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Carry the remaining turn work to completion and summarize the result.
+• Step 1/12: read `README.md` — README.md [0 evidence]
+• Ran read
+  └ read `README.md`
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `read `apps/web/src/runtime-shell.css`` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `read `apps/web/src/runtime-shell.css`` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css · known-edit-bootstrap: known edit turn bypassed initial `read `apps/web/src/runtime-shell.css`` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Planner step 1: read `apps/web/src/runtime-store.tsx`
+  └ Rationale: known edit turn; action produces information, so read `apps/web/src/runtime-store.tsx` before broader planning
+• Planner step 1: read `src/application/mod.rs`
+  └ Rationale: known edit turn; action produces information, so read `src/application/mod.rs` before broader planning
+• Fell back
+  └ action-bias: Replaced `search `keep searching broadly` [linear / bm25]` with `read `src/application/mod.rs`` after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: Replaced `search `keep searching broadly` [linear / bm25]` with `read `src/application/mod.rs`` after judging the current sources. · action-bias: Replaced `search `keep searching broadly` [linear / bm25]` with `read `src/application/mod.rs`` after judging the current sources.
+• Planner step 1: inspect `git status --short`
+  └ Rationale: controller bootstrapped a git status probe before allowing a commit turn to answer directly
+• Planner step 1: read `apps/web/src/runtime-shell.css`
+  └ Rationale: known edit turn; action produces information, so read `apps/web/src/runtime-shell.css` before broader planning
+• Planner step 1: read `apps/web/src/runtime-shell.css`
+  └ Rationale: known edit turn; action produces information, so read `apps/web/src/runtime-shell.css` before broader planning
+• Fell back
+  └ known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css · known-edit-bootstrap: known edit turn bypassed initial `answer directly` and forced `read `apps/web/src/runtime-shell.css``; candidate files: apps/web/src/runtime-shell.css
+• Planner step 1: read `apps/web/src/runtime-shell.css`
+  └ Rationale: known edit turn; action produces information, so read `apps/web/src/runtime-shell.css` before broader planning
+• Completed read
+  └ executed read `README.md`
+• Planner step 1: read `src/two.rs`
+  └ Rationale: known edit turn; action produces information, so read `src/two.rs` before broader planning
+• inspect stderr
+  └ fatal: not a git repository (or any parent up to mount point /)
+    Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+• allowed inspect via terminal_runner
+  └ requires [run_workspace_command] (run `inspect` command `git status --short`) | reason: terminal_runner allowed under `workspace_write` sandbox | requested_reuse=command_prefix | prefix=git status --short
+test application::tests::out_of_domain_direct_turns_do_not_trigger_controller_workspace_inspects ... ok
+test application::tests::planner_requests_include_specialist_brain_fallback_for_prompt_envelope_safe_profiles ... ok
+test application::tests::recent_turn_history_persists_across_service_processes ... ok
+• inspect stderr
+  └ fatal: not a git repository (or any parent up to mount point /)
+    Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+test application::tests::initial_answer_decisions_render_explicit_user_answer_without_synthesizer_rewrite ... ok
+• allowed inspect via terminal_runner
+  └ requires [run_workspace_command] (run `inspect` command `git status --short`) | reason: terminal_runner allowed under `workspace_write` sandbox | requested_reuse=command_prefix | prefix=git status --short
+test application::tests::initial_refusals_render_policy_violation_without_synthesizer_rewrite ... ok
+test application::tests::planner_requests_include_runtime_notes_when_retrieval_is_still_warming ... ok
+• Planner step 2: stop (workspace read was enough)
+  └ Rationale: stop after the bounded action
+• Completed inspect
+  └ inspect failed: fatal: not a git repository (or any parent up to mount point /)
+    Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action read `apps/web/src/runtime-store.tsx`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Step 1/10: read `apps/web/src/runtime-store.tsx` — apps/web/src/runtime-store.tsx [0 evidence]
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action read `src/application/mod.rs`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Completed inspect
+  └ inspect failed: fatal: not a git repository (or any parent up to mount point /)
+    Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
+• Classified turn
+  └ planned
+• Classified turn
+  └ planned
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action inspect `git status --short`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Routed turn
+  └ model selected initial planner action read `apps/web/src/runtime-shell.css`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Routed turn
+  └ model selected initial planner action read `apps/web/src/runtime-shell.css`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Record the requested git commit.
+    □ Verify the commit and summarize the outcome.
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Step 1/10: read `src/application/mod.rs` — src/application/mod.rs [0 evidence]
+• Classified turn
+  └ planned
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action read `src/two.rs`; turn will use planner lane 'planner' with gatherer backend 'sift-direct' (SiftDirect) before synthesizer lane 'synth'
+• Routed turn
+  └ model selected initial planner action read `apps/web/src/runtime-shell.css`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Step 1/6: inspect `git status --short` — git status --short [0 evidence]
+• Ran inspect
+  └ git status --short
+• Step 1/10: read `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [0 evidence]
+test application::tests::synthesizer_only_turns_receive_planner_declared_grounding_handoff ... ok
+• Step 1/10: read `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [0 evidence]
+• Step 1/10: read `src/two.rs` — src/two.rs [0 evidence]
+• Step 1/10: read `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [0 evidence]
+• Planner step 1: read `apps/web/src/runtime-shell.css`
+  └ Rationale: known edit turn; action produces information, so read `apps/web/src/runtime-shell.css` before broader planning
+• Planner step 2: stop (refusal)
+  └ Rationale: the user requested disallowed automotive repair instructions
+• Planner step 2: read `src/application/mod.rs`
+  └ Rationale: read the likely target file before more retrieval
+• Planner step 1: read `apps/web/src/runtime-shell.css`
+  └ Rationale: known edit turn; action produces information, so read `apps/web/src/runtime-shell.css` before broader planning
+• Planner step 2: stop (model selected answer)
+  └ Rationale: the user asked for general troubleshooting advice, so the loop can end without synthesis
+• Step 2/12: stop (workspace read was enough) — workspace read was enough [1 evidence]
+• Updated Plan
+  └ ✓ Carry the remaining turn work to completion and summarize the result.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=2, steps=2, stop=workspace read was enough, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• inspect stdout
+  └  M src/application/mod.rs
+• allowed inspect via terminal_runner
+  └ requires [run_workspace_command] (run `inspect` command `git status --short`) | reason: terminal_runner allowed under `workspace_write` sandbox | requested_reuse=command_prefix | prefix=git status --short
+• Step 2/12: stop (refusal) — refusal [0 evidence]
+• Classified turn
+  └ planned
+• Updated Plan
+  └ ✓ Carry the remaining turn work to completion and summarize the result.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=2, steps=2, stop=refusal, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Routed turn
+  └ model selected initial planner action read `apps/web/src/runtime-shell.css`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Ran read
+  └ read `apps/web/src/runtime-store.tsx`
+• Step 1/10: read `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [0 evidence]
+• Step 2/10: read `src/application/mod.rs` — src/application/mod.rs [2 evidence]
+• Completed inspect
+  └ inspection completed
+• Ran read
+  └ read `src/application/mod.rs`
+• Ran read
+  └ read `src/application/mod.rs`
+• Step 2/12: stop (model selected answer) — model selected answer [0 evidence]
+• Classified turn
+  └ planned
+• Routed turn
+  └ model selected initial planner action read `apps/web/src/runtime-shell.css`; turn will use planner lane 'planner' and synthesizer lane 'synth' with no dedicated gatherer backend configured
+• Updated Plan
+  └ □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Updated Plan
+  └ ✓ Carry the remaining turn work to completion and summarize the result.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=2, steps=2, stop=model selected answer, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Ran read
+  └ read `src/two.rs`
+• Ran read
+  └ read `apps/web/src/runtime-shell.css`
+• Step 1/10: read `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [0 evidence]
+test application::tests::planner_workspace_actions_route_through_application_owned_executor_boundary ... ok
+• Ran read
+  └ read `apps/web/src/runtime-shell.css`
+• Ran read
+  └ read `apps/web/src/runtime-shell.css`
+• Completed read
+  └ executed read `apps/web/src/runtime-store.tsx`
+test application::tests::planner_workspace_actions_emit_governance_decision_events ... ok
+• Completed read
+  └ executed read `src/application/mod.rs`
+• Fell back
+  └ premise-challenge: Reviewed `inspect `git diff -- src/application/mod.rs`` and kept the same action after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=premise-challenge: Reviewed `inspect `git diff -- src/application/mod.rs`` and kept the same action after judging the current sources. · premise-challenge: Reviewed `inspect `git diff -- src/application/mod.rs`` and kept the same action after judging the current sources.
+test application::tests::external_capability_actions_remain_useful_when_the_fabric_is_disabled ... ok
+• Completed read
+  └ executed read `src/application/mod.rs`
+• Completed read
+  └ executed read `apps/web/src/runtime-shell.css`
+• Completed read
+  └ executed read `src/two.rs`
+• Completed read
+  └ executed read `apps/web/src/runtime-shell.css`
+• Completed read
+  └ executed read `apps/web/src/runtime-shell.css`
+test application::tests::workspace_editor_edits_emit_applied_edit_events ... ok
+test application::tests::external_capability_actions_fail_closed_when_governance_blocks_network_access ... ok
+test application::tests::recursive_refusals_render_policy_violation_without_synthesizer_rewrite ... ok
+test application::tests::external_capability_actions_route_through_discovery_governance_and_evidence ... ok
+• Fell back
+  └ action-bias: Reviewed `read `apps/web/src/runtime-app.tsx`` and kept the same action after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: Reviewed `read `apps/web/src/runtime-app.tsx`` and kept the same action after judging the current sources. · action-bias: Reviewed `read `apps/web/src/runtime-app.tsx`` and kept the same action after judging the current sources.
+• Planner step 3: stop (enough information)
+  └ Rationale: stop after acting
+test application::tests::inspect_actions_emit_tool_execution_events ... ok
+• Planner step 2: stop (the file was enough)
+  └ Rationale: stop after the read
+test application::tests::planner_stop_answers_render_directly_without_synthesizer_rewrite ... ok
+• Planner step 2: stop (done)
+  └ Rationale: stop
+• Planner step 2: stop (model selected answer)
+  └ Rationale: describe the requested edit
+test application::tests::execution_mode_remains_the_default_mutation_path ... ok
+• Planner step 2: replace text in `apps/web/src/runtime-shell.css`
+  └ Rationale: apply the requested padding change
+• Fell back
+  └ action-bias: Replaced `read `apps/web/src/runtime-shell.css`` with `stop (model selected answer)` after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: Replaced `read `apps/web/src/runtime-shell.css`` with `stop (model selected answer)` after judging the current sources. · action-bias: Replaced `read `apps/web/src/runtime-shell.css`` with `stop (model selected answer)` after judging the current sources.
+• Ran read
+  └ read `apps/web/src/runtime-shell.css`
+test application::tests::shell_actions_stream_terminal_output_before_completion ... ok
+• Ran read
+  └ read `apps/web/src/runtime-shell.css`
+• Completed read
+  └ executed read `apps/web/src/runtime-shell.css`
+• Step 3/10: stop (enough information) — enough information [3 evidence]
+• Planner step 2: inspect `git diff -- src/application/mod.rs`
+  └ Rationale: premise review kept the same diff inspection because the workspace is dirty
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs
+• Step 2/10: stop (the file was enough) — the file was enough [1 evidence]
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs, README.md
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs, README.md · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs, README.md
+• Completed read
+  └ executed read `apps/web/src/runtime-shell.css`
+• Step 2/10: stop (done) — done [1 evidence]
+• Step 2/10: stop (model selected answer) — model selected answer [1 evidence]
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/two.rs, src/one.rs
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/two.rs, src/one.rs · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/two.rs, src/one.rs
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+test application::tests::review_mode_bootstraps_local_diff_and_carries_findings_first_handoff ... ok
+• Step 2/10: replace text in `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [1 evidence]
+• Ran replace_in_file
+  └ replace text in `apps/web/src/runtime-shell.css`
+test application::tests::diagnostic_turn_requests_recursive_evidence_review_before_stopping ... ok
+test application::tests::planning_mode_explores_read_only_then_requests_bounded_clarification_before_mutation ... ok
+• Planner step 2: read `apps/web/src/runtime-app.tsx`
+  └ Rationale: the action-bias review still allows reading the app shell
+• Planner step 2: stop (model selected answer)
+  └ Rationale: describe the requested padding edit
+test application::tests::diagnostic_turn_stops_after_sources_weaken_failure_premise ... ok
+test application::tests::repo_scoped_followups_bootstrap_a_grounding_probe_before_direct_answer ... ok
+test application::tests::diagnostic_turn_stops_after_plain_ci_listing_shows_no_failure ... ok
+• Planner step 2: stop (the file was enough)
+  └ Rationale: stop after the read
+• Planner step 2: stop (model selected answer)
+  └ Rationale: describe the requested edit
+• Applied replace_in_file
+  └ files: apps/web/src/runtime-shell.css
+  └ change: +1 -1
+  └ --- a/apps/web/src/runtime-shell.css
+    +++ b/apps/web/src/runtime-shell.css
+    @@
+    -padding: 0;
+    …
+• Updated Plan
+  └ ✓ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Planner step 3: stop (model selected answer)
+  └ Rationale: the requested edit is complete
+test application::tests::synthesizer_only_turns_receive_recent_turns_and_thread_summary_handoff ... ok
+• Step 2/6: inspect `git diff -- src/application/mod.rs` — git diff -- src/application/mod.rs [1 evidence]
+• Ran inspect
+  └ git diff -- src/application/mod.rs
+• Step 2/10: read `apps/web/src/runtime-app.tsx` — apps/web/src/runtime-app.tsx [1 evidence]
+• Step 2/10: stop (model selected answer) — model selected answer [1 evidence]
+• Ran read
+  └ read `apps/web/src/runtime-app.tsx`
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Step 2/10: stop (the file was enough) — the file was enough [1 evidence]
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Step 3/10: stop (model selected answer) — model selected answer [2 evidence]
+• Step 2/10: stop (model selected answer) — model selected answer [1 evidence]
+• Updated Plan
+  └ ✓ Apply the requested repository change.
+    ✓ Verify the change and summarize the outcome.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=3, steps=3, stop=model selected answer, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Completed read
+  └ executed read `apps/web/src/runtime-app.tsx`
+• inspect stdout
+  └ diff --git a/src/application/mod.rs b/src/application/mod.rs
+    index c9d5dd6..45b48cd 100644
+    --- a/src/application/mod.rs
+    +++ b/src/application/mod.rs
+    @@ -1 +1 @@
+    -pub fn runtime_mode() -> &'static str { "before" }
+    …
+• allowed inspect via terminal_runner
+  └ requires [run_workspace_command] (run `inspect` command `git diff -- src/application/mod.rs`) | reason: terminal_runner allowed under `workspace_write` sandbox | requested_reuse=command_prefix | prefix=git diff -- src/application/mod.rs
+test application::tests::process_prompt_assembles_interpretation_before_model_selected_initial_action ... ok
+• Fell back
+  └ action-bias: Reviewed `read `apps/web/src/runtime-store.tsx`` and kept the same action after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: Reviewed `read `apps/web/src/runtime-store.tsx`` and kept the same action after judging the current sources. · action-bias: Reviewed `read `apps/web/src/runtime-store.tsx`` and kept the same action after judging the current sources.
+• Completed inspect
+  └ inspection completed
+test application::tests::edit_turns_can_complete_after_a_successful_write ... ok
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Fell back
+  └ action-bias: Replaced `stop (model selected answer)` with `git commit -am "Clarify premise challenge containment signals"` after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: Replaced `stop (model selected answer)` with `git commit -am "Clarify premise challenge containment signals"` after judging the current sources. · action-bias: Replaced `stop (model selected answer)` with `git commit -am "Clarify premise challenge containment signals"` after judging the current sources.
+• Planner step 4: stop (enough information)
+  └ Rationale: stop after acting
+• Planner step 3: stop (the file was enough)
+  └ Rationale: stop after the read
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Planner step 3: stop (done)
+  └ Rationale: stop
+• Planner step 3: stop (model selected answer)
+  └ Rationale: describe the requested edit
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    □ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Fell back
+  └ replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence · replan: pending edit remained open after instruction unsatisfied; extending planner budget to 20 steps, 8 reads, 6 inspects, and 4 searches while continuing from current evidence
+• Planner step 3: read `apps/web/src/runtime-store.tsx`
+  └ Rationale: the action-bias review still allows reading the runtime store
+• Step 4/20: stop (enough information) — enough information [3 evidence]
+• Step 3/20: stop (the file was enough) — the file was enough [1 evidence]
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs, README.md
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs, README.md · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/application/mod.rs, README.md
+• Step 3/20: stop (done) — done [1 evidence]
+• Step 3/20: stop (model selected answer) — model selected answer [1 evidence]
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/two.rs, src/one.rs
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/two.rs, src/one.rs · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: src/two.rs, src/one.rs
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Planner step 3: stop (model selected answer)
+  └ Rationale: describe the requested padding edit
+• Planner step 3: git commit -am "Clarify premise challenge containment signals"
+  └ Rationale: the commit-bias review should hand the turn to git commit now
+test application::tests::recursive_search_requests_graph_mode_and_surfaces_graph_trace_summary ... ok
+• Planner step 3: stop (the file was enough)
+  └ Rationale: stop after the read
+• Fell back
+  └ action-bias: Replaced `stop (model selected answer)` with `replace text in `apps/web/src/runtime-shell.css`` after judging the current sources.
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=action-bias: Replaced `stop (model selected answer)` with `replace text in `apps/web/src/runtime-shell.css`` after judging the current sources. · action-bias: Replaced `stop (model selected answer)` with `replace text in `apps/web/src/runtime-shell.css`` after judging the current sources.
+• Step 3/10: read `apps/web/src/runtime-store.tsx` — apps/web/src/runtime-store.tsx [2 evidence]
+• Ran read
+  └ read `apps/web/src/runtime-store.tsx`
+• Completed read
+  └ executed read `apps/web/src/runtime-store.tsx`
+• Step 3/20: stop (model selected answer) — model selected answer [1 evidence]
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Step 3/6: git commit -am "Clarify premise challenge containment signals" — git commit -am "Clarify premise challenge containment signals" [2 evidence]
+• Ran shell command
+  └ git commit -am "Clarify premise challenge containment signals"
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=3, steps=3, stop=workspace-editor-boundary, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=4, steps=4, stop=workspace-editor-boundary, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Step 3/20: stop (the file was enough) — the file was enough [1 evidence]
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=3, steps=3, stop=workspace-editor-boundary, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Fell back
+  └ instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=3, steps=3, stop=workspace-editor-boundary, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Governor: governor
+  └ status=intervening · watch=nominal · intervention=instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css · instruction-manifold: Instruction manifold [applied-edit]
+    User requested an applied repository edit. Recommendation text is not completion. Hand the turn to the workspace editor and apply a workspace change before finishing. Candidate files: apps/web/src/runtime-shell.css
+• Planner step 4: replace text in `apps/web/src/runtime-shell.css`
+  └ Rationale: apply the requested padding change
+• Planner step 3: replace text in `apps/web/src/runtime-shell.css`
+  └ Rationale: the replan should now hand the turn to the workspace editor
+• shell stdout
+  └ [main 55eb4c0] Clarify premise challenge containment signals
+     1 file changed, 1 insertion(+), 1 deletion(-)
+• allowed shell via terminal_runner
+  └ requires [run_workspace_command] (run `shell` command `git commit -am "Clarify premise challenge containment signals"`) | reason: terminal_runner allowed under `workspace_write` sandbox | requested_reuse=command_prefix | prefix=git commit -am "Clarify
+• Step 4/10: replace text in `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [2 evidence]
+• Completed shell
+  └ command completed
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=3, steps=3, stop=workspace-editor-boundary, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Ran replace_in_file
+  └ replace text in `apps/web/src/runtime-shell.css`
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=3, steps=3, stop=workspace-editor-boundary, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Step 3/20: replace text in `apps/web/src/runtime-shell.css` — apps/web/src/runtime-shell.css [1 evidence]
+• Ran replace_in_file
+  └ replace text in `apps/web/src/runtime-shell.css`
+• Applied replace_in_file
+  └ files: apps/web/src/runtime-shell.css
+  └ change: +1 -1
+  └ --- a/apps/web/src/runtime-shell.css
+    +++ b/apps/web/src/runtime-shell.css
+    @@
+    -padding: 0;
+    …
+• Updated Plan
+  └ ✓ Record the requested git commit.
+    □ Verify the commit and summarize the outcome.
+• Updated Plan
+  └ ✓ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Planner step 4: stop (model selected answer)
+  └ Rationale: the requested commit is complete
+• Planner step 5: stop (model selected answer)
+  └ Rationale: the requested edit is complete
+• Applied replace_in_file
+  └ files: apps/web/src/runtime-shell.css
+  └ change: +1 -1
+  └ --- a/apps/web/src/runtime-shell.css
+    +++ b/apps/web/src/runtime-shell.css
+    @@
+    -padding: 0;
+    …
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    ✓ Apply the requested repository change.
+    □ Verify the change and summarize the outcome.
+• Planner step 4: stop (model selected answer)
+  └ Rationale: the requested edit is complete
+test application::tests::known_edit_initial_decision_bootstraps_to_a_file_read ... ok
+test application::tests::action_bias_reads_best_candidate_after_initial_search ... ok
+test application::tests::known_edit_bootstrap_uses_vector_evidence_to_pick_the_best_candidate ... ok
+test application::tests::edit_turns_do_not_complete_with_advice_only_stop_answers ... ok
+• Step 4/6: stop (model selected answer) — model selected answer [3 evidence]
+• Step 5/10: stop (model selected answer) — model selected answer [3 evidence]
+• Updated Plan
+  └ ✓ Record the requested git commit.
+    ✓ Verify the commit and summarize the outcome.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=4, steps=4, stop=model selected answer, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Updated Plan
+  └ ✓ Apply the requested repository change.
+    ✓ Verify the change and summarize the outcome.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=5, steps=5, stop=model selected answer, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+• Step 4/20: stop (model selected answer) — model selected answer [2 evidence]
+• Updated Plan
+  └ ✓ Replanned from current evidence after instruction unsatisfied.
+    ✓ Apply the requested repository change.
+    ✓ Verify the change and summarize the outcome.
+• Reviewed planner trace
+  └ strategy=model-driven, mode=linear, turns=4, steps=4, stop=model selected answer, active=none, branches=n/a, frontier=n/a, nodes=n/a, edges=n/a, retained=n/a
+• Synthesized direct answer
+  └ No repository citations required for this turn.
+test application::tests::recursive_edit_signals_promote_turns_into_edit_obligations ... ok
+test application::tests::known_edit_turns_can_spend_multiple_candidate_reads_before_applying_a_patch ... ok
+test application::tests::commit_turns_review_stop_answers_into_git_commit_actions ... ok
+test application::tests::controller_infers_known_edit_from_prompt_without_provider_signal ... ok
+test application::tests::edit_turn_stop_answers_replan_into_workspace_editor_actions ... ok
+test application::tests::known_edit_turns_can_replan_after_budget_exhaustion_and_still_apply_a_patch ... ok
+
+test result: ok. 113 passed; 0 failed; 0 ignored; 0 measured; 526 filtered out; finished in 1.70s
+
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-368fd65f357d3f27)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+

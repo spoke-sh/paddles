@@ -27,11 +27,11 @@ started_at: 2026-04-21T22:35:24
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Extract Chamber-Aligned Turn Services From MechSuitService](../../../../stories/VHUSCJwQG/README.md) | refactor | done |
-| [Move Conversation Projections Into An Application Read Model](../../../../stories/VHUSCtMpx/README.md) | refactor | backlog |
+| [Move Conversation Projections Into An Application Read Model](../../../../stories/VHUSCtMpx/README.md) | refactor | done |
 | [Move Runtime Event Presentation Out Of The Domain Model](../../../../stories/VHUSDTFaN/README.md) | refactor | backlog |
 <!-- END GENERATED -->

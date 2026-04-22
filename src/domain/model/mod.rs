@@ -7,21 +7,28 @@ pub mod control;
 pub mod delegation;
 pub mod execution_hand;
 pub mod external_capability;
-pub mod forensics;
 pub mod generative;
 pub mod harness;
 pub mod harness_projector;
 pub mod instructions;
 pub mod interpretation;
-pub mod manifold;
 pub mod native_transport;
-pub mod projection;
 pub mod render;
 pub mod runtime_events;
 pub mod threading;
 pub mod traces;
-pub mod transcript;
 pub mod turns;
+pub use crate::application::read_model::{
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
+    ConversationTraceGraphEdge, ConversationTraceGraphNode, ConversationTranscript,
+    ConversationTranscriptEntry, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
+    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
+    ManifoldConduitState, ManifoldFrame, ManifoldGateState, ManifoldPrimitiveBasis,
+    ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
+    NullForensicUpdateSink, NullTranscriptUpdateSink, TranscriptUpdateSink,
+};
 pub use collaboration::{
     CollaborationClarificationPolicy, CollaborationMode, CollaborationModeRequest,
     CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
@@ -65,10 +72,6 @@ pub use external_capability::{
     ExternalCapabilityResult, ExternalCapabilityResultStatus, ExternalCapabilitySideEffectPosture,
     ExternalCapabilitySourceRecord, default_external_capability_descriptors,
 };
-pub use forensics::{
-    ConversationForensicProjection, ConversationForensicUpdate, ForensicLifecycle,
-    ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, NullForensicUpdateSink,
-};
 pub use generative::{AuthoredResponse, ResponseMode};
 pub use harness::{
     GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, TimeoutPhase, TimeoutState,
@@ -83,10 +86,6 @@ pub use interpretation::{
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
 };
-pub use manifold::{
-    ConversationManifoldProjection, ManifoldConduitState, ManifoldFrame, ManifoldPrimitiveBasis,
-    ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
-};
 pub use native_transport::{
     NativeTransportAuth, NativeTransportAuthMode, NativeTransportCapability,
     NativeTransportChannel, NativeTransportConfiguration, NativeTransportConfigurations,
@@ -99,11 +98,6 @@ pub use paddles_conversation::{
     ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
     TurnTraceId,
-};
-pub use projection::{
-    ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
-    ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
-    ConversationTraceGraphEdge, ConversationTraceGraphNode,
 };
 pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
 pub use runtime_events::{
@@ -118,10 +112,6 @@ pub use traces::{
     TraceRecordKind, TraceReplay, TraceSelectionArtifact, TraceSelectionKind,
     TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
     TraceTurnStarted, TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
-};
-pub use transcript::{
-    ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
-    ConversationTranscriptUpdate, NullTranscriptUpdateSink, TranscriptUpdateSink,
 };
 pub use turns::{
     AppliedEdit, ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink,

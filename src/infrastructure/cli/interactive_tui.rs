@@ -1,9 +1,11 @@
-use crate::application::{ConversationSession, MechSuitService, RuntimeLaneConfig};
+use crate::application::{
+    ConversationSession, ConversationTranscript, ConversationTranscriptSpeaker,
+    ConversationTranscriptUpdate, MechSuitService, RuntimeLaneConfig, TranscriptUpdateSink,
+};
 use crate::domain::model::render::uses_compact_block_separator;
 use crate::domain::model::{
-    ConversationTranscript, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
-    RenderBlock, RenderDocument, RuntimeEventPresentation, RuntimeItem, ThreadCandidate,
-    TranscriptUpdateSink, TurnEvent, TurnEventSink, project_runtime_event_for_tui,
+    RenderBlock, RenderDocument, RuntimeEventPresentation, RuntimeItem, ThreadCandidate, TurnEvent,
+    TurnEventSink, project_runtime_event_for_tui,
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;

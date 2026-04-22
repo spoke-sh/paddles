@@ -1,10 +1,12 @@
-use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
-use super::generative::ResponseMode;
-use super::render::RenderDocument;
-use super::traces::{
+use crate::domain::model::execution_hand::{
+    ExecutionGovernanceDecision, ExecutionGovernanceSnapshot,
+};
+use crate::domain::model::generative::ResponseMode;
+use crate::domain::model::render::RenderDocument;
+use crate::domain::model::traces::{
     TraceRecordKind, TraceReplay, TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
 };
-use super::{ControlResult, ControlSubject, trace_control_result};
+use crate::domain::model::{ControlResult, ControlSubject, trace_control_result};
 use paddles_conversation::{ArtifactEnvelope, TaskTraceId, TraceRecordId, TurnTraceId};
 use serde::{Deserialize, Serialize};
 

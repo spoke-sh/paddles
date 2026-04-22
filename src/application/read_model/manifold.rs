@@ -1,8 +1,8 @@
-use super::{
-    ArtifactEnvelope, ConversationForensicProjection, ForensicLifecycle, SteeringGateKind,
-    SteeringGatePhase, TaskTraceId, TraceLineageNodeKind, TraceLineageNodeRef, TraceRecordId,
-    TraceRecordKind, TraceReplay, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TurnTraceId,
+use super::{ConversationForensicProjection, ForensicLifecycle};
+use crate::domain::model::{
+    ArtifactEnvelope, SteeringGateKind, SteeringGatePhase, TaskTraceId, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceRecordId, TraceRecordKind, TraceReplay, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TurnTraceId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

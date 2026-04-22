@@ -1,11 +1,23 @@
 mod conversation_read_model;
 mod interpretation_chamber;
+pub mod read_model;
 mod recursive_control;
 mod synthesis_chamber;
 mod turn_orchestration;
 
 use self::conversation_read_model::ConversationReadModelChamber;
 use self::interpretation_chamber::InterpretationChamber;
+pub use self::read_model::{
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
+    ConversationTraceGraphEdge, ConversationTraceGraphNode, ConversationTranscript,
+    ConversationTranscriptEntry, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
+    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
+    ManifoldConduitState, ManifoldFrame, ManifoldGateState, ManifoldPrimitiveBasis,
+    ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
+    NullForensicUpdateSink, NullTranscriptUpdateSink, TranscriptUpdateSink,
+};
 use self::recursive_control::RecursiveControlChamber;
 use self::synthesis_chamber::SynthesisChamber;
 use self::turn_orchestration::TurnOrchestrationChamber;
@@ -37,25 +49,21 @@ use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CollaborationMode,
     CollaborationModeRequest, CollaborationModeRequestTarget, CollaborationModeResult,
     CompactionDecision, CompactionPlan, ControlOperation, ControlResult, ControlResultStatus,
-    ControlSubject, ConversationForensicProjection, ConversationForensicUpdate,
-    ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
-    ConversationProjectionUpdateKind, ConversationThreadRef, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ExecutionGovernanceDecision,
-    ExecutionGovernanceOutcome, ExecutionHandDiagnostic, ExecutionPermissionRequest,
-    ExternalCapabilityDescriptor, ExternalCapabilityInvocation, ExternalCapabilityResultStatus,
-    ExternalCapabilitySourceRecord, ForensicArtifactCapture, ForensicTraceSink, ForensicUpdateSink,
-    InstructionFrame, InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic,
-    PlanChecklistItem, PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase,
-    StrainFactor, StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
-    StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
-    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
-    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
-    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
-    TraceRecord, TraceRecordId, TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind,
-    TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall,
-    TraceTurnStarted, TranscriptUpdateSink, TurnControlOperation, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    ControlSubject, ConversationThreadRef, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
+    ExecutionHandDiagnostic, ExecutionPermissionRequest, ExternalCapabilityDescriptor,
+    ExternalCapabilityInvocation, ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord,
+    ForensicArtifactCapture, ForensicTraceSink, InstructionFrame, InstructionIntent,
+    MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem, PlanChecklistItemStatus,
+    ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor, StrainLevel,
+    StructuredClarificationKind, StructuredClarificationOption, StructuredClarificationRequest,
+    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
+    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
+    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
+    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
+    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
+    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
+    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
+    TurnControlOperation, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 #[cfg(test)]
 use crate::domain::model::{
@@ -2457,7 +2465,7 @@ impl MechSuitService {
         &self,
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
-    ) -> Result<Option<crate::domain::model::ForensicTurnProjection>> {
+    ) -> Result<Option<ForensicTurnProjection>> {
         self.conversation_read_model()
             .replay_turn_forensics(task_id, turn_id)
     }
@@ -2474,7 +2482,7 @@ impl MechSuitService {
         &self,
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
-    ) -> Result<Option<crate::domain::model::ManifoldTurnProjection>> {
+    ) -> Result<Option<ManifoldTurnProjection>> {
         self.conversation_read_model()
             .replay_turn_manifold(task_id, turn_id)
     }
@@ -10888,6 +10896,22 @@ mod tests {
     }
 
     #[test]
+    fn application_read_model_exports_projection_types() {
+        let task_id = TaskTraceId::new("task-1").expect("task");
+        let replay = crate::domain::model::TraceReplay {
+            task_id: task_id.clone(),
+            records: Vec::new(),
+        };
+
+        let transcript = crate::application::ConversationTranscript::from_trace_replay(&replay);
+        let snapshot =
+            crate::application::ConversationProjectionSnapshot::from_trace_replay(&replay);
+
+        assert_eq!(transcript.task_id, task_id);
+        assert_eq!(snapshot.task_id, task_id);
+    }
+
+    #[test]
     fn replay_conversation_transcript_projects_prompt_and_completion_records() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
@@ -11247,11 +11271,11 @@ mod tests {
             .expect("projection transcript update");
         assert_eq!(
             transcript_projection_update.kind,
-            crate::domain::model::ConversationProjectionUpdateKind::Transcript
+            crate::application::ConversationProjectionUpdateKind::Transcript
         );
         assert_eq!(
             transcript_projection_update.reducer,
-            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+            crate::application::ConversationProjectionReducer::ReplaceSnapshot
         );
         assert_eq!(transcript_projection_update.version, expected.version());
         assert_eq!(transcript_projection_update.snapshot, expected);
@@ -11266,11 +11290,11 @@ mod tests {
             .expect("projection forensic update");
         assert_eq!(
             forensic_projection_update.kind,
-            crate::domain::model::ConversationProjectionUpdateKind::Forensic
+            crate::application::ConversationProjectionUpdateKind::Forensic
         );
         assert_eq!(
             forensic_projection_update.reducer,
-            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+            crate::application::ConversationProjectionReducer::ReplaceSnapshot
         );
         assert_eq!(forensic_projection_update.version, expected.version());
         assert_eq!(forensic_projection_update.snapshot, expected);

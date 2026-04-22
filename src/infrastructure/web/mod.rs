@@ -1,13 +1,14 @@
-use crate::application::MechSuitService;
-use crate::domain::model::{
+use crate::application::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ExecutionHandDiagnostic,
-    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
-    ManifoldFrame, ManifoldTurnProjection, NativeTransportConfigurations,
-    NativeTransportDiagnostic, NativeTransportKind, NativeTransportSessionIdentity,
-    RuntimeEventPresentation, RuntimeItem, TaskTraceId, TranscriptUpdateSink, TurnEvent,
-    TurnEventSink, TurnTraceId, project_runtime_event,
+    ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
+    ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
+    ManifoldTurnProjection, MechSuitService, TranscriptUpdateSink,
+};
+use crate::domain::model::{
+    ExecutionHandDiagnostic, NativeTransportConfigurations, NativeTransportDiagnostic,
+    NativeTransportKind, NativeTransportSessionIdentity, RuntimeEventPresentation, RuntimeItem,
+    TaskTraceId, TurnEvent, TurnEventSink, TurnTraceId, project_runtime_event,
 };
 use crate::domain::ports::TraceRecorder;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
@@ -1179,11 +1180,11 @@ mod tests {
     use crate::domain::model::{
         ArtifactKind, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
         ConversationForensicUpdate, ConversationProjectionUpdateKind,
-        ConversationTranscriptSpeaker, ConversationTranscriptUpdate, ForensicUpdateSink,
-        TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceLineageNodeKind,
-        TraceLineageNodeRef, TraceModelExchangeArtifact, TraceModelExchangeCategory,
-        TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-        TraceRecordKind, TraceReplay, TraceSignalContribution, TraceSignalKind,
+        ConversationTranscriptSpeaker, ConversationTranscriptUpdate, ForensicLifecycle,
+        ForensicUpdateSink, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
+        TraceLineageNodeKind, TraceLineageNodeRef, TraceModelExchangeArtifact,
+        TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TraceRecord,
+        TraceRecordId, TraceRecordKind, TraceReplay, TraceSignalContribution, TraceSignalKind,
         TraceSignalSnapshot, TranscriptUpdateSink, TurnControlOperation, TurnEventSink,
     };
     use crate::domain::ports::{
@@ -1803,14 +1804,18 @@ mod tests {
                 .iter()
                 .any(|record| record.record.record_id == latest_record_id)
         );
-        assert!(conversation.turns[0].records.iter().any(|record| matches!(
-            record.lifecycle,
-            crate::domain::model::ForensicLifecycle::Superseded
-        )));
-        assert!(conversation.turns[0].records.iter().any(|record| matches!(
-            record.lifecycle,
-            crate::domain::model::ForensicLifecycle::Final
-        )));
+        assert!(
+            conversation.turns[0]
+                .records
+                .iter()
+                .any(|record| matches!(record.lifecycle, ForensicLifecycle::Superseded))
+        );
+        assert!(
+            conversation.turns[0]
+                .records
+                .iter()
+                .any(|record| matches!(record.lifecycle, ForensicLifecycle::Final))
+        );
 
         let Json(ForensicTurnProjectionResponse(turn)) = turn_forensics(
             State(state),
@@ -1995,7 +2000,7 @@ mod tests {
         );
         assert_eq!(
             transcript_payload.reducer,
-            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+            crate::application::ConversationProjectionReducer::ReplaceSnapshot
         );
         assert_eq!(transcript_payload.task_id, task_id);
         assert_eq!(
@@ -2027,7 +2032,7 @@ mod tests {
         );
         assert_eq!(
             forensic_payload.reducer,
-            crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot
+            crate::application::ConversationProjectionReducer::ReplaceSnapshot
         );
         assert_eq!(forensic_payload.task_id, task_id);
         assert_eq!(forensic_payload.forensic_update, Some(forensic_update));

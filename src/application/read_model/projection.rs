@@ -1,7 +1,9 @@
 use super::{
-    ConversationDelegationProjection, ConversationForensicProjection, ConversationForensicUpdate,
-    ConversationManifoldProjection, ConversationTranscript, ConversationTranscriptUpdate,
-    TaskTraceId, TraceRecordKind, TraceReplay,
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationTranscript, ConversationTranscriptUpdate,
+};
+use crate::domain::model::{
+    ConversationDelegationProjection, TaskTraceId, TraceRecordKind, TraceReplay,
 };
 use serde::{Deserialize, Serialize};
 

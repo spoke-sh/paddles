@@ -59,7 +59,7 @@ impl<'a> ConversationReadModelChamber<'a> {
         &self,
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
-    ) -> Result<Option<crate::domain::model::ForensicTurnProjection>> {
+    ) -> Result<Option<ForensicTurnProjection>> {
         Ok(self.replay_conversation_forensics(task_id)?.turn(turn_id))
     }
 
@@ -80,7 +80,7 @@ impl<'a> ConversationReadModelChamber<'a> {
         &self,
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
-    ) -> Result<Option<crate::domain::model::ManifoldTurnProjection>> {
+    ) -> Result<Option<ManifoldTurnProjection>> {
         Ok(self.replay_conversation_manifold(task_id)?.turn(turn_id))
     }
 
@@ -139,7 +139,7 @@ impl<'a> ConversationReadModelChamber<'a> {
         Ok(ConversationProjectionUpdate {
             task_id: update.task_id.clone(),
             kind: ConversationProjectionUpdateKind::Transcript,
-            reducer: crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot,
+            reducer: ConversationProjectionReducer::ReplaceSnapshot,
             version: snapshot.version(),
             transcript_update: Some(update.clone()),
             forensic_update: None,
@@ -155,7 +155,7 @@ impl<'a> ConversationReadModelChamber<'a> {
         Ok(ConversationProjectionUpdate {
             task_id: update.task_id.clone(),
             kind: ConversationProjectionUpdateKind::Forensic,
-            reducer: crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot,
+            reducer: ConversationProjectionReducer::ReplaceSnapshot,
             version: snapshot.version(),
             transcript_update: None,
             forensic_update: Some(update.clone()),
