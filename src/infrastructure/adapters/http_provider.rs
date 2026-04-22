@@ -896,7 +896,7 @@ impl HttpProviderAdapter {
             "messages": messages,
             "max_completion_tokens": OPENAI_MAX_COMPLETION_TOKENS,
         });
-        self.apply_openai_reasoning_effort(&mut body);
+        self.apply_openai_chat_thinking_controls(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -1070,7 +1070,7 @@ impl HttpProviderAdapter {
                 }
             }
         });
-        self.apply_openai_reasoning_effort(&mut body);
+        self.apply_openai_chat_thinking_controls(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -1135,7 +1135,7 @@ impl HttpProviderAdapter {
                 }
             }
         });
-        self.apply_openai_reasoning_effort(&mut body);
+        self.apply_openai_chat_thinking_controls(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -1204,20 +1204,46 @@ impl HttpProviderAdapter {
             .unwrap_or_else(|| self.model_id.clone())
     }
 
-    fn apply_openai_reasoning_effort(&self, body: &mut Value) {
+    fn runtime_model_thinking_mode(&self) -> Option<String> {
+        let provider = ModelProvider::from_name(&self.provider_name)?;
+        provider.runtime_model_thinking_mode(&self.model_id)
+    }
+
+    fn apply_openai_chat_thinking_controls(&self, body: &mut Value) {
         let Some(provider) = ModelProvider::from_name(&self.provider_name) else {
             return;
         };
-        let Some(reasoning_effort) = provider.runtime_model_thinking_mode(&self.model_id) else {
+        let Some(thinking_mode) = self.runtime_model_thinking_mode() else {
             return;
         };
         let Some(body_object) = body.as_object_mut() else {
             return;
         };
-        body_object.insert(
-            "reasoning_effort".to_string(),
-            Value::String(reasoning_effort),
-        );
+        match provider {
+            ModelProvider::Openai | ModelProvider::Inception => {
+                body_object.insert("reasoning_effort".to_string(), Value::String(thinking_mode));
+                if provider == ModelProvider::Inception {
+                    body_object.insert("reasoning_summary".to_string(), Value::Bool(true));
+                }
+            }
+            ModelProvider::Moonshot => {
+                let thinking_kind = if thinking_mode == "none" {
+                    "disabled"
+                } else {
+                    "enabled"
+                };
+                body_object.insert("thinking".to_string(), json!({ "type": thinking_kind }));
+            }
+            ModelProvider::Ollama => {
+                let think_value = match thinking_mode.as_str() {
+                    "none" => Value::Bool(false),
+                    "thinking" => Value::Bool(true),
+                    level => Value::String(level.to_string()),
+                };
+                body_object.insert("think".to_string(), think_value);
+            }
+            _ => {}
+        }
     }
 
     fn apply_openai_responses_reasoning_effort(&self, body: &mut Value) {
@@ -1238,6 +1264,39 @@ impl HttpProviderAdapter {
         );
     }
 
+    fn anthropic_thinking_payload(&self) -> Option<Value> {
+        match self.runtime_model_thinking_mode()?.as_str() {
+            "none" => None,
+            "low" => Some(json!({ "type": "enabled", "budget_tokens": 1024 })),
+            "medium" => Some(json!({ "type": "enabled", "budget_tokens": 4096 })),
+            "high" => Some(json!({ "type": "enabled", "budget_tokens": 8192 })),
+            _ => None,
+        }
+    }
+
+    fn apply_gemini_thinking_config(&self, body: &mut Value) {
+        let Some(thinking_mode) = self.runtime_model_thinking_mode() else {
+            return;
+        };
+        let Some(body_object) = body.as_object_mut() else {
+            return;
+        };
+        let thinking_config = match thinking_mode.as_str() {
+            "none" => json!({ "thinkingBudget": 0, "includeThoughts": false }),
+            "low" => json!({ "thinkingBudget": 1024, "includeThoughts": true }),
+            "medium" => json!({ "thinkingBudget": 8192, "includeThoughts": true }),
+            "high" => json!({ "thinkingBudget": 24576, "includeThoughts": true }),
+            _ => return,
+        };
+        let generation_config = body_object
+            .entry("generationConfig".to_string())
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        let Some(generation_config_object) = generation_config.as_object_mut() else {
+            return;
+        };
+        generation_config_object.insert("thinkingConfig".to_string(), thinking_config);
+    }
+
     async fn send_anthropic(
         &self,
         system: &str,
@@ -1248,16 +1307,29 @@ impl HttpProviderAdapter {
     ) -> Result<ProviderTurnResponse> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
         let messages = self.build_anthropic_messages(user, deliberation_state, tool_results)?;
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model_id,
             "max_tokens": 4096,
-            "thinking": {
-                "type": "enabled",
-                "budget_tokens": 1024,
-            },
             "system": system,
             "messages": messages,
         });
+        let thinking_payload = self.anthropic_thinking_payload();
+        if let Some(body_object) = body.as_object_mut()
+            && let Some(thinking_payload) = thinking_payload.clone()
+        {
+            body_object.insert("thinking".to_string(), thinking_payload);
+        }
+        let mut headers = vec![
+            ("x-api-key".to_string(), self.api_key.clone()),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+            ("Content-Type".to_string(), "application/json".to_string()),
+        ];
+        if thinking_payload.is_some() {
+            headers.push((
+                "anthropic-beta".to_string(),
+                "interleaved-thinking-2025-05-14".to_string(),
+            ));
+        }
 
         let assembled_context_id = capture
             .as_ref()
@@ -1266,15 +1338,7 @@ impl HttpProviderAdapter {
             .post_json_with_capture(
                 "Anthropic",
                 &url,
-                &[
-                    ("x-api-key".to_string(), self.api_key.clone()),
-                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
-                    (
-                        "anthropic-beta".to_string(),
-                        "interleaved-thinking-2025-05-14".to_string(),
-                    ),
-                    ("Content-Type".to_string(), "application/json".to_string()),
-                ],
+                &headers,
                 &body,
                 capture,
                 assembled_context_id,
@@ -1309,7 +1373,7 @@ impl HttpProviderAdapter {
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-        let body = json!({
+        let mut body = json!({
             "model": self.model_id,
             "max_tokens": 4096,
             "system": system,
@@ -1327,6 +1391,23 @@ impl HttpProviderAdapter {
                 "name": ANTHROPIC_RENDER_TOOL_NAME
             }
         });
+        let thinking_payload = self.anthropic_thinking_payload();
+        if let Some(body_object) = body.as_object_mut()
+            && let Some(thinking_payload) = thinking_payload.clone()
+        {
+            body_object.insert("thinking".to_string(), thinking_payload);
+        }
+        let mut headers = vec![
+            ("x-api-key".to_string(), self.api_key.clone()),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+            ("Content-Type".to_string(), "application/json".to_string()),
+        ];
+        if thinking_payload.is_some() {
+            headers.push((
+                "anthropic-beta".to_string(),
+                "interleaved-thinking-2025-05-14".to_string(),
+            ));
+        }
 
         let assembled_context_id = capture
             .as_ref()
@@ -1335,11 +1416,7 @@ impl HttpProviderAdapter {
             .post_json_with_capture(
                 "Anthropic",
                 &url,
-                &[
-                    ("x-api-key".to_string(), self.api_key.clone()),
-                    ("anthropic-version".to_string(), "2023-06-01".to_string()),
-                    ("Content-Type".to_string(), "application/json".to_string()),
-                ],
+                &headers,
                 &body,
                 capture,
                 assembled_context_id,
@@ -1379,7 +1456,7 @@ impl HttpProviderAdapter {
             self.api_key
         );
         let contents = self.build_gemini_contents(user, deliberation_state, tool_results)?;
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "system_instruction": { "parts": [{ "text": system }] },
             "contents": contents,
             "generationConfig": {
@@ -1388,6 +1465,7 @@ impl HttpProviderAdapter {
                 }
             }
         });
+        self.apply_gemini_thinking_config(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -1443,7 +1521,7 @@ impl HttpProviderAdapter {
             self.model_id,
             self.api_key
         );
-        let body = json!({
+        let mut body = json!({
             "system_instruction": { "parts": [{ "text": system }] },
             "contents": [{ "parts": [{ "text": user }] }],
             "generationConfig": {
@@ -1451,6 +1529,7 @@ impl HttpProviderAdapter {
                 "responseSchema": schema,
             }
         });
+        self.apply_gemini_thinking_config(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -4227,6 +4306,295 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn inception_thinking_mode_maps_to_reasoning_effort_and_summary() {
+        let workspace = setup_workspace_with_agents().expect("workspace");
+        let final_answer = &structured_answer_json("Mocked final answer.");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::OpenAi, final_answer),
+            },
+        ])
+        .await;
+
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Inception,
+            ApiFormat::OpenAi,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Inception)
+            .with_synthesizer_thinking_mode(Some("instant".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Inception,
+            ))
+            .with_planner_model_id(Some("mercury-2".to_string()));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let response = service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+        let requests = server.recorded_requests();
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(
+            requests[0].body["reasoning_effort"].as_str(),
+            Some("instant")
+        );
+        assert_eq!(requests[0].body["reasoning_summary"].as_bool(), Some(true));
+        assert_eq!(
+            requests[1].body["reasoning_effort"].as_str(),
+            Some("instant")
+        );
+        assert_eq!(requests[1].body["reasoning_summary"].as_bool(), Some(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn anthropic_none_thinking_mode_omits_extended_thinking_payload() {
+        let workspace = setup_workspace_with_agents().expect("workspace");
+        let final_answer = &structured_answer_json("Mocked final answer.");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::Anthropic, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::Anthropic, final_answer),
+            },
+        ])
+        .await;
+
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Anthropic,
+            ApiFormat::Anthropic,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("claude-sonnet-4-20250514".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Anthropic)
+            .with_synthesizer_thinking_mode(Some("none".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Anthropic,
+            ))
+            .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let response = service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+        let requests = server.recorded_requests();
+
+        assert_eq!(response, "Mocked final answer.");
+        assert!(requests[0].body.get("thinking").is_none());
+        assert!(requests[1].body.get("thinking").is_none());
+        assert!(!requests[0].headers.contains_key("anthropic-beta"));
+        assert!(!requests[1].headers.contains_key("anthropic-beta"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gemini_high_thinking_mode_maps_to_budgeted_thinking_config() {
+        let workspace = setup_workspace_with_agents().expect("workspace");
+        let final_answer = &structured_answer_json("Mocked final answer.");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::Gemini, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::Gemini, final_answer),
+            },
+        ])
+        .await;
+
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Google,
+            ApiFormat::Gemini,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("gemini-2.5-flash".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Google)
+            .with_synthesizer_thinking_mode(Some("high".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Google,
+            ))
+            .with_planner_model_id(Some("gemini-2.5-flash".to_string()));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let response = service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+        let requests = server.recorded_requests();
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(
+            requests[0].body["generationConfig"]["thinkingConfig"]["thinkingBudget"].as_i64(),
+            Some(24576)
+        );
+        assert_eq!(
+            requests[0].body["generationConfig"]["thinkingConfig"]["includeThoughts"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            requests[1].body["generationConfig"]["thinkingConfig"]["thinkingBudget"].as_i64(),
+            Some(24576)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn moonshot_k2_6_none_thinking_mode_maps_to_disabled_toggle() {
+        let workspace = setup_workspace_with_agents().expect("workspace");
+        let final_answer = &structured_answer_json("Mocked final answer.");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::OpenAi, final_answer),
+            },
+        ])
+        .await;
+
+        let service = http_test_service(
+            workspace.path(),
+            server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Moonshot,
+            ApiFormat::OpenAi,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("kimi-k2.6".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Moonshot)
+            .with_synthesizer_thinking_mode(Some("none".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Moonshot,
+            ))
+            .with_planner_model_id(Some("kimi-k2.6".to_string()));
+        service
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare runtime lanes");
+
+        let response = service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process prompt");
+        let requests = server.recorded_requests();
+
+        assert_eq!(response, "Mocked final answer.");
+        assert_eq!(
+            requests[0].body["thinking"]["type"].as_str(),
+            Some("disabled")
+        );
+        assert_eq!(
+            requests[1].body["thinking"]["type"].as_str(),
+            Some("disabled")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ollama_thinking_modes_map_to_boolean_and_level_controls() {
+        let workspace = setup_workspace_with_agents().expect("workspace");
+        let final_answer = &structured_answer_json("Mocked final answer.");
+        let qwen_server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::OpenAi, final_answer),
+            },
+        ])
+        .await;
+        let qwen_service = http_test_service(
+            workspace.path(),
+            qwen_server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Ollama,
+            ApiFormat::OpenAi,
+        );
+        let qwen_runtime_lanes = RuntimeLaneConfig::new("qwen3".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Ollama)
+            .with_synthesizer_thinking_mode(Some("thinking".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Ollama,
+            ))
+            .with_planner_model_id(Some("qwen3".to_string()));
+        qwen_service
+            .prepare_runtime_lanes(&qwen_runtime_lanes)
+            .await
+            .expect("prepare qwen runtime lanes");
+        qwen_service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process qwen prompt");
+        let qwen_requests = qwen_server.recorded_requests();
+        assert_eq!(qwen_requests[0].body["think"].as_bool(), Some(true));
+        assert_eq!(qwen_requests[1].body["think"].as_bool(), Some(true));
+
+        let gpt_oss_server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: provider_response(ApiFormat::OpenAi, &planner_json_answer()),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: final_answer_response(ApiFormat::OpenAi, final_answer),
+            },
+        ])
+        .await;
+        let gpt_oss_service = http_test_service(
+            workspace.path(),
+            gpt_oss_server.base_url.clone(),
+            "test-key".to_string(),
+            crate::infrastructure::providers::ModelProvider::Ollama,
+            ApiFormat::OpenAi,
+        );
+        let gpt_oss_runtime_lanes = RuntimeLaneConfig::new("gpt-oss:20b".to_string(), None)
+            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Ollama)
+            .with_synthesizer_thinking_mode(Some("high".to_string()))
+            .with_planner_provider(Some(
+                crate::infrastructure::providers::ModelProvider::Ollama,
+            ))
+            .with_planner_model_id(Some("gpt-oss:20b".to_string()));
+        gpt_oss_service
+            .prepare_runtime_lanes(&gpt_oss_runtime_lanes)
+            .await
+            .expect("prepare gpt-oss runtime lanes");
+        gpt_oss_service
+            .process_prompt("Sup dawg")
+            .await
+            .expect("process gpt-oss prompt");
+        let gpt_oss_requests = gpt_oss_server.recorded_requests();
+        assert_eq!(gpt_oss_requests[0].body["think"].as_str(), Some("high"));
+        assert_eq!(gpt_oss_requests[1].body["think"].as_str(), Some("high"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn moonshot_provider_executes_full_turn_without_planner_tool_choice() {
         let model_id = "kimi-k2.5";
         let (requests, events, response) = run_mocked_turn(
@@ -5175,7 +5543,7 @@ mod tests {
         let adapter = super::HttpProviderAdapter::new(
             workspace.path(),
             "anthropic",
-            "claude-sonnet-4-20250514",
+            "claude-sonnet-4-20250514@@thinking=high",
             "test-key",
             server.base_url.clone(),
             ApiFormat::Anthropic,
@@ -5216,12 +5584,28 @@ mod tests {
 
         let requests = server.recorded_requests();
         assert_eq!(
+            requests[0].headers["anthropic-beta"],
+            "interleaved-thinking-2025-05-14"
+        );
+        assert_eq!(
+            requests[0].body["thinking"]["type"].as_str(),
+            Some("enabled")
+        );
+        assert_eq!(
+            requests[0].body["thinking"]["budget_tokens"].as_i64(),
+            Some(8192)
+        );
+        assert_eq!(
             requests[1].headers["anthropic-beta"],
             "interleaved-thinking-2025-05-14"
         );
         assert_eq!(
             requests[1].body["thinking"]["type"].as_str(),
             Some("enabled")
+        );
+        assert_eq!(
+            requests[1].body["thinking"]["budget_tokens"].as_i64(),
+            Some(8192)
         );
         assert_eq!(
             requests[1].body["messages"][1]["role"].as_str(),

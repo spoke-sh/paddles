@@ -152,7 +152,8 @@ model = "claude-sonnet-4-20250514"
 ```
 
 `thinking_mode` is optional and currently only applies when the selected
-provider/model catalog exposes an extra thinking-mode stage.
+provider/model catalog exposes selectable reasoning effort, provider-native
+thinking toggles, or an explicit `none` mode.
 
 When `[synthesizer]` or `[planner]` is omitted, that lane falls back to
 `[shared]`. CLI flags still win over everything:
@@ -476,20 +477,25 @@ controller, planner, and renderer should consume the shared capability record
 rather than branching on provider names for behavior that is conceptually the
 same.
 
+The provider catalog also publishes the selectable thinking modes for each
+provider/model path. The CLI, TUI, and persisted runtime preferences validate
+requested `thinking_mode` values against that catalog instead of relying on
+provider-specific hard-coding.
+
 Representative provider/model paths are documented below when one provider
 family exposes more than one contract:
 
 <!-- BEGIN_PROVIDER_CAPABILITY_MATRIX -->
-| Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Notes |
-|---|---|---|---|---|---|---|---|---|
-| `sift` | `qwen-1.5b` | `local` | `supported` | `prompt-envelope` | `prompt-envelope` | `unsupported` | `none` | Local native runtime; no provider-native reasoning substrate. |
-| `openai` | `gpt-5.4` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | Chat Completions path with reasoning-effort control only. |
-| `openai` | `gpt-5.4-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | Responses path with reusable previous_response_id continuity. |
-| `inception` | `mercury-2` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `summary_only` | `none` | OpenAI-compatible chat with reasoning summaries but no reusable state. |
-| `anthropic` | `claude-sonnet-4-20250514` | `anthropic` | `supported` | `anthropic-tool-use` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | Messages API with thinking blocks and interleaved-thinking support. |
-| `google` | `gemini-2.5-flash` | `gemini` | `supported` | `gemini-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | generateContent path with thought-signature continuity. |
-| `moonshot` | `kimi-k2.6` | `openai` | `supported` | `openai-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | OpenAI-compatible chat with reasoning_content continuity. |
-| `ollama` | `qwen3` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | Freeform local models; qwen3 shown for thinking-capable toggle behavior. |
+| Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Thinking modes | Notes |
+|---|---|---|---|---|---|---|---|---|---|
+| `sift` | `qwen-1.5b` | `local` | `supported` | `prompt-envelope` | `prompt-envelope` | `unsupported` | `none` | `none` | Local native runtime; no provider-native reasoning substrate. |
+| `openai` | `gpt-5.4` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `low`, `medium`, `high`, `xhigh` | Chat Completions path with reasoning-effort control only. |
+| `openai` | `gpt-5.4-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high`, `xhigh` | Responses path with reusable previous_response_id continuity. |
+| `inception` | `mercury-2` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `summary_only` | `none` | `instant`, `low`, `medium`, `high` | OpenAI-compatible chat with reasoning summaries but no reusable state. |
+| `anthropic` | `claude-sonnet-4-20250514` | `anthropic` | `supported` | `anthropic-tool-use` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | Messages API with thinking blocks and interleaved-thinking support. |
+| `google` | `gemini-2.5-flash` | `gemini` | `supported` | `gemini-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | generateContent path with thought-signature continuity. |
+| `moonshot` | `kimi-k2.6` | `openai` | `supported` | `openai-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `thinking` | OpenAI-compatible chat with reasoning_content continuity. |
+| `ollama` | `qwen3` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `thinking` | Freeform local models; qwen3 shown for thinking-capable toggle behavior. |
 <!-- END_PROVIDER_CAPABILITY_MATRIX -->
 
 - `summary_only` means the provider can surface reasoning summaries or similar

@@ -169,6 +169,7 @@ pub struct ModelThinkingMode {
     pub label: &'static str,
     pub model_override: Option<&'static str>,
     pub thinking_mode: Option<&'static str>,
+    pub runtime_control: bool,
 }
 
 const OPENAI_MODELS: &[&str] = &[
@@ -209,7 +210,13 @@ const MOONSHOT_MODELS: &[&str] = &[
     "kimi-k2-thinking",
     "kimi-k2-thinking-turbo",
 ];
-const NO_THINKING_MODES: &[ModelThinkingMode] = &[];
+const NONE_ONLY_THINKING_MODES: &[ModelThinkingMode] = &[ModelThinkingMode {
+    key: "none",
+    label: "None",
+    model_override: None,
+    thinking_mode: Some("none"),
+    runtime_control: false,
+}];
 const MOONSHOT_SELECTABLE_MODELS: &[&str] = &[
     "kimi-k2.6",
     "kimi-k2.5",
@@ -223,56 +230,330 @@ const MOONSHOT_K2_THINKING_MODES: &[ModelThinkingMode] = &[
         label: "Default",
         model_override: Some("kimi-k2"),
         thinking_mode: None,
+        runtime_control: false,
     },
     ModelThinkingMode {
         key: "turbo-preview",
         label: "Turbo preview",
         model_override: Some("kimi-k2-turbo-preview"),
         thinking_mode: None,
+        runtime_control: false,
     },
     ModelThinkingMode {
         key: "thinking",
         label: "Thinking",
         model_override: Some("kimi-k2-thinking"),
         thinking_mode: None,
+        runtime_control: false,
     },
     ModelThinkingMode {
         key: "thinking-turbo",
         label: "Thinking turbo",
         model_override: Some("kimi-k2-thinking-turbo"),
         thinking_mode: None,
+        runtime_control: false,
     },
 ];
-const OPENAI_GPT_5_4_THINKING_MODES: &[ModelThinkingMode] = &[
+const MOONSHOT_BOOLEAN_THINKING_MODES: &[ModelThinkingMode] = &[
     ModelThinkingMode {
         key: "none",
         label: "None",
         model_override: None,
         thinking_mode: Some("none"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "thinking",
+        label: "Thinking",
+        model_override: None,
+        thinking_mode: Some("enabled"),
+        runtime_control: true,
+    },
+];
+const OPENAI_NONE_LOW_MEDIUM_HIGH_XHIGH_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+        runtime_control: true,
     },
     ModelThinkingMode {
         key: "low",
         label: "Low",
         model_override: None,
         thinking_mode: Some("low"),
+        runtime_control: true,
     },
     ModelThinkingMode {
         key: "medium",
         label: "Medium",
         model_override: None,
         thinking_mode: Some("medium"),
+        runtime_control: true,
     },
     ModelThinkingMode {
         key: "high",
         label: "High",
         model_override: None,
         thinking_mode: Some("high"),
+        runtime_control: true,
     },
     ModelThinkingMode {
         key: "xhigh",
         label: "XHigh",
         model_override: None,
         thinking_mode: Some("xhigh"),
+        runtime_control: true,
+    },
+];
+const OPENAI_NONE_LOW_MEDIUM_HIGH_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+];
+const OPENAI_MINIMAL_LOW_MEDIUM_HIGH_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "minimal",
+        label: "Minimal",
+        model_override: None,
+        thinking_mode: Some("minimal"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+];
+const OPENAI_NONE_MEDIUM_HIGH_XHIGH_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "xhigh",
+        label: "XHigh",
+        model_override: None,
+        thinking_mode: Some("xhigh"),
+        runtime_control: true,
+    },
+];
+const OPENAI_MEDIUM_HIGH_XHIGH_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "xhigh",
+        label: "XHigh",
+        model_override: None,
+        thinking_mode: Some("xhigh"),
+        runtime_control: true,
+    },
+];
+const OPENAI_HIGH_ONLY_THINKING_MODES: &[ModelThinkingMode] = &[ModelThinkingMode {
+    key: "high",
+    label: "High",
+    model_override: None,
+    thinking_mode: Some("high"),
+    runtime_control: true,
+}];
+const ANTHROPIC_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+];
+const GEMINI_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+];
+const INCEPTION_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "instant",
+        label: "Instant",
+        model_override: None,
+        thinking_mode: Some("instant"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
+    },
+];
+const OLLAMA_BOOLEAN_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "none",
+        label: "None",
+        model_override: None,
+        thinking_mode: Some("none"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "thinking",
+        label: "Thinking",
+        model_override: None,
+        thinking_mode: Some("thinking"),
+        runtime_control: true,
+    },
+];
+const OLLAMA_GPT_OSS_THINKING_MODES: &[ModelThinkingMode] = &[
+    ModelThinkingMode {
+        key: "low",
+        label: "Low",
+        model_override: None,
+        thinking_mode: Some("low"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "medium",
+        label: "Medium",
+        model_override: None,
+        thinking_mode: Some("medium"),
+        runtime_control: true,
+    },
+    ModelThinkingMode {
+        key: "high",
+        label: "High",
+        model_override: None,
+        thinking_mode: Some("high"),
+        runtime_control: true,
     },
 ];
 const OPENAI_RUNTIME_THINKING_DELIMITER: &str = "@@thinking=";
@@ -293,6 +574,53 @@ fn ollama_supports_thinking(model: &str) -> bool {
         || family.starts_with("gpt-oss")
         || family.starts_with("deepseek-v3.1")
         || family.starts_with("deepseek-r1")
+}
+
+fn openai_thinking_modes(model: &str) -> &'static [ModelThinkingMode] {
+    if model == "gpt-5-pro" {
+        return OPENAI_HIGH_ONLY_THINKING_MODES;
+    }
+    if model == "gpt-5.2-pro" {
+        return OPENAI_MEDIUM_HIGH_XHIGH_THINKING_MODES;
+    }
+    if model == "gpt-5.4-pro" {
+        return OPENAI_NONE_LOW_MEDIUM_HIGH_XHIGH_THINKING_MODES;
+    }
+    if model == "gpt-5.1-codex-max" {
+        return OPENAI_NONE_MEDIUM_HIGH_XHIGH_THINKING_MODES;
+    }
+    if model.starts_with("gpt-5.4") || model.starts_with("gpt-5.2") {
+        return OPENAI_NONE_LOW_MEDIUM_HIGH_XHIGH_THINKING_MODES;
+    }
+    if model.starts_with("gpt-5.1") {
+        return OPENAI_NONE_LOW_MEDIUM_HIGH_THINKING_MODES;
+    }
+    if model.starts_with("gpt-5") {
+        return OPENAI_MINIMAL_LOW_MEDIUM_HIGH_THINKING_MODES;
+    }
+    NONE_ONLY_THINKING_MODES
+}
+
+fn moonshot_thinking_modes(model: &str) -> &'static [ModelThinkingMode] {
+    match model {
+        "kimi-k2.6" | "kimi-k2.5" => MOONSHOT_BOOLEAN_THINKING_MODES,
+        "kimi-k2" => MOONSHOT_K2_THINKING_MODES,
+        _ => NONE_ONLY_THINKING_MODES,
+    }
+}
+
+fn ollama_thinking_modes(model: &str) -> &'static [ModelThinkingMode] {
+    let family = ollama_model_family(model);
+    if family.starts_with("gpt-oss") {
+        return OLLAMA_GPT_OSS_THINKING_MODES;
+    }
+    if family.starts_with("qwen3")
+        || family.starts_with("deepseek-v3.1")
+        || family.starts_with("deepseek-r1")
+    {
+        return OLLAMA_BOOLEAN_THINKING_MODES;
+    }
+    NONE_ONLY_THINKING_MODES
 }
 
 impl ModelProvider {
@@ -418,12 +746,14 @@ impl ModelProvider {
 
     pub fn thinking_modes(self, model: &str) -> &'static [ModelThinkingMode] {
         let normalized_model = self.runtime_model_id(model);
-        match (self, normalized_model.as_str()) {
-            (Self::Moonshot, "kimi-k2") => MOONSHOT_K2_THINKING_MODES,
-            (Self::Openai, "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.4-nano") => {
-                OPENAI_GPT_5_4_THINKING_MODES
-            }
-            _ => NO_THINKING_MODES,
+        match self {
+            Self::Sift => NONE_ONLY_THINKING_MODES,
+            Self::Openai => openai_thinking_modes(&normalized_model),
+            Self::Inception => INCEPTION_THINKING_MODES,
+            Self::Anthropic => ANTHROPIC_THINKING_MODES,
+            Self::Google => GEMINI_THINKING_MODES,
+            Self::Moonshot => moonshot_thinking_modes(&normalized_model),
+            Self::Ollama => ollama_thinking_modes(&normalized_model),
         }
     }
 
@@ -578,32 +908,26 @@ impl ModelProvider {
         let normalized_thinking_mode = thinking_mode
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        match (self, normalized_thinking_mode) {
-            (Self::Openai, Some(thinking_mode))
-                if self
-                    .thinking_modes(&normalized_model)
-                    .iter()
-                    .any(|mode| mode.thinking_mode == Some(thinking_mode)) =>
-            {
-                format!("{normalized_model}{OPENAI_RUNTIME_THINKING_DELIMITER}{thinking_mode}")
-            }
-            _ => normalized_model,
+        if let Some(thinking_mode) = normalized_thinking_mode
+            && self
+                .thinking_modes(&normalized_model)
+                .iter()
+                .any(|mode| mode.thinking_mode == Some(thinking_mode) && mode.runtime_control)
+        {
+            return format!("{normalized_model}{OPENAI_RUNTIME_THINKING_DELIMITER}{thinking_mode}");
         }
+        normalized_model
     }
 
     pub fn runtime_model_id(self, model: &str) -> String {
-        if self == Self::Openai
-            && let Some((model_id, _)) = model.split_once(OPENAI_RUNTIME_THINKING_DELIMITER)
-        {
+        if let Some((model_id, _)) = model.split_once(OPENAI_RUNTIME_THINKING_DELIMITER) {
             return self.normalize_model_alias(model_id);
         }
         self.normalize_model_alias(model)
     }
 
     pub fn runtime_model_thinking_mode(self, model: &str) -> Option<String> {
-        if self == Self::Openai
-            && let Some((_, thinking_mode)) = model.split_once(OPENAI_RUNTIME_THINKING_DELIMITER)
-        {
+        if let Some((_, thinking_mode)) = model.split_once(OPENAI_RUNTIME_THINKING_DELIMITER) {
             let thinking_mode = thinking_mode.trim();
             if !thinking_mode.is_empty() {
                 return Some(thinking_mode.to_string());
@@ -656,6 +980,7 @@ pub struct ProviderCapabilityMatrixRow {
     pub planner_tool_call: PlannerToolCallCapability,
     pub deliberation_support: DeliberationSupport,
     pub state_contract: DeliberationStateContract,
+    pub thinking_modes: Vec<String>,
     pub notes: String,
 }
 
@@ -716,6 +1041,11 @@ pub fn documented_provider_capability_matrix() -> Vec<ProviderCapabilityMatrixRo
                 planner_tool_call: surface.planner_tool_call,
                 deliberation_support: surface.deliberation.support,
                 state_contract: surface.deliberation.state_contract,
+                thinking_modes: provider
+                    .thinking_modes(model_id)
+                    .iter()
+                    .map(|mode| mode.key.to_string())
+                    .collect(),
                 notes: (*notes).to_string(),
             }
         })
@@ -724,14 +1054,20 @@ pub fn documented_provider_capability_matrix() -> Vec<ProviderCapabilityMatrixRo
 
 pub fn render_documented_provider_capability_matrix_markdown() -> String {
     let mut lines = vec![
-        "| Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Notes |"
+        "| Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Thinking modes | Notes |"
             .to_string(),
-        "|---|---|---|---|---|---|---|---|---|".to_string(),
+        "|---|---|---|---|---|---|---|---|---|---|".to_string(),
     ];
     for row in documented_provider_capability_matrix() {
         let wire = row.http_format.map(ApiFormat::label).unwrap_or("local");
+        let thinking_modes = row
+            .thinking_modes
+            .iter()
+            .map(|mode| format!("`{mode}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
         lines.push(format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |",
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} |",
             row.provider.name(),
             row.model_id,
             wire,
@@ -740,6 +1076,7 @@ pub fn render_documented_provider_capability_matrix_markdown() -> String {
             row.planner_tool_call.label(),
             row.deliberation_support.label(),
             row.state_contract.label(),
+            thinking_modes,
             row.notes,
         ));
     }
@@ -827,24 +1164,28 @@ mod tests {
                     label: "Default",
                     model_override: Some("kimi-k2"),
                     thinking_mode: None,
+                    runtime_control: false,
                 },
                 ModelThinkingMode {
                     key: "turbo-preview",
                     label: "Turbo preview",
                     model_override: Some("kimi-k2-turbo-preview"),
                     thinking_mode: None,
+                    runtime_control: false,
                 },
                 ModelThinkingMode {
                     key: "thinking",
                     label: "Thinking",
                     model_override: Some("kimi-k2-thinking"),
                     thinking_mode: None,
+                    runtime_control: false,
                 },
                 ModelThinkingMode {
                     key: "thinking-turbo",
                     label: "Thinking turbo",
                     model_override: Some("kimi-k2-thinking-turbo"),
                     thinking_mode: None,
+                    runtime_control: false,
                 },
             ]
         );
@@ -872,30 +1213,35 @@ mod tests {
                     label: "None",
                     model_override: None,
                     thinking_mode: Some("none"),
+                    runtime_control: true,
                 },
                 ModelThinkingMode {
                     key: "low",
                     label: "Low",
                     model_override: None,
                     thinking_mode: Some("low"),
+                    runtime_control: true,
                 },
                 ModelThinkingMode {
                     key: "medium",
                     label: "Medium",
                     model_override: None,
                     thinking_mode: Some("medium"),
+                    runtime_control: true,
                 },
                 ModelThinkingMode {
                     key: "high",
                     label: "High",
                     model_override: None,
                     thinking_mode: Some("high"),
+                    runtime_control: true,
                 },
                 ModelThinkingMode {
                     key: "xhigh",
                     label: "XHigh",
                     model_override: None,
                     thinking_mode: Some("xhigh"),
+                    runtime_control: true,
                 },
             ]
         );
@@ -914,6 +1260,105 @@ mod tests {
         assert_eq!(
             ModelProvider::Openai.qualified_model_label("gpt-5.4@@thinking=high"),
             "openai:gpt-5.4 (High)"
+        );
+    }
+
+    #[test]
+    fn provider_catalog_exposes_thinking_modes_across_supported_providers() {
+        assert_eq!(
+            ModelProvider::Sift.thinking_modes("qwen-1.5b"),
+            [ModelThinkingMode {
+                key: "none",
+                label: "None",
+                model_override: None,
+                thinking_mode: Some("none"),
+                runtime_control: false,
+            }]
+        );
+        assert_eq!(
+            ModelProvider::Inception
+                .thinking_modes("mercury-2")
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>(),
+            ["instant", "low", "medium", "high"]
+        );
+        assert_eq!(
+            ModelProvider::Anthropic
+                .thinking_modes("claude-sonnet-4-20250514")
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>(),
+            ["none", "low", "medium", "high"]
+        );
+        assert_eq!(
+            ModelProvider::Google
+                .thinking_modes("gemini-2.5-flash")
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>(),
+            ["none", "low", "medium", "high"]
+        );
+        assert_eq!(
+            ModelProvider::Moonshot
+                .thinking_modes("kimi-k2.6")
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>(),
+            ["none", "thinking"]
+        );
+        assert_eq!(
+            ModelProvider::Ollama
+                .thinking_modes("qwen3")
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>(),
+            ["none", "thinking"]
+        );
+        assert_eq!(
+            ModelProvider::Ollama
+                .thinking_modes("gpt-oss:20b")
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>(),
+            ["low", "medium", "high"]
+        );
+    }
+
+    #[test]
+    fn runtime_model_ids_preserve_provider_specific_thinking_modes_when_needed() {
+        assert_eq!(
+            ModelProvider::Openai.prepare_runtime_model_id("gpt-5.4", Some("high")),
+            "gpt-5.4@@thinking=high"
+        );
+        assert_eq!(
+            ModelProvider::Inception.prepare_runtime_model_id("mercury-2", Some("instant")),
+            "mercury-2@@thinking=instant"
+        );
+        assert_eq!(
+            ModelProvider::Anthropic
+                .prepare_runtime_model_id("claude-sonnet-4-20250514", Some("none")),
+            "claude-sonnet-4-20250514@@thinking=none"
+        );
+        assert_eq!(
+            ModelProvider::Google.prepare_runtime_model_id("gemini-2.5-flash", Some("high")),
+            "gemini-2.5-flash@@thinking=high"
+        );
+        assert_eq!(
+            ModelProvider::Moonshot.prepare_runtime_model_id("kimi-k2.6", Some("enabled")),
+            "kimi-k2.6@@thinking=enabled"
+        );
+        assert_eq!(
+            ModelProvider::Ollama.prepare_runtime_model_id("qwen3", Some("thinking")),
+            "qwen3@@thinking=thinking"
+        );
+        assert_eq!(
+            ModelProvider::Sift.prepare_runtime_model_id("qwen-1.5b", Some("none")),
+            "qwen-1.5b"
+        );
+        assert_eq!(
+            ModelProvider::Openai.prepare_runtime_model_id("gpt-4o", Some("none")),
+            "gpt-4o"
         );
     }
 

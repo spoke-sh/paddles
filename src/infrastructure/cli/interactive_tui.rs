@@ -1630,8 +1630,18 @@ impl InteractiveApp {
                 else {
                     return true;
                 };
-                if provider.thinking_modes(&model_id).is_empty() {
-                    if self.queue_model_selection(provider, &model_id, None) {
+                let thinking_modes = provider.thinking_modes(&model_id);
+                let auto_selected_thinking_mode = match thinking_modes {
+                    [] => Some(None),
+                    [mode] if mode.model_override.is_none() => Some(if mode.runtime_control {
+                        mode.thinking_mode
+                    } else {
+                        None
+                    }),
+                    _ => None,
+                };
+                if let Some(thinking_mode) = auto_selected_thinking_mode {
+                    if self.queue_model_selection(provider, &model_id, thinking_mode) {
                         self.input.clear();
                         self.cursor_pos = 0;
                         self.input_mode = InputMode::Normal;
@@ -4704,8 +4714,9 @@ fn terminal_uses_light_background() -> bool {
 mod tests {
     use super::{
         BusyPhase, ComposerPart, InFlightWorkKind, InputMode, InteractiveApp, InteractiveFrontend,
-        PendingReveal, QueuedPrompt, RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind,
-        TranscriptTiming, TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
+        ModelSelectionStage, ModelSelectionState, PendingReveal, QueuedPrompt,
+        RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
+        TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
         format_duration_compact, format_turn_event_row, inline_multiline_text,
         inline_viewport_height_for_terminal, render_row_lines, select_interactive_frontend,
         web_server_ready_row,
@@ -6738,6 +6749,57 @@ mod tests {
     }
 
     #[test]
+    fn explicit_none_only_thinking_catalogs_do_not_block_model_selection() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Openai),
+            vec![provider_availability(
+                ModelProvider::Openai,
+                true,
+                "using local credential store",
+            )],
+        );
+        app.input = "/model openai".to_string();
+        app.cursor_pos = app.input.chars().count();
+        app.input_mode = InputMode::ModelSelection(ModelSelectionState {
+            stage: ModelSelectionStage::Model {
+                provider: ModelProvider::Openai,
+            },
+            selected_index: ModelProvider::Openai
+                .selectable_model_ids()
+                .iter()
+                .position(|model_id| *model_id == "gpt-4o")
+                .expect("gpt-4o index"),
+        });
+
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!should_exit);
+        assert_eq!(app.input_mode, InputMode::Normal);
+        let update = app
+            .take_pending_runtime_update()
+            .expect("pending runtime update");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_provider(),
+            ModelProvider::Openai
+        );
+        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
+        assert_eq!(update.runtime_lanes.synthesizer_thinking_mode(), None);
+        assert_eq!(update.persisted_preferences.thinking_mode.as_deref(), None);
+    }
+
+    #[test]
     fn slash_command_login_provider_suggestions_skip_non_login_providers() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -7080,7 +7142,7 @@ mod tests {
     }
 
     #[test]
-    fn model_selection_queues_runtime_update_from_prompt_box() {
+    fn inception_model_selection_queues_runtime_update_from_prompt_box() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "mercury-2".to_string(),
@@ -7110,9 +7172,38 @@ mod tests {
             super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(!should_exit);
+        assert!(matches!(
+            app.input_mode,
+            InputMode::ModelSelection(ModelSelectionState {
+                stage: ModelSelectionStage::ThinkingMode {
+                    provider: ModelProvider::Inception,
+                    ref model,
+                },
+                selected_index: 0,
+            }) if model == "mercury-2"
+        ));
+        let should_exit =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(!should_exit);
         assert_eq!(app.input_mode, InputMode::Normal);
         assert_eq!(app.input, "");
-        assert!(app.take_pending_runtime_update().is_some());
+        let update = app
+            .take_pending_runtime_update()
+            .expect("pending runtime update");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_provider(),
+            ModelProvider::Inception
+        );
+        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "mercury-2");
+        assert_eq!(
+            update.runtime_lanes.synthesizer_thinking_mode(),
+            Some("instant")
+        );
+        assert_eq!(
+            update.persisted_preferences.thinking_mode.as_deref(),
+            Some("instant")
+        );
     }
 
     #[test]

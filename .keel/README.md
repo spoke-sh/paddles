@@ -378,7 +378,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Deliberation Substrate And Continuation Contracts](epics/VHXJWQaFC/voyages/VHXJipEBj/) | done |
-| [Cross-Provider Deliberation Rollout And Verification](epics/VHXJWQaFC/voyages/VHXJipyBc/) | in-progress |
+| [Cross-Provider Deliberation Rollout And Verification](epics/VHXJWQaFC/voyages/VHXJipyBc/) | done |
 | [Normalized Deliberation Signals And Rationale Compilation](epics/VHXJWQaFC/voyages/VHXJiqMD1/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
