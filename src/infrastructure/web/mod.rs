@@ -3,7 +3,7 @@ use crate::application::{
     ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
     ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
     ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
-    ManifoldTurnProjection, MechSuitService, TranscriptUpdateSink,
+    ManifoldTurnProjection, MechSuitService, ResumableConversation, TranscriptUpdateSink,
 };
 use crate::domain::model::{
     ExecutionHandDiagnostic, NativeTransportConfigurations, NativeTransportDiagnostic,
@@ -89,6 +89,13 @@ struct ConversationBootstrapResponse {
     prompt_history: Vec<String>,
     execution_hands: Vec<ExecutionHandDiagnostic>,
     native_transports: Vec<NativeTransportDiagnostic>,
+}
+
+#[derive(Serialize)]
+struct ResumableConversationResponse {
+    task_id: String,
+    turn_count: usize,
+    preview: String,
 }
 
 #[derive(Deserialize)]
@@ -282,6 +289,11 @@ pub fn router(
         .route(
             "/session/shared/bootstrap",
             get(shared_conversation_bootstrap),
+        )
+        .route("/sessions/resume", get(resumable_conversations))
+        .route(
+            "/session/shared/resume/{id}",
+            post(restore_shared_conversation),
         )
         .route("/native-transports/websocket", get(websocket_transport))
         .route("/native-transports/transit", post(transit_transport))
@@ -480,26 +492,74 @@ async fn create_session(State(state): State<Arc<AppState>>) -> Json<SessionRespo
     Json(SessionResponse { session_id })
 }
 
-async fn shared_conversation_bootstrap(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<ConversationBootstrapResponse>, axum::http::StatusCode> {
-    let session = state.service.shared_conversation_session();
-    let task_id = session.task_id();
+fn conversation_bootstrap_response(
+    state: &Arc<AppState>,
+    task_id: &TaskTraceId,
+) -> Result<ConversationBootstrapResponse, axum::http::StatusCode> {
     let projection = state
         .service
-        .replay_conversation_projection(&task_id)
+        .replay_conversation_projection(task_id)
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     let prompt_history = state.service.prompt_history().unwrap_or_default();
     let execution_hands = state.service.execution_hand_diagnostics();
     let native_transports = state.service.native_transport_diagnostics();
 
-    Ok(Json(ConversationBootstrapResponse {
+    Ok(ConversationBootstrapResponse {
         session_id: task_id.as_str().to_string(),
         projection,
         prompt_history,
         execution_hands,
         native_transports,
-    }))
+    })
+}
+
+async fn shared_conversation_bootstrap(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ConversationBootstrapResponse>, axum::http::StatusCode> {
+    let session = state.service.shared_conversation_session();
+    let task_id = session.task_id();
+    Ok(Json(conversation_bootstrap_response(&state, &task_id)?))
+}
+
+async fn resumable_conversations(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ResumableConversationResponse>>, axum::http::StatusCode> {
+    let conversations = state
+        .service
+        .resumable_conversations()
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(
+        conversations
+            .into_iter()
+            .map(
+                |ResumableConversation {
+                     task_id,
+                     turn_count,
+                     preview,
+                 }| ResumableConversationResponse {
+                    task_id: task_id.as_str().to_string(),
+                    turn_count,
+                    preview,
+                },
+            )
+            .collect(),
+    ))
+}
+
+async fn restore_shared_conversation(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ConversationBootstrapResponse>, axum::http::StatusCode> {
+    let task_id = parse_task_id(&id)?;
+    let session = state
+        .service
+        .restore_shared_conversation_session(&task_id)
+        .map_err(|_| axum::http::StatusCode::NOT_FOUND)?;
+
+    Ok(Json(conversation_bootstrap_response(
+        &state,
+        &session.task_id(),
+    )?))
 }
 
 async fn submit_turn(
@@ -1195,7 +1255,9 @@ mod tests {
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
-    use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
+    use crate::infrastructure::adapters::trace_recorders::{
+        InMemoryTraceRecorder, TransitTraceRecorder,
+    };
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
     use crate::infrastructure::providers::{ApiFormat, ModelProvider};
     use crate::infrastructure::rendering::RenderCapability;
@@ -2471,6 +2533,29 @@ mod tests {
     }
 
     #[test]
+    fn embedded_primary_shell_bootstraps_from_shared_projection_snapshot() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("/session/shared/bootstrap"));
+        assert!(!html.contains("fetch('/sessions', { method: 'POST' })"));
+        assert!(html.contains("const projection = bootstrap.projection || {};"));
+        assert!(html.contains("const transcript = projection.transcript ||"));
+        assert!(html.contains("latestForensics = projection.forensics ||"));
+        assert!(html.contains("latestManifold = projection.manifold ||"));
+        assert!(html.contains("latestTraceGraph = projection.trace_graph ||"));
+    }
+
+    #[test]
+    fn embedded_primary_shell_handles_resume_commands_against_shared_session_routes() {
+        let html = include_str!("index.html");
+
+        assert!(html.contains("trimmed === '/resume'"));
+        assert!(html.contains("trimmed.startsWith('/resume ')"));
+        assert!(html.contains("/sessions/resume"));
+        assert!(html.contains("/session/shared/resume/"));
+    }
+
+    #[test]
     fn embedded_primary_shell_renders_system_transcript_messages_with_system_styling() {
         let html = include_str!("index.html");
 
@@ -2669,6 +2754,273 @@ mod tests {
         assert_eq!(
             native_transports[0].phase,
             crate::domain::model::NativeTransportPhase::Disabled
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shared_bootstrap_route_starts_fresh_after_service_restart() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nReplay shared bootstrap state after restart.\n",
+        )
+        .expect("write AGENTS.md");
+        let recorder_root = tempfile::tempdir().expect("recorder root");
+        let server = start_mock_provider_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    "I should inspect the local workspace before answering.",
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"inspect","command":"pwd","rationale":"inspect the local workspace before answering"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"answer","rationale":"the local evidence is sufficient"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    r#"{"render_types":["paragraph"],"blocks":[{"type":"paragraph","text":"Mock provider completed the turn after local inspection."}]}"#,
+                ),
+            },
+        ])
+        .await;
+
+        let recorder_one =
+            Arc::new(TransitTraceRecorder::open(recorder_root.path()).expect("transit recorder"));
+        let service_one = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder_one,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception));
+        service_one
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare lanes");
+
+        let session = service_one.shared_conversation_session();
+        service_one
+            .process_prompt_in_session_with_sink(
+                "CI is failing. Can you debug it on this machine?",
+                session.clone(),
+                Arc::new(NullTurnEventSink),
+            )
+            .await
+            .expect("process prompt");
+
+        let recorder_two =
+            Arc::new(TransitTraceRecorder::open(recorder_root.path()).expect("reopen recorder"));
+        let service_two = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder_two.clone(),
+        );
+        let state = test_app_state(service_two, recorder_two);
+
+        let Json(ConversationBootstrapResponse {
+            session_id,
+            projection,
+            ..
+        }) = super::shared_conversation_bootstrap(State(state))
+            .await
+            .expect("shared bootstrap");
+
+        assert_eq!(session.task_id().as_str(), "task-000001");
+        assert_eq!(session_id, "task-000002");
+        assert_eq!(projection.task_id.as_str(), "task-000002");
+        assert!(projection.transcript.entries.is_empty());
+        assert!(projection.forensics.turns.is_empty());
+        assert!(projection.manifold.turns.is_empty());
+        assert!(projection.trace_graph.nodes.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_catalog_lists_persisted_conversations_after_restart() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nList resumable conversations after restart.\n",
+        )
+        .expect("write AGENTS.md");
+        let recorder_root = tempfile::tempdir().expect("recorder root");
+        let server = start_mock_provider_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    "I should inspect the local workspace before answering.",
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"inspect","command":"pwd","rationale":"inspect the local workspace before answering"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"answer","rationale":"the local evidence is sufficient"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    r#"{"render_types":["paragraph"],"blocks":[{"type":"paragraph","text":"Mock provider completed the turn after local inspection."}]}"#,
+                ),
+            },
+        ])
+        .await;
+
+        let recorder_one =
+            Arc::new(TransitTraceRecorder::open(recorder_root.path()).expect("transit recorder"));
+        let service_one = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder_one,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception));
+        service_one
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare lanes");
+
+        let session = service_one.shared_conversation_session();
+        service_one
+            .process_prompt_in_session_with_sink(
+                "CI is failing. Can you debug it on this machine?",
+                session.clone(),
+                Arc::new(NullTurnEventSink),
+            )
+            .await
+            .expect("process prompt");
+
+        let recorder_two =
+            Arc::new(TransitTraceRecorder::open(recorder_root.path()).expect("reopen recorder"));
+        let service_two = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder_two.clone(),
+        );
+        let state = test_app_state(service_two, recorder_two);
+
+        let Json(resumable) = super::resumable_conversations(State(state))
+            .await
+            .expect("resume catalog");
+
+        assert_eq!(resumable.len(), 1);
+        assert_eq!(resumable[0].task_id, "task-000001");
+        assert_eq!(resumable[0].turn_count, 1);
+        assert_eq!(
+            resumable[0].preview,
+            "CI is failing. Can you debug it on this machine?"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shared_resume_route_restores_persisted_conversation_after_restart() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nRestore a resumable conversation after restart.\n",
+        )
+        .expect("write AGENTS.md");
+        let recorder_root = tempfile::tempdir().expect("recorder root");
+        let server = start_mock_provider_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    "I should inspect the local workspace before answering.",
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"inspect","command":"pwd","rationale":"inspect the local workspace before answering"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_tool_call_response(
+                    r#"{"action":"answer","rationale":"the local evidence is sufficient"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_content_response(
+                    r#"{"render_types":["paragraph"],"blocks":[{"type":"paragraph","text":"Mock provider completed the turn after local inspection."}]}"#,
+                ),
+            },
+        ])
+        .await;
+
+        let recorder_one =
+            Arc::new(TransitTraceRecorder::open(recorder_root.path()).expect("transit recorder"));
+        let service_one = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder_one,
+        );
+        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Inception)
+            .with_planner_provider(Some(ModelProvider::Inception));
+        service_one
+            .prepare_runtime_lanes(&runtime_lanes)
+            .await
+            .expect("prepare lanes");
+
+        let session = service_one.shared_conversation_session();
+        service_one
+            .process_prompt_in_session_with_sink(
+                "CI is failing. Can you debug it on this machine?",
+                session.clone(),
+                Arc::new(NullTurnEventSink),
+            )
+            .await
+            .expect("process prompt");
+
+        let recorder_two =
+            Arc::new(TransitTraceRecorder::open(recorder_root.path()).expect("reopen recorder"));
+        let service_two = live_http_test_service_with_recorder(
+            workspace.path(),
+            server.base_url.clone(),
+            recorder_two.clone(),
+        );
+        let state = test_app_state(service_two, recorder_two);
+
+        let Json(ConversationBootstrapResponse {
+            session_id,
+            projection,
+            ..
+        }) = super::restore_shared_conversation(
+            State(state),
+            Path(session.task_id().as_str().to_string()),
+        )
+        .await
+        .expect("resume conversation");
+
+        assert_eq!(session_id, "task-000001");
+        assert_eq!(projection.task_id.as_str(), "task-000001");
+        assert_eq!(projection.transcript.entries.len(), 3);
+        assert_eq!(
+            projection.transcript.entries[0].content,
+            "CI is failing. Can you debug it on this machine?"
+        );
+        assert_eq!(
+            projection.transcript.entries[2].content,
+            "Mock provider completed the turn after local inspection."
         );
     }
 

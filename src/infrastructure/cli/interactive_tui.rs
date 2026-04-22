@@ -1,10 +1,12 @@
 use crate::application::{
     ConversationSession, ConversationTranscript, ConversationTranscriptSpeaker,
-    ConversationTranscriptUpdate, MechSuitService, RuntimeLaneConfig, TranscriptUpdateSink,
+    ConversationTranscriptUpdate, MechSuitService, ResumableConversation, RuntimeLaneConfig,
+    TranscriptUpdateSink,
 };
 use crate::domain::model::render::uses_compact_block_separator;
 use crate::domain::model::{
-    RenderBlock, RenderDocument, RuntimeItem, ThreadCandidate, TurnEvent, TurnEventSink,
+    RenderBlock, RenderDocument, RuntimeItem, TaskTraceId, ThreadCandidate, TurnEvent,
+    TurnEventSink,
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
@@ -180,6 +182,11 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         usage: "/model",
         description: "choose the shared runtime model",
     },
+    SlashCommandSpec {
+        insert_text: "/resume",
+        usage: "/resume",
+        description: "list or restore persisted conversations",
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,15 +260,46 @@ pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiCont
             format!("Could not load persisted prompt history: {err:#}"),
         ),
     }
-    if let Ok(transcript) = service.replay_conversation_transcript(&session.task_id()) {
+    if let Ok(transcript) = service.replay_conversation_transcript(&app.session.task_id()) {
         app.load_transcript(&transcript);
     }
     app.rows.push(web_server_ready_row(tui_ctx.web_server_addr));
 
     loop {
         drain_messages(&mut app, &mut rx);
+        if let Some(command) = app.take_pending_resume_command() {
+            match command {
+                PendingResumeCommand::List => match service.resumable_conversations() {
+                    Ok(conversations) => app.show_resumable_conversations(&conversations),
+                    Err(err) => app.push_error(
+                        "Resume command failed",
+                        format!("Could not load persisted conversations: {err:#}"),
+                    ),
+                },
+                PendingResumeCommand::Restore { task_id } => {
+                    let task_id =
+                        TaskTraceId::new(task_id).expect("resume commands validate task ids");
+                    match service.restore_shared_conversation_session(&task_id) {
+                        Ok(session) => match service.replay_conversation_transcript(&task_id) {
+                            Ok(transcript) => app.restore_resumed_session(session, &transcript),
+                            Err(err) => app.push_error(
+                                "Resume command failed",
+                                format!(
+                                    "Could not replay transcript for `{}`: {err:#}",
+                                    task_id.as_str()
+                                ),
+                            ),
+                        },
+                        Err(err) => app.push_error(
+                            "Resume command failed",
+                            format!("Could not restore `{}`: {err:#}", task_id.as_str()),
+                        ),
+                    }
+                }
+            }
+        }
         if app.take_transcript_sync_request()
-            && let Ok(transcript) = service.replay_conversation_transcript(&session.task_id())
+            && let Ok(transcript) = service.replay_conversation_transcript(&app.session.task_id())
         {
             app.sync_transcript(&transcript);
         }
@@ -283,7 +321,7 @@ pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiCont
             let handle = dispatch_prompt(
                 prompt,
                 Arc::clone(&service),
-                session.clone(),
+                app.session.clone(),
                 tx.clone(),
                 work_id,
             );
@@ -1118,6 +1156,7 @@ struct InteractiveApp {
     spinner_index: usize,
     input_mode: InputMode,
     pending_login: Option<PendingLogin>,
+    pending_resume_command: Option<PendingResumeCommand>,
     pending_runtime_update: Option<PendingRuntimeUpdate>,
     runtime_update_started_at: Option<Instant>,
     slash_suggestion_index: usize,
@@ -1202,6 +1241,12 @@ struct PendingRuntimeUpdate {
     runtime_lanes: RuntimeLaneConfig,
     persisted_preferences: RuntimeLanePreferences,
     summary: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PendingResumeCommand {
+    List,
+    Restore { task_id: String },
 }
 
 fn runtime_lane_summary(runtime_lanes: &RuntimeLaneConfig) -> String {
@@ -1331,6 +1376,7 @@ impl InteractiveApp {
             spinner_index: 0,
             input_mode: InputMode::Normal,
             pending_login: None,
+            pending_resume_command: None,
             pending_runtime_update: None,
             runtime_update_started_at: None,
             slash_suggestion_index: 0,
@@ -2208,6 +2254,11 @@ impl InteractiveApp {
             return;
         }
 
+        if raw.starts_with("/resume") {
+            self.handle_resume_command(&raw);
+            return;
+        }
+
         self.rows.push(TranscriptRow::new(
             TranscriptRowKind::User,
             "User",
@@ -2249,6 +2300,10 @@ impl InteractiveApp {
 
     fn take_pending_login(&mut self) -> Option<PendingLogin> {
         self.pending_login.take()
+    }
+
+    fn take_pending_resume_command(&mut self) -> Option<PendingResumeCommand> {
+        self.pending_resume_command.take()
     }
 
     #[cfg(test)]
@@ -2451,6 +2506,62 @@ impl InteractiveApp {
         ));
     }
 
+    fn show_resumable_conversations(&mut self, conversations: &[ResumableConversation]) {
+        if conversations.is_empty() {
+            self.push_event(
+                "Resume",
+                "No persisted conversations are available to restore.",
+            );
+            return;
+        }
+
+        let mut lines = conversations
+            .iter()
+            .take(8)
+            .map(|conversation| {
+                format!(
+                    "{} · {} turn{} · {}",
+                    conversation.task_id.as_str(),
+                    conversation.turn_count,
+                    if conversation.turn_count == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    conversation.preview
+                )
+            })
+            .collect::<Vec<_>>();
+        lines.push("Type `/resume <task-id>` to restore one.".to_string());
+        self.push_event("Resumable conversations", lines.join("\n"));
+    }
+
+    fn restore_resumed_session(
+        &mut self,
+        session: ConversationSession,
+        transcript: &ConversationTranscript,
+    ) {
+        self.session = session;
+        self.current_task_id = self.session.task_id().as_str().to_string();
+        self.busy = false;
+        self.busy_phase = BusyPhase::Idle;
+        self.pending_transcript_sync = false;
+        self.seen_transcript_record_ids.clear();
+        self.pending_turn_total_timing = None;
+        self.pending_turn_result_fallback = None;
+        self.queued_prompts.clear();
+        self.clear_in_flight_turn_state();
+        self.rows.retain(|row| {
+            row.header == "• Interactive mode ready" || row.header == "• Web UI ready"
+        });
+        self.flushed_row_count = self.flushed_row_count.min(self.rows.len());
+        self.load_transcript(transcript);
+        self.push_event(
+            "Conversation resumed",
+            format!("Restored `{}`.", self.current_task_id),
+        );
+    }
+
     fn dispatch_next_prompt(&mut self) -> Option<QueuedPrompt> {
         self.dispatch_next_prompt_at(Instant::now())
     }
@@ -2556,6 +2667,33 @@ impl InteractiveApp {
             }
 
             self.seen_transcript_record_ids.insert(record_id);
+        }
+    }
+
+    fn handle_resume_command(&mut self, raw: &str) {
+        if self.busy || !self.queued_prompts.is_empty() {
+            self.push_error(
+                "Resume unavailable",
+                "Wait for the current turn queue to drain before restoring another conversation.",
+            );
+            return;
+        }
+
+        let mut parts = raw.split_whitespace();
+        let _ = parts.next();
+        match (parts.next(), parts.next()) {
+            (None, None) => {
+                self.pending_resume_command = Some(PendingResumeCommand::List);
+            }
+            (Some(task_id), None) if TaskTraceId::new(task_id).is_ok() => {
+                self.pending_resume_command = Some(PendingResumeCommand::Restore {
+                    task_id: task_id.to_string(),
+                });
+            }
+            _ => self.push_error(
+                "Resume command",
+                "Use `/resume` to list persisted conversations or `/resume <task-id>` to restore one.",
+            ),
         }
     }
 
@@ -6227,6 +6365,34 @@ mod tests {
     }
 
     #[test]
+    fn slash_command_popup_renders_resume_command() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/res".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let buffer = render_buffer(&app, 100, 18);
+        let rendered = buffer_text(&buffer);
+        let suggestions = app
+            .slash_command_suggestions()
+            .into_iter()
+            .map(|command| command.usage)
+            .collect::<Vec<_>>();
+
+        assert!(rendered.contains("Commands"));
+        assert!(rendered.contains("/resume"));
+        assert_eq!(suggestions, vec!["/resume"]);
+    }
+
+    #[test]
     fn slash_command_popup_renders_login_provider_suggestions() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -6908,6 +7074,64 @@ mod tests {
         assert!(app.accept_selected_slash_completion());
         assert_eq!(app.input, "/login inception");
         assert_eq!(app.cursor_pos, "/login inception".chars().count());
+    }
+
+    #[test]
+    fn resume_command_without_task_id_requests_resume_catalog() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/resume".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        app.submit_prompt();
+
+        assert_eq!(app.input, "");
+        assert!(matches!(
+            app.take_pending_resume_command(),
+            Some(super::PendingResumeCommand::List)
+        ));
+        assert!(
+            !app.rows
+                .iter()
+                .any(|row| row.kind == TranscriptRowKind::User)
+        );
+    }
+
+    #[test]
+    fn resume_command_with_task_id_requests_restore() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.input = "/resume task-000123".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        app.submit_prompt();
+
+        assert_eq!(app.input, "");
+        assert!(matches!(
+            app.take_pending_resume_command(),
+            Some(super::PendingResumeCommand::Restore { task_id }) if task_id == "task-000123"
+        ));
+        assert!(
+            !app.rows
+                .iter()
+                .any(|row| row.kind == TranscriptRowKind::User)
+        );
     }
 
     #[test]

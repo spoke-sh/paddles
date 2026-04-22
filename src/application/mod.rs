@@ -41,6 +41,7 @@ use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::specialist_brains::SpecialistBrainRegistry;
 use crate::infrastructure::terminal::run_background_terminal_command_with_execution_hand_registry;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
+use paddles_conversation::ConversationThreadStatus;
 pub use paddles_conversation::{
     ContextLocator, ConversationSession, TraceArtifactId, TurnControlKind, TurnControlRequest,
 };
@@ -49,21 +50,22 @@ use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CollaborationMode,
     CollaborationModeRequest, CollaborationModeRequestTarget, CollaborationModeResult,
     CompactionDecision, CompactionPlan, ControlOperation, ControlResult, ControlResultStatus,
-    ControlSubject, ConversationThreadRef, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
-    ExecutionHandDiagnostic, ExecutionPermissionRequest, ExternalCapabilityDescriptor,
-    ExternalCapabilityInvocation, ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord,
-    ForensicArtifactCapture, ForensicTraceSink, InstructionFrame, InstructionIntent,
-    MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem, PlanChecklistItemStatus,
-    ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor, StrainLevel,
-    StructuredClarificationKind, StructuredClarificationOption, StructuredClarificationRequest,
-    TaskTraceId, ThreadCandidate, ThreadDecision, ThreadDecisionKind, ThreadMergeMode,
-    ThreadMergeRecord, TraceBranch, TraceBranchId, TraceBranchStatus, TraceCheckpointId,
-    TraceCheckpointKind, TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage,
-    TraceLineageEdge, TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation,
-    TraceModelExchangeArtifact, TraceModelExchangePhase, TraceRecord, TraceRecordId,
-    TraceRecordKind, TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution,
-    TraceSignalKind, TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted,
-    TurnControlOperation, TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ControlSubject, ConversationReplayView, ConversationThreadRef, ExecutionGovernanceDecision,
+    ExecutionGovernanceOutcome, ExecutionHandDiagnostic, ExecutionPermissionRequest,
+    ExternalCapabilityDescriptor, ExternalCapabilityInvocation, ExternalCapabilityResultStatus,
+    ExternalCapabilitySourceRecord, ForensicArtifactCapture, ForensicTraceSink, InstructionFrame,
+    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
+    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
+    StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnControlOperation, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 #[cfg(test)]
 use crate::domain::model::{
@@ -85,7 +87,7 @@ use crate::domain::ports::{
     TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
     WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -149,6 +151,13 @@ pub enum RuntimeLaneRole {
     Planner,
     Synthesizer,
     Gatherer,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResumableConversation {
+    pub task_id: TaskTraceId,
+    pub turn_count: usize,
+    pub preview: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -2249,6 +2258,7 @@ impl MechSuitService {
     ) -> Self {
         let workspace_root = workspace_root.into();
         let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+        let next_task_sequence = next_task_sequence_from_trace_recorder(trace_recorder.as_ref());
         let workspace_action_executor: Arc<dyn WorkspaceActionExecutor> =
             Arc::new(LocalWorkspaceActionExecutor::with_execution_hand_registry(
                 workspace_root.clone(),
@@ -2269,7 +2279,7 @@ impl MechSuitService {
             transcript_observers: Mutex::new(Vec::new()),
             forensic_observers: Mutex::new(Vec::new()),
             trace_recorder,
-            trace_counter: AtomicU64::new(1),
+            trace_counter: AtomicU64::new(next_task_sequence),
             sessions: Mutex::new(HashMap::new()),
             shared_session_id: Mutex::new(None),
             conversation_history_store: Mutex::new(None),
@@ -2693,6 +2703,34 @@ impl MechSuitService {
         }
     }
 
+    fn load_persisted_conversation_session(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationSession> {
+        if let Some(session) = self
+            .sessions
+            .lock()
+            .expect("conversation sessions lock")
+            .get(task_id.as_str())
+            .cloned()
+        {
+            return Ok(session);
+        }
+
+        let known_task = self
+            .trace_recorder
+            .task_ids()
+            .into_iter()
+            .any(|candidate| candidate == *task_id);
+        if !known_task {
+            return Err(anyhow!("conversation '{}' was not found", task_id.as_str()));
+        }
+
+        let replay = self.trace_recorder.replay(task_id)?;
+        let session = rehydrate_conversation_session(&replay);
+        Ok(self.register_session(session))
+    }
+
     fn allocate_task_id(&self) -> TaskTraceId {
         let sequence = self.trace_counter.fetch_add(1, Ordering::Relaxed);
         TaskTraceId::new(format!("task-{sequence:06}")).expect("generated task trace id")
@@ -2730,6 +2768,62 @@ impl MechSuitService {
         *self.shared_session_id.lock().expect("shared session lock") =
             Some(session.task_id().as_str().to_string());
         session
+    }
+
+    pub fn resumable_conversations(&self) -> Result<Vec<ResumableConversation>> {
+        let current_shared_session_id = self
+            .shared_session_id
+            .lock()
+            .expect("shared session lock")
+            .clone();
+        let mut task_ids = self.trace_recorder.task_ids();
+        task_ids.sort_by(compare_task_ids_desc);
+
+        let mut conversations = Vec::new();
+        for task_id in task_ids {
+            if current_shared_session_id.as_deref() == Some(task_id.as_str()) {
+                continue;
+            }
+
+            let transcript = self.replay_conversation_transcript(&task_id)?;
+            if transcript.entries.is_empty() {
+                continue;
+            }
+
+            let turn_count = transcript
+                .entries
+                .iter()
+                .filter(|entry| entry.speaker == ConversationTranscriptSpeaker::User)
+                .count();
+            let preview = transcript
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.speaker == ConversationTranscriptSpeaker::User
+                        && !entry.content.trim().is_empty()
+                })
+                .or_else(|| transcript.entries.first())
+                .map(|entry| trim_for_planner(&entry.content, 120))
+                .unwrap_or_default();
+
+            conversations.push(ResumableConversation {
+                task_id,
+                turn_count,
+                preview,
+            });
+        }
+
+        Ok(conversations)
+    }
+
+    pub fn restore_shared_conversation_session(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<ConversationSession> {
+        let session = self.load_persisted_conversation_session(task_id)?;
+        *self.shared_session_id.lock().expect("shared session lock") =
+            Some(task_id.as_str().to_string());
+        Ok(session)
     }
 
     pub fn conversation_session(&self, task_id: &TaskTraceId) -> Option<ConversationSession> {
@@ -7715,6 +7809,97 @@ fn trim_for_planner(input: &str, limit: usize) -> String {
     format!("{}...[truncated]", kept.trim_end())
 }
 
+fn next_task_sequence_from_trace_recorder(trace_recorder: &dyn TraceRecorder) -> u64 {
+    trace_recorder
+        .task_ids()
+        .iter()
+        .filter_map(|task_id| parse_generated_sequence(task_id.as_str(), "task-"))
+        .max()
+        .map(|sequence| sequence.saturating_add(1))
+        .unwrap_or(1)
+}
+
+fn compare_task_ids_desc(left: &TaskTraceId, right: &TaskTraceId) -> std::cmp::Ordering {
+    parse_generated_sequence(right.as_str(), "task-")
+        .cmp(&parse_generated_sequence(left.as_str(), "task-"))
+        .then_with(|| right.as_str().cmp(left.as_str()))
+}
+
+fn parse_generated_sequence(value: &str, marker: &str) -> Option<u64> {
+    value.rsplit_once(marker)?.1.parse().ok()
+}
+
+fn rehydrate_conversation_session(replay: &TraceReplay) -> ConversationSession {
+    let session = ConversationSession::new(replay.task_id.clone());
+    let replay_view = ConversationReplayView::from_trace_replay(replay);
+    let next_turn_sequence = replay
+        .records
+        .iter()
+        .filter_map(|record| parse_generated_sequence(record.lineage.turn_id.as_str(), ".turn-"))
+        .max()
+        .map(|sequence| sequence.saturating_add(1))
+        .unwrap_or(1);
+    let next_candidate_sequence = replay
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            TraceRecordKind::ThreadCandidateCaptured(candidate) => {
+                Some(candidate.captured_sequence)
+            }
+            _ => None,
+        })
+        .max()
+        .map(|sequence| sequence.saturating_add(1))
+        .unwrap_or(1);
+    let next_branch_sequence = replay
+        .records
+        .iter()
+        .filter_map(|record| match &record.kind {
+            TraceRecordKind::PlannerBranchDeclared(branch) => {
+                parse_generated_sequence(branch.branch_id.as_str(), ".thread-")
+            }
+            _ => None,
+        })
+        .max()
+        .map(|sequence| sequence.saturating_add(1))
+        .unwrap_or(1);
+    let mut root_last_record_id = None;
+    let mut branch_last_record_ids = HashMap::new();
+    for record in &replay.records {
+        if let Some(branch_id) = record.lineage.branch_id.clone() {
+            branch_last_record_ids.insert(branch_id, record.record_id.clone());
+        } else {
+            root_last_record_id = Some(record.record_id.clone());
+        }
+    }
+
+    let active_thread = replay_view
+        .threads
+        .iter()
+        .find(|thread| thread.status == ConversationThreadStatus::Active)
+        .map(|thread| thread.thread_ref.clone())
+        .unwrap_or(ConversationThreadRef::Mainline);
+    let threads = replay_view
+        .threads
+        .into_iter()
+        .map(|thread| (thread.thread_ref.stable_id(), thread))
+        .collect::<HashMap<_, _>>();
+    let state = session.state();
+    let mut state = state.lock().expect("conversation session lock");
+    state.next_turn_sequence = next_turn_sequence;
+    state.next_candidate_sequence = next_candidate_sequence;
+    state.next_branch_sequence = next_branch_sequence;
+    state.root_started = !replay.records.is_empty();
+    state.root_last_record_id = root_last_record_id;
+    state.branch_last_record_ids = branch_last_record_ids;
+    state.active_thread = active_thread;
+    if !threads.is_empty() {
+        state.threads = threads;
+    }
+    drop(state);
+    session
+}
+
 fn format_command_output_summary(command: &str, output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -8242,6 +8427,33 @@ mod tests {
         T: WorkspaceActionExecutor + 'static,
     {
         service.set_workspace_action_executor(executor);
+    }
+
+    async fn install_direct_answer_runtime(service: &MechSuitService) {
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared: PreparedRuntimeLanes {
+                planner: PreparedModelLane {
+                    role: RuntimeLaneRole::Planner,
+                    provider: ModelProvider::Sift,
+                    model_id: "planner".to_string(),
+                    paths: Some(sample_model_paths("planner")),
+                },
+                synthesizer: PreparedModelLane {
+                    role: RuntimeLaneRole::Synthesizer,
+                    provider: ModelProvider::Sift,
+                    model_id: "synth".to_string(),
+                    paths: Some(sample_model_paths("synth")),
+                },
+                gatherer: None,
+            },
+            planner_engine: Arc::new(TestPlanner::new(
+                initial_action_decision(InitialAction::Answer, "answer directly"),
+                Vec::new(),
+                Arc::new(Mutex::new(Vec::new())),
+            )),
+            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
+            gatherer: None,
+        });
     }
 
     #[test]
@@ -10727,7 +10939,91 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recent_turn_history_persists_across_service_processes() {
+    async fn shared_conversation_session_starts_after_highest_persisted_task_on_restart() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service_one = test_service(workspace.path());
+        install_direct_answer_runtime(&service_one).await;
+
+        service_one
+            .process_prompt_in_session_with_sink(
+                "First prompt",
+                service_one.shared_conversation_session(),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process first prompt");
+
+        let service_two = test_service(workspace.path());
+        let shared = service_two.shared_conversation_session();
+
+        assert_eq!(shared.task_id().as_str(), "task-000002");
+        assert_eq!(shared.allocate_turn_id().as_str(), "task-000002.turn-0001");
+    }
+
+    #[tokio::test]
+    async fn resumable_conversations_list_prior_persisted_tasks() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service_one = test_service(workspace.path());
+        install_direct_answer_runtime(&service_one).await;
+
+        service_one
+            .process_prompt_in_session_with_sink(
+                "First prompt",
+                service_one.shared_conversation_session(),
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process first prompt");
+
+        let service_two = test_service(workspace.path());
+        let resumable = service_two
+            .resumable_conversations()
+            .expect("resumable conversations");
+
+        assert_eq!(resumable.len(), 1);
+        assert_eq!(resumable[0].task_id.as_str(), "task-000001");
+        assert_eq!(resumable[0].turn_count, 1);
+        assert_eq!(resumable[0].preview, "First prompt");
+    }
+
+    #[tokio::test]
+    async fn shared_conversation_session_can_restore_persisted_task_on_demand() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service_one = test_service(workspace.path());
+        install_direct_answer_runtime(&service_one).await;
+        let original = service_one.shared_conversation_session();
+        let original_task_id = original.task_id();
+
+        service_one
+            .process_prompt_in_session_with_sink(
+                "First prompt",
+                original,
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process first prompt");
+
+        let service_two = test_service(workspace.path());
+        let fresh = service_two.shared_conversation_session();
+        assert_eq!(fresh.task_id().as_str(), "task-000002");
+
+        let restored = service_two
+            .restore_shared_conversation_session(&original_task_id)
+            .expect("restore persisted conversation");
+
+        assert_eq!(restored.task_id(), original_task_id);
+        assert_eq!(
+            service_two.shared_conversation_session().task_id(),
+            original_task_id
+        );
+        assert_eq!(
+            restored.allocate_turn_id().as_str(),
+            "task-000001.turn-0002"
+        );
+    }
+
+    #[tokio::test]
+    async fn service_restarts_keep_prompt_history_but_start_fresh_recent_turn_context() {
         let workspace = tempfile::tempdir().expect("workspace");
         let history_store = Arc::new(ConversationHistoryStore::with_path(
             workspace.path().join("state/conversation-history.toml"),
@@ -10811,7 +11107,7 @@ mod tests {
         assert_eq!(second_requests.len(), 1);
         assert_eq!(
             second_requests[0].recent_turns,
-            vec!["Q: First prompt A: Applied the bounded action.".to_string()]
+            vec!["Q: Second prompt".to_string()]
         );
 
         assert_eq!(

@@ -6,7 +6,7 @@ use crate::domain::ports::{TraceRecorder, TraceRecorderCapability};
 use anyhow::{Context, Result, anyhow, ensure};
 use directories::ProjectDirs;
 use std::any::Any;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -124,6 +124,153 @@ pub(crate) struct TransitTaskState {
 }
 
 impl TransitTraceRecorder {
+    fn root_stream_id(task_id: &TaskTraceId) -> Result<StreamId> {
+        StreamId::new(format!("paddles.task.{}.root", task_id.as_str()))
+            .context("construct task root stream id")
+    }
+
+    fn branch_stream_id(task_id: &TaskTraceId, branch_id: &TraceBranchId) -> Result<StreamId> {
+        StreamId::new(format!(
+            "paddles.task.{}.branch.{}",
+            task_id.as_str(),
+            branch_id.as_str()
+        ))
+        .context("construct task branch stream id")
+    }
+
+    fn streams_root(&self) -> PathBuf {
+        self.engine.data_dir().join("streams")
+    }
+
+    fn persisted_stream_ids_for_task(&self, task_id: &TaskTraceId) -> Result<Vec<StreamId>> {
+        let prefix = format!("paddles.task.{}.", task_id.as_str());
+        let mut stream_ids = Vec::new();
+
+        let Ok(entries) = fs::read_dir(self.streams_root()) else {
+            return Ok(stream_ids);
+        };
+
+        for entry in entries {
+            let entry = entry.context("read recorder stream directory entry")?;
+            if !entry
+                .file_type()
+                .context("read recorder stream directory file type")?
+                .is_dir()
+            {
+                continue;
+            }
+
+            let stream_name = entry.file_name().to_string_lossy().to_string();
+            if !stream_name.starts_with(&prefix) {
+                continue;
+            }
+            if !stream_name.ends_with(".root") && !stream_name.contains(".branch.") {
+                continue;
+            }
+
+            stream_ids.push(
+                StreamId::new(stream_name)
+                    .context("construct persisted stream id from recorder directory")?,
+            );
+        }
+
+        stream_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        Ok(stream_ids)
+    }
+
+    fn load_task_state_from_disk(&self, task_id: &TaskTraceId) -> Result<Option<TransitTaskState>> {
+        let stream_ids = self.persisted_stream_ids_for_task(task_id)?;
+        if stream_ids.is_empty() {
+            return Ok(None);
+        }
+
+        let root_stream = Self::root_stream_id(task_id)?;
+        ensure!(
+            stream_ids.iter().any(|stream_id| stream_id == &root_stream),
+            "persisted trace state for '{}' is missing root stream '{}'",
+            task_id.as_str(),
+            root_stream.as_str()
+        );
+
+        let mut task = TransitTaskState {
+            root_stream: root_stream.clone(),
+            branch_streams: HashMap::new(),
+            record_positions: HashMap::new(),
+            checkpoints: HashMap::new(),
+        };
+
+        let branch_prefix = format!("paddles.task.{}.branch.", task_id.as_str());
+        for stream_id in &stream_ids {
+            if let Some(branch_id) = stream_id.as_str().strip_prefix(&branch_prefix) {
+                let branch_id =
+                    TraceBranchId::new(branch_id).context("parse persisted branch id")?;
+                task.branch_streams.insert(branch_id, stream_id.clone());
+            }
+        }
+
+        for stream_id in std::iter::once(root_stream).chain(task.branch_streams.values().cloned()) {
+            for local_record in self.engine.replay(&stream_id)? {
+                let record: TraceRecord = serde_json::from_slice(local_record.payload())
+                    .context("deserialize persisted transit trace record")?;
+                task.record_positions
+                    .insert(record.record_id.clone(), local_record.position().clone());
+            }
+        }
+
+        Ok(Some(task))
+    }
+
+    fn ensure_task_loaded(&self, task_id: &TaskTraceId) -> Result<Option<StreamId>> {
+        {
+            let guard = self.state.lock().expect("transit trace recorder lock");
+            if let Some(task) = guard.tasks.get(task_id) {
+                return Ok(Some(task.root_stream.clone()));
+            }
+        }
+
+        let Some(task_state) = self.load_task_state_from_disk(task_id)? else {
+            return Ok(None);
+        };
+
+        let mut guard = self.state.lock().expect("transit trace recorder lock");
+        let task = guard.tasks.entry(task_id.clone()).or_insert(task_state);
+        Ok(Some(task.root_stream.clone()))
+    }
+
+    fn scan_task_ids(&self) -> Result<Vec<TaskTraceId>> {
+        let mut task_ids = BTreeSet::new();
+
+        {
+            let guard = self.state.lock().expect("transit trace recorder lock");
+            task_ids.extend(guard.tasks.keys().cloned());
+        }
+
+        let Ok(entries) = fs::read_dir(self.streams_root()) else {
+            return Ok(task_ids.into_iter().collect());
+        };
+        for entry in entries {
+            let entry = entry.context("read recorder stream directory entry")?;
+            if !entry
+                .file_type()
+                .context("read recorder stream directory file type")?
+                .is_dir()
+            {
+                continue;
+            }
+
+            let stream_name = entry.file_name().to_string_lossy().to_string();
+            let Some(task_id) = stream_name
+                .strip_prefix("paddles.task.")
+                .and_then(|candidate| candidate.strip_suffix(".root"))
+            else {
+                continue;
+            };
+            task_ids.insert(TaskTraceId::new(task_id).context("parse persisted task id")?);
+        }
+
+        Ok(task_ids.into_iter().collect())
+    }
+
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
         fs::create_dir_all(data_dir.as_ref()).with_context(|| {
             format!(
@@ -160,6 +307,7 @@ impl TransitTraceRecorder {
     }
 
     pub fn stream_count(&self, task_id: &TaskTraceId) -> usize {
+        let _ = self.ensure_task_loaded(task_id);
         self.state
             .lock()
             .expect("transit trace recorder lock")
@@ -170,9 +318,8 @@ impl TransitTraceRecorder {
     }
 
     fn create_task_root_if_needed(&self, record: &TraceRecord) -> Result<StreamId> {
-        let mut guard = self.state.lock().expect("transit trace recorder lock");
-        if let Some(existing) = guard.tasks.get(&record.lineage.task_id) {
-            return Ok(existing.root_stream.clone());
+        if let Some(existing) = self.ensure_task_loaded(&record.lineage.task_id)? {
+            return Ok(existing);
         }
 
         ensure!(
@@ -180,16 +327,14 @@ impl TransitTraceRecorder {
             "embedded transit recording requires a task root record before any other record"
         );
 
-        let root_stream = StreamId::new(format!(
-            "paddles.task.{}.root",
-            record.lineage.task_id.as_str()
-        ))?;
+        let root_stream = Self::root_stream_id(&record.lineage.task_id)?;
         self.engine
             .create_stream(transit_core::kernel::StreamDescriptor::root(
                 root_stream.clone(),
                 LineageMetadata::new(Some("paddles".into()), Some("task-root".into()))
                     .with_label("task_id", record.lineage.task_id.as_str()),
             ))?;
+        let mut guard = self.state.lock().expect("transit trace recorder lock");
         guard.tasks.insert(
             record.lineage.task_id.clone(),
             TransitTaskState {
@@ -255,11 +400,7 @@ impl TransitTraceRecorder {
             .get(parent_record_id)
             .cloned()
             .ok_or_else(|| anyhow!("unknown parent record '{}'", parent_record_id.as_str()))?;
-        let branch_stream = StreamId::new(format!(
-            "paddles.task.{}.branch.{}",
-            record.lineage.task_id.as_str(),
-            branch.branch_id.as_str()
-        ))?;
+        let branch_stream = Self::branch_stream_id(&record.lineage.task_id, &branch.branch_id)?;
         self.engine.create_branch(
             branch_stream.clone(),
             parent_position,
@@ -335,6 +476,7 @@ impl TraceRecorder for TransitTraceRecorder {
     }
 
     fn replay(&self, task_id: &TaskTraceId) -> Result<TraceReplay> {
+        let _ = self.ensure_task_loaded(task_id)?;
         let streams = {
             let guard = self.state.lock().expect("transit trace recorder lock");
             let Some(task) = guard.tasks.get(task_id) else {
@@ -365,6 +507,10 @@ impl TraceRecorder for TransitTraceRecorder {
             task_id: task_id.clone(),
             records: records.into_values().collect(),
         })
+    }
+
+    fn task_ids(&self) -> Vec<TaskTraceId> {
+        self.scan_task_ids().unwrap_or_default()
     }
 }
 
@@ -575,6 +721,53 @@ mod tests {
         recorder
             .verify_checkpoints(&task_id)
             .expect("verify checkpoints");
+    }
+
+    #[test]
+    fn transit_recorder_rehydrates_existing_task_streams_after_reopen() {
+        let temp = tempdir().expect("tempdir");
+        let recorder = TransitTraceRecorder::open(temp.path()).expect("transit recorder");
+        let mut root = root_record("task-reopen");
+        let task_id = root.lineage.task_id.clone();
+        let turn_one = root.lineage.turn_id.clone();
+        recorder.record(root.clone()).expect("record root");
+
+        root.record_id = TraceRecordId::new("record-2").expect("record id");
+        root.sequence = 2;
+        root.lineage.parent_record_id = Some(TraceRecordId::new("record-1").expect("record id"));
+        root.kind = TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+            checkpoint_id: TraceCheckpointId::new("checkpoint-1").expect("checkpoint id"),
+            kind: TraceCheckpointKind::TurnCompleted,
+            summary: "turn completed".to_string(),
+            response: None,
+            authored_response: None,
+            citations: Vec::new(),
+            grounded: true,
+        });
+        recorder.record(root).expect("record checkpoint");
+        drop(recorder);
+
+        let reopened = TransitTraceRecorder::open(temp.path()).expect("reopen recorder");
+        let replay = reopened.replay(&task_id).expect("replay after reopen");
+        assert_eq!(replay.records.len(), 2);
+        assert_eq!(reopened.task_ids(), vec![task_id.clone()]);
+
+        let turn_two = TurnTraceId::new("task-reopen.turn-0002").expect("turn");
+        reopened
+            .record(turn_started_record(
+                &task_id,
+                &turn_two,
+                "record-3",
+                3,
+                "record-2",
+                "follow-up prompt",
+            ))
+            .expect("append after reopen");
+
+        let replay = reopened.replay(&task_id).expect("replay after append");
+        assert_eq!(replay.records.len(), 3);
+        assert_eq!(replay.records[0].lineage.turn_id, turn_one);
+        assert_eq!(replay.records[2].lineage.turn_id, turn_two);
     }
 
     #[test]
