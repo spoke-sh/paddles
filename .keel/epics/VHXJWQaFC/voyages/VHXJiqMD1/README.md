@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VHXJiqMD1
-status: in-progress
+status: done
 epic: VHXJWQaFC
 created_at: 2026-04-22T09:04:40
 # authored
@@ -22,16 +22,18 @@ started_at: 2026-04-22T10:36:41
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Compile Explicit Paddles Rationale And Operator Evidence](../../../../stories/VHXK93BbJ/README.md) | feat | backlog |
+| [Compile Explicit Paddles Rationale And Operator Evidence](../../../../stories/VHXK93BbJ/README.md) | feat | done |
 | [Use Deliberation Signals In Recursive Branch Refine And Stop Decisions](../../../../stories/VHXK93dcv/README.md) | feat | done |
 | [Define Normalized Deliberation Signals](../../../../stories/VHXK94Ueg/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -587,6 +587,7 @@ impl StructuredTurnTrace {
         &self,
         action: &str,
         rationale: &str,
+        signal_summary: Option<&str>,
         branch_id: Option<TraceBranchId>,
     ) {
         let branch_id = branch_id.or_else(|| self.default_branch_id());
@@ -595,6 +596,7 @@ impl StructuredTurnTrace {
             TraceRecordKind::PlannerAction {
                 action: action.to_string(),
                 rationale: rationale.to_string(),
+                signal_summary: signal_summary.map(str::to_string),
             },
         );
         self.record_lineage_edge(
@@ -1925,11 +1927,23 @@ fn render_turn_event(event: &TurnEvent) -> String {
             sequence,
             action,
             rationale,
-        } => format!(
-            "• Planner step {sequence}: {}\n  └ Rationale: {}",
-            trim_event_detail(action, 1),
-            trim_event_detail(rationale, 2)
-        ),
+            signal_summary,
+        } => {
+            let mut lines = vec![
+                format!(
+                    "• Planner step {sequence}: {}",
+                    trim_event_detail(action, 1)
+                ),
+                format!("  └ Rationale: {}", trim_event_detail(rationale, 2)),
+            ];
+            if let Some(signal_summary) = signal_summary {
+                lines.push(format!(
+                    "    Signals: {}",
+                    trim_event_detail(signal_summary, 2)
+                ));
+            }
+            lines.join("\n")
+        }
         TurnEvent::PlanUpdated { items } => format!(
             "• Updated Plan\n  └ {}",
             trim_event_detail(
@@ -3479,12 +3493,6 @@ impl MechSuitService {
                     },
                 )
                 .await?;
-                trace.emit(TurnEvent::PlannerActionSelected {
-                    sequence,
-                    action: decision.action.summary(),
-                    rationale: decision.rationale.clone(),
-                });
-                trace.record_planner_action(&decision.action.summary(), &decision.rationale, None);
             }
 
             decision = sanitize_recursive_planner_decision_for_collaboration(
@@ -3495,6 +3503,26 @@ impl MechSuitService {
                 merge_instruction_frame_with_edit_signal(instruction_frame, &decision.edit);
             if let Some(resolution) = decision.edit.resolution.clone() {
                 loop_state.target_resolution = Some(resolution);
+            }
+            if planner_selected_this_step {
+                let (compiled_rationale, signal_summary) = compile_recursive_paddles_rationale(
+                    &decision.action,
+                    &loop_state.evidence_items,
+                    &pending_deliberation_signals,
+                );
+                decision.rationale = compiled_rationale;
+                trace.emit(TurnEvent::PlannerActionSelected {
+                    sequence,
+                    action: decision.action.summary(),
+                    rationale: decision.rationale.clone(),
+                    signal_summary: signal_summary.clone(),
+                });
+                trace.record_planner_action(
+                    &decision.action.summary(),
+                    &decision.rationale,
+                    signal_summary.as_deref(),
+                    None,
+                );
             }
 
             trace.emit(TurnEvent::PlannerStepProgress {
@@ -6542,6 +6570,180 @@ fn format_deliberation_signal_note(signals: &DeliberationSignals) -> Option<Stri
         );
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn deliberation_confidence_label(confidence: DeliberationConfidence) -> &'static str {
+    match confidence {
+        DeliberationConfidence::Low => "low",
+        DeliberationConfidence::Medium => "medium",
+        DeliberationConfidence::High => "high",
+    }
+}
+
+fn summarize_deliberation_signal_values(values: &[String]) -> Option<String> {
+    let values = values
+        .iter()
+        .map(|value| trim_for_planner(value, 48))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return None;
+    }
+
+    let preview = values.iter().take(2).cloned().collect::<Vec<_>>();
+    let mut summary = preview.join(", ");
+    if values.len() > preview.len() {
+        summary.push_str(&format!(" (+{} more)", values.len() - preview.len()));
+    }
+    Some(summary)
+}
+
+fn summarize_deliberation_signals(signals: &DeliberationSignals) -> Option<String> {
+    let mut summaries = Vec::new();
+    if continuation_requires_tool_follow_up(signals) {
+        summaries.push("continuation=tool_follow_up".to_string());
+    }
+
+    match &signals.uncertainty {
+        DeliberationSignal::Present(confidence) => summaries.push(format!(
+            "uncertainty={}",
+            deliberation_confidence_label(*confidence)
+        )),
+        DeliberationSignal::Unknown => summaries.push("uncertainty=opaque".to_string()),
+        DeliberationSignal::None => {}
+    }
+
+    match &signals.evidence_gaps {
+        DeliberationSignal::Present(gaps) => {
+            if let Some(gaps) = summarize_deliberation_signal_values(gaps) {
+                summaries.push(format!("evidence_gaps={gaps}"));
+            }
+        }
+        DeliberationSignal::Unknown => summaries.push("evidence_gaps=opaque".to_string()),
+        DeliberationSignal::None => {}
+    }
+
+    match &signals.branch_candidates {
+        DeliberationSignal::Present(candidates) => {
+            if let Some(candidates) = summarize_deliberation_signal_values(candidates) {
+                summaries.push(format!("branch_candidates={candidates}"));
+            }
+        }
+        DeliberationSignal::Unknown => summaries.push("branch_candidates=opaque".to_string()),
+        DeliberationSignal::None => {}
+    }
+
+    match &signals.stop_confidence {
+        DeliberationSignal::Present(confidence) => summaries.push(format!(
+            "stop_confidence={}",
+            deliberation_confidence_label(*confidence)
+        )),
+        DeliberationSignal::Unknown => summaries.push("stop_confidence=opaque".to_string()),
+        DeliberationSignal::None => {}
+    }
+
+    match &signals.risk_hints {
+        DeliberationSignal::Present(risks) => {
+            if let Some(risks) = summarize_deliberation_signal_values(risks) {
+                summaries.push(format!("risk_hints={risks}"));
+            }
+        }
+        DeliberationSignal::Unknown => summaries.push("risk_hints=opaque".to_string()),
+        DeliberationSignal::None => {}
+    }
+
+    (!summaries.is_empty()).then(|| summaries.join("; "))
+}
+
+fn summarize_rationale_evidence_sources(evidence_items: &[EvidenceItem]) -> Option<String> {
+    let mut unique_sources = Vec::new();
+    for item in evidence_items {
+        let source = trim_for_planner(&item.source, 48);
+        if source.is_empty() || unique_sources.contains(&source) {
+            continue;
+        }
+        unique_sources.push(source);
+    }
+
+    match unique_sources.as_slice() {
+        [] => None,
+        [only] => Some(only.clone()),
+        [first, second] => Some(format!("{first} and {second}")),
+        [first, second, rest @ ..] => Some(format!(
+            "{first}, {second}, and {} other source(s)",
+            rest.len()
+        )),
+    }
+}
+
+fn compile_initial_paddles_rationale(
+    action: &InitialAction,
+    signals: &DeliberationSignals,
+) -> (String, Option<String>) {
+    let signal_summary = summarize_deliberation_signals(signals);
+    let rationale = match action {
+        InitialAction::Answer | InitialAction::Stop { .. } => format!(
+            "Paddles chose `{}` because the turn could complete without additional evidence before responding.",
+            action.summary()
+        ),
+        InitialAction::Workspace { .. }
+        | InitialAction::Refine { .. }
+        | InitialAction::Branch { .. } => format!(
+            "Paddles chose `{}` as the first bounded step to gather or act on the most relevant evidence.",
+            action.summary()
+        ),
+    };
+    let rationale = if continuation_requires_tool_follow_up(signals) {
+        format!(
+            "{rationale} Normalized deliberation signals preserved the active tool-result path."
+        )
+    } else if has_opaque_deliberation_hints(signals) {
+        format!(
+            "{rationale} Normalized deliberation signals kept the first step conservative and grounded."
+        )
+    } else {
+        rationale
+    };
+
+    (rationale, signal_summary)
+}
+
+fn compile_recursive_paddles_rationale(
+    action: &PlannerAction,
+    evidence_items: &[EvidenceItem],
+    signals: &DeliberationSignals,
+) -> (String, Option<String>) {
+    let signal_summary = summarize_deliberation_signals(signals);
+    let evidence_summary = summarize_rationale_evidence_sources(evidence_items);
+    let base = match (action, evidence_summary.as_deref()) {
+        (PlannerAction::Stop { .. }, Some(evidence_summary)) => format!(
+            "Paddles chose `{}` because evidence from {evidence_summary} made the current path sufficient.",
+            action.summary()
+        ),
+        (PlannerAction::Stop { .. }, None) => format!(
+            "Paddles chose `{}` because the turn could close without additional evidence.",
+            action.summary()
+        ),
+        (_, Some(evidence_summary)) => format!(
+            "Paddles chose `{}` because evidence from {evidence_summary} narrowed the next bounded step.",
+            action.summary()
+        ),
+        (_, None) => format!(
+            "Paddles chose `{}` as the next bounded step to gather or act on the most relevant evidence.",
+            action.summary()
+        ),
+    };
+    let rationale = if continuation_requires_tool_follow_up(signals) {
+        format!("{base} Normalized deliberation signals preserved the active tool-result path.")
+    } else if has_opaque_deliberation_hints(signals) {
+        format!(
+            "{base} Normalized deliberation signals kept the follow-up conservative and grounded."
+        )
+    } else {
+        base
+    };
+
+    (rationale, signal_summary)
 }
 
 fn sync_deliberation_signal_note(
@@ -10617,6 +10819,22 @@ mod tests {
                 .iter()
                 .any(|record| matches!(record.kind, TraceRecordKind::PlannerAction { .. }))
         );
+        let planner_action = replay
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TraceRecordKind::PlannerAction {
+                    action,
+                    rationale,
+                    signal_summary,
+                } => Some((action, rationale, signal_summary)),
+                _ => None,
+            })
+            .expect("planner action record");
+        assert_eq!(planner_action.0, "answer directly");
+        assert_ne!(planner_action.1, "answer directly");
+        assert!(planner_action.1.contains("answer directly"));
+        assert_eq!(planner_action.2, &None);
         assert!(
             replay
                 .records
@@ -10705,6 +10923,22 @@ mod tests {
     }
 
     #[test]
+    fn plain_turn_event_rendering_includes_planner_signal_summaries() {
+        let rendered = render_turn_event(&TurnEvent::PlannerActionSelected {
+            sequence: 3,
+            action: "inspect `ls`".to_string(),
+            rationale: "Paddles chose `inspect `ls`` because evidence from command: pwd narrowed the next bounded step.".to_string(),
+            signal_summary: Some(
+                "continuation=tool_follow_up; uncertainty=opaque".to_string(),
+            ),
+        });
+
+        assert!(rendered.contains("Planner step 3: inspect `ls`"));
+        assert!(rendered.contains("Rationale: Paddles chose `inspect `ls``"));
+        assert!(rendered.contains("Signals: continuation=tool_follow_up; uncertainty=opaque"));
+    }
+
+    #[test]
     fn structured_turn_trace_records_lineage_edges_for_model_calls_and_outputs() {
         let session = ConversationSession::new(TaskTraceId::new("task-lineage").expect("task id"));
         let turn_id = session.allocate_turn_id();
@@ -10738,7 +10972,12 @@ mod tests {
             &InterpretationContext::default(),
             &prepared,
         );
-        trace.record_planner_action("read src/lib.rs", "act on the likeliest file first", None);
+        trace.record_planner_action(
+            "read src/lib.rs",
+            "act on the likeliest file first",
+            None,
+            None,
+        );
         let exchange_id = ForensicTraceSink::allocate_model_exchange_id(
             trace.as_ref(),
             TraceModelExchangeLane::Planner,
@@ -18603,6 +18842,32 @@ mod tests {
         }));
 
         let events = sink.recorded();
+        let follow_up_event = events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::PlannerActionSelected {
+                    sequence,
+                    action,
+                    rationale,
+                    signal_summary,
+                } if *sequence == 3 => Some((action, rationale, signal_summary)),
+                _ => None,
+            })
+            .expect("signal-aware follow-up planner action event");
+        assert_eq!(follow_up_event.0, "inspect `ls`");
+        assert!(follow_up_event.1.contains("Paddles chose `inspect `ls``"));
+        assert!(
+            !follow_up_event
+                .1
+                .contains("inspect the current tool path before stopping")
+        );
+        assert!(matches!(
+            follow_up_event.2.as_deref(),
+            Some(summary)
+                if summary.contains("continuation=tool_follow_up")
+                    && summary.contains("uncertainty=opaque")
+                    && !summary.contains("inspect the current tool path before stopping")
+        ));
         assert!(events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
@@ -18693,6 +18958,21 @@ mod tests {
                 .any(|note| note.contains("Steering review [deliberation-signals]"))
         }));
         let events = sink.recorded();
+        let terminal_event = events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::PlannerActionSelected {
+                    sequence,
+                    action,
+                    rationale,
+                    signal_summary,
+                } if *sequence == 3 => Some((action, rationale, signal_summary)),
+                _ => None,
+            })
+            .expect("terminal planner action event");
+        assert_eq!(terminal_event.0, "stop (model selected answer)");
+        assert!(terminal_event.1.contains("stop (model selected answer)"));
+        assert_eq!(terminal_event.2, &None);
         assert!(!events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }

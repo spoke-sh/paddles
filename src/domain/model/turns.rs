@@ -109,6 +109,8 @@ pub enum TurnEvent {
         sequence: usize,
         action: String,
         rationale: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signal_summary: Option<String>,
     },
     PlanUpdated {
         items: Vec<PlanChecklistItem>,

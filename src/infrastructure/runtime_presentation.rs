@@ -89,11 +89,17 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             sequence,
             action,
             rationale,
+            signal_summary,
         } => RuntimeEventPresentation {
             badge: "planner".to_string(),
             badge_class: "planner".to_string(),
             title: format!("• Planner step {sequence}: {action}"),
-            detail: format!("Rationale: {rationale}"),
+            detail: match signal_summary {
+                Some(signal_summary) => {
+                    format!("Rationale: {rationale}\nSignals: {signal_summary}")
+                }
+                None => format!("Rationale: {rationale}"),
+            },
             text: format!("Step {sequence}: {action}"),
         },
         TurnEvent::PlanUpdated { items } => RuntimeEventPresentation {
@@ -1032,6 +1038,32 @@ mod tests {
         assert!(presentation.detail.contains("stay_in_planning"));
         assert!(presentation.detail.contains("switch_to_execution"));
         assert_eq!(presentation.text, "approval · requested");
+    }
+
+    #[test]
+    fn projects_planner_signal_summaries_into_runtime_event_presentation() {
+        let presentation = project_runtime_event(&TurnEvent::PlannerActionSelected {
+            sequence: 3,
+            action: "inspect `ls`".to_string(),
+            rationale: "Paddles chose `inspect `ls`` because evidence from workspace.inspect narrowed the next bounded step.".to_string(),
+            signal_summary: Some(
+                "continuation=tool_follow_up; uncertainty=opaque".to_string(),
+            ),
+        });
+
+        assert_eq!(presentation.badge, "planner");
+        assert_eq!(presentation.badge_class, "planner");
+        assert_eq!(presentation.title, "• Planner step 3: inspect `ls`");
+        assert!(
+            presentation
+                .detail
+                .contains("Rationale: Paddles chose `inspect `ls``")
+        );
+        assert!(
+            presentation
+                .detail
+                .contains("Signals: continuation=tool_follow_up; uncertainty=opaque")
+        );
     }
 
     #[test]

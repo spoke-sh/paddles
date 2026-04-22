@@ -250,14 +250,21 @@ impl<'a> TurnOrchestrationChamber<'a> {
                         &collaboration,
                         decision,
                     );
+                    let (compiled_rationale, signal_summary) = compile_initial_paddles_rationale(
+                        &decision.action,
+                        &DeliberationSignals::default(),
+                    );
+                    decision.rationale = compiled_rationale;
                     trace.emit(TurnEvent::PlannerActionSelected {
                         sequence: 1,
                         action: decision.action.summary(),
                         rationale: decision.rationale.clone(),
+                        signal_summary: signal_summary.clone(),
                     });
                     trace.record_planner_action(
                         &decision.action.summary(),
                         &decision.rationale,
+                        signal_summary.as_deref(),
                         None,
                     );
                     let mut execution_plan =

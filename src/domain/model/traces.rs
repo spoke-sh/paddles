@@ -458,6 +458,8 @@ pub enum TraceRecordKind {
     PlannerAction {
         action: String,
         rationale: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signal_summary: Option<String>,
     },
     PlannerBranchDeclared(TraceBranch),
     SelectionArtifact(TraceSelectionArtifact),
@@ -694,5 +696,26 @@ mod tests {
             }
             other => panic!("unexpected trace record kind: {other:?}"),
         }
+    }
+
+    #[test]
+    fn planner_action_signal_summaries_round_trip_through_trace_records() {
+        let kind = TraceRecordKind::PlannerAction {
+            action: "inspect `pwd`".to_string(),
+            rationale: "Paddles chose `inspect `pwd`` as the next bounded step.".to_string(),
+            signal_summary: Some("continuation=tool_follow_up; uncertainty=opaque".to_string()),
+        };
+
+        let value = serde_json::to_value(&kind).expect("serialize planner action");
+        assert_eq!(
+            value
+                .get("PlannerAction")
+                .and_then(|item| item.get("signal_summary")),
+            Some(&json!("continuation=tool_follow_up; uncertainty=opaque"))
+        );
+
+        let restored: TraceRecordKind =
+            serde_json::from_value(value).expect("deserialize planner action");
+        assert_eq!(restored, kind);
     }
 }
