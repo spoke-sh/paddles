@@ -1,5 +1,4 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
-use super::local_workspace_editor::LocalWorkspaceEditor;
 use crate::domain::model::{
     CompactionDecision, ConversationThreadRef, ExternalCapabilityInvocation,
     ForensicArtifactCapture, NullTurnEventSink, StrainFactor, StrainTracker, ThreadDecision,
@@ -15,20 +14,14 @@ use crate::domain::ports::{
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
     OperatorMemoryDocument, PlannerAction, PlannerLoopState, PlannerRequest,
     RecursivePlannerDecision, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
-    ThreadDecisionRequest, WorkspaceAction, WorkspaceEditor,
-};
-use crate::infrastructure::execution_governance::{
-    GovernedTerminalCommandResult, summarize_governance_outcome,
+    ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::rendering::{
     RenderCapability, ensure_citation_section, extract_http_urls, final_answer_contract_prompt,
     normalize_assistant_response,
 };
-use crate::infrastructure::sift_cache::{
-    default_sift_cache_dir_for_workspace, ensure_sift_process_cache_dirs,
-};
-use crate::infrastructure::terminal::run_background_terminal_command_with_runtime_mediator;
+use crate::infrastructure::sift_cache::ensure_sift_process_cache_dirs;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
@@ -43,27 +36,18 @@ use candle_transformers::models::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sift::internal::search::adapters::llm_utils::{QwenConfigPartial, get_device_for};
-use sift::{
-    AgentTurnInput, ContextAssemblyBudget, ContextAssemblyRequest, ContextAssemblyResponse,
-    Conversation, EnvironmentFactInput, LocalContextSource, RetainedArtifact, SearchPlan, Sift,
-    ToolOutputInput,
-};
+use sift::{AgentTurnInput, Conversation, LocalContextSource};
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokenizers::Tokenizer;
 
 const MAX_MODEL_TOKENS: usize = 256;
-const MAX_TOOL_STEPS: usize = 4;
 const MAX_LOCAL_CONTEXT_ITEMS: usize = 24;
-const MAX_TOOL_OUTPUT_CHARS: usize = 12_000;
-const MAX_FILE_CHARS: usize = 16_000;
-const MAX_LISTED_FILES: usize = 200;
 const MAX_CONTEXT_HITS: usize = 5;
-const RETAINED_ARTIFACT_LIMIT: usize = 5;
 const MAX_CITATIONS: usize = 4;
 const MAX_INTERPRETATION_GRAPH_DEPTH: usize = 3;
 const MAX_INTERPRETATION_GRAPH_DOCS: usize = 8;
@@ -88,12 +72,8 @@ struct PreparedQwenModel {
 
 pub struct SiftAgentAdapter {
     workspace_root: PathBuf,
-    execution_hand_registry: Arc<ExecutionHandRegistry>,
-    transport_mediator: Arc<TransportToolMediator>,
     model_id: String,
-    sift: Sift,
     conversation_factory: Box<dyn ConversationFactory>,
-    base_context: Vec<LocalContextSource>,
     render_capability: RenderCapability,
     state: Mutex<SessionState>,
     verbose: AtomicU8,
@@ -103,57 +83,7 @@ pub struct SiftAgentAdapter {
 struct SessionState {
     session_id: String,
     turn_counter: usize,
-    tool_counter: usize,
-    retained_artifacts: Vec<RetainedArtifact>,
     local_context: Vec<LocalContextSource>,
-}
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(tag = "tool", rename_all = "snake_case")]
-enum ToolCall {
-    Search {
-        query: String,
-        #[serde(default)]
-        intent: Option<String>,
-    },
-    ListFiles {
-        #[serde(default)]
-        pattern: Option<String>,
-    },
-    ReadFile {
-        path: String,
-    },
-    WriteFile {
-        path: String,
-        content: String,
-    },
-    ReplaceInFile {
-        path: String,
-        old: String,
-        new: String,
-        #[serde(default)]
-        replace_all: bool,
-    },
-    Shell {
-        command: String,
-    },
-    Diff {
-        #[serde(default)]
-        path: Option<String>,
-    },
-    ApplyPatch {
-        patch: String,
-    },
-}
-
-#[derive(Debug)]
-pub(crate) struct ToolResult {
-    pub(crate) name: &'static str,
-    pub(crate) summary: String,
-    pub(crate) applied_edit: Option<crate::domain::model::AppliedEdit>,
-    pub(crate) governance_request: Option<crate::domain::model::ExecutionPermissionRequest>,
-    pub(crate) governance_outcome: Option<crate::domain::model::ExecutionGovernanceOutcome>,
-    pub(crate) retained_artifacts: Option<Vec<RetainedArtifact>>,
 }
 
 struct SiftForensicRecord {
@@ -457,19 +387,6 @@ struct InterpretationGraphEdge {
     source: String,
     #[serde(default)]
     targets: Vec<String>,
-}
-
-struct TurnPrompt<'a> {
-    workspace_root: &'a Path,
-    user_prompt: &'a str,
-    recent_turns: &'a str,
-    recent_thread_summary: Option<&'a str>,
-    memory_prompt: &'a str,
-    context: &'a ContextAssemblyResponse,
-    gathered_evidence: Option<&'a EvidenceBundle>,
-    prefer_tools: bool,
-    follow_up_execution: bool,
-    render_capability: RenderCapability,
 }
 
 struct PlannerPrompt<'a> {
@@ -1111,21 +1028,6 @@ fn load_qwen_var_builder(
     unsafe { VarBuilder::from_mmaped_safetensors(weights_paths, dtype, device) }.map_err(Into::into)
 }
 
-impl ToolCall {
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Search { .. } => "search",
-            Self::ListFiles { .. } => "list_files",
-            Self::ReadFile { .. } => "read_file",
-            Self::WriteFile { .. } => "write_file",
-            Self::ReplaceInFile { .. } => "replace_in_file",
-            Self::Shell { .. } => "shell",
-            Self::Diff { .. } => "diff",
-            Self::ApplyPatch { .. } => "apply_patch",
-        }
-    }
-}
-
 impl SiftAgentAdapter {
     pub fn new(
         workspace_root: impl Into<PathBuf>,
@@ -1164,8 +1066,8 @@ impl SiftAgentAdapter {
 
     pub fn new_with_runtime_mediator(
         workspace_root: impl Into<PathBuf>,
-        execution_hand_registry: Arc<ExecutionHandRegistry>,
-        transport_mediator: Arc<TransportToolMediator>,
+        _execution_hand_registry: Arc<ExecutionHandRegistry>,
+        _transport_mediator: Arc<TransportToolMediator>,
         model_id: &str,
         model_paths: ModelPaths,
         render_capability: RenderCapability,
@@ -1177,8 +1079,6 @@ impl SiftAgentAdapter {
         )?)?;
         Ok(Self::from_factory(
             workspace_root,
-            execution_hand_registry,
-            transport_mediator,
             model_id,
             Box::new(model),
             render_capability,
@@ -1187,42 +1087,21 @@ impl SiftAgentAdapter {
 
     fn from_factory(
         workspace_root: PathBuf,
-        execution_hand_registry: Arc<ExecutionHandRegistry>,
-        transport_mediator: Arc<TransportToolMediator>,
         model_id: &str,
         conversation_factory: Box<dyn ConversationFactory>,
         render_capability: RenderCapability,
     ) -> Self {
         let session_id = format!("paddles-{}", unix_timestamp());
-        let base_context = vec![
-            LocalContextSource::EnvironmentFact(EnvironmentFactInput::new(
-                "workspace_root",
-                workspace_root.display().to_string(),
-            )),
-            LocalContextSource::EnvironmentFact(EnvironmentFactInput::new("model_id", model_id)),
-            LocalContextSource::EnvironmentFact(EnvironmentFactInput::new(
-                "runtime",
-                "sift-native",
-            )),
-        ];
         ensure_sift_process_cache_dirs();
 
         Self {
             workspace_root: workspace_root.clone(),
-            execution_hand_registry,
-            transport_mediator,
             model_id: model_id.to_string(),
-            sift: Sift::builder()
-                .with_cache_dir(default_sift_cache_dir_for_workspace(&workspace_root))
-                .build(),
             conversation_factory,
-            base_context,
             render_capability,
             state: Mutex::new(SessionState {
                 session_id,
                 turn_counter: 0,
-                tool_counter: 0,
-                retained_artifacts: Vec::new(),
                 local_context: Vec::new(),
             }),
             verbose: AtomicU8::new(0),
@@ -1235,14 +1114,8 @@ impl SiftAgentAdapter {
         model_id: &str,
         conversation: Box<dyn Conversation>,
     ) -> Self {
-        let execution_hand_registry =
-            Arc::new(ExecutionHandRegistry::with_default_local_governance());
         Self::from_factory(
             workspace_root.into(),
-            Arc::clone(&execution_hand_registry),
-            Arc::new(TransportToolMediator::with_execution_hand_registry(
-                execution_hand_registry,
-            )),
             model_id,
             Box::new(StaticConversationFactory::new(vec![conversation])),
             RenderCapability::PromptEnvelope,
@@ -1255,14 +1128,8 @@ impl SiftAgentAdapter {
         model_id: &str,
         conversations: Vec<Box<dyn Conversation>>,
     ) -> Self {
-        let execution_hand_registry =
-            Arc::new(ExecutionHandRegistry::with_default_local_governance());
         Self::from_factory(
             workspace_root.into(),
-            Arc::clone(&execution_hand_registry),
-            Arc::new(TransportToolMediator::with_execution_hand_registry(
-                execution_hand_registry,
-            )),
             model_id,
             Box::new(StaticConversationFactory::new(conversations)),
             RenderCapability::PromptEnvelope,
@@ -1648,7 +1515,6 @@ impl SiftAgentAdapter {
             .filter(|summary| !summary.trim().is_empty());
         let instruction_handoff = format_instruction_handoff(handoff);
 
-        let mut working_retained = state.retained_artifacts.clone();
         let mut working_local_context = state.local_context.clone();
         push_local_context(
             &mut working_local_context,
@@ -1659,8 +1525,6 @@ impl SiftAgentAdapter {
         let direct_response_turn =
             matches!(turn_intent, TurnIntent::DirectResponse | TurnIntent::Casual);
         let require_grounding = gathered_evidence.is_some_and(|bundle| !bundle.items.is_empty());
-        let prefer_tools = turn_intent.prefers_tools();
-        let follow_up_execution = false;
         let mut conversation = self.conversation_factory.start_conversation()?;
         let mut rendered_parent_artifact_id = None;
         let mut rendered_exchange_id = None;
@@ -1711,32 +1575,6 @@ impl SiftAgentAdapter {
                     String::new()
                 }
             }
-        } else if prefer_tools {
-            let initial_local_context = self.combined_local_context(&working_local_context);
-            let initial_context =
-                self.assemble_context(prompt, None, &initial_local_context, &working_retained)?;
-            working_retained = initial_context.retained_artifacts.clone();
-            self.log_context_assembly("initial", &initial_context, event_sink);
-
-            let (reply, exchange_id, raw_response_artifact_id) = self.send_to_model_for_turn(
-                conversation.as_mut(),
-                &build_turn_prompt(&TurnPrompt {
-                    workspace_root: &self.workspace_root,
-                    user_prompt: prompt,
-                    recent_turns: &recent_turns,
-                    recent_thread_summary,
-                    memory_prompt: &memory_prompt,
-                    context: &initial_context,
-                    gathered_evidence,
-                    prefer_tools,
-                    follow_up_execution,
-                    render_capability: self.render_capability,
-                }),
-                event_sink,
-            )?;
-            rendered_exchange_id = Some(exchange_id);
-            rendered_parent_artifact_id = raw_response_artifact_id;
-            reply
         } else {
             let (reply, exchange_id, raw_response_artifact_id) = self.send_to_model_for_turn(
                 conversation.as_mut(),
@@ -1820,27 +1658,7 @@ impl SiftAgentAdapter {
                         reply = next_reply;
                     }
                 }
-            } else if prefer_tools
-                && (is_blank_model_reply(&reply) || parse_tool_call(&reply)?.is_none())
-            {
-                self.log_retry_reason("tool-retry", &reply, "missing or empty tool call response");
-                let (next_reply, exchange_id, raw_response_artifact_id) = self
-                    .send_to_model_for_turn(
-                        conversation.as_mut(),
-                        &build_tool_retry_prompt(
-                            prompt,
-                            &recent_turns,
-                            recent_thread_summary,
-                            &memory_prompt,
-                        ),
-                        event_sink,
-                    )?;
-                rendered_exchange_id = Some(exchange_id);
-                rendered_parent_artifact_id = raw_response_artifact_id;
-                reply = next_reply;
-            } else if is_blank_model_reply(&reply)
-                || response_looks_like_malformed_tool_protocol(&reply)?
-            {
+            } else if is_blank_model_reply(&reply) || response_looks_like_tool_protocol(&reply)? {
                 self.log_retry_reason("direct-retry", &reply, "empty or tool-like direct response");
                 let (next_reply, exchange_id, raw_response_artifact_id) = self
                     .send_to_model_for_turn(
@@ -1861,98 +1679,6 @@ impl SiftAgentAdapter {
                 reply = next_reply;
             }
 
-            for _ in 0..MAX_TOOL_STEPS {
-                let Some(tool_call) = parse_tool_call(&reply)? else {
-                    break;
-                };
-
-                state.tool_counter += 1;
-                let call_id = format!("tool-{}", state.tool_counter);
-                let combined_context = self.combined_local_context(&working_local_context);
-                event_sink.emit(TurnEvent::ToolCalled {
-                    call_id: call_id.clone(),
-                    tool_name: tool_call.name().to_string(),
-                    invocation: describe_tool_call(&tool_call),
-                });
-                let result = match self.execute_tool(
-                    &tool_call,
-                    &call_id,
-                    &combined_context,
-                    &working_retained,
-                    event_sink,
-                ) {
-                    Ok(result) => result,
-                    Err(err) => ToolResult {
-                        name: tool_call.name(),
-                        summary: format!("Tool `{}` failed: {err:#}", tool_call.name()),
-                        applied_edit: None,
-                        governance_request: None,
-                        governance_outcome: None,
-                        retained_artifacts: None,
-                    },
-                };
-
-                if let Some(retained) = result.retained_artifacts {
-                    working_retained = retained;
-                }
-                if let (Some(governance_request), Some(governance_outcome)) = (
-                    result.governance_request.clone(),
-                    result.governance_outcome.clone(),
-                ) {
-                    event_sink.emit(TurnEvent::ExecutionGovernanceDecisionRecorded {
-                        decision: crate::domain::model::ExecutionGovernanceDecision::new(
-                            Some(call_id.clone()),
-                            Some(result.name.to_string()),
-                            governance_request,
-                            governance_outcome,
-                        ),
-                    });
-                }
-                if let Some(edit) = result.applied_edit.clone() {
-                    event_sink.emit(TurnEvent::WorkspaceEditApplied {
-                        call_id: call_id.clone(),
-                        tool_name: result.name.to_string(),
-                        edit,
-                    });
-                } else {
-                    event_sink.emit(TurnEvent::ToolFinished {
-                        call_id: call_id.clone(),
-                        tool_name: result.name.to_string(),
-                        summary: result.summary.clone(),
-                    });
-                }
-
-                push_local_context(
-                    &mut working_local_context,
-                    LocalContextSource::ToolOutput(ToolOutputInput::new(
-                        result.name,
-                        &call_id,
-                        result.summary.clone(),
-                    )),
-                );
-
-                let (next_reply, exchange_id, raw_response_artifact_id) = self
-                    .send_to_model_for_turn(
-                        conversation.as_mut(),
-                        &build_tool_follow_up_prompt(
-                            prompt,
-                            &call_id,
-                            result.name,
-                            &result.summary,
-                            &memory_prompt,
-                            self.render_capability,
-                        ),
-                        event_sink,
-                    )?;
-                rendered_exchange_id = Some(exchange_id);
-                rendered_parent_artifact_id = raw_response_artifact_id;
-                reply = next_reply;
-            }
-
-            if parse_tool_call(&reply)?.is_some() {
-                bail!("tool step limit exceeded after {MAX_TOOL_STEPS} tool call(s)");
-            }
-
             if is_blank_model_reply(&reply) {
                 self.log_retry_reason(
                     "blank-fallback",
@@ -1961,7 +1687,7 @@ impl SiftAgentAdapter {
                 );
                 reply =
                     "I couldn't produce a usable response. Ask again or request a concrete workspace action.".to_string();
-            } else if !prefer_tools && response_looks_like_malformed_tool_protocol(&reply)? {
+            } else if response_looks_like_tool_protocol(&reply)? {
                 self.log_retry_reason(
                     "tool-like-fallback",
                     &reply,
@@ -1998,19 +1724,9 @@ impl SiftAgentAdapter {
             ),
         );
 
-        state.retained_artifacts = working_retained;
         state.local_context = working_local_context;
 
         Ok(reply)
-    }
-
-    fn combined_local_context(
-        &self,
-        rolling_context: &[LocalContextSource],
-    ) -> Vec<LocalContextSource> {
-        let mut combined = self.base_context.clone();
-        combined.extend_from_slice(rolling_context);
-        combined
     }
 
     fn send_to_model(&self, conversation: &mut dyn Conversation, prompt: &str) -> Result<String> {
@@ -2144,226 +1860,6 @@ impl SiftAgentAdapter {
                 "non-empty"
             };
             println!("[INFO] Response recovery ({stage}): {reason} (observed={observed}).");
-        }
-    }
-
-    fn log_context_assembly(
-        &self,
-        label: &str,
-        response: &ContextAssemblyResponse,
-        event_sink: &dyn TurnEventSink,
-    ) {
-        if self.verbose.load(Ordering::Relaxed) >= 1 {
-            println!(
-                "[INFO] Context assembly ({label}) produced {} hit(s), retained {} artifact(s), pruned {}.",
-                response.response.hits.len(),
-                response.retained_artifacts.len(),
-                response.pruned_artifacts
-            );
-        }
-        event_sink.emit(TurnEvent::ContextAssembly {
-            label: label.to_string(),
-            hits: response.response.hits.len(),
-            retained_artifacts: response.retained_artifacts.len(),
-            pruned_artifacts: response.pruned_artifacts,
-        });
-    }
-
-    fn assemble_context(
-        &self,
-        query: &str,
-        intent: Option<String>,
-        local_context: &[LocalContextSource],
-        retained_artifacts: &[RetainedArtifact],
-    ) -> Result<ContextAssemblyResponse> {
-        self.sift.assemble_context(
-            ContextAssemblyRequest::new(&self.workspace_root, query)
-                .with_plan(SearchPlan::default_lexical())
-                .with_intent_opt(intent)
-                .with_limit(MAX_CONTEXT_HITS)
-                .with_shortlist(MAX_CONTEXT_HITS)
-                .with_budget(ContextAssemblyBudget::new(RETAINED_ARTIFACT_LIMIT))
-                .with_local_context(local_context.to_vec())
-                .with_retained_artifacts(retained_artifacts.to_vec()),
-        )
-    }
-
-    fn execute_tool(
-        &self,
-        tool_call: &ToolCall,
-        call_id: &str,
-        local_context: &[LocalContextSource],
-        retained_artifacts: &[RetainedArtifact],
-        event_sink: &dyn TurnEventSink,
-    ) -> Result<ToolResult> {
-        let verbose = self.verbose.load(Ordering::Relaxed);
-        if verbose >= 1 {
-            println!("[INFO] Executing tool call {call_id}: {:?}", tool_call);
-        }
-
-        match tool_call {
-            ToolCall::Search { query, intent } => {
-                let assembly = self.assemble_context(
-                    query,
-                    intent.clone(),
-                    local_context,
-                    retained_artifacts,
-                )?;
-                self.log_context_assembly("search", &assembly, event_sink);
-                Ok(ToolResult {
-                    name: "search",
-                    summary: format_search_summary(query, &assembly),
-                    applied_edit: None,
-                    governance_request: None,
-                    governance_outcome: None,
-                    retained_artifacts: Some(assembly.retained_artifacts),
-                })
-            }
-            ToolCall::ListFiles { pattern } => {
-                let files = list_files(&self.workspace_root, pattern.as_deref())?;
-                let summary = if files.is_empty() {
-                    "No matching files found.".to_string()
-                } else {
-                    format!("Listed {} file(s):\n{}", files.len(), files.join("\n"))
-                };
-                Ok(ToolResult {
-                    name: "list_files",
-                    summary: trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS),
-                    applied_edit: None,
-                    governance_request: None,
-                    governance_outcome: None,
-                    retained_artifacts: None,
-                })
-            }
-            ToolCall::ReadFile { path } => {
-                let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
-                let content = fs::read(&resolved)
-                    .with_context(|| format!("failed to read {}", resolved.display()))?;
-                let content = String::from_utf8_lossy(&content).to_string();
-                let rel = relative_path(&self.workspace_root, &resolved);
-                let summary = format!(
-                    "Read file {rel}:\n{}",
-                    trim_for_context(&content, MAX_FILE_CHARS)
-                );
-                Ok(ToolResult {
-                    name: "read_file",
-                    summary,
-                    applied_edit: None,
-                    governance_request: None,
-                    governance_outcome: None,
-                    retained_artifacts: None,
-                })
-            }
-            ToolCall::WriteFile { path, content } => {
-                let result = LocalWorkspaceEditor::with_runtime_mediator(
-                    self.workspace_root.clone(),
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )
-                .write_file(path, content)?;
-                Ok(ToolResult {
-                    name: "write_file",
-                    summary: result.summary,
-                    applied_edit: result.applied_edit,
-                    governance_request: result.governance_request,
-                    governance_outcome: result.governance_outcome,
-                    retained_artifacts: None,
-                })
-            }
-            ToolCall::ReplaceInFile {
-                path,
-                old,
-                new,
-                replace_all,
-            } => {
-                let result = LocalWorkspaceEditor::with_runtime_mediator(
-                    self.workspace_root.clone(),
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )
-                .replace_in_file(path, old, new, *replace_all)?;
-                Ok(ToolResult {
-                    name: "replace_in_file",
-                    summary: result.summary,
-                    applied_edit: result.applied_edit,
-                    governance_request: result.governance_request,
-                    governance_outcome: result.governance_outcome,
-                    retained_artifacts: None,
-                })
-            }
-            ToolCall::Shell { command } => {
-                let output = run_background_terminal_command_with_runtime_mediator(
-                    &self.workspace_root,
-                    command,
-                    "shell",
-                    call_id,
-                    event_sink,
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )
-                .with_context(|| format!("failed to execute shell command `{command}`"))?;
-                let (summary, governance_request, governance_outcome) = match output {
-                    GovernedTerminalCommandResult::Executed {
-                        output,
-                        governance_request,
-                        governance_outcome,
-                    } => {
-                        let summary = format_command_summary("Shell command", command, &output);
-                        if !output.status.success() {
-                            bail!("{summary}");
-                        }
-                        (summary, Some(governance_request), Some(governance_outcome))
-                    }
-                    GovernedTerminalCommandResult::Blocked {
-                        governance_request,
-                        governance_outcome,
-                    } => (
-                        summarize_governance_outcome(&governance_outcome),
-                        Some(governance_request),
-                        Some(governance_outcome),
-                    ),
-                };
-                Ok(ToolResult {
-                    name: "shell",
-                    summary,
-                    applied_edit: None,
-                    governance_request,
-                    governance_outcome,
-                    retained_artifacts: None,
-                })
-            }
-            ToolCall::Diff { path } => {
-                let result = LocalWorkspaceEditor::with_runtime_mediator(
-                    self.workspace_root.clone(),
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )
-                .diff(path.as_deref())?;
-                Ok(ToolResult {
-                    name: "diff",
-                    summary: result.summary,
-                    applied_edit: result.applied_edit,
-                    governance_request: result.governance_request,
-                    governance_outcome: result.governance_outcome,
-                    retained_artifacts: None,
-                })
-            }
-            ToolCall::ApplyPatch { patch } => {
-                let result = LocalWorkspaceEditor::with_runtime_mediator(
-                    self.workspace_root.clone(),
-                    Arc::clone(&self.execution_hand_registry),
-                    Arc::clone(&self.transport_mediator),
-                )
-                .apply_patch(patch)?;
-                Ok(ToolResult {
-                    name: "apply_patch",
-                    summary: result.summary,
-                    applied_edit: result.applied_edit,
-                    governance_request: result.governance_request,
-                    governance_outcome: result.governance_outcome,
-                    retained_artifacts: None,
-                })
-            }
         }
     }
 
@@ -2506,72 +2002,6 @@ impl crate::domain::ports::SynthesizerEngine for SiftAgentAdapter {
     }
 }
 
-fn build_turn_prompt(turn: &TurnPrompt<'_>) -> String {
-    let routing_guidance = if turn.follow_up_execution {
-        "This request refers to a previous turn. Resolve words like `it` or `that` using the recent conversation, then perform the implied action with a tool when possible."
-    } else if turn.prefer_tools {
-        "This request is action-oriented. If a workspace tool can answer it, call the tool instead of explaining a command the user could run."
-    } else {
-        "Use tools when they materially improve accuracy; otherwise answer directly."
-    };
-
-    format!(
-        "You are Paddles, a local-first coding assistant operating inside the workspace `{}`.\n\
-Use the provided workspace evidence first. If you have enough information, answer directly.\n\
-Final answers should stay concise and focus on the requested result.\n\
-When the user asks for a safe, reasonable repository change, your job is to make the workspace edit with a tool instead of stopping at diagnosis or advice once local evidence is sufficient.\n\
-Routing guidance: {}\n\
-Persistent operator memory:\n\
-{}\n\
-\n\
-If you need a tool, respond with ONLY a single JSON tool call and no prose outside it.\n\
-If you do not need a tool, respond with ONLY a single JSON final answer object using this rendering contract:\n\
-{}\n\
-\n\
-When the user asks you to inspect repository state, run a command, read a file, search the workspace, or apply a change, prefer a tool call over describing how they could do it themselves.\n\
-For `search.query`, return only the retrieval target terms. Do not prefix the query with tool verbs or instructions like `search`, `find`, `look for`, or `search for` unless those words are part of the literal text you need to match.\n\
-Examples:\n\
-- `show me the git status` -> {{\"tool\":\"shell\",\"command\":\"git status --short\"}}\n\
-- `open src/main.rs` -> {{\"tool\":\"read_file\",\"path\":\"src/main.rs\"}}\n\
-- `find heartbeat references` -> {{\"tool\":\"search\",\"query\":\"heartbeat references\"}}\n\
-\n\
-Available tools:\n\
-- {{\"tool\":\"search\",\"query\":\"...\",\"intent\":\"optional\"}}\n\
-- {{\"tool\":\"list_files\",\"pattern\":\"optional substring\"}}\n\
-- {{\"tool\":\"read_file\",\"path\":\"relative/path\"}}\n\
-- {{\"tool\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\"}}\n\
-- {{\"tool\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false}}\n\
-- {{\"tool\":\"shell\",\"command\":\"local shell command\"}}\n\
-- {{\"tool\":\"diff\",\"path\":\"optional relative/path\"}}\n\
-- {{\"tool\":\"apply_patch\",\"patch\":\"unified diff text\"}}\n\
-\n\
-Recent conversation:\n\
-{}\n\
-\n\
-Active thread summary:\n\
-{}\n\
-\n\
-Gathered retrieval evidence:\n\
-{}\n\
-\n\
-Current workspace evidence:\n\
-{}\n\
-\n\
-Current user request:\n\
-{}\n",
-        turn.workspace_root.display(),
-        routing_guidance,
-        turn.memory_prompt,
-        final_answer_contract_prompt(turn.render_capability, turn.gathered_evidence.is_some()),
-        turn.recent_turns,
-        turn.recent_thread_summary
-            .unwrap_or("No active thread summary."),
-        format_gathered_evidence_digest(turn.gathered_evidence),
-        format_context_digest(turn.context),
-        turn.user_prompt
-    )
-}
-
 fn build_grounded_turn_prompt(
     user_prompt: &str,
     recent_turns: &str,
@@ -2702,7 +2132,8 @@ fn build_direct_retry_prompt(
 ) -> String {
     let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
-        "Your last reply tried to call a workspace tool for a conversational message.\n\
+        "Your last reply was empty or tried to call a workspace tool during final-answer authoring.\n\
+The application harness already owns repository action execution.\n\
 Use this final answer rendering contract:\n\
 {}\n\
 \n\
@@ -3671,7 +3102,8 @@ fn build_grounded_retry_prompt(
 ) -> String {
     let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
     format!(
-        "Your last reply was empty or tried to call a tool for a repository question.\n\
+        "Your last reply was empty or tried to call a workspace tool during final-answer authoring.\n\
+The application harness already owns repository action execution.\n\
 Answer using ONLY the gathered repository evidence.\n\
 Include source/file citations in the final answer.\n\
 If the evidence is insufficient, say so explicitly.\n\
@@ -3696,68 +3128,6 @@ Current user request:\n\
         final_answer_contract_prompt(render_capability, true),
         format_gathered_evidence_digest(Some(evidence)),
         format_grounding_contract_section(handoff),
-    )
-}
-
-fn build_tool_retry_prompt(
-    user_prompt: &str,
-    recent_turns: &str,
-    recent_thread_summary: Option<&str>,
-    memory_prompt: &str,
-) -> String {
-    let thread_summary = recent_thread_summary.unwrap_or("No active thread summary.");
-    format!(
-        "The user asked for a workspace action and your last reply used prose instead of a tool.\n\
-Reply with ONLY one JSON tool call and no prose.\n\
-If the request refers to `it` or `that`, resolve it from the recent conversation first.\n\
-\n\
-Persistent operator memory:\n\
-{memory_prompt}\n\
-\n\
-Available tools:\n\
-- {{\"tool\":\"search\",\"query\":\"...\",\"intent\":\"optional\"}}\n\
-- {{\"tool\":\"list_files\",\"pattern\":\"optional substring\"}}\n\
-- {{\"tool\":\"read_file\",\"path\":\"relative/path\"}}\n\
-- {{\"tool\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\"}}\n\
-- {{\"tool\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false}}\n\
-- {{\"tool\":\"shell\",\"command\":\"local shell command\"}}\n\
-- {{\"tool\":\"diff\",\"path\":\"optional relative/path\"}}\n\
-- {{\"tool\":\"apply_patch\",\"patch\":\"unified diff text\"}}\n\
-\n\
-Recent conversation:\n\
-{recent_turns}\n\
-\n\
-Active thread summary:\n\
-{thread_summary}\n\
-\n\
-Current user request:\n\
-{user_prompt}\n"
-    )
-}
-
-fn build_tool_follow_up_prompt(
-    user_prompt: &str,
-    call_id: &str,
-    tool_name: &str,
-    summary: &str,
-    memory_prompt: &str,
-    render_capability: RenderCapability,
-) -> String {
-    format!(
-        "Persistent operator memory:\n\
-{memory_prompt}\n\
-\n\
-Tool call {call_id} ({tool_name}) completed.\n\
-Tool result:\n\
-{summary}\n\
-\n\
-Original user request:\n\
-{user_prompt}\n\
-\n\
-If you need another tool, respond with ONLY one JSON tool call.\n\
-Otherwise respond with ONLY one JSON final answer object using this rendering contract:\n\
-{}",
-        final_answer_contract_prompt(render_capability, false),
     )
 }
 
@@ -3975,34 +3345,6 @@ fn normalize_citation_source(workspace_root: &Path, source: &str) -> String {
     }
 
     source.to_string()
-}
-
-fn format_context_digest(context: &ContextAssemblyResponse) -> String {
-    if context.response.hits.is_empty() {
-        return "No relevant workspace context was assembled.".to_string();
-    }
-
-    let mut lines = vec![format!(
-        "Retained artifacts: {} (pruned: {})",
-        context.retained_artifacts.len(),
-        context.pruned_artifacts
-    )];
-
-    for hit in context.response.hits.iter().take(MAX_CONTEXT_HITS) {
-        let location = hit
-            .location
-            .as_ref()
-            .map(|value| format!(" @ {value}"))
-            .unwrap_or_default();
-        lines.push(format!(
-            "- {}{}: {}",
-            hit.path,
-            location,
-            trim_for_context(&hit.snippet, 280)
-        ));
-    }
-
-    lines.join("\n")
 }
 
 fn format_gathered_evidence_digest(evidence: Option<&EvidenceBundle>) -> String {
@@ -4302,35 +3644,6 @@ fn format_planner_strategy(strategy: &crate::domain::ports::PlannerStrategyKind)
     }
 }
 
-fn format_search_summary(query: &str, assembly: &ContextAssemblyResponse) -> String {
-    if assembly.response.hits.is_empty() {
-        return format!("Search `{query}` returned no matching hits.");
-    }
-
-    let mut lines = vec![format!(
-        "Search `{query}` returned {} hit(s); retained {} artifact(s), pruned {}.",
-        assembly.response.hits.len(),
-        assembly.retained_artifacts.len(),
-        assembly.pruned_artifacts
-    )];
-
-    for hit in assembly.response.hits.iter().take(MAX_CONTEXT_HITS) {
-        let location = hit
-            .location
-            .as_ref()
-            .map(|value| format!(" @ {value}"))
-            .unwrap_or_default();
-        lines.push(format!(
-            "- {}{}: {}",
-            hit.path,
-            location,
-            trim_for_context(&hit.snippet, 320)
-        ));
-    }
-
-    lines.join("\n")
-}
-
 fn format_recent_turns(local_context: &[LocalContextSource]) -> String {
     let turns = local_context
         .iter()
@@ -4379,36 +3692,6 @@ fn format_synthesis_recent_turns(
     }
 
     turns.into_iter().take(6).collect::<Vec<_>>().join("\n")
-}
-
-fn describe_tool_call(tool_call: &ToolCall) -> String {
-    match tool_call {
-        ToolCall::Search { query, intent } => match intent {
-            Some(intent) => format!("search workspace for `{query}` ({intent})"),
-            None => format!("search workspace for `{query}`"),
-        },
-        ToolCall::ListFiles { pattern } => match pattern {
-            Some(pattern) => format!("list files matching `{pattern}`"),
-            None => "list workspace files".to_string(),
-        },
-        ToolCall::ReadFile { path } => format!("read `{path}`"),
-        ToolCall::WriteFile { path, .. } => format!("write `{path}`"),
-        ToolCall::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
-        ToolCall::Shell { command } => command.clone(),
-        ToolCall::Diff { path } => match path {
-            Some(path) => format!("git diff --no-ext-diff -- {path}"),
-            None => "git diff --no-ext-diff".to_string(),
-        },
-        ToolCall::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
-    }
-}
-
-fn parse_tool_call(response: &str) -> Result<Option<ToolCall>> {
-    let trimmed = response.trim();
-    let Some(json) = extract_json_payload(trimmed) else {
-        return Ok(None);
-    };
-    Ok(serde_json::from_str(json).ok())
 }
 
 fn parse_interpretation_graph(response: &str) -> Result<Option<InterpretationGraphEnvelope>> {
@@ -5231,8 +4514,7 @@ fn fallback_thread_decision(request: &ThreadDecisionRequest) -> ThreadDecision {
 }
 
 fn response_looks_like_tool_protocol(response: &str) -> Result<bool> {
-    Ok(parse_tool_call(response)?.is_some()
-        || response_looks_like_malformed_tool_protocol(response)?)
+    response_looks_like_malformed_tool_protocol(response)
 }
 
 fn response_looks_like_malformed_tool_protocol(response: &str) -> Result<bool> {
@@ -5240,9 +4522,6 @@ fn response_looks_like_malformed_tool_protocol(response: &str) -> Result<bool> {
     let Some(json) = extract_json_payload(trimmed) else {
         return Ok(false);
     };
-    if parse_tool_call(response)?.is_some() {
-        return Ok(false);
-    }
 
     Ok(match serde_json::from_str::<serde_json::Value>(json) {
         Ok(value) => value
@@ -5291,73 +4570,21 @@ fn push_local_context(context: &mut Vec<LocalContextSource>, item: LocalContextS
     }
 }
 
-fn resolve_workspace_path(
-    workspace_root: &Path,
-    requested: &str,
-    allow_missing: bool,
-) -> Result<PathBuf> {
-    let requested_path = Path::new(requested);
-    if requested_path.is_absolute() {
-        bail!("absolute paths are not allowed: {requested}");
-    }
-
-    let canonical_root = workspace_root
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", workspace_root.display()))?;
-    let normalized = normalize_relative_path(&canonical_root, requested_path);
-    let resolved = resolve_existing_path(&canonical_root, &normalized)?;
-    if !resolved.starts_with(&canonical_root) {
-        bail!("path escapes workspace root: {requested}");
-    }
-    if !allow_missing && !resolved.exists() {
-        bail!("path does not exist: {}", resolved.display());
-    }
-    Ok(resolved)
-}
-
-fn resolve_existing_path(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
-    let mut existing = candidate.to_path_buf();
-    let mut missing_components = Vec::new();
-
-    while !existing.exists() {
-        let missing = existing
-            .file_name()
-            .ok_or_else(|| anyhow!("path escapes workspace root: {}", candidate.display()))?
-            .to_os_string();
-        missing_components.push(missing);
-        if !existing.pop() {
-            bail!("path escapes workspace root: {}", candidate.display());
-        }
-    }
-
-    let mut resolved = existing
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", existing.display()))?;
-    if !resolved.starts_with(workspace_root) {
-        bail!("path escapes workspace root: {}", candidate.display());
-    }
-
-    for component in missing_components.iter().rev() {
-        resolved.push(component);
-    }
-
-    Ok(resolved)
-}
-
 fn canonical_document_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
+#[cfg(test)]
 fn normalize_relative_path(workspace_root: &Path, requested: &Path) -> PathBuf {
     let mut normalized = workspace_root.to_path_buf();
     for component in requested.components() {
         match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
                 normalized.pop();
             }
-            Component::Normal(part) => normalized.push(part),
-            Component::Prefix(_) | Component::RootDir => {}
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {}
         }
     }
     normalized
@@ -5370,100 +4597,12 @@ fn relative_path(workspace_root: &Path, path: &Path) -> String {
         .to_string()
 }
 
-fn list_files(workspace_root: &Path, pattern: Option<&str>) -> Result<Vec<String>> {
-    let path_policy = WorkspacePathPolicy::new(workspace_root);
-    let mut files = Vec::new();
-    visit_files(
-        workspace_root,
-        workspace_root,
-        &path_policy,
-        pattern,
-        &mut files,
-    )?;
-    files.sort();
-    if files.len() > MAX_LISTED_FILES {
-        files.truncate(MAX_LISTED_FILES);
-    }
-    Ok(files)
-}
-
-fn visit_files(
-    dir: &Path,
-    workspace_root: &Path,
-    path_policy: &WorkspacePathPolicy,
-    pattern: Option<&str>,
-    files: &mut Vec<String>,
-) -> Result<()> {
-    if files.len() >= MAX_LISTED_FILES {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
-        let entry = entry?;
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)
-            .with_context(|| format!("failed to stat {}", path.display()))?;
-
-        if metadata.file_type().is_symlink() {
-            continue;
-        }
-
-        if metadata.is_dir() {
-            let Some(relative_dir) = path
-                .strip_prefix(workspace_root)
-                .ok()
-                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
-            else {
-                continue;
-            };
-            if !path_policy.allows_relative_directory(&relative_dir) {
-                continue;
-            }
-            visit_files(&path, workspace_root, path_policy, pattern, files)?;
-            continue;
-        }
-
-        if !metadata.is_file() {
-            continue;
-        }
-
-        let rel = relative_path(workspace_root, &path);
-        if path_policy.allows_relative_file(&rel)
-            && pattern.is_none_or(|needle| rel.contains(needle))
-        {
-            files.push(rel);
-        }
-        if files.len() >= MAX_LISTED_FILES {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
 fn trim_for_context(input: &str, max_chars: usize) -> String {
     let mut trimmed = input.chars().take(max_chars).collect::<String>();
     if input.chars().count() > max_chars {
         trimmed.push_str("\n...[truncated]");
     }
     trimmed
-}
-
-fn format_command_summary(header: &str, command: &str, output: &std::process::Output) -> String {
-    let mut summary = format!("{header}: {command}\nExit status: {}\n", output.status);
-
-    if !output.stdout.is_empty() {
-        summary.push_str("STDOUT:\n");
-        summary.push_str(&String::from_utf8_lossy(&output.stdout));
-        summary.push('\n');
-    }
-
-    if !output.stderr.is_empty() {
-        summary.push_str("STDERR:\n");
-        summary.push_str(&String::from_utf8_lossy(&output.stderr));
-    }
-
-    trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
 }
 
 fn unix_timestamp() -> u64 {
@@ -5501,10 +4640,9 @@ impl ConversationFactory for StaticConversationFactory {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalContextSource, MAX_TOOL_STEPS, QwenGenerationConfig, SiftAgentAdapter, ToolCall,
-        extract_json_payload, format_qwen_prompt, generation_sampling, grounded_answer_fallback,
-        normalize_relative_path, preferred_qwen_weight_dtype, should_retry_qwen_on_cpu_message,
-        trim_for_context,
+        LocalContextSource, QwenGenerationConfig, SiftAgentAdapter, extract_json_payload,
+        format_qwen_prompt, generation_sampling, grounded_answer_fallback, normalize_relative_path,
+        preferred_qwen_weight_dtype, should_retry_qwen_on_cpu_message, trim_for_context,
     };
     use crate::domain::model::{
         ForensicArtifactCapture, ForensicTraceSink, NullTurnEventSink, TraceArtifactId,
@@ -5520,9 +4658,12 @@ mod tests {
         RefinementPolicy, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
         SynthesisHandoff, WorkspaceAction,
     };
+    use crate::domain::ports::{WorkspaceActionExecutionFrame, WorkspaceActionExecutor};
+    use crate::infrastructure::adapters::local_workspace_action_executor::LocalWorkspaceActionExecutor;
     use crate::infrastructure::adapters::sift_agent::{
         DEFAULT_QWEN_MAX_LENGTH, QwenModelFamily, infer_qwen_family, infer_qwen_runtime_max_length,
     };
+    use crate::infrastructure::execution_hand::ExecutionHandRegistry;
     use anyhow::{Result, anyhow};
     use candle_core::{DType, Device};
     use candle_transformers::generation::Sampling;
@@ -5635,44 +4776,26 @@ mod tests {
     }
 
     #[test]
-    fn extracts_tool_call_from_raw_json() {
+    fn extracts_json_payload_from_raw_json() {
         let payload = extract_json_payload("{\"tool\":\"read_file\",\"path\":\"src/main.rs\"}")
             .expect("json payload");
-        let parsed: ToolCall = serde_json::from_str(payload).expect("tool call");
-        assert_eq!(
-            parsed,
-            ToolCall::ReadFile {
-                path: "src/main.rs".to_string()
-            }
-        );
+        assert_eq!(payload, "{\"tool\":\"read_file\",\"path\":\"src/main.rs\"}");
     }
 
     #[test]
-    fn extracts_tool_call_from_fenced_json() {
+    fn extracts_json_payload_from_fenced_json() {
         let payload =
             extract_json_payload("```json\n{\"tool\":\"shell\",\"command\":\"pwd\"}\n```")
                 .expect("fenced json payload");
-        let parsed: ToolCall = serde_json::from_str(payload).expect("tool call");
-        assert_eq!(
-            parsed,
-            ToolCall::Shell {
-                command: "pwd".to_string()
-            }
-        );
+        assert_eq!(payload, "{\"tool\":\"shell\",\"command\":\"pwd\"}");
     }
 
     #[test]
-    fn extracts_tool_call_from_embedded_json() {
+    fn extracts_json_payload_from_embedded_json() {
         let payload =
             extract_json_payload("Sure, running it now.\n{\"tool\":\"shell\",\"command\":\"pwd\"}")
                 .expect("embedded json payload");
-        let parsed: ToolCall = serde_json::from_str(payload).expect("tool call");
-        assert_eq!(
-            parsed,
-            ToolCall::Shell {
-                command: "pwd".to_string()
-            }
-        );
+        assert_eq!(payload, "{\"tool\":\"shell\",\"command\":\"pwd\"}");
     }
 
     #[test]
@@ -5816,16 +4939,12 @@ mod tests {
     }
 
     #[test]
-    fn respond_records_tool_outputs_and_turns_in_local_context() {
+    fn respond_records_turns_in_local_context_without_tool_outputs() {
         let workspace = tempfile::tempdir().expect("temp workspace");
-        fs::create_dir_all(workspace.path().join("src")).expect("create src");
-        fs::write(workspace.path().join("src/main.rs"), "fn main() {}\n").expect("write file");
-
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
-                r#"{"tool":"list_files","pattern":"main.rs"}"#.to_string(),
                 "The entrypoint is src/main.rs.".to_string(),
             ])),
         );
@@ -5842,12 +4961,6 @@ mod tests {
         assert_eq!(reply, "The entrypoint is src/main.rs.");
 
         let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 1);
-        assert!(state.local_context.iter().any(|item| matches!(
-            item,
-            LocalContextSource::ToolOutput(output)
-                if output.tool_name == "list_files" && output.content.contains("src/main.rs")
-        )));
         assert!(state.local_context.iter().any(|item| matches!(
             item,
             LocalContextSource::AgentTurn(turn)
@@ -5858,6 +4971,12 @@ mod tests {
             LocalContextSource::AgentTurn(turn)
                 if turn.role == "assistant" && turn.content == "The entrypoint is src/main.rs."
         )));
+        assert!(
+            !state
+                .local_context
+                .iter()
+                .any(|item| matches!(item, LocalContextSource::ToolOutput(_)))
+        );
     }
 
     #[test]
@@ -6864,93 +5983,44 @@ mod tests {
         assert!(bullets[1].contains("AGENTS.md"));
     }
 
-    #[test]
-    fn search_tool_uses_sift_context_assembly() {
-        let workspace = tempfile::tempdir().expect("temp workspace");
-        fs::write(
-            workspace.path().join("guide.txt"),
-            "telemetry waterfall architecture\n",
-        )
-        .expect("write guide");
-
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
-
-        let result = adapter
-            .execute_tool(
-                &ToolCall::Search {
-                    query: "telemetry".to_string(),
-                    intent: None,
-                },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &NullTurnEventSink,
-            )
-            .expect("search tool");
-
-        assert_eq!(result.name, "search");
-        assert!(result.summary.contains("guide.txt"));
-        assert!(result.retained_artifacts.is_some());
-    }
-
     #[cfg(unix)]
     #[test]
-    fn read_file_rejects_symlink_escape() {
+    fn workspace_action_executor_read_rejects_symlink_escape() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let outside = tempfile::tempdir().expect("outside workspace");
         fs::write(outside.path().join("secret.txt"), "classified\n").expect("write secret");
         unix_fs::symlink(outside.path(), workspace.path().join("vault")).expect("create symlink");
+        let executor = local_executor(workspace.path());
 
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
-
-        let err = adapter
-            .execute_tool(
-                &ToolCall::ReadFile {
-                    path: "vault/secret.txt".to_string(),
-                },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &NullTurnEventSink,
-            )
-            .expect_err("symlink escape should fail");
+        let err = execute_local_action(
+            &executor,
+            &WorkspaceAction::Read {
+                path: "vault/secret.txt".to_string(),
+            },
+            &NullTurnEventSink,
+        )
+        .expect_err("symlink escape should fail");
 
         assert!(err.to_string().contains("path escapes workspace root"));
     }
 
     #[cfg(unix)]
     #[test]
-    fn list_files_skips_symlinked_directories() {
+    fn workspace_action_executor_list_files_skips_symlinked_directories() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let outside = tempfile::tempdir().expect("outside workspace");
         fs::write(outside.path().join("secret.txt"), "classified\n").expect("write secret");
         unix_fs::symlink(outside.path(), workspace.path().join("vault")).expect("create symlink");
         fs::write(workspace.path().join("main.rs"), "fn main() {}\n")
             .expect("write workspace file");
+        let executor = local_executor(workspace.path());
 
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
-
-        let result = adapter
-            .execute_tool(
-                &ToolCall::ListFiles { pattern: None },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &NullTurnEventSink,
-            )
-            .expect("list files");
+        let result = execute_local_action(
+            &executor,
+            &WorkspaceAction::ListFiles { pattern: None },
+            &NullTurnEventSink,
+        )
+        .expect("list files");
 
         assert!(result.summary.contains("main.rs"));
         assert!(!result.summary.contains("secret.txt"));
@@ -6958,7 +6028,7 @@ mod tests {
     }
 
     #[test]
-    fn list_files_respects_repo_gitignore_patterns() {
+    fn workspace_action_executor_list_files_respects_repo_gitignore_patterns() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::create_dir_all(workspace.path().join("apps/docs/.docusaurus"))
             .expect("create generated docs dir");
@@ -6980,22 +6050,14 @@ mod tests {
             "export function RuntimeApp() { return null; }\n",
         )
         .expect("write authored runtime app");
+        let executor = local_executor(workspace.path());
 
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
-
-        let result = adapter
-            .execute_tool(
-                &ToolCall::ListFiles { pattern: None },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &NullTurnEventSink,
-            )
-            .expect("list files");
+        let result = execute_local_action(
+            &executor,
+            &WorkspaceAction::ListFiles { pattern: None },
+            &NullTurnEventSink,
+        )
+        .expect("list files");
 
         assert!(result.summary.contains("apps/web/src/runtime-app.tsx"));
         assert!(
@@ -7006,14 +6068,14 @@ mod tests {
     }
 
     #[test]
-    fn tool_failures_are_recorded_and_can_recover() {
+    fn tool_protocol_replies_do_not_record_tool_outputs() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
                 r#"{"tool":"read_file","path":"missing.txt"}"#.to_string(),
-                "Recovered after the failed read.".to_string(),
+                "The planner loop still needs to select the next workspace action.".to_string(),
             ])),
         );
 
@@ -7026,14 +6088,18 @@ mod tests {
                 Arc::new(NullTurnEventSink),
             )
             .expect("response");
-        assert_eq!(reply, "Recovered after the failed read.");
+        assert_eq!(
+            reply,
+            "The planner loop still needs to select the next workspace action."
+        );
 
         let state = adapter.state.lock().expect("state");
-        assert!(state.local_context.iter().any(|item| matches!(
-            item,
-            LocalContextSource::ToolOutput(output)
-                if output.tool_name == "read_file" && output.content.contains("failed")
-        )));
+        assert!(
+            !state
+                .local_context
+                .iter()
+                .any(|item| matches!(item, LocalContextSource::ToolOutput(_)))
+        );
     }
 
     #[test]
@@ -7053,7 +6119,6 @@ mod tests {
         assert_eq!(reply, "Hello.");
 
         let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 0);
         assert!(
             !state
                 .local_context
@@ -7076,9 +6141,6 @@ mod tests {
 
         let reply = adapter.respond("Hello").expect("response");
         assert_eq!(reply, "Hello.");
-
-        let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 0);
     }
 
     #[test]
@@ -7095,9 +6157,6 @@ mod tests {
             reply,
             "I couldn't produce a usable response. Ask again or request a concrete workspace action."
         );
-
-        let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 0);
     }
 
     #[test]
@@ -7119,9 +6178,6 @@ mod tests {
             reply,
             "I couldn't produce a usable response. Ask again or request a concrete workspace action."
         );
-
-        let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 0);
     }
 
     #[test]
@@ -7149,7 +6205,6 @@ mod tests {
         assert_eq!(reply, "Sure. How can I help?");
 
         let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 0);
         assert!(
             !state
                 .local_context
@@ -7189,22 +6244,13 @@ mod tests {
     }
 
     #[test]
-    fn action_prompts_retry_for_tool_calls_after_prose() {
+    fn action_prompts_accept_plain_text_on_first_response() {
         let workspace = tempfile::tempdir().expect("temp workspace");
-        std::process::Command::new("git")
-            .arg("init")
-            .arg("-q")
-            .current_dir(workspace.path())
-            .status()
-            .expect("git init");
-
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
                 "You can run `git status` to inspect the working tree.".to_string(),
-                r#"{"tool":"shell","command":"git status"}"#.to_string(),
-                "Working tree is clean.".to_string(),
             ])),
         );
 
@@ -7218,27 +6264,20 @@ mod tests {
             )
             .expect("response");
 
-        assert_eq!(reply, "Working tree is clean.");
-        let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 1);
+        assert_eq!(
+            reply,
+            "You can run `git status` to inspect the working tree."
+        );
     }
 
     #[test]
-    fn action_prompts_retry_for_tool_calls_after_empty_response() {
+    fn action_prompts_retry_for_plain_text_after_empty_response() {
         let workspace = tempfile::tempdir().expect("temp workspace");
-        std::process::Command::new("git")
-            .arg("init")
-            .arg("-q")
-            .current_dir(workspace.path())
-            .status()
-            .expect("git init");
-
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
                 String::new(),
-                r#"{"tool":"shell","command":"git status"}"#.to_string(),
                 "Working tree is clean.".to_string(),
             ])),
         );
@@ -7254,90 +6293,99 @@ mod tests {
             .expect("response");
 
         assert_eq!(reply, "Working tree is clean.");
-        let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 1);
     }
 
     #[test]
-    fn deterministic_action_turns_require_model_selected_tool_calls() {
+    fn deterministic_action_turns_retry_for_plain_text_instead_of_executing_tools() {
         let workspace = tempfile::tempdir().expect("temp workspace");
-        std::process::Command::new("git")
-            .arg("init")
-            .arg("-q")
-            .current_dir(workspace.path())
-            .status()
-            .expect("git init");
-
+        let sink = Arc::new(RecordingForensicSink::default());
         let adapter = SiftAgentAdapter::new_for_test(
             workspace.path(),
             "qwen-1.5b",
             Box::new(MockConversation::new(vec![
-                r#"{"tool":"shell","command":"git status"}"#.to_string(),
-                "Working tree is clean.".to_string(),
+                r#"{"tool":"list_files"}"#.to_string(),
+                "I can help once the planner loop selects the next workspace action.".to_string(),
             ])),
         );
 
         let reply = adapter
             .respond_for_turn(
-                "Show me the git status",
+                "Show me the workspace files",
                 TurnIntent::DeterministicAction,
                 None,
                 &SynthesisHandoff::default(),
-                Arc::new(NullTurnEventSink),
+                sink.clone(),
             )
             .expect("response");
 
-        assert_eq!(reply, "Working tree is clean.");
-        let state = adapter.state.lock().expect("state");
-        assert_eq!(state.tool_counter, 1);
+        assert_eq!(
+            reply,
+            "I can help once the planner loop selects the next workspace action."
+        );
+
+        let events = sink.events.lock().expect("events lock");
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { .. }
+                | TurnEvent::ToolFinished { .. }
+                | TurnEvent::WorkspaceEditApplied { .. }
+                | TurnEvent::ExecutionGovernanceDecisionRecorded { .. }
+        )));
+    }
+
+    fn local_executor(workspace_root: &Path) -> LocalWorkspaceActionExecutor {
+        LocalWorkspaceActionExecutor::with_execution_hand_registry(
+            workspace_root.to_path_buf(),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
+        )
+    }
+
+    fn execute_local_action(
+        executor: &LocalWorkspaceActionExecutor,
+        action: &WorkspaceAction,
+        event_sink: &dyn TurnEventSink,
+    ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+        executor.execute_workspace_action(
+            action,
+            WorkspaceActionExecutionFrame {
+                call_id: "tool-1",
+                event_sink,
+            },
+        )
     }
 
     #[test]
-    fn shell_tool_returns_error_on_non_zero_exit() {
+    fn workspace_action_executor_shell_reports_non_zero_exit() {
         let workspace = tempfile::tempdir().expect("temp workspace");
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
+        let executor = local_executor(workspace.path());
 
-        let err = adapter
-            .execute_tool(
-                &ToolCall::Shell {
-                    command: "exit 7".to_string(),
-                },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &NullTurnEventSink,
-            )
-            .expect_err("shell failure should propagate");
+        let err = execute_local_action(
+            &executor,
+            &WorkspaceAction::Shell {
+                command: "exit 7".to_string(),
+            },
+            &NullTurnEventSink,
+        )
+        .expect_err("shell failure should propagate");
 
         assert!(err.to_string().contains("Exit status"));
         assert!(err.to_string().contains("7"));
     }
 
     #[test]
-    fn shell_tool_emits_terminal_output_events() {
+    fn workspace_action_executor_shell_emits_terminal_output_events() {
         let workspace = tempfile::tempdir().expect("temp workspace");
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
+        let executor = local_executor(workspace.path());
         let sink = RecordingForensicSink::default();
 
-        let result = adapter
-            .execute_tool(
-                &ToolCall::Shell {
-                    command: "printf 'alpha\\n'; printf 'warning\\n' >&2".to_string(),
-                },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &sink,
-            )
-            .expect("shell tool should succeed");
+        let result = execute_local_action(
+            &executor,
+            &WorkspaceAction::Shell {
+                command: "printf 'alpha\\n'; printf 'warning\\n' >&2".to_string(),
+            },
+            &sink,
+        )
+        .expect("shell action should succeed");
 
         assert!(result.summary.contains("Shell command"));
         assert!(
@@ -7377,54 +6425,23 @@ mod tests {
     }
 
     #[test]
-    fn apply_patch_returns_error_on_failure() {
+    fn workspace_action_executor_apply_patch_returns_error_on_failure() {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::write(workspace.path().join("notes.txt"), "before\n").expect("seed file");
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(Vec::new())),
-        );
+        let executor = local_executor(workspace.path());
 
-        let err = adapter
-            .execute_tool(
-                &ToolCall::ApplyPatch {
-                    patch: "diff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-missing\n+after\n"
-                        .to_string(),
-                },
-                "tool-1",
-                &adapter.combined_local_context(&[]),
-                &[],
-                &NullTurnEventSink,
-            )
-            .expect_err("apply_patch failure should propagate");
+        let err = execute_local_action(
+            &executor,
+            &WorkspaceAction::ApplyPatch {
+                patch: "diff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-missing\n+after\n"
+                    .to_string(),
+            },
+            &NullTurnEventSink,
+        )
+        .expect_err("apply_patch failure should propagate");
 
         assert!(err.to_string().contains("git apply"));
         assert!(err.to_string().contains("Exit status"));
-    }
-
-    #[test]
-    fn exhausting_the_tool_budget_returns_an_error() {
-        let workspace = tempfile::tempdir().expect("temp workspace");
-        let responses = (0..=MAX_TOOL_STEPS)
-            .map(|_| r#"{"tool":"list_files"}"#.to_string())
-            .collect::<Vec<_>>();
-        let adapter = SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(MockConversation::new(responses)),
-        );
-
-        let err = adapter
-            .respond_for_turn(
-                "Keep listing files forever.",
-                TurnIntent::DeterministicAction,
-                None,
-                &SynthesisHandoff::default(),
-                Arc::new(NullTurnEventSink),
-            )
-            .expect_err("tool budget error");
-        assert!(err.to_string().contains("tool step limit exceeded"));
     }
 
     #[test]
@@ -7436,13 +6453,8 @@ mod tests {
         let workspace_root = sandbox.path().join("project");
         std::fs::create_dir_all(&workspace_root).expect("create dir");
 
-        let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
         let adapter = SiftAgentAdapter::from_factory(
             workspace_root,
-            Arc::clone(&execution_hand_registry),
-            Arc::new(TransportToolMediator::with_execution_hand_registry(
-                execution_hand_registry,
-            )),
             "qwen-1.5b",
             Box::new(StaticConversationFactory::new(Vec::new())),
             crate::infrastructure::rendering::RenderCapability::resolve("openai", "gpt-4o"),

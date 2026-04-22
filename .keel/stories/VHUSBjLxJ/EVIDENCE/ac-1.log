@@ -1,0 +1,65 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.01s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-6e1a86015c5cb772)
+
+running 48 tests
+test infrastructure::adapters::sift_agent::tests::caps_prepared_qwen_runtime_length_to_existing_budget ... ok
+test infrastructure::adapters::sift_agent::tests::cpu_runtime_keeps_qwen_weights_in_f32 ... ok
+test infrastructure::adapters::sift_agent::tests::assess_context_relevance_produces_heuristic_decisions ... ok
+test infrastructure::adapters::sift_agent::tests::extracts_json_payload_from_embedded_json ... ok
+test infrastructure::adapters::sift_agent::tests::extracts_json_payload_from_fenced_json ... ok
+test infrastructure::adapters::sift_agent::tests::infers_qwen_family_from_prepared_config_shapes ... ok
+test infrastructure::adapters::sift_agent::tests::extracts_json_payload_from_raw_json ... ok
+test infrastructure::adapters::sift_agent::tests::grounded_answer_fallback_preserves_evidence_order_without_source_priority ... ok
+test infrastructure::adapters::sift_agent::tests::action_prompts_retry_for_plain_text_after_empty_response ... ok
+test infrastructure::adapters::sift_agent::tests::action_prompts_accept_plain_text_on_first_response ... ok
+test infrastructure::adapters::sift_agent::tests::deterministic_action_turns_retry_for_plain_text_instead_of_executing_tools ... ok
+test infrastructure::adapters::sift_agent::tests::casual_prompts_retry_for_plain_text_instead_of_executing_tools ... ok
+test infrastructure::adapters::sift_agent::tests::casual_prompts_fall_back_to_plain_text_after_repeated_tool_calls ... ok
+test infrastructure::adapters::sift_agent::tests::general_prompts_retry_after_malformed_tool_protocol_response ... ok
+test infrastructure::adapters::sift_agent::tests::initial_action_answer_payload_is_preserved_separately_from_rationale ... ok
+test infrastructure::adapters::sift_agent::tests::casual_prompts_retry_after_empty_response ... ok
+test infrastructure::adapters::sift_agent::tests::initial_action_can_request_structural_fuzzy_retrievers ... ok
+test infrastructure::adapters::sift_agent::tests::normalizes_relative_paths_without_leaving_workspace ... ok
+test infrastructure::adapters::sift_agent::tests::casual_prompts_fall_back_after_repeated_empty_responses ... ok
+test infrastructure::adapters::sift_agent::tests::initial_action_retries_when_edit_metadata_is_missing ... ok
+test infrastructure::adapters::sift_agent::tests::external_grounding_rejects_unverified_urls_in_sift_responses ... ok
+test infrastructure::adapters::sift_agent::tests::invalid_initial_action_replies_use_constrained_redecision_before_succeeding ... ok
+test infrastructure::adapters::sift_agent::tests::invalid_planner_replies_use_constrained_redecision_before_succeeding ... ok
+test infrastructure::adapters::sift_agent::tests::direct_prompts_include_loaded_agents_memory ... ok
+test infrastructure::adapters::sift_agent::tests::invalid_planner_replies_fail_closed_after_redecision_is_still_invalid ... ok
+test infrastructure::adapters::sift_agent::tests::invalid_initial_action_replies_fail_closed_after_redecision_is_still_invalid ... ok
+test infrastructure::adapters::sift_agent::tests::qwen_generation_sampling_uses_model_defaults ... ok
+test infrastructure::adapters::sift_agent::tests::qwen3_family_prompts_disable_thinking_explicitly ... ok
+test infrastructure::adapters::sift_agent::tests::retries_qwen_cuda_runtime_on_oom_or_dtype_errors ... ok
+test infrastructure::adapters::sift_agent::tests::planner_action_prompts_include_exact_diff_guidance ... ok
+test infrastructure::adapters::sift_agent::tests::interpretation_context_expands_model_selected_guidance_subgraph_from_agents_roots ... ok
+test infrastructure::adapters::sift_agent::tests::repository_turns_fall_back_to_grounded_evidence_when_model_is_confused ... ok
+test infrastructure::adapters::sift_agent::tests::trims_large_context_payloads ... ok
+test infrastructure::adapters::sift_agent::tests::repository_turns_without_evidence_report_insufficient_evidence ... ok
+test infrastructure::adapters::sift_agent::tests::initial_action_prompts_include_interpretation_context ... ok
+test infrastructure::adapters::sift_agent::tests::respond_records_turns_in_local_context_without_tool_outputs ... ok
+test infrastructure::adapters::sift_agent::tests::respond_with_evidence_includes_gathered_summary_in_prompt ... ok
+test infrastructure::adapters::sift_agent::tests::respond_starts_a_fresh_conversation_each_turn ... ok
+test infrastructure::adapters::sift_agent::tests::planned_prompts_include_loaded_agents_memory ... ok
+test infrastructure::adapters::sift_agent::tests::respond_for_turn_records_forensic_exchange_artifacts_on_trace_capable_sink ... ok
+test infrastructure::adapters::sift_agent::tests::workspace_action_executor_read_rejects_symlink_escape ... ok
+test infrastructure::adapters::sift_agent::tests::workspace_action_executor_list_files_skips_symlinked_directories ... ok
+test infrastructure::adapters::sift_agent::tests::structured_final_answer_envelopes_are_normalized_before_return ... ok
+test infrastructure::adapters::sift_agent::tests::tool_protocol_replies_do_not_record_tool_outputs ... ok
+test infrastructure::adapters::sift_agent::tests::workspace_action_executor_list_files_respects_repo_gitignore_patterns ... ok
+test infrastructure::adapters::sift_agent::tests::workspace_action_executor_apply_patch_returns_error_on_failure ... ok
+test infrastructure::adapters::sift_agent::tests::workspace_action_executor_shell_emits_terminal_output_events ... ok
+test infrastructure::adapters::sift_agent::tests::workspace_action_executor_shell_reports_non_zero_exit ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 589 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-368fd65f357d3f27)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+

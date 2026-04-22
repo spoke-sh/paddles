@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VHUS5RqZf
-status: in-progress
+status: done
 epic: VHURpL4nG
 created_at: 2026-04-21T21:19:05
 # authored
@@ -9,6 +9,7 @@ title: Single Recursive Control Plane
 index: 2
 updated_at: 2026-04-21T21:24:11
 started_at: 2026-04-21T21:55:55
+completed_at: 2026-04-21T22:32:21
 ---
 
 # Single Recursive Control Plane
@@ -22,16 +23,18 @@ started_at: 2026-04-21T21:55:55
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Introduce A Workspace Action Executor Boundary](../../../../stories/VHUS9rF4d/README.md) | feat | done |
 | [Make Synthesizer Engines Author Responses Only](../../../../stories/VHUSB4bI0/README.md) | refactor | done |
-| [Remove Nested Tool Loops From Model Adapters](../../../../stories/VHUSBjLxJ/README.md) | refactor | backlog |
+| [Remove Nested Tool Loops From Model Adapters](../../../../stories/VHUSBjLxJ/README.md) | refactor | done |
 <!-- END GENERATED -->
