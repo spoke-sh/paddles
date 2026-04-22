@@ -435,11 +435,14 @@ to select the next bounded workspace action. The provider chooses the action
 through the planner tool, and Paddles executes that action locally in the
 workspace harness.
 
-For OpenAI specifically, chat-completions models such as `gpt-5.4`,
-`gpt-5.4-mini`, and `gpt-4o` stay on Chat Completions with structured
-JSON/tool calls, while Responses-only models such as `gpt-5.4-pro`,
-`gpt-5-pro`, and `gpt-5.2-pro` route through `/v1/responses` with prompt
-envelopes and reusable `previous_response_id` continuity.
+For OpenAI specifically, non-reasoning turns on chat-completions models such as
+`gpt-5.4`, `gpt-5.4-mini`, and `gpt-4o` stay on Chat Completions with
+structured JSON/tool calls. When a GPT-5 lane enables thinking, Paddles now
+routes planner tool calls and structured-answer requests through
+`/v1/responses` so reasoning-aware turns stay compatible with OpenAI's
+Responses-only tool/schema contract. Responses-only models such as
+`gpt-5.4-pro`, `gpt-5-pro`, and `gpt-5.2-pro` continue to use
+`/v1/responses` with reusable `previous_response_id` continuity.
 
 For Moonshot, Paddles currently recognizes the Kimi API model ids
 `kimi-k2.6`, `kimi-k2.5`, `kimi-k2`, `kimi-k2-0905-preview`,
@@ -489,7 +492,7 @@ family exposes more than one contract:
 | Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Thinking modes | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | `sift` | `qwen-1.5b` | `local` | `supported` | `prompt-envelope` | `prompt-envelope` | `unsupported` | `none` | `none` | Local native runtime; no provider-native reasoning substrate. |
-| `openai` | `gpt-5.4` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `low`, `medium`, `high`, `xhigh` | Chat Completions path with reasoning-effort control only. |
+| `openai` | `gpt-5.4` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `low`, `medium`, `high`, `xhigh` | Chat Completions by default; thinking-enabled GPT-5 turns switch planner/schema requests to Responses. |
 | `openai` | `gpt-5.4-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high`, `xhigh` | Responses path with reusable previous_response_id continuity. |
 | `inception` | `mercury-2` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `summary_only` | `none` | `instant`, `low`, `medium`, `high` | OpenAI-compatible chat with reasoning summaries but no reusable state. |
 | `anthropic` | `claude-sonnet-4-20250514` | `anthropic` | `supported` | `anthropic-tool-use` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | Messages API with thinking blocks and interleaved-thinking support. |

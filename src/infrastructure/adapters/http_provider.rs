@@ -956,12 +956,7 @@ impl HttpProviderAdapter {
         tool_results: &[ProviderToolResult],
     ) -> Result<ProviderTurnResponse> {
         let url = format!("{}/v1/responses", self.base_url.trim_end_matches('/'));
-        let mut body = json!({
-            "model": self.request_model_id(),
-            "instructions": system,
-            "store": true,
-            "max_output_tokens": OPENAI_MAX_COMPLETION_TOKENS,
-        });
+        let mut body = self.openai_responses_base_body(system);
         let input = if deliberation_state.is_some() && !tool_results.is_empty() {
             tool_results
                 .iter()
@@ -991,7 +986,6 @@ impl HttpProviderAdapter {
                 );
             }
         }
-        self.apply_openai_responses_reasoning_effort(&mut body);
 
         let assembled_context_id = capture
             .as_ref()
@@ -1018,15 +1012,7 @@ impl HttpProviderAdapter {
             .output
             .iter()
             .any(|item| item.kind == "function_call");
-        let content = parsed
-            .output
-            .iter()
-            .filter(|item| item.kind == "message")
-            .flat_map(|item| item.content.iter())
-            .filter(|item| item.kind == "output_text")
-            .filter_map(|item| item.text.clone())
-            .collect::<Vec<_>>()
-            .join("");
+        let content = self.extract_openai_responses_output_text(&parsed);
         if content.is_empty() && !has_function_call {
             return Err(anyhow!("empty OpenAI Responses response"));
         }
@@ -1047,6 +1033,17 @@ impl HttpProviderAdapter {
         })
     }
 
+    fn openai_responses_base_body(&self, system: &str) -> Value {
+        let mut body = json!({
+            "model": self.request_model_id(),
+            "instructions": system,
+            "store": true,
+            "max_output_tokens": OPENAI_MAX_COMPLETION_TOKENS,
+        });
+        self.apply_openai_responses_reasoning_effort(&mut body);
+        body
+    }
+
     async fn send_openai_json_schema(
         &self,
         system: &str,
@@ -1055,6 +1052,11 @@ impl HttpProviderAdapter {
         schema: Value,
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
+        if self.uses_openai_responses_transport() {
+            return self
+                .send_openai_responses_json_schema(system, user, schema_name, schema, capture)
+                .await;
+        }
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
@@ -1107,12 +1109,70 @@ impl HttpProviderAdapter {
         Ok((content, raw_response_artifact_id))
     }
 
+    async fn send_openai_responses_json_schema(
+        &self,
+        system: &str,
+        user: &str,
+        schema_name: &str,
+        schema: Value,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        let url = format!("{}/v1/responses", self.base_url.trim_end_matches('/'));
+        let mut body = self.openai_responses_base_body(system);
+        if let Some(body_object) = body.as_object_mut() {
+            body_object.insert("input".to_string(), Value::String(user.to_string()));
+            body_object.insert(
+                "text".to_string(),
+                json!({
+                    "format": {
+                        "type": "json_schema",
+                        "name": schema_name,
+                        "strict": true,
+                        "schema": schema,
+                    }
+                }),
+            );
+        }
+
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "OpenAI",
+                &url,
+                &[
+                    (
+                        "Authorization".to_string(),
+                        format!("Bearer {}", self.api_key),
+                    ),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
+
+        let parsed: OpenAiResponsesResponse = serde_json::from_str(&text)?;
+        let content = self.extract_openai_responses_output_text(&parsed);
+        if content.is_empty() {
+            return Err(anyhow!("empty OpenAI Responses response"));
+        }
+        Ok((content, raw_response_artifact_id))
+    }
+
     async fn send_openai_planner_tool_call(
         &self,
         system: &str,
         user: &str,
         capture: Option<ExchangeCapture<'_>>,
     ) -> Result<(String, Option<TraceArtifactId>)> {
+        if self.uses_openai_responses_transport() {
+            return self
+                .send_openai_responses_planner_tool_call(system, user, capture)
+                .await;
+        }
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
@@ -1187,6 +1247,69 @@ impl HttpProviderAdapter {
         Ok((content, raw_response_artifact_id))
     }
 
+    async fn send_openai_responses_planner_tool_call(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+    ) -> Result<(String, Option<TraceArtifactId>)> {
+        let url = format!("{}/v1/responses", self.base_url.trim_end_matches('/'));
+        let mut body = self.openai_responses_base_body(system);
+        if let Some(body_object) = body.as_object_mut() {
+            body_object.insert("input".to_string(), Value::String(user.to_string()));
+            body_object.insert(
+                "tools".to_string(),
+                Value::Array(vec![json!({
+                    "type": "function",
+                    "name": OPENAI_PLANNER_TOOL_NAME,
+                    "description": "Select the next bounded planner action for local execution in the Paddles harness.",
+                    "parameters": planner_action_json_schema(),
+                    "strict": true,
+                })]),
+            );
+            body_object.insert(
+                "tool_choice".to_string(),
+                json!({
+                    "type": "function",
+                    "name": OPENAI_PLANNER_TOOL_NAME,
+                }),
+            );
+        }
+
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "OpenAI",
+                &url,
+                &[
+                    (
+                        "Authorization".to_string(),
+                        format!("Bearer {}", self.api_key),
+                    ),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
+
+        let parsed: OpenAiResponsesResponse = serde_json::from_str(&text)?;
+        if let Some(arguments) =
+            self.extract_openai_responses_function_arguments(&parsed, OPENAI_PLANNER_TOOL_NAME)
+        {
+            return Ok((arguments, raw_response_artifact_id));
+        }
+
+        let content = self.extract_openai_responses_output_text(&parsed);
+        if content.is_empty() {
+            return Err(anyhow!("empty OpenAI Responses response"));
+        }
+        Ok((content, raw_response_artifact_id))
+    }
+
     async fn send_openai_structured_answer(
         &self,
         system: &str,
@@ -1215,6 +1338,32 @@ impl HttpProviderAdapter {
         provider.runtime_model_thinking_mode(&self.model_id)
     }
 
+    fn extract_openai_responses_output_text(&self, parsed: &OpenAiResponsesResponse) -> String {
+        parsed
+            .output
+            .iter()
+            .filter(|item| item.kind == "message")
+            .flat_map(|item| item.content.iter())
+            .filter(|item| item.kind == "output_text")
+            .filter_map(|item| item.text.clone())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    fn extract_openai_responses_function_arguments(
+        &self,
+        parsed: &OpenAiResponsesResponse,
+        function_name: &str,
+    ) -> Option<String> {
+        parsed
+            .output
+            .iter()
+            .find(|item| {
+                item.kind == "function_call" && item.name.as_deref() == Some(function_name)
+            })
+            .and_then(|item| item.arguments.clone())
+    }
+
     fn apply_openai_chat_thinking_controls(&self, body: &mut Value) {
         let Some(provider) = ModelProvider::from_name(&self.provider_name) else {
             return;
@@ -1227,6 +1376,9 @@ impl HttpProviderAdapter {
         };
         match provider {
             ModelProvider::Openai | ModelProvider::Inception => {
+                if provider == ModelProvider::Openai && thinking_mode == "none" {
+                    return;
+                }
                 body_object.insert("reasoning_effort".to_string(), Value::String(thinking_mode));
                 if provider == ModelProvider::Inception {
                     body_object.insert("reasoning_summary".to_string(), Value::Bool(true));
@@ -1259,6 +1411,9 @@ impl HttpProviderAdapter {
         let Some(reasoning_effort) = provider.runtime_model_thinking_mode(&self.model_id) else {
             return;
         };
+        if reasoning_effort == "none" {
+            return;
+        }
         let Some(body_object) = body.as_object_mut() else {
             return;
         };
@@ -2463,6 +2618,12 @@ struct OpenAiResponsesResponse {
 struct OpenAiResponsesOutputItem {
     #[serde(rename = "type")]
     kind: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+    #[serde(default)]
+    call_id: Option<String>,
     #[serde(default)]
     content: Vec<OpenAiResponsesContentItem>,
 }
@@ -4309,17 +4470,23 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn openai_gpt_5_4_thinking_mode_maps_to_reasoning_effort_in_chat_completions() {
+    async fn openai_gpt_5_4_thinking_mode_uses_responses_transport_for_planner_and_structured_answer()
+     {
         let workspace = setup_workspace_with_agents().expect("workspace");
         let final_answer = &structured_answer_json("Mocked final answer.");
         let server = start_mock_server(vec![
             MockResponse {
                 status: StatusCode::OK,
-                body: provider_response(ApiFormat::OpenAi, &planner_json_answer()),
+                body: openai_responses_function_call_response(
+                    "resp_planner",
+                    "call_planner",
+                    super::OPENAI_PLANNER_TOOL_NAME,
+                    &planner_json_answer(),
+                ),
             },
             MockResponse {
                 status: StatusCode::OK,
-                body: final_answer_response(ApiFormat::OpenAi, final_answer),
+                body: openai_responses_text_response("resp_answer", final_answer),
             },
         ])
         .await;
@@ -4350,10 +4517,52 @@ mod tests {
         let requests = server.recorded_requests();
 
         assert_eq!(response, "Mocked final answer.");
+        assert_eq!(requests[0].uri, "/v1/responses");
         assert_eq!(requests[0].body["model"].as_str(), Some("gpt-5.4"));
-        assert_eq!(requests[0].body["reasoning_effort"].as_str(), Some("high"));
+        assert_eq!(
+            requests[0].body["reasoning"]["effort"].as_str(),
+            Some("high")
+        );
+        assert_eq!(
+            requests[0].body["tools"][0]["type"].as_str(),
+            Some("function")
+        );
+        assert_eq!(
+            requests[0].body["tools"][0]["name"].as_str(),
+            Some(super::OPENAI_PLANNER_TOOL_NAME)
+        );
+        assert_eq!(requests[0].body["tools"][0]["strict"].as_bool(), Some(true));
+        assert_eq!(
+            requests[0].body["tool_choice"]["type"].as_str(),
+            Some("function")
+        );
+        assert_eq!(
+            requests[0].body["tool_choice"]["name"].as_str(),
+            Some(super::OPENAI_PLANNER_TOOL_NAME)
+        );
+        assert_eq!(requests[0].body["max_output_tokens"].as_i64(), Some(4096));
+        assert!(requests[0].body.get("max_completion_tokens").is_none());
+
+        assert_eq!(requests[1].uri, "/v1/responses");
         assert_eq!(requests[1].body["model"].as_str(), Some("gpt-5.4"));
-        assert_eq!(requests[1].body["reasoning_effort"].as_str(), Some("high"));
+        assert_eq!(
+            requests[1].body["reasoning"]["effort"].as_str(),
+            Some("high")
+        );
+        assert_eq!(
+            requests[1].body["text"]["format"]["type"].as_str(),
+            Some("json_schema")
+        );
+        assert_eq!(
+            requests[1].body["text"]["format"]["name"].as_str(),
+            Some("assistant_response")
+        );
+        assert_eq!(
+            requests[1].body["text"]["format"]["strict"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(requests[1].body["max_output_tokens"].as_i64(), Some(4096));
+        assert!(requests[1].body.get("max_completion_tokens").is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -819,13 +819,23 @@ impl ModelProvider {
 
     pub fn capability_surface(self, model: &str) -> ModelCapabilitySurface {
         let normalized_model = self.runtime_model_id(model);
+        let runtime_thinking_mode = self.runtime_model_thinking_mode(model);
+        let openai_reasoning_uses_responses = matches!(self, Self::Openai)
+            && normalized_model.starts_with("gpt-5")
+            && matches!(
+                runtime_thinking_mode.as_deref(),
+                Some(thinking_mode) if thinking_mode != "none"
+            );
         let transport_support = ProviderTransportSupport::Supported;
         let deliberation = match self {
             Self::Sift => DeliberationCapabilitySurface {
                 support: DeliberationSupport::Unsupported,
                 state_contract: DeliberationStateContract::None,
             },
-            Self::Openai if OPENAI_RESPONSES_ONLY_MODELS.contains(&normalized_model.as_str()) => {
+            Self::Openai
+                if OPENAI_RESPONSES_ONLY_MODELS.contains(&normalized_model.as_str())
+                    || openai_reasoning_uses_responses =>
+            {
                 DeliberationCapabilitySurface {
                     support: DeliberationSupport::NativeContinuation,
                     state_contract: DeliberationStateContract::OpaqueRoundTrip,
@@ -993,7 +1003,7 @@ const DOCUMENTED_PROVIDER_CAPABILITY_PATHS: &[(ModelProvider, &str, &str)] = &[
     (
         ModelProvider::Openai,
         "gpt-5.4",
-        "Chat Completions path with reasoning-effort control only.",
+        "Chat Completions by default; thinking-enabled GPT-5 turns switch planner/schema requests to Responses.",
     ),
     (
         ModelProvider::Openai,
@@ -1502,6 +1512,16 @@ mod tests {
         assert_eq!(
             openai.deliberation.state_contract,
             DeliberationStateContract::None
+        );
+
+        let openai_reasoning = ModelProvider::Openai.capability_surface("gpt-5.4@@thinking=high");
+        assert_eq!(
+            openai_reasoning.deliberation.support,
+            DeliberationSupport::NativeContinuation
+        );
+        assert_eq!(
+            openai_reasoning.deliberation.state_contract,
+            DeliberationStateContract::OpaqueRoundTrip
         );
 
         let openai_responses = ModelProvider::Openai.capability_surface("gpt-5.4-pro");
