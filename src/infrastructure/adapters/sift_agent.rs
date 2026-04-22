@@ -4175,6 +4175,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::ListFiles { pattern, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4189,6 +4191,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::Read { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4200,6 +4204,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::Inspect { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4211,6 +4217,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::Shell { command, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4222,6 +4230,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::Diff { path, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4236,6 +4246,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::WriteFile {
             path,
@@ -4252,6 +4264,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::ReplaceInFile {
             path,
@@ -4272,6 +4286,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::ApplyPatch { patch, rationale } => RecursivePlannerDecision {
             action: PlannerAction::Workspace {
@@ -4283,6 +4299,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::ExternalCapability {
             capability_id,
@@ -4303,6 +4321,8 @@ fn planner_action_from_envelope(
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: grounding.clone(),
+
+            deliberation_state: None,
         },
         PlannerActionEnvelope::Refine {
             query,
@@ -4328,6 +4348,8 @@ fn planner_action_from_envelope(
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: grounding.clone(),
+
+                deliberation_state: None,
             }
         }
         PlannerActionEnvelope::Branch {
@@ -4351,6 +4373,8 @@ fn planner_action_from_envelope(
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: grounding.clone(),
+
+                deliberation_state: None,
             }
         }
         PlannerActionEnvelope::Stop {
@@ -4369,6 +4393,7 @@ fn planner_action_from_envelope(
                 .map(str::to_string),
             edit: InitialEditInstruction::default(),
             grounding,
+            deliberation_state: None,
         },
     };
     Ok(RecursivePlannerDecision { edit, ..decision })
@@ -4492,6 +4517,8 @@ fn fail_closed_planner_action() -> RecursivePlannerDecision {
         answer: None,
         edit: InitialEditInstruction::default(),
         grounding: None,
+
+        deliberation_state: None,
     }
 }
 

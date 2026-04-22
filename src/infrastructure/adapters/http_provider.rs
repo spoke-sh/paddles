@@ -148,6 +148,12 @@ impl ProviderTurnResponse {
     }
 }
 
+struct PlannerActionTransportResponse {
+    content: String,
+    raw_response_artifact_id: Option<TraceArtifactId>,
+    deliberation_state: Option<DeliberationState>,
+}
+
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
@@ -1683,15 +1689,21 @@ Rules:
         system: &str,
         user: &str,
         capture: Option<ExchangeCapture<'_>>,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+    ) -> Result<PlannerActionTransportResponse> {
         match self.capabilities.planner_tool_call {
-            PlannerToolCallCapability::NativeFunctionTool => {
-                self.send_openai_planner_tool_call(system, user, capture)
-                    .await
-            }
+            PlannerToolCallCapability::NativeFunctionTool => self
+                .send_openai_planner_tool_call(system, user, capture)
+                .await
+                .map(
+                    |(content, raw_response_artifact_id)| PlannerActionTransportResponse {
+                        content,
+                        raw_response_artifact_id,
+                        deliberation_state: None,
+                    },
+                ),
             PlannerToolCallCapability::StructuredJsonEnvelope => match self.format {
-                ApiFormat::OpenAi => {
-                    self.send_openai_json_schema(
+                ApiFormat::OpenAi => self
+                    .send_openai_json_schema(
                         system,
                         user,
                         "planner_action",
@@ -1699,16 +1711,23 @@ Rules:
                         capture,
                     )
                     .await
-                }
-                ApiFormat::Gemini => {
-                    self.send_gemini_json_schema(
-                        system,
-                        user,
-                        planner_action_json_schema(),
-                        capture,
-                    )
+                    .map(
+                        |(content, raw_response_artifact_id)| PlannerActionTransportResponse {
+                            content,
+                            raw_response_artifact_id,
+                            deliberation_state: None,
+                        },
+                    ),
+                ApiFormat::Gemini => self
+                    .send_gemini_json_schema(system, user, planner_action_json_schema(), capture)
                     .await
-                }
+                    .map(
+                        |(content, raw_response_artifact_id)| PlannerActionTransportResponse {
+                            content,
+                            raw_response_artifact_id,
+                            deliberation_state: None,
+                        },
+                    ),
                 ApiFormat::Anthropic => {
                     bail!("planner structured-json transport is unsupported for Anthropic format")
                 }
@@ -1722,7 +1741,11 @@ Rules:
                     tool_results: Vec::new(),
                 })
                 .await
-                .map(ProviderTurnResponse::into_plain_response),
+                .map(|response| PlannerActionTransportResponse {
+                    content: response.content,
+                    raw_response_artifact_id: response.raw_response_artifact_id,
+                    deliberation_state: response.deliberation_state,
+                }),
         }
     }
 
@@ -1833,6 +1856,7 @@ Rules:
             answer,
             edit,
             grounding: envelope.grounding,
+            deliberation_state: None,
         })
     }
 
@@ -2102,7 +2126,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
             event_sink.as_ref(),
             TraceModelExchangeCategory::InitialAction,
         );
-        let (mut response, mut raw_response_artifact_id) = self
+        let PlannerActionTransportResponse {
+            content: mut response,
+            mut raw_response_artifact_id,
+            deliberation_state: _,
+        } = self
             .engine
             .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
@@ -2122,7 +2150,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::InitialAction,
             );
-            (response, raw_response_artifact_id) = self
+            PlannerActionTransportResponse {
+                content: response,
+                raw_response_artifact_id,
+                deliberation_state: _,
+            } = self
                 .engine
                 .send_planner_action_async(&system, &user, Some(capture.clone()))
                 .await?;
@@ -2144,7 +2176,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::InitialAction,
             );
-            (response, raw_response_artifact_id) = self
+            PlannerActionTransportResponse {
+                content: response,
+                raw_response_artifact_id,
+                deliberation_state: _,
+            } = self
                 .engine
                 .send_planner_action_async(&system, &user, Some(capture.clone()))
                 .await?;
@@ -2188,7 +2224,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
             event_sink.as_ref(),
             TraceModelExchangeCategory::PlannerAction,
         );
-        let (mut response, mut raw_response_artifact_id) = self
+        let PlannerActionTransportResponse {
+            content: mut response,
+            mut raw_response_artifact_id,
+            mut deliberation_state,
+        } = self
             .engine
             .send_planner_action_async(&system, &user, Some(capture.clone()))
             .await?;
@@ -2203,7 +2243,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::PlannerAction,
             );
-            (response, raw_response_artifact_id) = self
+            PlannerActionTransportResponse {
+                content: response,
+                raw_response_artifact_id,
+                deliberation_state,
+            } = self
                 .engine
                 .send_planner_action_async(&system, &user, Some(capture.clone()))
                 .await?;
@@ -2219,13 +2263,17 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::PlannerAction,
             );
-            (response, raw_response_artifact_id) = self
+            PlannerActionTransportResponse {
+                content: response,
+                raw_response_artifact_id,
+                deliberation_state,
+            } = self
                 .engine
                 .send_planner_action_async(&system, &user, Some(capture.clone()))
                 .await?;
         }
 
-        let decision = match self.engine.parse_planner_action(&response) {
+        let mut decision = match self.engine.parse_planner_action(&response) {
             Ok(decision) => decision,
             Err(_) => {
                 event_sink.emit(TurnEvent::Fallback {
@@ -2236,6 +2284,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
                 return Ok(fail_closed_http_planner_action());
             }
         };
+        decision.deliberation_state = deliberation_state;
         let rendered = json!({
             "action": decision.action.summary(),
             "rationale": decision.rationale,
@@ -3048,6 +3097,8 @@ fn fail_closed_http_planner_action() -> RecursivePlannerDecision {
         answer: None,
         edit: InitialEditInstruction::default(),
         grounding: None,
+
+        deliberation_state: None,
     }
 }
 
@@ -4911,6 +4962,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }
         );
     }
@@ -4946,7 +4999,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
-            }
+
+                deliberation_state: None,            }
         );
     }
 
@@ -4985,6 +5039,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }
         );
     }
@@ -5024,6 +5080,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }
         );
     }
@@ -5059,6 +5117,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }
         );
     }
@@ -5092,6 +5152,8 @@ mod tests {
                 answer: Some("Starter circuit\n\n[battery]---(solenoid)---(starter)".to_string()),
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }
         );
     }
@@ -6089,6 +6151,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }
         );
         let requests = server.recorded_requests();

@@ -3399,6 +3399,7 @@ impl MechSuitService {
         let mut direct_answer = None;
         let mut instruction_frame = context.instruction_frame.clone();
         let mut pending_initial_decision = initial_decision;
+        let mut pending_deliberation_signals = DeliberationSignals::default();
         let mut steps_without_new_evidence = 0usize;
         let mut replan_count = 0usize;
         let mut sequence = 1usize;
@@ -3437,6 +3438,7 @@ impl MechSuitService {
 
             let evidence_count_before = loop_state.evidence_items.len();
             let planner_selected_this_step = pending_initial_decision.is_none();
+            sync_deliberation_signal_note(&mut loop_state, &pending_deliberation_signals);
             let mut decision = if let Some(decision) = pending_initial_decision.take() {
                 decision
             } else {
@@ -3470,8 +3472,11 @@ impl MechSuitService {
                     &budget,
                     &loop_state,
                     decision,
-                    &self.workspace_root,
-                    trace.clone(),
+                    DecisionReviewFrame {
+                        deliberation_signals: &pending_deliberation_signals,
+                        workspace_root: &self.workspace_root,
+                        trace: trace.clone(),
+                    },
                 )
                 .await?;
                 trace.emit(TurnEvent::PlannerActionSelected {
@@ -3978,6 +3983,9 @@ impl MechSuitService {
                 action: decision.action.clone(),
                 outcome: outcome.clone(),
             });
+            pending_deliberation_signals =
+                extract_deliberation_signals(decision.deliberation_state.as_ref());
+            sync_deliberation_signal_note(&mut loop_state, &pending_deliberation_signals);
 
             if let Some(checklist) = execution_checklist.as_mut() {
                 let mut changed = false;
@@ -4015,6 +4023,7 @@ impl MechSuitService {
                     sequence,
                     &loop_state,
                     steps_without_new_evidence,
+                    &pending_deliberation_signals,
                 );
                 if let Some(refinement_reason) = refinement_reason
                     && let Some(updated_context) = self
@@ -4181,9 +4190,14 @@ impl MechSuitService {
         sequence: usize,
         loop_state: &PlannerLoopState,
         steps_without_new_evidence: usize,
+        deliberation_signals: &DeliberationSignals,
     ) -> Option<String> {
         let policy = &loop_state.refinement_policy;
         if !policy.enabled {
+            return None;
+        }
+
+        if continuation_requires_tool_follow_up(deliberation_signals) {
             return None;
         }
 
@@ -5374,6 +5388,8 @@ fn execution_plan_from_initial_action(
                     answer: None,
                     edit: edit.clone(),
                     grounding: grounding.clone(),
+
+                    deliberation_state: None,
                 }),
                 direct_answer: None,
                 instruction_frame,
@@ -6319,6 +6335,7 @@ fn has_file_targeting_step(loop_state: &PlannerLoopState) -> bool {
 enum SteeringReviewKind {
     Evidence,
     Execution,
+    Deliberation,
 }
 
 impl SteeringReviewKind {
@@ -6326,6 +6343,7 @@ impl SteeringReviewKind {
         match self {
             Self::Evidence => "premise-challenge",
             Self::Execution => "action-bias",
+            Self::Deliberation => "deliberation-signals",
         }
     }
 }
@@ -6336,21 +6354,27 @@ struct SteeringReviewNote {
     note: String,
 }
 
+struct DecisionReviewFrame<'a> {
+    deliberation_signals: &'a DeliberationSignals,
+    workspace_root: &'a Path,
+    trace: Arc<StructuredTurnTrace>,
+}
+
 async fn review_decision_under_signals(
     prompt: &str,
     context: &PlannerLoopContext,
     budget: &PlannerBudget,
     loop_state: &PlannerLoopState,
     decision: RecursivePlannerDecision,
-    workspace_root: &Path,
-    trace: Arc<StructuredTurnTrace>,
+    frame: DecisionReviewFrame<'_>,
 ) -> Result<RecursivePlannerDecision> {
     let mut review_loop_state = loop_state.clone();
+    sync_deliberation_signal_note(&mut review_loop_state, frame.deliberation_signals);
     if context.initial_edit.known_edit {
-        let likely_targets = likely_action_bias_targets(loop_state, workspace_root, 3);
+        let likely_targets = likely_action_bias_targets(loop_state, frame.workspace_root, 3);
         if let Some(resolution) = resolve_known_edit_target(
             &context.entity_resolver,
-            workspace_root,
+            frame.workspace_root,
             prompt,
             &context.initial_edit.candidate_files,
             &likely_targets,
@@ -6366,8 +6390,13 @@ async fn review_decision_under_signals(
         }
     }
 
-    let steering_notes =
-        collect_steering_review_notes(context, &review_loop_state, &decision, workspace_root);
+    let steering_notes = collect_steering_review_notes(
+        context,
+        &review_loop_state,
+        &decision,
+        frame.workspace_root,
+        frame.deliberation_signals,
+    );
     if steering_notes.is_empty() {
         return Ok(decision);
     }
@@ -6378,7 +6407,7 @@ async fn review_decision_under_signals(
 
     let request = PlannerRequest::new(
         prompt,
-        workspace_root.to_path_buf(),
+        frame.workspace_root.to_path_buf(),
         context.interpretation.clone(),
         budget.clone(),
     )
@@ -6396,7 +6425,7 @@ async fn review_decision_under_signals(
 
     let reviewed = context
         .planner_engine
-        .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
+        .select_next_action(&request, frame.trace.clone() as Arc<dyn TurnEventSink>)
         .await?;
 
     if steering_review_failed_closed(&reviewed) {
@@ -6405,7 +6434,7 @@ async fn review_decision_under_signals(
 
     if reviewed != decision {
         let stage = steering_review_stage(&steering_notes, &reviewed);
-        trace.emit(TurnEvent::Fallback {
+        frame.trace.emit(TurnEvent::Fallback {
             stage: stage.to_string(),
             reason: format_steering_review_fallback_reason(&decision, &reviewed),
         });
@@ -6419,6 +6448,7 @@ fn collect_steering_review_notes(
     loop_state: &PlannerLoopState,
     decision: &RecursivePlannerDecision,
     workspace_root: &Path,
+    deliberation_signals: &DeliberationSignals,
 ) -> Vec<SteeringReviewNote> {
     let mut notes = Vec::new();
 
@@ -6469,7 +6499,112 @@ fn collect_steering_review_notes(
         });
     }
 
+    if should_apply_deliberation_review(deliberation_signals, decision) {
+        notes.push(SteeringReviewNote {
+            kind: SteeringReviewKind::Deliberation,
+            note: format_deliberation_review_note(decision, deliberation_signals),
+        });
+    }
+
     notes
+}
+
+fn continuation_requires_tool_follow_up(signals: &DeliberationSignals) -> bool {
+    matches!(
+        signals.continuation,
+        DeliberationSignal::Present(DeliberationContinuation {
+            tool_results_required: true,
+            ..
+        })
+    )
+}
+
+fn has_opaque_deliberation_hints(signals: &DeliberationSignals) -> bool {
+    !matches!(&signals.uncertainty, DeliberationSignal::None)
+        || !matches!(&signals.evidence_gaps, DeliberationSignal::None)
+        || !matches!(&signals.branch_candidates, DeliberationSignal::None)
+        || !matches!(&signals.stop_confidence, DeliberationSignal::None)
+        || !matches!(&signals.risk_hints, DeliberationSignal::None)
+}
+
+fn format_deliberation_signal_note(signals: &DeliberationSignals) -> Option<String> {
+    let mut lines = Vec::new();
+    if continuation_requires_tool_follow_up(signals) {
+        lines.push(
+            "Deliberation signals: prior provider turn left reusable continuation state. Judge the current tool-result path before branching, refining, or stopping."
+                .to_string(),
+        );
+    }
+    if has_opaque_deliberation_hints(signals) {
+        lines.push(
+            "Opaque provider hints are present but intentionally not surfaced directly. Prefer one bounded continuation step over speculative branching."
+                .to_string(),
+        );
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn sync_deliberation_signal_note(
+    loop_state: &mut PlannerLoopState,
+    deliberation_signals: &DeliberationSignals,
+) {
+    const DELIBERATION_SIGNAL_NOTE_PREFIX: &str = "Deliberation signals:";
+    loop_state
+        .notes
+        .retain(|note| !note.starts_with(DELIBERATION_SIGNAL_NOTE_PREFIX));
+
+    if let Some(note) = format_deliberation_signal_note(deliberation_signals) {
+        loop_state.notes.push(note);
+    }
+}
+
+fn should_apply_deliberation_review(
+    deliberation_signals: &DeliberationSignals,
+    decision: &RecursivePlannerDecision,
+) -> bool {
+    if continuation_requires_tool_follow_up(deliberation_signals)
+        && matches!(
+            decision.action,
+            PlannerAction::Stop { .. }
+                | PlannerAction::Branch { .. }
+                | PlannerAction::Refine { .. }
+        )
+    {
+        return true;
+    }
+
+    has_opaque_deliberation_hints(deliberation_signals) && decision.action.is_terminal()
+}
+
+fn format_deliberation_review_note(
+    decision: &RecursivePlannerDecision,
+    deliberation_signals: &DeliberationSignals,
+) -> String {
+    let mut lines = vec![
+        "Steering review [deliberation-signals]".to_string(),
+        format!(
+            "Proposed action under review: {}",
+            decision.action.summary()
+        ),
+    ];
+
+    if continuation_requires_tool_follow_up(deliberation_signals) {
+        lines.push(
+            "The previous provider turn left reusable continuation state that expects the current tool result or evidence to be judged on the same path.".to_string(),
+        );
+        lines.push(
+            "Continue the active path with one bounded action before branching, refining, or stopping unless the current evidence is already decisive."
+                .to_string(),
+        );
+    }
+
+    if has_opaque_deliberation_hints(deliberation_signals) {
+        lines.push(
+            "Opaque provider hints are present but intentionally hidden from canonical output. Stay conservative and grounded.".to_string(),
+        );
+    }
+
+    lines.join("\n")
 }
 
 fn should_apply_execution_review(
@@ -6884,6 +7019,11 @@ fn steering_review_stage(
             .any(|note| note.kind == SteeringReviewKind::Execution)
     {
         SteeringReviewKind::Execution.stage()
+    } else if notes
+        .iter()
+        .any(|note| note.kind == SteeringReviewKind::Deliberation)
+    {
+        SteeringReviewKind::Deliberation.stage()
     } else if reviewed.action.is_terminal()
         && notes
             .iter()
@@ -8341,9 +8481,10 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 #[cfg(test)]
 mod tests {
     use crate::application::{
-        ActiveRuntimeState, GathererProvider, MechSuitService, POLICY_VIOLATION_DIRECT_REPLY,
-        PreparedGathererLane, PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig,
-        RuntimeLaneRole, StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
+        ActiveRuntimeState, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
+        GathererProvider, MechSuitService, POLICY_VIOLATION_DIRECT_REPLY, PreparedGathererLane,
+        PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
+        StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
     };
     use crate::domain::model::{
         AuthoredResponse, CollaborationMode, CollaborationModeRequest,
@@ -8387,7 +8528,7 @@ mod tests {
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
-    use crate::infrastructure::providers::ModelProvider;
+    use crate::infrastructure::providers::{DeliberationState, ModelProvider};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use paddles_conversation::ConversationSession;
@@ -9109,6 +9250,41 @@ mod tests {
         }
     }
 
+    fn planner_decision(action: PlannerAction, rationale: &str) -> RecursivePlannerDecision {
+        RecursivePlannerDecision {
+            action,
+            rationale: rationale.to_string(),
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: None,
+            deliberation_state: None,
+        }
+    }
+
+    fn moonshot_continuation_state() -> DeliberationState {
+        DeliberationState::new(
+            ModelProvider::Moonshot,
+            "kimi-k2.6",
+            json!({
+                "kind": "moonshot_openai_chat_completion",
+                "assistant": {
+                    "role": "assistant",
+                    "reasoning_content": "inspect the current tool path before stopping",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "inspect",
+                                "arguments": "{\"command\":\"pwd\"}"
+                            }
+                        }
+                    ]
+                }
+            }),
+        )
+    }
+
     fn test_planner_loop_context(
         initial_edit: InitialEditInstruction,
     ) -> super::PlannerLoopContext {
@@ -9787,6 +9963,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&request_log),
         ));
@@ -9932,6 +10110,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&request_log),
         ));
@@ -10048,6 +10228,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&request_log),
         ));
@@ -10181,6 +10363,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -10916,6 +11100,8 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: None,
+
+            deliberation_state: None,
         };
 
         let reason = super::format_steering_review_fallback_reason(&decision, &decision);
@@ -11864,7 +12050,8 @@ mod tests {
                         resolution: None,
                     },
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "change applied and verified".to_string(),
@@ -11877,7 +12064,8 @@ mod tests {
                         resolution: None,
                     },
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
             ],
             recorded_requests.clone(),
         ));
@@ -12010,6 +12198,8 @@ mod tests {
                 answer: Some("Steered reply.".to_string()),
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             recorded_requests.clone(),
             ThreadDecisionPlan::continue_current(),
@@ -12348,6 +12538,8 @@ mod tests {
                 answer: Some("Child thread reply.".to_string()),
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
             ThreadDecisionPlan::open_child("investigate"),
@@ -12780,6 +12972,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -13018,6 +13212,8 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: None,
+
+            deliberation_state: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -13029,6 +13225,7 @@ mod tests {
             &loop_state,
             &decision,
             Path::new("/workspace"),
+            &DeliberationSignals::default(),
         );
 
         assert!(notes.iter().any(|note| {
@@ -13070,6 +13267,8 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: None,
+
+            deliberation_state: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -13081,6 +13280,7 @@ mod tests {
             &loop_state,
             &decision,
             Path::new("/workspace"),
+            &DeliberationSignals::default(),
         );
 
         assert!(notes.iter().any(|note| {
@@ -13123,6 +13323,8 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: None,
+
+            deliberation_state: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -13134,6 +13336,7 @@ mod tests {
             &loop_state,
             &decision,
             Path::new("/workspace"),
+            &DeliberationSignals::default(),
         );
 
         let note = notes
@@ -13213,6 +13416,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -13224,6 +13429,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13233,6 +13440,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13242,6 +13451,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13251,6 +13462,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13260,6 +13473,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::clone(&request_log),
@@ -13392,6 +13607,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13401,6 +13618,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13410,6 +13629,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13419,6 +13640,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -13558,6 +13781,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13567,6 +13792,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13576,6 +13803,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13585,6 +13814,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -13710,6 +13941,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13719,6 +13952,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13728,6 +13963,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -13737,6 +13974,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -13899,6 +14138,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -13932,16 +14173,23 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             },
-            Path::new("/workspace"),
-            Arc::new(StructuredTurnTrace::new(
-                Arc::new(RecordingTurnEventSink::default()),
-                Arc::new(InMemoryTraceRecorder::default()),
-                Vec::new(),
-                ConversationSession::new(TaskTraceId::new("task-review").expect("task trace id")),
-                crate::domain::model::TurnTraceId::new("turn").expect("turn id"),
-                ConversationThreadRef::Mainline,
-            )),
+            super::DecisionReviewFrame {
+                deliberation_signals: &DeliberationSignals::default(),
+                workspace_root: Path::new("/workspace"),
+                trace: Arc::new(StructuredTurnTrace::new(
+                    Arc::new(RecordingTurnEventSink::default()),
+                    Arc::new(InMemoryTraceRecorder::default()),
+                    Vec::new(),
+                    ConversationSession::new(
+                        TaskTraceId::new("task-review").expect("task trace id"),
+                    ),
+                    crate::domain::model::TurnTraceId::new("turn").expect("turn id"),
+                    ConversationThreadRef::Mainline,
+                )),
+            },
         )
         .await
         .expect("steering review should succeed");
@@ -14024,6 +14272,8 @@ mod tests {
                         answer: None,
                         edit: InitialEditInstruction::default(),
                         grounding: None,
+
+                        deliberation_state: None,
                     }),
                     None,
                     trace,
@@ -14138,6 +14388,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -14220,6 +14472,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -14335,6 +14589,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -14466,6 +14722,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -14581,6 +14839,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -14726,6 +14986,8 @@ mod tests {
                 answer: Some(answer.clone()),
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -14861,6 +15123,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -15005,6 +15269,8 @@ mod tests {
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15014,6 +15280,8 @@ mod tests {
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15023,6 +15291,8 @@ mod tests {
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15032,6 +15302,8 @@ mod tests {
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -15119,6 +15391,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15128,6 +15402,8 @@ mod tests {
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15138,6 +15414,8 @@ mod tests {
                     answer: Some("Add `padding: 8px;` to `.runtime-shell-host`.".to_string()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15153,6 +15431,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15162,6 +15442,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15171,6 +15453,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             recorded_requests.clone(),
@@ -15304,7 +15588,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
@@ -15317,7 +15602,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
@@ -15329,7 +15615,8 @@ mod tests {
                     ),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Shell {
@@ -15343,7 +15630,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
@@ -15352,7 +15640,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
-                },
+
+                    deliberation_state: None,                },
             ],
             recorded_requests.clone(),
         ));
@@ -15450,6 +15739,8 @@ mod tests {
                         resolution: None,
                     },
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15463,6 +15754,8 @@ mod tests {
                         resolution: None,
                     },
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15476,6 +15769,8 @@ mod tests {
                         resolution: None,
                     },
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15489,6 +15784,8 @@ mod tests {
                         resolution: None,
                     },
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -15576,6 +15873,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15585,6 +15884,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15594,6 +15895,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -15692,6 +15995,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15704,6 +16009,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15715,6 +16022,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15727,6 +16036,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15741,6 +16052,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15750,6 +16063,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15759,6 +16074,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -15869,6 +16186,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15880,6 +16199,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15891,6 +16212,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15902,6 +16225,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15913,6 +16238,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15924,6 +16251,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15936,6 +16265,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15947,6 +16278,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Workspace {
@@ -15961,6 +16294,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15970,6 +16305,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -15979,6 +16316,8 @@ mod tests {
                     answer: Some(answer.clone()),
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             recorded_requests.clone(),
@@ -16307,6 +16646,8 @@ mod tests {
                     resolution: None,
                 },
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -16406,6 +16747,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -16511,6 +16854,8 @@ mod tests {
                     resolution: None,
                 },
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -16600,6 +16945,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
@@ -16687,6 +17034,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -16783,6 +17132,8 @@ mod tests {
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
+
+                deliberation_state: None,
             }],
             Arc::clone(&recorded_requests),
         ));
@@ -16865,13 +17216,15 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
                 grounding: None,
-        };
+
+                deliberation_state: None,        };
 
         let notes = super::collect_steering_review_notes(
             &test_planner_loop_context(InitialEditInstruction::default()),
             &loop_state,
             &decision,
             Path::new("/workspace"),
+            &DeliberationSignals::default(),
         );
 
         assert!(notes.iter().any(|note| {
@@ -16927,6 +17280,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -16938,6 +17293,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::clone(&recorded_requests),
@@ -17025,6 +17382,8 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: None,
+
+            deliberation_state: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -17032,6 +17391,7 @@ mod tests {
             &loop_state,
             &decision,
             Path::new("/workspace"),
+            &DeliberationSignals::default(),
         );
 
         assert!(notes.iter().any(|note| {
@@ -17086,6 +17446,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -17097,6 +17459,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -17205,6 +17569,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
                 RecursivePlannerDecision {
                     action: PlannerAction::Stop {
@@ -17216,6 +17582,8 @@ mod tests {
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
+
+                    deliberation_state: None,
                 },
             ],
             Arc::new(Mutex::new(Vec::new())),
@@ -17974,6 +18342,8 @@ mod tests {
             answer: None,
             edit: InitialEditInstruction::default(),
             grounding: None,
+
+            deliberation_state: None,
         };
 
         let notes = super::collect_steering_review_notes(
@@ -17985,6 +18355,7 @@ mod tests {
             &PlannerLoopState::default(),
             &decision,
             workspace.path(),
+            &DeliberationSignals::default(),
         );
 
         assert!(notes.iter().any(|note| {
@@ -17992,6 +18363,95 @@ mod tests {
                 && note.note.contains("Steering review [action-bias]")
                 && note.note.contains("src/application/mod.rs")
         }));
+    }
+
+    #[test]
+    fn continuation_signals_suspend_mid_loop_refinement() {
+        let service = test_service(Path::new("/workspace"));
+        let loop_state = PlannerLoopState {
+            evidence_items: vec![EvidenceItem {
+                source: "command: pwd".to_string(),
+                snippet: "/workspace".to_string(),
+                rationale: "existing evidence".to_string(),
+                rank: 1,
+            }],
+            refinement_policy: crate::domain::ports::RefinementPolicy {
+                trigger: crate::domain::ports::RefinementTrigger {
+                    min_evidence_items: 1,
+                    min_steps_without_new_evidence: 1,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let signals = DeliberationSignals {
+            continuation: DeliberationSignal::Present(DeliberationContinuation {
+                reusable_state: true,
+                tool_results_required: true,
+            }),
+            ..DeliberationSignals::default()
+        };
+
+        let suspended = service.mid_loop_refinement_reason(3, &loop_state, 1, &signals);
+        let default_reason =
+            service.mid_loop_refinement_reason(3, &loop_state, 1, &DeliberationSignals::default());
+
+        assert!(suspended.is_none());
+        assert!(default_reason.is_some());
+    }
+
+    #[test]
+    fn continuation_signals_request_steering_review_for_stop_actions() {
+        let signals = DeliberationSignals {
+            continuation: DeliberationSignal::Present(DeliberationContinuation {
+                reusable_state: true,
+                tool_results_required: true,
+            }),
+            uncertainty: DeliberationSignal::Unknown,
+            ..DeliberationSignals::default()
+        };
+
+        let notes = super::collect_steering_review_notes(
+            &test_planner_loop_context(InitialEditInstruction::default()),
+            &PlannerLoopState::default(),
+            &planner_decision(
+                PlannerAction::Stop {
+                    reason: "answer now".to_string(),
+                },
+                "stop after the first tool result",
+            ),
+            Path::new("/workspace"),
+            &signals,
+        );
+
+        assert!(notes.iter().any(|note| {
+            note.kind == super::SteeringReviewKind::Deliberation
+                && note.note.contains("Steering review [deliberation-signals]")
+                && note.note.contains("reusable continuation state")
+        }));
+    }
+
+    #[test]
+    fn explicit_none_signals_do_not_request_deliberation_review() {
+        let notes = super::collect_steering_review_notes(
+            &test_planner_loop_context(InitialEditInstruction::default()),
+            &PlannerLoopState::default(),
+            &planner_decision(
+                PlannerAction::Stop {
+                    reason: "answer now".to_string(),
+                },
+                "stop after the first tool result",
+            ),
+            Path::new("/workspace"),
+            &DeliberationSignals::default(),
+        );
+
+        assert!(
+            !notes
+                .iter()
+                .any(|note| { note.kind == super::SteeringReviewKind::Deliberation })
+        );
     }
 
     #[test]
@@ -18032,6 +18492,212 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(request.loop_state.target_resolution, Some(resolution));
+    }
+
+    #[test]
+    fn native_continuation_signals_retry_stop_decisions_on_the_active_path() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "pwd".to_string(),
+                    },
+                },
+                "start with a local checkpoint",
+            ),
+            vec![
+                RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "README.md".to_string(),
+                        },
+                    },
+                    rationale: "consume the active tool path once".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: Some(moonshot_continuation_state()),
+                },
+                planner_decision(
+                    PlannerAction::Stop {
+                        reason: "answer now".to_string(),
+                    },
+                    "the tool result should be enough",
+                ),
+                planner_decision(
+                    PlannerAction::Workspace {
+                        action: WorkspaceAction::Inspect {
+                            command: "ls".to_string(),
+                        },
+                    },
+                    "continue the active path before answering",
+                ),
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the continued path is now sufficient".to_string(),
+                    answer: Some("Continued the active path before answering.".to_string()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                },
+            ],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Trace the current runtime state.", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Continued the active path before answering.");
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        let review_request = requests
+            .iter()
+            .find(|request| {
+                request
+                    .loop_state
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("Steering review [deliberation-signals]"))
+            })
+            .expect("deliberation steering review request should be recorded");
+        assert!(review_request.loop_state.notes.iter().any(|note| {
+            note.contains("reusable continuation state")
+                && note.contains("before branching, refining, or stopping")
+        }));
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress { step_number, action, .. }
+                if *step_number == 3 && action.contains("inspect `ls`")
+        )));
+    }
+
+    #[test]
+    fn explicit_none_signals_allow_stop_without_deliberation_retry() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "pwd".to_string(),
+                    },
+                },
+                "start with a local checkpoint",
+            ),
+            vec![
+                planner_decision(
+                    PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "README.md".to_string(),
+                        },
+                    },
+                    "consume the active tool path once",
+                ),
+                RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "model selected answer".to_string(),
+                    },
+                    rationale: "the current path is sufficient".to_string(),
+                    answer: Some("Stopped without a deliberation retry.".to_string()),
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                },
+            ],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Trace the current runtime state.", sink.clone())
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Stopped without a deliberation retry.");
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(!requests.iter().any(|request| {
+            request
+                .loop_state
+                .notes
+                .iter()
+                .any(|note| note.contains("Steering review [deliberation-signals]"))
+        }));
+        let events = sink.recorded();
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress { step_number, action, .. }
+                if *step_number == 3 && action.contains("inspect `ls`")
+        )));
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

@@ -101,7 +101,7 @@ pub struct DeliberationCapabilitySurface {
     pub state_contract: DeliberationStateContract,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeliberationState {
     provider: ModelProvider,
     runtime_model_id: String,

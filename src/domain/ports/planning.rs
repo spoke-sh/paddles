@@ -10,6 +10,7 @@ pub use crate::domain::model::{
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate,
     ThreadDecision, TraceBranch, TraceBranchId, WorkspaceAction,
 };
+use crate::infrastructure::providers::DeliberationState;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -525,6 +526,7 @@ pub struct PlannerDecision {
     pub answer: Option<String>,
     pub edit: InitialEditInstruction,
     pub grounding: Option<GroundingRequirement>,
+    pub deliberation_state: Option<DeliberationState>,
 }
 
 fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {

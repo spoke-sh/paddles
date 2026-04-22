@@ -27,11 +27,11 @@ started_at: 2026-04-22T10:36:41
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Compile Explicit Paddles Rationale And Operator Evidence](../../../../stories/VHXK93BbJ/README.md) | feat | backlog |
-| [Use Deliberation Signals In Recursive Branch Refine And Stop Decisions](../../../../stories/VHXK93dcv/README.md) | feat | backlog |
+| [Use Deliberation Signals In Recursive Branch Refine And Stop Decisions](../../../../stories/VHXK93dcv/README.md) | feat | done |
 | [Define Normalized Deliberation Signals](../../../../stories/VHXK94Ueg/README.md) | feat | done |
 <!-- END GENERATED -->
