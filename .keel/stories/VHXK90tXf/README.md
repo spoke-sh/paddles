@@ -1,0 +1,27 @@
+---
+# system-managed
+id: VHXK90tXf
+status: in-progress
+created_at: 2026-04-22T09:06:21
+updated_at: 2026-04-22T09:14:11
+# authored
+title: Define Deliberation Capability Surface And Adapter State
+type: feat
+operator-signal:
+scope: VHXJWQaFC/VHXJipEBj
+index: 1
+started_at: 2026-04-22T09:14:11
+---
+
+# Define Deliberation Capability Surface And Adapter State
+
+## Summary
+
+Define the provider-agnostic deliberation capability surface and the opaque
+adapter state shape that later provider implementations will plug into, without
+changing canonical transcript/render state or replacing paddles `rationale`.
+
+## Acceptance Criteria
+
+- [ ] Provider/model negotiation classifies deliberation support explicitly for every provider path needed by the runtime. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
+- [ ] Adapter turn interfaces can return and accept opaque deliberation state separately from authored response and paddles rationale. [SRS-02/AC-02] <!-- verify: manual, SRS-02:start:end -->

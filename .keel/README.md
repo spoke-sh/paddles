@@ -373,6 +373,14 @@
 | [Single Recursive Control Plane](epics/VHURpL4nG/voyages/VHUS5RqZf/) | done |
 | [Chamber Services And Read-Model Boundaries](epics/VHURpL4nG/voyages/VHUS6H0Kd/) | done |
 
+### [Provider Reasoning Integration And Rationale Boundaries](epics/VHXJWQaFC/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Deliberation Substrate And Continuation Contracts](epics/VHXJWQaFC/voyages/VHXJipEBj/) | in-progress |
+| [Cross-Provider Deliberation Rollout And Verification](epics/VHXJWQaFC/voyages/VHXJipyBc/) | planned |
+| [Normalized Deliberation Signals And Rationale Compilation](epics/VHXJWQaFC/voyages/VHXJiqMD1/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
