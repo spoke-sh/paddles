@@ -8,7 +8,47 @@ export type ComposerPart =
   | { id: string; kind: 'paste'; text: string; lines: number; preview: string };
 
 function normalizeComposerText(text: string) {
-  return text.replace(/\r\n/g, '\n');
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const splitLines = normalized.split('\n');
+  let startIndex = 0;
+
+  while (startIndex < splitLines.length && splitLines[startIndex]?.trim() === '') {
+    startIndex += 1;
+  }
+
+  const hadTrailingNewline = normalized.endsWith('\n');
+  const sourceLines = splitLines.slice(startIndex);
+  const lines: string[] = [];
+  for (const [index, line] of sourceLines.entries()) {
+    if (hadTrailingNewline && index + 1 === sourceLines.length && line === '') {
+      continue;
+    }
+
+    const trimmedLine = line.trim();
+    if (
+      trimmedLine !== '```' &&
+      !trimmedLine.startsWith('```') &&
+      trimmedLine.endsWith('```')
+    ) {
+      const fenceIndex = line.lastIndexOf('```');
+      if (fenceIndex >= 0) {
+        const content = line.slice(0, fenceIndex).trimEnd();
+        if (content.length > 0) {
+          lines.push(content);
+        }
+        lines.push('```');
+        continue;
+      }
+    }
+
+    lines.push(line);
+  }
+
+  const result = lines.join('\n');
+  if (hadTrailingNewline && result.length > 0) {
+    return `${result}\n`;
+  }
+  return result;
 }
 
 function pastedLineCount(text: string) {

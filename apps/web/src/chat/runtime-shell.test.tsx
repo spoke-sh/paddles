@@ -489,6 +489,50 @@ describe('Runtime shell and chat', () => {
     });
   });
 
+  it('splits compressed pasted closing code fences onto their own lines before submit', async () => {
+    renderAtPath('/');
+
+    await screen.findByText('Mock provider completed the turn after local inspection.');
+
+    const input = screen.getByPlaceholderText('Ask paddles...');
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: (type: string) =>
+          type === 'text'
+            ? [
+                'Why does the trace recorder keep falling back?',
+                '',
+                '```',
+                '• Fell back · 200ms',
+                "  └ trace-recorder: trace recording failed: stream 'paddles.task.task-000001.root' already exists```",
+              ].join('\n')
+            : '',
+      },
+    });
+
+    expect(await screen.findByText('6 lines pasted')).toBeInTheDocument();
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+
+    await waitFor(() => {
+      const turnCall = vi
+        .mocked(fetch)
+        .mock.calls.find(([url]) => String(url).endsWith('/sessions/task-123/turns'));
+      expect(turnCall).toBeDefined();
+      expect(
+        JSON.parse(String((turnCall?.[1] as RequestInit | undefined)?.body || '{}'))
+      ).toEqual({
+        prompt: [
+          'Why does the trace recorder keep falling back?',
+          '',
+          '```',
+          '• Fell back · 200ms',
+          "  └ trace-recorder: trace recording failed: stream 'paddles.task.task-000001.root' already exists",
+          '```',
+        ].join('\n'),
+      });
+    });
+  });
+
   it('removes a compressed multiline paste chip with backspace when the prompt is empty', async () => {
     renderAtPath('/');
 
