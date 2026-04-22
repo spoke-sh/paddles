@@ -26,6 +26,10 @@ pub struct ConversationTranscriptEntry {
     pub response_mode: Option<ResponseMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub render: Option<RenderDocument>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub citations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grounded: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +51,8 @@ impl ConversationTranscript {
                         content: artifact_content(&root.prompt),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     })
                 }
                 TraceRecordKind::TurnStarted(turn) => entries.push(ConversationTranscriptEntry {
@@ -56,18 +62,20 @@ impl ConversationTranscript {
                     content: artifact_content(&turn.prompt),
                     response_mode: None,
                     render: None,
+                    citations: Vec::new(),
+                    grounded: None,
                 }),
                 TraceRecordKind::CompletionCheckpoint(checkpoint) => {
-                    if let Some(response) = checkpoint.response.as_ref() {
-                        let render =
-                            RenderDocument::from_assistant_plain_text(&artifact_content(response));
+                    if let Some(response) = checkpoint.replay_response() {
                         entries.push(ConversationTranscriptEntry {
                             record_id: record.record_id.clone(),
                             turn_id: record.lineage.turn_id.clone(),
                             speaker: ConversationTranscriptSpeaker::Assistant,
-                            content: render.to_plain_text(),
-                            response_mode: response_mode_label(response),
-                            render: Some(render),
+                            content: response.document.to_plain_text(),
+                            response_mode: Some(response.mode),
+                            render: Some(response.document),
+                            citations: checkpoint.citations.clone(),
+                            grounded: Some(checkpoint.grounded),
                         });
                     }
                 }
@@ -79,6 +87,8 @@ impl ConversationTranscript {
                         content: format_execution_governance_snapshot(snapshot),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 TraceRecordKind::ExecutionGovernanceDecisionRecorded(decision) => {
@@ -89,6 +99,8 @@ impl ConversationTranscript {
                         content: format_execution_governance_decision(decision),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 TraceRecordKind::WorkerLifecycleRecorded(lifecycle) => {
@@ -99,6 +111,8 @@ impl ConversationTranscript {
                         content: format_worker_lifecycle(lifecycle),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 TraceRecordKind::WorkerArtifactRecorded(artifact) => {
@@ -109,6 +123,8 @@ impl ConversationTranscript {
                         content: format_worker_artifact(artifact),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 TraceRecordKind::WorkerIntegrationRecorded(integration) => {
@@ -119,6 +135,8 @@ impl ConversationTranscript {
                         content: format_worker_integration(integration),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 TraceRecordKind::ToolCallRequested(tool)
@@ -134,6 +152,8 @@ impl ConversationTranscript {
                         ),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 TraceRecordKind::ToolCallCompleted(tool)
@@ -149,6 +169,8 @@ impl ConversationTranscript {
                         ),
                         response_mode: None,
                         render: None,
+                        citations: Vec::new(),
+                        grounded: None,
                     });
                 }
                 kind => {
@@ -160,6 +182,8 @@ impl ConversationTranscript {
                             content: format_control_result(&result),
                             response_mode: None,
                             render: None,
+                            citations: Vec::new(),
+                            grounded: None,
                         });
                     }
                 }
@@ -178,13 +202,6 @@ fn artifact_content(artifact: &ArtifactEnvelope) -> String {
         .inline_content
         .clone()
         .unwrap_or_else(|| artifact.summary.clone())
-}
-
-fn response_mode_label(artifact: &ArtifactEnvelope) -> Option<ResponseMode> {
-    artifact
-        .labels
-        .get("paddles.response_mode")
-        .and_then(|value| ResponseMode::from_label(value))
 }
 
 fn format_execution_governance_snapshot(snapshot: &ExecutionGovernanceSnapshot) -> String {
@@ -289,17 +306,18 @@ impl TranscriptUpdateSink for NullTranscriptUpdateSink {
 mod tests {
     use super::{ConversationTranscript, ConversationTranscriptSpeaker};
     use crate::domain::model::{
-        ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
+        AuthoredResponse, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
         DelegationEvidencePolicy, DelegationGovernancePolicy, DelegationIntegrationOwner,
         ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
         ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionGovernanceSnapshot,
         ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequest,
         ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
-        ResponseMode, TraceBranchId, TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage,
-        TraceRecord, TraceRecordKind, TraceReplay, TraceTaskRoot, TraceWorkerIntegration,
-        TraceWorkerLifecycle, TurnControlOperation, WorkerArtifactKind, WorkerDelegationContract,
-        WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleOperation,
-        WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
+        RenderBlock, RenderDocument, ResponseMode, TraceBranchId, TraceCheckpointKind,
+        TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordKind, TraceReplay,
+        TraceTaskRoot, TraceWorkerIntegration, TraceWorkerLifecycle, TurnControlOperation,
+        WorkerArtifactKind, WorkerDelegationContract, WorkerDelegationRequest,
+        WorkerIntegrationStatus, WorkerLifecycleOperation, WorkerLifecycleResult,
+        WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
     };
     use paddles_conversation::{
         ArtifactEnvelope, ArtifactKind, ConversationThreadRef, TaskTraceId, TraceArtifactId,
@@ -365,6 +383,7 @@ mod tests {
                             )
                             .with_label("paddles.response_mode", "grounded_answer"),
                         ),
+                        authored_response: None,
                         citations: Vec::new(),
                         grounded: true,
                     }),
@@ -388,7 +407,104 @@ mod tests {
             transcript.entries[1].response_mode,
             Some(ResponseMode::GroundedAnswer)
         );
+        assert!(transcript.entries[1].citations.is_empty());
+        assert_eq!(transcript.entries[1].grounded, Some(true));
         assert!(transcript.entries[1].render.is_some());
+    }
+
+    #[test]
+    fn projects_completion_entries_from_persisted_authored_response() {
+        let task_id = TaskTraceId::new("task-typed").expect("task");
+        let turn_id = TurnTraceId::new("task-typed.turn-0001").expect("turn");
+        let typed_render = RenderDocument {
+            blocks: vec![
+                RenderBlock::Heading {
+                    text: "Summary".to_string(),
+                },
+                RenderBlock::Paragraph {
+                    text: "Typed body".to_string(),
+                },
+                RenderBlock::Citations {
+                    sources: vec!["README.md".to_string()],
+                },
+            ],
+        };
+        let replay = TraceReplay {
+            task_id: task_id.clone(),
+            records: vec![
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-1").expect("record"),
+                    sequence: 1,
+                    lineage: TraceLineage {
+                        task_id: task_id.clone(),
+                        turn_id: turn_id.clone(),
+                        branch_id: None,
+                        parent_record_id: None,
+                    },
+                    kind: TraceRecordKind::TaskRootStarted(TraceTaskRoot {
+                        prompt: ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-1").expect("artifact"),
+                            ArtifactKind::Prompt,
+                            "prompt",
+                            "hello",
+                            200,
+                        ),
+                        interpretation: None,
+                        planner_model: "planner".to_string(),
+                        synthesizer_model: "synth".to_string(),
+                        harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                            requested_profile_id: "recursive-structured-v1".to_string(),
+                            active_profile_id: "recursive-structured-v1".to_string(),
+                            downgrade_reason: None,
+                        },
+                    }),
+                },
+                TraceRecord {
+                    record_id: TraceRecordId::new("record-2").expect("record"),
+                    sequence: 2,
+                    lineage: TraceLineage {
+                        task_id,
+                        turn_id,
+                        branch_id: None,
+                        parent_record_id: Some(
+                            TraceRecordId::new("record-1").expect("parent record"),
+                        ),
+                    },
+                    kind: TraceRecordKind::CompletionCheckpoint(TraceCompletionCheckpoint {
+                        checkpoint_id: TraceCheckpointId::new("checkpoint-1").expect("checkpoint"),
+                        kind: TraceCheckpointKind::TurnCompleted,
+                        summary: "turn completed".to_string(),
+                        response: Some(ArtifactEnvelope::text(
+                            TraceArtifactId::new("artifact-2").expect("artifact"),
+                            ArtifactKind::ModelOutput,
+                            "assistant response",
+                            "flat fallback",
+                            200,
+                        )),
+                        authored_response: Some(AuthoredResponse {
+                            mode: ResponseMode::GroundedAnswer,
+                            document: typed_render.clone(),
+                        }),
+                        citations: vec!["README.md".to_string()],
+                        grounded: true,
+                    }),
+                },
+            ],
+        };
+
+        let transcript = ConversationTranscript::from_trace_replay(&replay);
+
+        assert_eq!(transcript.entries[1].content, typed_render.to_plain_text());
+        assert_eq!(
+            transcript.entries[1].response_mode,
+            Some(ResponseMode::GroundedAnswer)
+        );
+        assert_eq!(transcript.entries[1].render, Some(typed_render));
+        assert_eq!(
+            transcript.entries[1].citations,
+            vec!["README.md".to_string()]
+        );
+        assert_eq!(transcript.entries[1].grounded, Some(true));
     }
 
     #[test]
@@ -519,6 +635,7 @@ mod tests {
                             "done",
                             200,
                         )),
+                        authored_response: None,
                         citations: Vec::new(),
                         grounded: false,
                     }),

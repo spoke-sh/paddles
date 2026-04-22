@@ -563,6 +563,7 @@ mod tests {
             kind: TraceCheckpointKind::TurnCompleted,
             summary: "turn completed".to_string(),
             response: None,
+            authored_response: None,
             citations: Vec::new(),
             grounded: false,
         });
@@ -602,6 +603,7 @@ mod tests {
                     kind: TraceCheckpointKind::TurnCompleted,
                     summary: "turn completed".to_string(),
                     response: None,
+                    authored_response: None,
                     citations: Vec::new(),
                     grounded: true,
                 }),
@@ -661,6 +663,7 @@ mod tests {
                     kind: TraceCheckpointKind::TurnCompleted,
                     summary: "turn completed".to_string(),
                     response: None,
+                    authored_response: None,
                     citations: Vec::new(),
                     grounded: true,
                 }),

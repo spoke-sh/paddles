@@ -470,6 +470,7 @@ mod tests {
                         kind: TraceCheckpointKind::TurnCompleted,
                         summary: "done".to_string(),
                         response: None,
+                        authored_response: None,
                         citations: Vec::new(),
                         grounded: true,
                     }),

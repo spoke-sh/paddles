@@ -3,7 +3,9 @@ use super::delegation::{
     WorkerArtifactRecord, WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleResult,
 };
 use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
-use super::{CollaborationModeResult, StructuredClarificationResult};
+use super::{
+    AuthoredResponse, CollaborationModeResult, ResponseMode, StructuredClarificationResult,
+};
 use paddles_conversation::{
     ArtifactEnvelope, ConversationThreadRef, TaskTraceId, ThreadCandidate, ThreadDecision,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
@@ -382,8 +384,34 @@ pub struct TraceCompletionCheckpoint {
     pub kind: TraceCheckpointKind,
     pub summary: String,
     pub response: Option<ArtifactEnvelope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_response: Option<AuthoredResponse>,
     pub citations: Vec<String>,
     pub grounded: bool,
+}
+
+impl TraceCompletionCheckpoint {
+    pub fn replay_response(&self) -> Option<AuthoredResponse> {
+        if let Some(response) = &self.authored_response {
+            return Some(response.clone());
+        }
+
+        let response = self.response.as_ref()?;
+        let mode = response
+            .labels
+            .get("paddles.response_mode")
+            .and_then(|value| ResponseMode::from_label(value))
+            .unwrap_or(if self.grounded {
+                ResponseMode::GroundedAnswer
+            } else {
+                ResponseMode::DirectAnswer
+            });
+
+        Some(AuthoredResponse::from_plain_text(
+            mode,
+            artifact_content(response),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -454,6 +482,13 @@ pub struct TraceRecord {
 pub struct TraceReplay {
     pub task_id: TaskTraceId,
     pub records: Vec<TraceRecord>,
+}
+
+fn artifact_content(artifact: &ArtifactEnvelope) -> &str {
+    artifact
+        .inline_content
+        .as_deref()
+        .unwrap_or(&artifact.summary)
 }
 
 #[cfg(test)]

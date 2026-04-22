@@ -817,6 +817,7 @@ impl StructuredTurnTrace {
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
+        let authored_response = response.clone();
         let response = self
             .text_artifact(
                 ArtifactKind::ModelOutput,
@@ -846,6 +847,7 @@ impl StructuredTurnTrace {
                     "turn completed".to_string()
                 },
                 response: Some(response),
+                authored_response: Some(authored_response),
                 citations: synthesis.citations,
                 grounded: synthesis.grounded,
             }),
@@ -885,6 +887,7 @@ impl StructuredTurnTrace {
                 kind,
                 summary: summary.into(),
                 response: None,
+                authored_response: None,
                 citations: Vec::new(),
                 grounded: false,
             }),
@@ -10896,12 +10899,23 @@ mod tests {
             .iter()
             .find_map(|record| match &record.kind {
                 TraceRecordKind::CompletionCheckpoint(checkpoint) => checkpoint
-                    .response
+                    .authored_response
                     .as_ref()
-                    .and_then(|artifact| artifact.labels.get("paddles.response_mode").cloned()),
+                    .map(|response| response.mode.label().to_string()),
                 _ => None,
             })
             .expect("completion response mode");
+        let persisted_document = replay
+            .records
+            .iter()
+            .find_map(|record| match &record.kind {
+                TraceRecordKind::CompletionCheckpoint(checkpoint) => checkpoint
+                    .authored_response
+                    .as_ref()
+                    .map(|response| response.document.clone()),
+                _ => None,
+            })
+            .expect("persisted response document");
         let lineage_edges = replay
             .records
             .iter()
@@ -10945,6 +10959,7 @@ mod tests {
                 && edge.relation == TraceLineageRelation::ResultsIn
         }));
         assert_eq!(completion_mode, "direct_answer");
+        assert_eq!(persisted_document.to_plain_text(), "Patched src/lib.rs");
     }
 
     #[test]
@@ -17279,6 +17294,12 @@ mod tests {
                                 reply,
                                 256,
                             )),
+                            authored_response: Some(
+                                crate::domain::model::AuthoredResponse::from_plain_text(
+                                    crate::domain::model::ResponseMode::GroundedAnswer,
+                                    reply,
+                                ),
+                            ),
                             citations: Vec::new(),
                             grounded: true,
                         },

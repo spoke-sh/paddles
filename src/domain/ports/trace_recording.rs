@@ -481,6 +481,8 @@ mod tests {
                     content: "hello".to_string(),
                     response_mode: None,
                     render: None,
+                    citations: Vec::new(),
+                    grounded: None,
                 },
                 crate::domain::model::ConversationTranscriptEntry {
                     record_id: TraceRecordId::new("record-2").expect("record"),
@@ -489,6 +491,8 @@ mod tests {
                     content: "execution posture recursive-structured-v1".to_string(),
                     response_mode: None,
                     render: None,
+                    citations: Vec::new(),
+                    grounded: None,
                 },
                 crate::domain::model::ConversationTranscriptEntry {
                     record_id: TraceRecordId::new("record-3").expect("record"),
@@ -497,6 +501,8 @@ mod tests {
                     content: "hi".to_string(),
                     response_mode: None,
                     render: None,
+                    citations: Vec::new(),
+                    grounded: Some(false),
                 },
             ],
         };
@@ -619,6 +625,7 @@ mod tests {
                             "first reply",
                             200,
                         )),
+                        authored_response: None,
                         citations: Vec::new(),
                         grounded: false,
                     }),
@@ -672,6 +679,7 @@ mod tests {
                             "second reply",
                             200,
                         )),
+                        authored_response: None,
                         citations: Vec::new(),
                         grounded: true,
                     }),

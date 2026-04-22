@@ -209,6 +209,7 @@ mod tests {
                             "hi",
                             200,
                         )),
+                        authored_response: None,
                         citations: Vec::new(),
                         grounded: true,
                     }),

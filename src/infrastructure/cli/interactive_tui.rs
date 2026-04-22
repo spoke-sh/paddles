@@ -4556,6 +4556,8 @@ mod tests {
                     content: (*content).to_string(),
                     response_mode: None,
                     render: None,
+                    citations: Vec::new(),
+                    grounded: None,
                 })
                 .collect(),
         }
@@ -4658,6 +4660,8 @@ mod tests {
                         },
                     ],
                 }),
+                citations: Vec::new(),
+                grounded: Some(false),
             }],
         };
 
@@ -5398,6 +5402,8 @@ mod tests {
                     content: "hello".to_string(),
                     response_mode: None,
                     render: None,
+                    citations: Vec::new(),
+                    grounded: None,
                 },
                 ConversationTranscriptEntry {
                     record_id: TraceRecordId::new("record-2").expect("record"),
@@ -5410,6 +5416,8 @@ mod tests {
                             text: "hi there".to_string(),
                         }],
                     }),
+                    citations: Vec::new(),
+                    grounded: Some(false),
                 },
             ],
         };
