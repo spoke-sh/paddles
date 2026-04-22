@@ -96,6 +96,7 @@ const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
 const GOOGLE_MODELS: &[&str] = &["gemini-2.5-flash"];
 const MOONSHOT_MODELS: &[&str] = &[
+    "kimi-k2.6",
     "kimi-k2.5",
     "kimi-k2",
     "kimi-k2-0905-preview",
@@ -106,6 +107,7 @@ const MOONSHOT_MODELS: &[&str] = &[
 ];
 const NO_THINKING_MODES: &[ModelThinkingMode] = &[];
 const MOONSHOT_SELECTABLE_MODELS: &[&str] = &[
+    "kimi-k2.6",
     "kimi-k2.5",
     "kimi-k2",
     "kimi-k2-0905-preview",
@@ -263,6 +265,7 @@ impl ModelProvider {
 
     pub fn normalize_model_alias(self, model: &str) -> String {
         match (self, model) {
+            (Self::Moonshot, "kimi-2.6") => "kimi-k2.6".to_string(),
             (Self::Moonshot, "kimi-2.5") => "kimi-k2.5".to_string(),
             _ => model.to_string(),
         }
@@ -513,8 +516,16 @@ mod tests {
             "kimi-k2.5"
         );
         assert_eq!(
+            ModelProvider::Moonshot.normalize_model_alias("kimi-2.6"),
+            "kimi-k2.6"
+        );
+        assert_eq!(
             ModelProvider::Moonshot.normalize_model_alias("kimi-k2.5"),
             "kimi-k2.5"
+        );
+        assert_eq!(
+            ModelProvider::Moonshot.normalize_model_alias("kimi-k2.6"),
+            "kimi-k2.6"
         );
     }
 
@@ -523,6 +534,7 @@ mod tests {
         assert_eq!(
             ModelProvider::Moonshot.known_model_ids(),
             [
+                "kimi-k2.6",
                 "kimi-k2.5",
                 "kimi-k2",
                 "kimi-k2-0905-preview",
@@ -539,6 +551,7 @@ mod tests {
         assert_eq!(
             ModelProvider::Moonshot.selectable_model_ids(),
             [
+                "kimi-k2.6",
                 "kimi-k2.5",
                 "kimi-k2",
                 "kimi-k2-0905-preview",
@@ -736,7 +749,7 @@ mod tests {
             PlannerToolCallCapability::StructuredJsonEnvelope
         );
 
-        let moonshot = ModelProvider::Moonshot.capability_surface("kimi-k2.5");
+        let moonshot = ModelProvider::Moonshot.capability_surface("kimi-k2.6");
         assert_eq!(moonshot.http_format, Some(ApiFormat::OpenAi));
         assert_eq!(
             moonshot.render_capability,
@@ -786,6 +799,9 @@ mod tests {
         }));
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Openai && model.model_id == "gpt-4o"
+        }));
+        assert!(models.iter().any(|model| {
+            model.provider == ModelProvider::Moonshot && model.model_id == "kimi-k2.6"
         }));
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Moonshot && model.model_id == "kimi-k2.5"

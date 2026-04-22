@@ -440,10 +440,10 @@ with structured JSON/tool calls. Responses-only OpenAI models such as
 `gpt-5.4`, `gpt-5.4-mini`, or `gpt-4o` instead.
 
 For Moonshot, Paddles currently recognizes the Kimi API model ids
-`kimi-k2.5`, `kimi-k2`, `kimi-k2-0905-preview`, `kimi-k2-0711-preview`,
-`kimi-k2-turbo-preview`, `kimi-k2-thinking`, and `kimi-k2-thinking-turbo`.
-Legacy configs using `kimi-2.5` are normalized to `kimi-k2.5` at runtime for
-compatibility.
+`kimi-k2.6`, `kimi-k2.5`, `kimi-k2`, `kimi-k2-0905-preview`,
+`kimi-k2-0711-preview`, `kimi-k2-turbo-preview`, `kimi-k2-thinking`, and
+`kimi-k2-thinking-turbo`. Legacy configs using `kimi-2.6` or `kimi-2.5` are
+normalized to the corresponding `kimi-k2.*` ids at runtime for compatibility.
 
 For Inception, the supported core model path is `mercury-2`. Authenticate with
 `/login inception`, then select it with `/model inception mercury-2`. That chat-completions compatibility

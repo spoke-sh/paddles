@@ -762,8 +762,16 @@ model = "claude-sonnet-4-20250514"
             "kimi-k2.5"
         );
         assert_eq!(
+            normalize_provider_model_alias("moonshot", "kimi-2.6"),
+            "kimi-k2.6"
+        );
+        assert_eq!(
             normalize_provider_model_alias("moonshot", "kimi-k2.5"),
             "kimi-k2.5"
+        );
+        assert_eq!(
+            normalize_provider_model_alias("moonshot", "kimi-k2.6"),
+            "kimi-k2.6"
         );
         assert_eq!(normalize_provider_model_alias("openai", "gpt-4o"), "gpt-4o");
     }
