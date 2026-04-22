@@ -248,6 +248,24 @@ const OPENAI_GPT_5_4_THINKING_MODES: &[ModelThinkingMode] = &[
 ];
 const OPENAI_RUNTIME_THINKING_DELIMITER: &str = "@@thinking=";
 
+fn ollama_model_family(model: &str) -> String {
+    let without_namespace = model.rsplit('/').next().unwrap_or(model);
+    without_namespace
+        .split(':')
+        .next()
+        .unwrap_or(without_namespace)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn ollama_supports_thinking(model: &str) -> bool {
+    let family = ollama_model_family(model);
+    family.starts_with("qwen3")
+        || family.starts_with("gpt-oss")
+        || family.starts_with("deepseek-v3.1")
+        || family.starts_with("deepseek-r1")
+}
+
 impl ModelProvider {
     pub const ALL: [Self; 7] = [
         Self::Sift,
@@ -465,13 +483,19 @@ impl ModelProvider {
                 state_contract: DeliberationStateContract::None,
             },
             Self::Inception => DeliberationCapabilitySurface {
-                support: DeliberationSupport::ToggleOnly,
+                support: DeliberationSupport::SummaryOnly,
                 state_contract: DeliberationStateContract::None,
             },
             Self::Anthropic | Self::Google | Self::Moonshot => DeliberationCapabilitySurface {
                 support: DeliberationSupport::NativeContinuation,
                 state_contract: DeliberationStateContract::OpaqueRoundTrip,
             },
+            Self::Ollama if ollama_supports_thinking(&normalized_model) => {
+                DeliberationCapabilitySurface {
+                    support: DeliberationSupport::ToggleOnly,
+                    state_contract: DeliberationStateContract::None,
+                }
+            }
             Self::Ollama => DeliberationCapabilitySurface {
                 support: DeliberationSupport::Unsupported,
                 state_contract: DeliberationStateContract::None,
@@ -917,7 +941,7 @@ mod tests {
         let inception = ModelProvider::Inception.capability_surface("mercury-2");
         assert_eq!(
             inception.deliberation.support,
-            DeliberationSupport::ToggleOnly
+            DeliberationSupport::SummaryOnly
         );
         assert_eq!(
             inception.deliberation.state_contract,
@@ -955,12 +979,42 @@ mod tests {
         );
 
         let ollama = ModelProvider::Ollama.capability_surface("qwen3");
+        assert_eq!(ollama.deliberation.support, DeliberationSupport::ToggleOnly);
         assert_eq!(
-            ollama.deliberation.support,
+            ollama.deliberation.state_contract,
+            DeliberationStateContract::None
+        );
+
+        let ollama_without_thinking = ModelProvider::Ollama.capability_surface("llama3.2");
+        assert_eq!(
+            ollama_without_thinking.deliberation.support,
             DeliberationSupport::Unsupported
         );
         assert_eq!(
-            ollama.deliberation.state_contract,
+            ollama_without_thinking.deliberation.state_contract,
+            DeliberationStateContract::None
+        );
+    }
+
+    #[test]
+    fn ollama_deliberation_support_tracks_thinking_family_through_tags_and_namespaces() {
+        let namespaced_qwen = ModelProvider::Ollama.capability_surface("library/qwen3:8b");
+        assert_eq!(
+            namespaced_qwen.deliberation.support,
+            DeliberationSupport::ToggleOnly
+        );
+        assert_eq!(
+            namespaced_qwen.deliberation.state_contract,
+            DeliberationStateContract::None
+        );
+
+        let tagged_llama = ModelProvider::Ollama.capability_surface("llama3.2:latest");
+        assert_eq!(
+            tagged_llama.deliberation.support,
+            DeliberationSupport::Unsupported
+        );
+        assert_eq!(
+            tagged_llama.deliberation.state_contract,
             DeliberationStateContract::None
         );
     }

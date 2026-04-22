@@ -27,12 +27,12 @@ started_at: 2026-04-22T09:42:05
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Complete Native Continuation Paths For OpenAI Anthropic And Gemini](../../../../stories/VHXK92JZH/README.md) | feat | done |
-| [Add Limited Or No-Op Deliberation Modes For Inception Ollama And Sift](../../../../stories/VHXK92haY/README.md) | feat | backlog |
+| [Add Limited Or No-Op Deliberation Modes For Inception Ollama And Sift](../../../../stories/VHXK92haY/README.md) | feat | done |
 | [Publish Provider Capability Matrix Tests And Operator Docs](../../../../stories/VHXK942dC/README.md) | feat | backlog |
 | [Expose Thinking Modes Across Supported Providers](../../../../stories/VHXLSDBjB/README.md) | feat | backlog |
 <!-- END GENERATED -->
