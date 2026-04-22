@@ -4147,6 +4147,9 @@ fn render_assistant_document_lines(
         .into_iter()
         .enumerate()
         .map(|(index, spec)| {
+            if spec.text.is_empty() {
+                return Line::default();
+            }
             let prefix = if index == 0 { "  └ " } else { "    " };
             match spec.kind {
                 AssistantRenderLineKind::Heading => Line::from(vec![
@@ -4948,11 +4951,67 @@ mod tests {
             vec![
                 "  └ Summary".to_string(),
                 "    Body".to_string(),
-                "    ".to_string(),
+                String::new(),
                 "    Checklist".to_string(),
                 "    - Ship it.".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn transcript_buffer_keeps_assistant_paragraphs_and_lists_single_spaced() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.rows.push(
+            TranscriptRow::new(TranscriptRowKind::Assistant, "Paddles", "").with_render(
+                RenderDocument {
+                    blocks: vec![
+                        RenderBlock::Paragraph {
+                            text: "Yo! I'm Paddles, your recursive in-context planning harness. I'm loaded into your workspace at /home/alex/workspace/spoke-sh/paddles and ready to help.".to_string(),
+                        },
+                        RenderBlock::Paragraph {
+                            text: "What are we building, fixing, or exploring today? I can:".to_string(),
+                        },
+                        RenderBlock::BulletList {
+                            items: vec![
+                                "Edit code and configs".to_string(),
+                                "Debug CI/build/test failures".to_string(),
+                            ],
+                        },
+                    ],
+                },
+            ),
+        );
+
+        let buffer = render_buffer(&app, 100, 14);
+        let lines = (0..buffer.area.height)
+            .map(|y| buffer_line(&buffer, y).trim_end().to_string())
+            .collect::<Vec<_>>();
+
+        let help_line = lines
+            .iter()
+            .position(|line| line.contains("ready to help."))
+            .expect("help line");
+        let prompt_line = lines
+            .iter()
+            .position(|line| line.contains("What are we building, fixing, or exploring today?"))
+            .expect("prompt line");
+        let bullet_line = lines
+            .iter()
+            .position(|line| line.contains("- Edit code and configs"))
+            .expect("bullet line");
+
+        assert_eq!(prompt_line, help_line + 2, "{lines:#?}");
+        assert_eq!(bullet_line, prompt_line + 2, "{lines:#?}");
     }
 
     #[test]
