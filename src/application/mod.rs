@@ -11769,6 +11769,145 @@ mod tests {
     }
 
     #[test]
+    fn live_projection_updates_converge_with_replayed_transcript_render_state() {
+        struct ConvergenceSynthesizer {
+            reply: String,
+            citations: Vec<String>,
+        }
+
+        impl SynthesizerEngine for ConvergenceSynthesizer {
+            fn set_verbose(&self, _level: u8) {}
+
+            fn respond_for_turn(
+                &self,
+                _prompt: &str,
+                _turn_intent: TurnIntent,
+                _gathered_evidence: Option<&EvidenceBundle>,
+                _handoff: &SynthesisHandoff,
+                event_sink: Arc<dyn TurnEventSink>,
+            ) -> Result<String> {
+                event_sink.emit(TurnEvent::SynthesisReady {
+                    grounded: true,
+                    citations: self.citations.clone(),
+                    insufficient_evidence: false,
+                });
+                Ok(self.reply.clone())
+            }
+
+            fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+
+            fn execute_workspace_action(
+                &self,
+                _action: &WorkspaceAction,
+            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+                Err(anyhow!("workspace execution not used in convergence test"))
+            }
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nCompare live projection snapshots against replayed transcript state.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let reply =
+            "**Summary**\n\nProjection and replay stay aligned.\n\nSources: README.md".to_string();
+        let expected = AuthoredResponse::from_plain_text(ResponseMode::GroundedAnswer, &reply);
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(ConvergenceSynthesizer {
+            reply,
+            citations: vec!["README.md".to_string()],
+        });
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let updates = Arc::new(RecordingTranscriptUpdateSink::default());
+        service.register_transcript_observer(updates.clone());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_in_session_with_sink(
+                    "Prove live and replay convergence.",
+                    session.clone(),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let live_update = updates
+            .recorded()
+            .into_iter()
+            .last()
+            .expect("completion transcript update");
+        let live_projection = service
+            .projection_update_for_transcript(&live_update)
+            .expect("live projection update");
+        let replayed_projection = service
+            .replay_conversation_projection(&session.task_id())
+            .expect("replayed projection");
+        let live_assistant = live_projection
+            .snapshot
+            .transcript
+            .entries
+            .iter()
+            .rev()
+            .find(|entry| entry.speaker == ConversationTranscriptSpeaker::Assistant)
+            .cloned()
+            .expect("live assistant entry");
+        let replayed_assistant = replayed_projection
+            .transcript
+            .entries
+            .iter()
+            .rev()
+            .find(|entry| entry.speaker == ConversationTranscriptSpeaker::Assistant)
+            .cloned()
+            .expect("replayed assistant entry");
+
+        assert_eq!(
+            live_projection.snapshot.transcript,
+            replayed_projection.transcript
+        );
+        assert_eq!(live_assistant, replayed_assistant);
+        assert_eq!(
+            live_assistant.response_mode,
+            Some(ResponseMode::GroundedAnswer)
+        );
+        assert_eq!(live_assistant.render, Some(expected.document));
+        assert_eq!(live_assistant.citations, vec!["README.md".to_string()]);
+        assert_eq!(live_assistant.grounded, Some(true));
+    }
+
+    #[test]
     fn process_prompt_emits_plan_updates_and_containment_notes_for_edit_turns() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(

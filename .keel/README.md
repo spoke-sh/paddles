@@ -369,7 +369,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Canonical Render Truth And Projection Convergence](epics/VHURpL4nG/voyages/VHUS4nctz/) | in-progress |
+| [Canonical Render Truth And Projection Convergence](epics/VHURpL4nG/voyages/VHUS4nctz/) | done |
 | [Single Recursive Control Plane](epics/VHURpL4nG/voyages/VHUS5RqZf/) | planned |
 | [Chamber Services And Read-Model Boundaries](epics/VHURpL4nG/voyages/VHUS6H0Kd/) | planned |
 

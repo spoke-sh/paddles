@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VHUS4nctz
-status: in-progress
+status: done
 epic: VHURpL4nG
 created_at: 2026-04-21T21:19:02
 # authored
@@ -22,16 +22,18 @@ started_at: 2026-04-21T21:22:59
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Persist Typed Authored Responses In Completion Records](../../../../stories/VHUS75D3e/README.md) | feat | done |
 | [Make Projection Updates Reducer-Driven And Versioned](../../../../stories/VHUS8gdih/README.md) | feat | done |
-| [Prove Live And Replay Render Convergence](../../../../stories/VHUS8h4jI/README.md) | feat | backlog |
+| [Prove Live And Replay Render Convergence](../../../../stories/VHUS8h4jI/README.md) | feat | done |
 <!-- END GENERATED -->
