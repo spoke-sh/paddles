@@ -1,15 +1,17 @@
 ---
 # system-managed
 id: VHUSCJwQG
-status: backlog
+status: done
 created_at: 2026-04-21T21:19:31
-updated_at: 2026-04-21T21:24:11
+updated_at: 2026-04-21T22:47:50
 # authored
 title: Extract Chamber-Aligned Turn Services From MechSuitService
 type: refactor
 operator-signal:
 scope: VHURpL4nG/VHUS6H0Kd
 index: 1
+started_at: 2026-04-21T22:35:24
+completed_at: 2026-04-21T22:47:50
 ---
 
 # Extract Chamber-Aligned Turn Services From MechSuitService
@@ -23,5 +25,5 @@ file.
 
 ## Acceptance Criteria
 
-- [ ] Turn orchestration responsibilities are extracted into chamber-aligned application seams rather than remaining concentrated in one monolithic service. [SRS-01/AC-01] <!-- verify: review, SRS-01:start:end -->
-- [ ] The remaining top-level service composes those chambers instead of directly owning all recursive-control and projection behavior. [SRS-02/AC-02] <!-- verify: review, SRS-02:start:end -->
+- [x] Turn orchestration responsibilities are extracted into chamber-aligned application seams rather than remaining concentrated in one monolithic service. [SRS-01/AC-01] <!-- verify: /home/alex/workspace/spoke-sh/paddles/.keel/stories/VHUSCJwQG/EVIDENCE/verify-review.sh, SRS-01:start:end, proof: review.md, proof: application-tests.log -->
+- [x] The remaining top-level service composes those chambers instead of directly owning all recursive-control and projection behavior. [SRS-02/AC-02] <!-- verify: /home/alex/workspace/spoke-sh/paddles/.keel/stories/VHUSCJwQG/EVIDENCE/verify-review.sh, SRS-02:start:end, proof: review.md, proof: application-tests.log -->

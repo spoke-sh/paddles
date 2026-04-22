@@ -1,3 +1,15 @@
+mod conversation_read_model;
+mod interpretation_chamber;
+mod recursive_control;
+mod synthesis_chamber;
+mod turn_orchestration;
+
+use self::conversation_read_model::ConversationReadModelChamber;
+use self::interpretation_chamber::InterpretationChamber;
+use self::recursive_control::RecursiveControlChamber;
+use self::synthesis_chamber::SynthesisChamber;
+use self::turn_orchestration::TurnOrchestrationChamber;
+
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::local_workspace_action_executor::LocalWorkspaceActionExecutor;
 use crate::infrastructure::adapters::trace_recorders::{
@@ -2404,48 +2416,41 @@ impl MechSuitService {
             .push(observer);
     }
 
-    fn emit_transcript_update(&self, task_id: &TaskTraceId) {
-        let update = ConversationTranscriptUpdate {
-            task_id: task_id.clone(),
-        };
-        let observers = self
-            .transcript_observers
-            .lock()
-            .expect("transcript observers lock")
-            .clone();
-        for observer in observers {
-            observer.emit(update.clone());
-        }
+    fn turn_orchestration(&self) -> TurnOrchestrationChamber<'_> {
+        TurnOrchestrationChamber::new(self)
     }
 
+    fn interpretation_chamber(&self) -> InterpretationChamber<'_> {
+        InterpretationChamber::new(self)
+    }
+
+    fn recursive_control(&self) -> RecursiveControlChamber<'_> {
+        RecursiveControlChamber::new(self)
+    }
+
+    fn synthesis_chamber(&self) -> SynthesisChamber<'_> {
+        SynthesisChamber::new(self)
+    }
+
+    fn conversation_read_model(&self) -> ConversationReadModelChamber<'_> {
+        ConversationReadModelChamber::new(self)
+    }
+
+    #[cfg(test)]
     fn replay_for_known_session(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<Option<crate::domain::model::TraceReplay>> {
-        match self.trace_recorder.replay(task_id) {
-            Ok(replay) => Ok(Some(replay)),
-            Err(err) => {
-                let known_session = self
-                    .sessions
-                    .lock()
-                    .expect("conversation sessions lock")
-                    .contains_key(task_id.as_str());
-                if known_session { Ok(None) } else { Err(err) }
-            }
-        }
+        self.conversation_read_model()
+            .replay_for_known_session(task_id)
     }
 
     pub fn replay_conversation_forensics(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationForensicProjection> {
-        match self.replay_for_known_session(task_id)? {
-            Some(replay) => Ok(ConversationForensicProjection::from_trace_replay(&replay)),
-            None => Ok(ConversationForensicProjection {
-                task_id: task_id.clone(),
-                turns: Vec::new(),
-            }),
-        }
+        self.conversation_read_model()
+            .replay_conversation_forensics(task_id)
     }
 
     pub fn replay_turn_forensics(
@@ -2453,20 +2458,16 @@ impl MechSuitService {
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
     ) -> Result<Option<crate::domain::model::ForensicTurnProjection>> {
-        Ok(self.replay_conversation_forensics(task_id)?.turn(turn_id))
+        self.conversation_read_model()
+            .replay_turn_forensics(task_id, turn_id)
     }
 
     pub fn replay_conversation_manifold(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationManifoldProjection> {
-        match self.replay_for_known_session(task_id)? {
-            Some(replay) => Ok(ConversationManifoldProjection::from_trace_replay(&replay)),
-            None => Ok(ConversationManifoldProjection {
-                task_id: task_id.clone(),
-                turns: Vec::new(),
-            }),
-        }
+        self.conversation_read_model()
+            .replay_conversation_manifold(task_id)
     }
 
     pub fn replay_turn_manifold(
@@ -2474,7 +2475,8 @@ impl MechSuitService {
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
     ) -> Result<Option<crate::domain::model::ManifoldTurnProjection>> {
-        Ok(self.replay_conversation_manifold(task_id)?.turn(turn_id))
+        self.conversation_read_model()
+            .replay_turn_manifold(task_id, turn_id)
     }
 
     pub fn replay_all_traces(&self) -> Result<Vec<crate::domain::model::TraceReplay>> {
@@ -2514,29 +2516,6 @@ impl MechSuitService {
             .clone()
     }
 
-    fn recent_turn_summaries(
-        &self,
-        session: &ConversationSession,
-        synthesizer_engine: &dyn SynthesizerEngine,
-    ) -> Result<Vec<String>> {
-        let session_slice = self.query_session_context_slice(
-            &session.task_id(),
-            TraceSessionContextQuery::AdaptiveReplay { turn_limit: 4 },
-        )?;
-        if !session_slice.turn_summaries.is_empty() {
-            return Ok(session_slice.turn_summaries);
-        }
-
-        if let Some(store) = self.conversation_history_store() {
-            let recent_turns = store.recent_turn_summaries()?;
-            if !recent_turns.is_empty() {
-                return Ok(recent_turns);
-            }
-        }
-
-        synthesizer_engine.recent_turn_summaries()
-    }
-
     pub fn query_session_context_slice(
         &self,
         task_id: &TaskTraceId,
@@ -2545,31 +2524,14 @@ impl MechSuitService {
         self.trace_recorder.query_session_context(task_id, &query)
     }
 
-    fn specialist_runtime_notes(
+    #[cfg(test)]
+    fn recent_turn_summaries(
         &self,
-        prompt: &str,
         session: &ConversationSession,
-        prepared: &PreparedRuntimeLanes,
-    ) -> Vec<String> {
-        let Ok(session_context) = self.query_session_context_slice(
-            &session.task_id(),
-            TraceSessionContextQuery::AdaptiveReplay { turn_limit: 4 },
-        ) else {
-            return vec![
-                "Specialist brains unavailable: adaptive session context could not be queried."
-                    .to_string(),
-            ];
-        };
-        let profile = prepared.harness_profile();
-        self.specialist_brain_registry().runtime_notes(
-            &profile,
-            &SpecialistBrainRequest {
-                user_prompt: prompt.to_string(),
-                workspace_root: self.workspace_root.clone(),
-                active_profile_id: profile.active_profile_id().to_string(),
-                session_context,
-            },
-        )
+        synthesizer_engine: &dyn SynthesizerEngine,
+    ) -> Result<Vec<String>> {
+        self.synthesis_chamber()
+            .recent_turn_summaries(session, synthesizer_engine)
     }
 
     fn persist_prompt_history(&self, prompt: &str) {
@@ -2592,6 +2554,7 @@ impl MechSuitService {
         }
     }
 
+    #[cfg(test)]
     fn finalize_turn_response(
         &self,
         trace: &StructuredTurnTrace,
@@ -2600,12 +2563,13 @@ impl MechSuitService {
         prompt: &str,
         response: &AuthoredResponse,
     ) -> String {
-        let reply = response.to_plain_text();
-        trace.record_completion(response);
-        self.emit_transcript_update(&session.task_id());
-        session.note_thread_reply(active_thread, prompt, &reply);
-        self.persist_recent_turn_summary(prompt, &reply);
-        reply
+        self.synthesis_chamber().finalize_turn_response(
+            trace,
+            session,
+            active_thread,
+            prompt,
+            response,
+        )
     }
 
     async fn execute_planner_gather_step(
@@ -2772,79 +2736,48 @@ impl MechSuitService {
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationTranscript> {
-        match self.replay_for_known_session(task_id)? {
-            Some(replay) => Ok(ConversationTranscript::from_trace_replay(&replay)),
-            None => Ok(ConversationTranscript {
-                task_id: task_id.clone(),
-                entries: Vec::new(),
-            }),
-        }
+        self.conversation_read_model()
+            .replay_conversation_transcript(task_id)
     }
 
     pub fn replay_conversation_trace_graph(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationTraceGraph> {
-        match self.replay_for_known_session(task_id)? {
-            Some(replay) => Ok(ConversationTraceGraph::from_trace_replay(&replay)),
-            None => Ok(ConversationTraceGraph::empty(task_id.clone())),
-        }
+        self.conversation_read_model()
+            .replay_conversation_trace_graph(task_id)
     }
 
     pub fn replay_conversation_delegation(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<crate::domain::model::ConversationDelegationProjection> {
-        match self.replay_for_known_session(task_id)? {
-            Some(replay) => Ok(
-                crate::domain::model::ConversationDelegationProjection::from_trace_replay(&replay),
-            ),
-            None => {
-                Ok(crate::domain::model::ConversationDelegationProjection::empty(task_id.clone()))
-            }
-        }
+        self.conversation_read_model()
+            .replay_conversation_delegation(task_id)
     }
 
     pub fn replay_conversation_projection(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationProjectionSnapshot> {
-        match self.replay_for_known_session(task_id)? {
-            Some(replay) => Ok(ConversationProjectionSnapshot::from_trace_replay(&replay)),
-            None => Ok(ConversationProjectionSnapshot::empty(task_id.clone())),
-        }
+        self.conversation_read_model()
+            .replay_conversation_projection(task_id)
     }
 
     pub fn projection_update_for_transcript(
         &self,
         update: &ConversationTranscriptUpdate,
     ) -> Result<ConversationProjectionUpdate> {
-        let snapshot = self.replay_conversation_projection(&update.task_id)?;
-        Ok(ConversationProjectionUpdate {
-            task_id: update.task_id.clone(),
-            kind: ConversationProjectionUpdateKind::Transcript,
-            reducer: crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot,
-            version: snapshot.version(),
-            transcript_update: Some(update.clone()),
-            forensic_update: None,
-            snapshot,
-        })
+        self.conversation_read_model()
+            .projection_update_for_transcript(update)
     }
 
     pub fn projection_update_for_forensic(
         &self,
         update: &ConversationForensicUpdate,
     ) -> Result<ConversationProjectionUpdate> {
-        let snapshot = self.replay_conversation_projection(&update.task_id)?;
-        Ok(ConversationProjectionUpdate {
-            task_id: update.task_id.clone(),
-            kind: ConversationProjectionUpdateKind::Forensic,
-            reducer: crate::domain::model::ConversationProjectionReducer::ReplaceSnapshot,
-            version: snapshot.version(),
-            transcript_update: None,
-            forensic_update: Some(update.clone()),
-            snapshot,
-        })
+        self.conversation_read_model()
+            .projection_update_for_forensic(update)
     }
 
     /// Execute the boot sequence.
@@ -2968,14 +2901,7 @@ impl MechSuitService {
 
     /// Process a single prompt using the prepared synthesizer lane.
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
-        let session = self.create_conversation_session();
-        self.process_prompt_in_session_with_mode_request_and_sink(
-            prompt,
-            session,
-            None,
-            Arc::clone(&self.event_sink),
-        )
-        .await
+        self.turn_orchestration().process_prompt(prompt).await
     }
 
     pub async fn process_prompt_with_sink(
@@ -2983,8 +2909,8 @@ impl MechSuitService {
         prompt: &str,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        let session = self.create_conversation_session();
-        self.process_prompt_in_session_with_mode_request_and_sink(prompt, session, None, event_sink)
+        self.turn_orchestration()
+            .process_prompt_with_sink(prompt, event_sink)
             .await
     }
 
@@ -2994,7 +2920,8 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.process_prompt_in_session_with_mode_request_and_sink(prompt, session, None, event_sink)
+        self.turn_orchestration()
+            .process_prompt_in_session_with_sink(prompt, session, event_sink)
             .await
     }
 
@@ -3005,384 +2932,14 @@ impl MechSuitService {
         mode_request: Option<CollaborationModeRequest>,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        let event_sink = self.wrap_sink_with_observers(event_sink);
-        let mut current_prompt = prompt.to_string();
-        let collaboration = resolve_collaboration_mode_request(mode_request);
-
-        loop {
-            self.persist_prompt_history(&current_prompt);
-            let runtime_guard = self.runtime.read().await;
-            let runtime = runtime_guard
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
-            let prepared = runtime.prepared.clone();
-            self.execution_hand_registry().set_governance_profile(
-                prepared
-                    .harness_profile()
-                    .active_execution_governance()
-                    .clone(),
-            );
-            let planner_engine = Arc::clone(&runtime.planner_engine);
-            let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
-            let gatherer = runtime.gatherer.clone();
-            drop(runtime_guard);
-
-            let interpretation = self
-                .derive_interpretation_context(
-                    &current_prompt,
-                    planner_engine.as_ref(),
-                    event_sink.clone(),
-                )
-                .await;
-            let turn_id = session.allocate_turn_id();
-            let active_thread = session.active_thread().thread_ref;
-            let _active_turn = ActiveTurnGuard::new(session.clone(), turn_id.clone());
-            let trace = Arc::new(StructuredTurnTrace::new(
-                event_sink.clone(),
-                Arc::clone(&self.trace_recorder),
-                self.cloned_forensic_observers(),
-                session.clone(),
-                turn_id,
-                active_thread.clone(),
-            ));
-            trace.record_turn_start(&current_prompt, &interpretation, &prepared);
-            trace.emit(TurnEvent::CollaborationModeChanged {
-                result: collaboration.clone(),
-            });
-            let harness_profile = prepared.harness_profile();
-            trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
-                snapshot: crate::domain::model::ExecutionGovernanceSnapshot::new(
-                    harness_profile.requested.id(),
-                    harness_profile.active.id(),
-                    harness_profile.active_execution_governance().clone(),
-                ),
-            });
-            self.emit_transcript_update(&session.task_id());
-            trace.emit(TurnEvent::InterpretationContext {
-                context: interpretation.clone(),
-            });
-
-            let planner_capability = planner_engine.capability();
-            trace.emit(TurnEvent::PlannerCapability {
-                provider: prepared.planner.model_id.clone(),
-                capability: format_planner_capability(&planner_capability),
-            });
-
-            let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
-            let specialist_runtime_notes =
-                self.specialist_runtime_notes(&current_prompt, &session, &prepared);
-            let recent_thread_summary = session.recent_thread_summary(&active_thread);
-            let request = PlannerRequest::new(
-                &current_prompt,
-                self.workspace_root.clone(),
-                interpretation.clone(),
-                PlannerBudget::default(),
+        self.turn_orchestration()
+            .process_prompt_in_session_with_mode_request_and_sink(
+                prompt,
+                session,
+                mode_request,
+                event_sink,
             )
-            .with_collaboration(collaboration.clone())
-            .with_recent_turns(recent_turns.clone())
-            .with_recent_thread_summary(recent_thread_summary.clone())
-            .with_runtime_notes(planner_runtime_notes(
-                gatherer.as_ref(),
-                &specialist_runtime_notes,
-                &collaboration,
-            ))
-            .with_entity_resolver(Arc::clone(&self.entity_resolver));
-
-            let execution_plan = match planner_capability {
-                PlannerCapability::Available => {
-                    let mut decision = planner_engine
-                        .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
-                        .await?;
-                    let controller_edit =
-                        controller_prompt_edit_instruction(&self.workspace_root, &current_prompt);
-                    let provider_edit_missing =
-                        !decision.edit.known_edit && controller_edit.known_edit;
-                    decision.edit =
-                        merge_initial_edit_instruction(&decision.edit, &controller_edit);
-                    if provider_edit_missing
-                        && collaboration.active.mutation_posture.allows_mutation()
-                    {
-                        let candidate_summary = if decision.edit.candidate_files.is_empty() {
-                            "no candidate files surfaced yet".to_string()
-                        } else {
-                            format!(
-                                "candidate files: {}",
-                                decision.edit.candidate_files.join(", ")
-                            )
-                        };
-                        trace.emit(TurnEvent::Fallback {
-                            stage: "action-bias".to_string(),
-                            reason: format!(
-                                "controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; {candidate_summary}"
-                            ),
-                        });
-                    }
-                    let controller_commit_instruction =
-                        controller_prompt_commit_instruction(&current_prompt);
-                    if collaboration.active.mutation_posture.allows_mutation()
-                        && let Some(bootstrapped) =
-                            bootstrap_git_commit_initial_action(&current_prompt, &decision)
-                    {
-                        trace.emit(TurnEvent::Fallback {
-                            stage: "commit-bootstrap".to_string(),
-                            reason: format!(
-                                "commit-oriented turn bypassed initial `{}` and forced `{}` to inspect workspace status before committing",
-                                decision.action.summary(),
-                                bootstrapped.action.summary()
-                            ),
-                        });
-                        decision = bootstrapped;
-                    }
-                    if let Some(bootstrapped) = self
-                        .bootstrap_known_edit_initial_action(
-                            &current_prompt,
-                            &interpretation,
-                            &recent_turns,
-                            gatherer.as_ref(),
-                            &decision,
-                            trace.as_ref(),
-                        )
-                        .await?
-                    {
-                        let candidate_summary = if bootstrapped.edit.candidate_files.is_empty() {
-                            "no viable candidates discovered".to_string()
-                        } else {
-                            format!(
-                                "candidate files: {}",
-                                bootstrapped.edit.candidate_files.join(", ")
-                            )
-                        };
-                        trace.emit(TurnEvent::Fallback {
-                            stage: "known-edit-bootstrap".to_string(),
-                            reason: format!(
-                                "known edit turn bypassed initial `{}` and forced `{}`; {}",
-                                decision.action.summary(),
-                                bootstrapped.action.summary(),
-                                candidate_summary
-                            ),
-                        });
-                        decision = bootstrapped;
-                    }
-                    if let Some(bootstrapped) =
-                        bootstrap_repository_grounding_initial_action(&current_prompt, &decision)
-                    {
-                        trace.emit(TurnEvent::Fallback {
-                            stage: "grounding-bootstrap".to_string(),
-                            reason: format!(
-                                "repo-scoped conversational turn bypassed initial `{}` and forced `{}` to ground the reply locally",
-                                decision.action.summary(),
-                                bootstrapped.action.summary()
-                            ),
-                        });
-                        decision = bootstrapped;
-                    }
-                    if collaboration.active.mode == CollaborationMode::Review
-                        && let Some(bootstrapped) = bootstrap_review_initial_action(&decision)
-                    {
-                        trace.emit(TurnEvent::Fallback {
-                            stage: "review-bootstrap".to_string(),
-                            reason: format!(
-                                "review mode bypassed initial `{}` and forced `{}` to inspect local changes before synthesis",
-                                decision.action.summary(),
-                                bootstrapped.action.summary()
-                            ),
-                        });
-                        decision = bootstrapped;
-                    }
-                    decision = sanitize_initial_action_decision_for_collaboration(
-                        &collaboration,
-                        decision,
-                    );
-                    trace.emit(TurnEvent::PlannerActionSelected {
-                        sequence: 1,
-                        action: decision.action.summary(),
-                        rationale: decision.rationale.clone(),
-                    });
-                    trace.record_planner_action(
-                        &decision.action.summary(),
-                        &decision.rationale,
-                        None,
-                    );
-                    let mut execution_plan =
-                        execution_plan_from_initial_action(&prepared, decision);
-                    if collaboration.active.mutation_posture.allows_mutation() {
-                        execution_plan.instruction_frame = merge_instruction_frames(
-                            execution_plan.instruction_frame.clone(),
-                            controller_commit_instruction,
-                        );
-                    }
-                    execution_plan
-                }
-                PlannerCapability::Unsupported { reason } => {
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "planner".to_string(),
-                        reason: format!(
-                            "planner unavailable before first action selection: {reason}"
-                        ),
-                    });
-                    fallback_execution_plan(&prepared)
-                }
-            };
-
-            let mut execution_checklist =
-                build_execution_checklist(&current_prompt, &recent_turns, &execution_plan);
-
-            trace.emit(TurnEvent::IntentClassified {
-                intent: execution_plan.intent.clone(),
-            });
-            trace.emit(TurnEvent::RouteSelected {
-                summary: execution_plan.route_summary.clone(),
-            });
-            if let Some(checklist) = execution_checklist.as_mut() {
-                checklist.emit(trace.as_ref());
-            }
-
-            let planner_outcome = match execution_plan.path {
-                PromptExecutionPath::PlannerThenSynthesize => {
-                    let recent_turns =
-                        self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
-
-                    let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
-                        .trace_recorder
-                        .as_any()
-                        .downcast_ref::<TransitTraceRecorder>()
-                    {
-                        Arc::new(TransitContextResolver::new(Arc::new(transit.clone())))
-                    } else {
-                        Arc::new(NoopContextResolver)
-                    };
-
-                    self.execute_recursive_planner_loop(
-                        &current_prompt,
-                        PlannerLoopContext {
-                            prepared: prepared.clone(),
-                            planner_engine,
-                            gatherer,
-                            resolver,
-                            entity_resolver: Arc::clone(&self.entity_resolver),
-                            interpretation: interpretation.clone(),
-                            recent_turns,
-                            recent_thread_summary: recent_thread_summary.clone(),
-                            collaboration: collaboration.clone(),
-                            specialist_runtime_notes,
-                            instruction_frame: execution_plan.instruction_frame.clone(),
-                            initial_edit: execution_plan.initial_edit.clone(),
-                            grounding: execution_plan.grounding.clone(),
-                        },
-                        execution_plan.initial_planner_decision.clone(),
-                        execution_checklist,
-                        Arc::clone(&trace),
-                    )
-                    .await?
-                }
-                PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
-                    evidence: None,
-                    direct_answer: execution_plan.direct_answer.clone(),
-                    instruction_frame: execution_plan.instruction_frame.clone(),
-                    grounding: execution_plan.grounding.clone(),
-                    continuation: None,
-                },
-            };
-
-            self.expire_turn_control_requests(
-                &trace,
-                "The turn closed before the requested control could reach another safe checkpoint.",
-            );
-
-            if let Some(continuation) = planner_outcome.continuation {
-                trace.record_checkpoint_without_response(
-                    TraceCheckpointKind::TurnCompleted,
-                    continuation.summary,
-                );
-                current_prompt = continuation.prompt;
-                continue;
-            }
-
-            if let Some(reply) = planner_outcome.direct_answer {
-                let response = if let Some(frame) = planner_outcome
-                    .instruction_frame
-                    .as_ref()
-                    .filter(|frame| frame.has_pending_workspace_obligation())
-                {
-                    blocked_instruction_response(frame)
-                } else {
-                    reply
-                };
-                trace.emit(TurnEvent::SynthesisReady {
-                    grounded: false,
-                    citations: Vec::new(),
-                    insufficient_evidence: false,
-                });
-                let reply = self.finalize_turn_response(
-                    &trace,
-                    &session,
-                    &active_thread,
-                    &current_prompt,
-                    &response,
-                );
-                return Ok(reply);
-            }
-
-            let intent = execution_plan.intent;
-            let engine = synthesizer_engine;
-            let trace_for_reply = Arc::clone(&trace);
-            let event_sink = trace.as_event_sink();
-            let session_for_reply = session.clone();
-            let thread_for_reply = active_thread;
-            let prompt_for_model = current_prompt.clone();
-            let handoff = SynthesisHandoff {
-                recent_turns,
-                recent_thread_summary,
-                collaboration: collaboration.clone(),
-                instruction_frame: planner_outcome.instruction_frame.clone(),
-                grounding: planner_outcome.grounding.clone(),
-            };
-            if let Some(frame) = planner_outcome
-                .instruction_frame
-                .as_ref()
-                .filter(|frame| frame.has_pending_workspace_obligation())
-            {
-                let response = blocked_instruction_response(frame);
-                trace.emit(TurnEvent::SynthesisReady {
-                    grounded: false,
-                    citations: Vec::new(),
-                    insufficient_evidence: false,
-                });
-                let reply = self.finalize_turn_response(
-                    &trace_for_reply,
-                    &session_for_reply,
-                    &thread_for_reply,
-                    &current_prompt,
-                    &response,
-                );
-                return Ok(reply);
-            }
-            let reply = tokio::task::spawn_blocking(move || {
-                engine.respond_for_turn(
-                    &prompt_for_model,
-                    intent,
-                    planner_outcome.evidence.as_ref(),
-                    &handoff,
-                    event_sink,
-                )
-            })
             .await
-            .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
-            let response = AuthoredResponse::from_plain_text(
-                trace_for_reply.completion_response_mode_for_synthesis(
-                    planner_outcome.instruction_frame.as_ref(),
-                ),
-                &reply,
-            );
-            let reply = self.finalize_turn_response(
-                &trace_for_reply,
-                &session_for_reply,
-                &thread_for_reply,
-                &current_prompt,
-                &response,
-            );
-            return Ok(reply);
-        }
     }
 
     async fn bootstrap_known_edit_initial_action(
@@ -3666,99 +3223,9 @@ impl MechSuitService {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        let event_sink = self.wrap_sink_with_observers(event_sink);
-        let runtime_guard = self.runtime.read().await;
-        let runtime = runtime_guard
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
-        let planner_engine = Arc::clone(&runtime.planner_engine);
-        let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
-        drop(runtime_guard);
-
-        let interpretation = self
-            .derive_interpretation_context(
-                &candidate.prompt,
-                planner_engine.as_ref(),
-                event_sink.clone(),
-            )
-            .await;
-        let source_thread = candidate.active_thread.clone();
-        let turn_id = session.allocate_turn_id();
-        let trace = Arc::new(StructuredTurnTrace::new(
-            event_sink,
-            Arc::clone(&self.trace_recorder),
-            self.cloned_forensic_observers(),
-            session.clone(),
-            turn_id,
-            source_thread.clone(),
-        ));
-        trace.emit(TurnEvent::ThreadCandidateCaptured {
-            candidate_id: candidate.candidate_id.as_str().to_string(),
-            active_thread: candidate.active_thread.stable_id(),
-            prompt: candidate.prompt.clone(),
-        });
-        trace.record_thread_candidate(&candidate);
-
-        let recent_turns = self.recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
-        let active_thread = session.active_thread();
-        let thread_request = ThreadDecisionRequest::new(
-            self.workspace_root.clone(),
-            interpretation,
-            active_thread.clone(),
-            candidate.clone(),
-        )
-        .with_recent_turns(recent_turns)
-        .with_known_threads(session.known_threads())
-        .with_recent_thread_summary(session.recent_thread_summary(&active_thread.thread_ref));
-
-        let decision = planner_engine
-            .select_thread_decision(&thread_request, trace.clone() as Arc<dyn TurnEventSink>)
-            .await?;
-        trace.emit(TurnEvent::ThreadDecisionApplied {
-            candidate_id: candidate.candidate_id.as_str().to_string(),
-            decision: decision.kind.label().to_string(),
-            target_thread: decision.target_thread.stable_id(),
-            rationale: decision.rationale.clone(),
-        });
-        trace.record_thread_decision(&decision, &source_thread);
-
-        let branch_id = if matches!(decision.kind, ThreadDecisionKind::OpenChildThread) {
-            let branch_id = session.next_branch_id();
-            trace.declare_branch(
-                branch_id.clone(),
-                decision
-                    .new_thread_label
-                    .as_deref()
-                    .unwrap_or(candidate.prompt.as_str()),
-                Some(decision.rationale.as_str()),
-                source_thread.branch_id(),
-            );
-            Some(branch_id)
-        } else {
-            None
-        };
-
-        if matches!(decision.kind, ThreadDecisionKind::MergeIntoTarget) {
-            trace.emit(TurnEvent::ThreadMerged {
-                source_thread: source_thread.stable_id(),
-                target_thread: decision.target_thread.stable_id(),
-                mode: decision
-                    .merge_mode
-                    .unwrap_or(ThreadMergeMode::Summary)
-                    .label()
-                    .to_string(),
-                summary: decision.merge_summary.clone(),
-            });
-            trace.record_thread_merge(&decision, &source_thread, &decision.target_thread);
-        }
-
-        session.apply_thread_decision(&decision, branch_id, &candidate.prompt);
-        self.process_prompt_in_session_with_sink(
-            &candidate.prompt,
-            session,
-            trace.downstream.clone(),
-        )
-        .await
+        self.turn_orchestration()
+            .process_thread_candidate_in_session_with_sink(candidate, session, event_sink)
+            .await
     }
 
     async fn derive_interpretation_context(
@@ -11342,6 +10809,81 @@ mod tests {
         assert_eq!(
             history_store.prompt_history().expect("prompt history"),
             vec!["First prompt".to_string(), "Second prompt".to_string()]
+        );
+    }
+
+    #[test]
+    fn chamber_services_compose_turn_execution_and_projection_replay() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# Operator Memory\nCompose chamber seams around turn execution and projection replay.\n",
+        )
+        .expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
+            workspace.path(),
+            "qwen-1.5b",
+            Box::new(StaticConversation::new(vec![
+                "Chamber response.".to_string(),
+            ])),
+        ));
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder);
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .turn_orchestration()
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Execute through chamber seams",
+                    session.clone(),
+                    None,
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Chamber response.");
+
+        let projection = service
+            .conversation_read_model()
+            .replay_conversation_projection(&session.task_id())
+            .expect("projection replay");
+
+        assert_eq!(projection.task_id, session.task_id());
+        assert_eq!(projection.transcript.entries.len(), 3);
+        assert_eq!(
+            projection.transcript.entries[2].content,
+            "Chamber response."
         );
     }
 

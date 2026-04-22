@@ -371,7 +371,7 @@
 |--------|--------|
 | [Canonical Render Truth And Projection Convergence](epics/VHURpL4nG/voyages/VHUS4nctz/) | done |
 | [Single Recursive Control Plane](epics/VHURpL4nG/voyages/VHUS5RqZf/) | done |
-| [Chamber Services And Read-Model Boundaries](epics/VHURpL4nG/voyages/VHUS6H0Kd/) | planned |
+| [Chamber Services And Read-Model Boundaries](epics/VHURpL4nG/voyages/VHUS6H0Kd/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
