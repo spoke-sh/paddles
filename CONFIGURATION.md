@@ -434,10 +434,11 @@ to select the next bounded workspace action. The provider chooses the action
 through the planner tool, and Paddles executes that action locally in the
 workspace harness.
 
-For OpenAI specifically, the current remote transport stays on Chat Completions
-with structured JSON/tool calls. Responses-only OpenAI models such as
-`gpt-5.4-pro`, `gpt-5-pro`, and `gpt-5.2-pro` are rejected up front; use
-`gpt-5.4`, `gpt-5.4-mini`, or `gpt-4o` instead.
+For OpenAI specifically, chat-completions models such as `gpt-5.4`,
+`gpt-5.4-mini`, and `gpt-4o` stay on Chat Completions with structured
+JSON/tool calls, while Responses-only models such as `gpt-5.4-pro`,
+`gpt-5-pro`, and `gpt-5.2-pro` route through `/v1/responses` with prompt
+envelopes and reusable `previous_response_id` continuity.
 
 For Moonshot, Paddles currently recognizes the Kimi API model ids
 `kimi-k2.6`, `kimi-k2.5`, `kimi-k2`, `kimi-k2-0905-preview`,
@@ -455,7 +456,7 @@ boundary, even when the planner lane is Inception-backed.
 
 Remote lane behavior now resolves from one negotiated capability surface per
 provider/model pair instead of repeating provider-name branches in the runtime.
-That surface currently carries four shared decisions:
+That surface currently carries five shared decisions:
 
 - `http_format` — whether the lane uses the HTTP adapter and which wire format
   it speaks (`OpenAi`, `Anthropic`, or `Gemini`)
@@ -466,11 +467,37 @@ That surface currently carries four shared decisions:
   (`NativeFunctionTool`, `StructuredJsonEnvelope`, or `PromptEnvelope`)
 - `transport_support` — whether the selected model is supported on the current
   transport, plus an explicit operator-facing rejection reason when it is not
+- `deliberation` — whether the provider exposes `native_continuation`,
+  `summary_only`, `toggle_only`, or explicit `unsupported` no-op semantics, and
+  whether any provider-native state can be round-tripped
 
 When a future provider is added, extend this negotiated surface first. The
 controller, planner, and renderer should consume the shared capability record
 rather than branching on provider names for behavior that is conceptually the
 same.
+
+Representative provider/model paths are documented below when one provider
+family exposes more than one contract:
+
+<!-- BEGIN_PROVIDER_CAPABILITY_MATRIX -->
+| Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Notes |
+|---|---|---|---|---|---|---|---|---|
+| `sift` | `qwen-1.5b` | `local` | `supported` | `prompt-envelope` | `prompt-envelope` | `unsupported` | `none` | Local native runtime; no provider-native reasoning substrate. |
+| `openai` | `gpt-5.4` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | Chat Completions path with reasoning-effort control only. |
+| `openai` | `gpt-5.4-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | Responses path with reusable previous_response_id continuity. |
+| `inception` | `mercury-2` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `summary_only` | `none` | OpenAI-compatible chat with reasoning summaries but no reusable state. |
+| `anthropic` | `claude-sonnet-4-20250514` | `anthropic` | `supported` | `anthropic-tool-use` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | Messages API with thinking blocks and interleaved-thinking support. |
+| `google` | `gemini-2.5-flash` | `gemini` | `supported` | `gemini-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | generateContent path with thought-signature continuity. |
+| `moonshot` | `kimi-k2.6` | `openai` | `supported` | `openai-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | OpenAI-compatible chat with reasoning_content continuity. |
+| `ollama` | `qwen3` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | Freeform local models; qwen3 shown for thinking-capable toggle behavior. |
+<!-- END_PROVIDER_CAPABILITY_MATRIX -->
+
+- `summary_only` means the provider can surface reasoning summaries or similar
+  observational output, but Paddles cannot round-trip reusable state.
+- `toggle_only` means the provider exposes reasoning effort or visibility
+  controls without reusable continuity state.
+- `unsupported` means the harness treats the provider as an explicit no-op for
+  provider-native reasoning continuity.
 
 For the local `sift` provider, `bonsai-8b` is now available as an opt-in local
 model path:
@@ -491,11 +518,14 @@ Paddles resolves final-answer rendering capability at boot from the selected
 provider/model pair and then uses the strictest supported transport for the
 synthesizer lane:
 
-- `openai`: native JSON Schema via Chat Completions `response_format`
+- `openai`: Chat Completions models use native JSON Schema via
+  `response_format`; Responses-only models degrade to prompt-enveloped
+  structured final answers over `/v1/responses`
 - `anthropic`: native structured tool use with a forced render tool
 - `google`: native JSON Schema via Gemini `generationConfig`
 - `inception`: OpenAI-compatible JSON Schema via the `mercury-2` chat completions path
-- `moonshot`, `ollama`, and local `sift`: prompt-enveloped JSON with post-response normalization
+- `moonshot` and local `sift`: prompt-enveloped JSON with post-response normalization
+- `ollama`: OpenAI-compatible JSON Schema on the current local HTTP boundary
 
 All providers still normalize into the same transcript-safe render envelope
 (`paragraph`, `bullet_list`, `code_block`, `citations`), and slightly

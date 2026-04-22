@@ -34,11 +34,31 @@ pub enum ApiFormat {
     Gemini,
 }
 
+impl ApiFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlannerToolCallCapability {
     NativeFunctionTool,
     StructuredJsonEnvelope,
     PromptEnvelope,
+}
+
+impl PlannerToolCallCapability {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NativeFunctionTool => "native-function-tool",
+            Self::StructuredJsonEnvelope => "structured-json-envelope",
+            Self::PromptEnvelope => "prompt-envelope",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +138,15 @@ impl DeliberationState {
 pub enum ProviderTransportSupport {
     Supported,
     Unsupported { reason: String },
+}
+
+impl ProviderTransportSupport {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Supported => "supported",
+            Self::Unsupported { .. } => "unsupported",
+        }
+    }
 }
 
 /// Shared provider/runtime contract that the harness negotiates from a
@@ -617,6 +646,106 @@ pub struct KnownModel {
     pub model_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderCapabilityMatrixRow {
+    pub provider: ModelProvider,
+    pub model_id: String,
+    pub http_format: Option<ApiFormat>,
+    pub transport_support: ProviderTransportSupport,
+    pub render_capability: RenderCapability,
+    pub planner_tool_call: PlannerToolCallCapability,
+    pub deliberation_support: DeliberationSupport,
+    pub state_contract: DeliberationStateContract,
+    pub notes: String,
+}
+
+const DOCUMENTED_PROVIDER_CAPABILITY_PATHS: &[(ModelProvider, &str, &str)] = &[
+    (
+        ModelProvider::Sift,
+        "qwen-1.5b",
+        "Local native runtime; no provider-native reasoning substrate.",
+    ),
+    (
+        ModelProvider::Openai,
+        "gpt-5.4",
+        "Chat Completions path with reasoning-effort control only.",
+    ),
+    (
+        ModelProvider::Openai,
+        "gpt-5.4-pro",
+        "Responses path with reusable previous_response_id continuity.",
+    ),
+    (
+        ModelProvider::Inception,
+        "mercury-2",
+        "OpenAI-compatible chat with reasoning summaries but no reusable state.",
+    ),
+    (
+        ModelProvider::Anthropic,
+        "claude-sonnet-4-20250514",
+        "Messages API with thinking blocks and interleaved-thinking support.",
+    ),
+    (
+        ModelProvider::Google,
+        "gemini-2.5-flash",
+        "generateContent path with thought-signature continuity.",
+    ),
+    (
+        ModelProvider::Moonshot,
+        "kimi-k2.6",
+        "OpenAI-compatible chat with reasoning_content continuity.",
+    ),
+    (
+        ModelProvider::Ollama,
+        "qwen3",
+        "Freeform local models; qwen3 shown for thinking-capable toggle behavior.",
+    ),
+];
+
+pub fn documented_provider_capability_matrix() -> Vec<ProviderCapabilityMatrixRow> {
+    DOCUMENTED_PROVIDER_CAPABILITY_PATHS
+        .iter()
+        .map(|(provider, model_id, notes)| {
+            let surface = provider.capability_surface(model_id);
+            ProviderCapabilityMatrixRow {
+                provider: *provider,
+                model_id: (*model_id).to_string(),
+                http_format: surface.http_format,
+                transport_support: surface.transport_support,
+                render_capability: surface.render_capability,
+                planner_tool_call: surface.planner_tool_call,
+                deliberation_support: surface.deliberation.support,
+                state_contract: surface.deliberation.state_contract,
+                notes: (*notes).to_string(),
+            }
+        })
+        .collect()
+}
+
+pub fn render_documented_provider_capability_matrix_markdown() -> String {
+    let mut lines = vec![
+        "| Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Notes |"
+            .to_string(),
+        "|---|---|---|---|---|---|---|---|---|".to_string(),
+    ];
+    for row in documented_provider_capability_matrix() {
+        let wire = row.http_format.map(ApiFormat::label).unwrap_or("local");
+        lines.push(format!(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |",
+            row.provider.name(),
+            row.model_id,
+            wire,
+            row.transport_support.label(),
+            row.render_capability.label(),
+            row.planner_tool_call.label(),
+            row.deliberation_support.label(),
+            row.state_contract.label(),
+            row.notes,
+        ));
+    }
+    lines.join("\n")
+}
+
 pub fn known_state_space_models() -> Vec<KnownModel> {
     let mut models = Vec::new();
     for provider in ModelProvider::all() {
@@ -635,9 +764,11 @@ mod tests {
     use super::{
         ApiFormat, DeliberationStateContract, DeliberationSupport, ModelProvider,
         ModelThinkingMode, PlannerToolCallCapability, ProviderAuthRequirement,
-        ProviderTransportSupport, known_state_space_models,
+        ProviderTransportSupport, documented_provider_capability_matrix, known_state_space_models,
+        render_documented_provider_capability_matrix_markdown,
     };
     use crate::infrastructure::rendering::RenderCapability;
+    use std::fs;
 
     #[test]
     fn moonshot_aliases_are_normalized() {
@@ -1020,6 +1151,127 @@ mod tests {
     }
 
     #[test]
+    fn provider_capability_matrix_covers_documented_provider_paths() {
+        let rows = documented_provider_capability_matrix();
+        let summarized = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.provider,
+                    row.model_id.as_str(),
+                    row.http_format,
+                    row.render_capability,
+                    row.planner_tool_call,
+                    &row.transport_support,
+                    row.deliberation_support,
+                    row.state_contract,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            summarized,
+            vec![
+                (
+                    ModelProvider::Sift,
+                    "qwen-1.5b",
+                    None,
+                    RenderCapability::PromptEnvelope,
+                    PlannerToolCallCapability::PromptEnvelope,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::Unsupported,
+                    DeliberationStateContract::None,
+                ),
+                (
+                    ModelProvider::Openai,
+                    "gpt-5.4",
+                    Some(ApiFormat::OpenAi),
+                    RenderCapability::OpenAiJsonSchema,
+                    PlannerToolCallCapability::NativeFunctionTool,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::ToggleOnly,
+                    DeliberationStateContract::None,
+                ),
+                (
+                    ModelProvider::Openai,
+                    "gpt-5.4-pro",
+                    Some(ApiFormat::OpenAi),
+                    RenderCapability::PromptEnvelope,
+                    PlannerToolCallCapability::PromptEnvelope,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::NativeContinuation,
+                    DeliberationStateContract::OpaqueRoundTrip,
+                ),
+                (
+                    ModelProvider::Inception,
+                    "mercury-2",
+                    Some(ApiFormat::OpenAi),
+                    RenderCapability::OpenAiJsonSchema,
+                    PlannerToolCallCapability::NativeFunctionTool,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::SummaryOnly,
+                    DeliberationStateContract::None,
+                ),
+                (
+                    ModelProvider::Anthropic,
+                    "claude-sonnet-4-20250514",
+                    Some(ApiFormat::Anthropic),
+                    RenderCapability::AnthropicToolUse,
+                    PlannerToolCallCapability::PromptEnvelope,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::NativeContinuation,
+                    DeliberationStateContract::OpaqueRoundTrip,
+                ),
+                (
+                    ModelProvider::Google,
+                    "gemini-2.5-flash",
+                    Some(ApiFormat::Gemini),
+                    RenderCapability::GeminiJsonSchema,
+                    PlannerToolCallCapability::StructuredJsonEnvelope,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::NativeContinuation,
+                    DeliberationStateContract::OpaqueRoundTrip,
+                ),
+                (
+                    ModelProvider::Moonshot,
+                    "kimi-k2.6",
+                    Some(ApiFormat::OpenAi),
+                    RenderCapability::OpenAiJsonSchema,
+                    PlannerToolCallCapability::StructuredJsonEnvelope,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::NativeContinuation,
+                    DeliberationStateContract::OpaqueRoundTrip,
+                ),
+                (
+                    ModelProvider::Ollama,
+                    "qwen3",
+                    Some(ApiFormat::OpenAi),
+                    RenderCapability::OpenAiJsonSchema,
+                    PlannerToolCallCapability::NativeFunctionTool,
+                    &ProviderTransportSupport::Supported,
+                    DeliberationSupport::ToggleOnly,
+                    DeliberationStateContract::None,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn configuration_docs_embed_current_provider_capability_matrix() {
+        let config = fs::read_to_string(format!("{}/CONFIGURATION.md", env!("CARGO_MANIFEST_DIR")))
+            .expect("read configuration docs");
+        let rendered = render_documented_provider_capability_matrix_markdown();
+        let actual = extract_marked_section(
+            &config,
+            "<!-- BEGIN_PROVIDER_CAPABILITY_MATRIX -->",
+            "<!-- END_PROVIDER_CAPABILITY_MATRIX -->",
+        )
+        .expect("capability matrix markers");
+
+        assert_eq!(actual.trim(), rendered.trim());
+    }
+
+    #[test]
     fn inception_provider_metadata_is_registered() {
         assert_eq!(ModelProvider::Inception.name(), "inception");
         assert_eq!(ModelProvider::Inception.display_name(), "Inception");
@@ -1065,5 +1317,16 @@ mod tests {
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Inception && model.model_id == "mercury-2"
         }));
+    }
+
+    fn extract_marked_section<'a>(
+        content: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+    ) -> Option<&'a str> {
+        let start = content.find(start_marker)?;
+        let remainder = &content[start + start_marker.len()..];
+        let end = remainder.find(end_marker)?;
+        Some(remainder[..end].trim())
     }
 }
