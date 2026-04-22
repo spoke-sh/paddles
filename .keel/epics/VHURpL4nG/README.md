@@ -22,10 +22,10 @@ mission: VHURpKWnF
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 voyages complete, 8/9 stories done
+**Progress:** 3/3 voyages complete, 9/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Canonical Render Truth And Projection Convergence](voyages/VHUS4nctz/) | done | 3/3 |
 | [Single Recursive Control Plane](voyages/VHUS5RqZf/) | done | 3/3 |
-| [Chamber Services And Read-Model Boundaries](voyages/VHUS6H0Kd/) | in-progress | 2/3 |
+| [Chamber Services And Read-Model Boundaries](voyages/VHUS6H0Kd/) | done | 3/3 |
 <!-- END GENERATED -->

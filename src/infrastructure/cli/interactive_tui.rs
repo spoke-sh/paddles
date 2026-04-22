@@ -4,13 +4,15 @@ use crate::application::{
 };
 use crate::domain::model::render::uses_compact_block_separator;
 use crate::domain::model::{
-    RenderBlock, RenderDocument, RuntimeEventPresentation, RuntimeItem, ThreadCandidate, TurnEvent,
-    TurnEventSink, project_runtime_event_for_tui,
+    RenderBlock, RenderDocument, RuntimeItem, ThreadCandidate, TurnEvent, TurnEventSink,
 };
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::runtime_preferences::{
     RuntimeLanePreferenceStore, RuntimeLanePreferences,
+};
+use crate::infrastructure::runtime_presentation::{
+    RuntimeEventPresentation, project_runtime_event_for_tui,
 };
 use crate::infrastructure::step_timing::{Pace, StepTimingReservoir};
 use anyhow::Result;

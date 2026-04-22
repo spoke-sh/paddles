@@ -7,10 +7,13 @@ use crate::application::{
 };
 use crate::domain::model::{
     ExecutionHandDiagnostic, NativeTransportConfigurations, NativeTransportDiagnostic,
-    NativeTransportKind, NativeTransportSessionIdentity, RuntimeEventPresentation, RuntimeItem,
-    TaskTraceId, TurnEvent, TurnEventSink, TurnTraceId, project_runtime_event,
+    NativeTransportKind, NativeTransportSessionIdentity, RuntimeItem, TaskTraceId, TurnEvent,
+    TurnEventSink, TurnTraceId,
 };
 use crate::domain::ports::TraceRecorder;
+use crate::infrastructure::runtime_presentation::{
+    RuntimeEventPresentation, project_runtime_event,
+};
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use axum::Router;
 use axum::body::Bytes;

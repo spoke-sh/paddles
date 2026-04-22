@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VHUS6H0Kd
-status: in-progress
+status: done
 epic: VHURpL4nG
 created_at: 2026-04-21T21:19:08
 # authored
@@ -22,16 +22,18 @@ started_at: 2026-04-21T22:35:24
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Extract Chamber-Aligned Turn Services From MechSuitService](../../../../stories/VHUSCJwQG/README.md) | refactor | done |
 | [Move Conversation Projections Into An Application Read Model](../../../../stories/VHUSCtMpx/README.md) | refactor | done |
-| [Move Runtime Event Presentation Out Of The Domain Model](../../../../stories/VHUSDTFaN/README.md) | refactor | backlog |
+| [Move Runtime Event Presentation Out Of The Domain Model](../../../../stories/VHUSDTFaN/README.md) | refactor | done |
 <!-- END GENERATED -->

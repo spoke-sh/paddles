@@ -14,7 +14,6 @@ pub mod instructions;
 pub mod interpretation;
 pub mod native_transport;
 pub mod render;
-pub mod runtime_events;
 pub mod threading;
 pub mod traces;
 pub mod turns;
@@ -100,9 +99,6 @@ pub use paddles_conversation::{
     TurnTraceId,
 };
 pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
-pub use runtime_events::{
-    RuntimeEventPresentation, project_runtime_event, project_runtime_event_for_tui,
-};
 pub use threading::ConversationReplayView;
 pub use traces::{
     SteeringGateKind, SteeringGatePhase, TraceBranch, TraceBranchStatus, TraceCheckpointKind,

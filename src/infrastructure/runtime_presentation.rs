@@ -1,4 +1,4 @@
-use super::{
+use crate::domain::model::{
     AppliedEdit, CollaborationModeResult, ExecutionGovernanceDecision, PlanChecklistItem,
     StructuredClarificationResult, TurnEvent,
 };

@@ -1,0 +1,10 @@
+    Blocking waiting for file lock on package cache
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.89s
+     Running tests/runtime_presentation_boundary.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/runtime_presentation_boundary-ca82943fd8d33448)
+
+running 1 test
+test runtime_event_presentation_is_available_outside_the_domain_boundary ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
