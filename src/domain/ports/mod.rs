@@ -8,6 +8,7 @@ mod planning;
 mod specialist_brains;
 mod synthesis;
 mod trace_recording;
+mod workspace_action_execution;
 mod workspace_editing;
 
 use async_trait::async_trait;
@@ -48,6 +49,7 @@ pub use trace_recording::{
     TraceSessionCheckpointCursor, TraceSessionContextQuery, TraceSessionContextSlice,
     TraceSessionWake,
 };
+pub use workspace_action_execution::{WorkspaceActionExecutionFrame, WorkspaceActionExecutor};
 pub use workspace_editing::WorkspaceEditor;
 
 /// Port for model discovery and acquisition.

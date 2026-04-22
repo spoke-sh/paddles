@@ -618,7 +618,7 @@ fn extract_diff_paths(diff: &str) -> Vec<String> {
     paths
 }
 
-fn resolve_workspace_path(
+pub(crate) fn resolve_workspace_path(
     workspace_root: &Path,
     requested: &str,
     allow_missing: bool,
@@ -701,7 +701,7 @@ fn ensure_authored_workspace_path(
     Ok(())
 }
 
-fn relative_path(workspace_root: &Path, path: &Path) -> String {
+pub(crate) fn relative_path(workspace_root: &Path, path: &Path) -> String {
     path.strip_prefix(workspace_root)
         .unwrap_or(path)
         .display()

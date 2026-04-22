@@ -1,4 +1,5 @@
 use crate::infrastructure::adapters::TransitContextResolver;
+use crate::infrastructure::adapters::local_workspace_action_executor::LocalWorkspaceActionExecutor;
 use crate::infrastructure::adapters::trace_recorders::{
     TransitTraceRecorder, default_trace_recorder_for_workspace,
 };
@@ -62,6 +63,7 @@ use crate::domain::ports::{
     RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
     SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest,
     TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
+    WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
 };
 use anyhow::Result;
 use clap::ValueEnum;
@@ -116,6 +118,7 @@ pub struct MechSuitService {
     shared_session_id: Mutex<Option<String>>,
     conversation_history_store: Mutex<Option<Arc<ConversationHistoryStore>>>,
     execution_hand_registry: Mutex<Arc<ExecutionHandRegistry>>,
+    workspace_action_executor: Mutex<Arc<dyn WorkspaceActionExecutor>>,
     external_capability_broker: Mutex<Arc<dyn ExternalCapabilityBroker>>,
     native_transport_registry: Mutex<Arc<NativeTransportRegistry>>,
     specialist_brain_registry: Mutex<Arc<SpecialistBrainRegistry>>,
@@ -308,7 +311,6 @@ impl Drop for ActiveTurnGuard {
 struct PlannerLoopContext {
     prepared: PreparedRuntimeLanes,
     planner_engine: Arc<dyn RecursivePlanner>,
-    synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
     resolver: Arc<dyn ContextResolver>,
     entity_resolver: Arc<dyn EntityResolver>,
@@ -2225,8 +2227,15 @@ impl MechSuitService {
         gatherer_factory: Box<GathererFactory>,
         trace_recorder: Arc<dyn TraceRecorder>,
     ) -> Self {
+        let workspace_root = workspace_root.into();
+        let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+        let workspace_action_executor: Arc<dyn WorkspaceActionExecutor> =
+            Arc::new(LocalWorkspaceActionExecutor::with_execution_hand_registry(
+                workspace_root.clone(),
+                Arc::clone(&execution_hand_registry),
+            ));
         Self {
-            workspace_root: workspace_root.into(),
+            workspace_root,
             registry,
             operator_memory,
             synthesizer_factory,
@@ -2244,7 +2253,8 @@ impl MechSuitService {
             sessions: Mutex::new(HashMap::new()),
             shared_session_id: Mutex::new(None),
             conversation_history_store: Mutex::new(None),
-            execution_hand_registry: Mutex::new(Arc::new(ExecutionHandRegistry::default())),
+            execution_hand_registry: Mutex::new(execution_hand_registry),
+            workspace_action_executor: Mutex::new(workspace_action_executor),
             external_capability_broker: Mutex::new(Arc::new(
                 NoopExternalCapabilityBroker::default(),
             )),
@@ -2290,6 +2300,22 @@ impl MechSuitService {
 
     pub fn execution_hand_diagnostics(&self) -> Vec<ExecutionHandDiagnostic> {
         self.execution_hand_registry().diagnostics()
+    }
+
+    pub fn set_workspace_action_executor(&self, executor: Arc<dyn WorkspaceActionExecutor>) {
+        *self
+            .workspace_action_executor
+            .lock()
+            .expect("workspace action executor lock") = executor;
+    }
+
+    pub fn workspace_action_executor(&self) -> Arc<dyn WorkspaceActionExecutor> {
+        Arc::clone(
+            &self
+                .workspace_action_executor
+                .lock()
+                .expect("workspace action executor lock"),
+        )
     }
 
     pub fn set_external_capability_broker(&self, broker: Arc<dyn ExternalCapabilityBroker>) {
@@ -3231,7 +3257,6 @@ impl MechSuitService {
                         PlannerLoopContext {
                             prepared: prepared.clone(),
                             planner_engine,
-                            synthesizer_engine: Arc::clone(&synthesizer_engine),
                             gatherer,
                             resolver,
                             entity_resolver: Arc::clone(&self.entity_resolver),
@@ -4203,7 +4228,13 @@ impl MechSuitService {
                                     tool_name: action.label().to_string(),
                                     invocation: action.describe(),
                                 });
-                                match context.synthesizer_engine.execute_workspace_action(action) {
+                                match self.workspace_action_executor().execute_workspace_action(
+                                    action,
+                                    WorkspaceActionExecutionFrame {
+                                        call_id: &call_id,
+                                        event_sink: trace.as_ref(),
+                                    },
+                                ) {
                                     Ok(result) => {
                                         if let (
                                             Some(governance_request),
@@ -8683,7 +8714,7 @@ mod tests {
         PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision,
         RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
         SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
-        WorkspaceAction,
+        WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -8729,6 +8760,13 @@ mod tests {
             Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
             recorder,
         )
+    }
+
+    fn bind_workspace_action_executor<T>(service: &MechSuitService, executor: Arc<T>)
+    where
+        T: WorkspaceActionExecutor + 'static,
+    {
+        service.set_workspace_action_executor(executor);
     }
 
     #[test]
@@ -9320,6 +9358,16 @@ mod tests {
         }
     }
 
+    impl WorkspaceActionExecutor for RecordingSynthesizer {
+        fn execute_workspace_action(
+            &self,
+            action: &WorkspaceAction,
+            _frame: WorkspaceActionExecutionFrame<'_>,
+        ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+            SynthesizerEngine::execute_workspace_action(self, action)
+        }
+    }
+
     fn mock_applied_edit_for_action(
         action: &WorkspaceAction,
     ) -> Option<crate::domain::model::AppliedEdit> {
@@ -9400,7 +9448,6 @@ mod tests {
                 Vec::new(),
                 Arc::new(Mutex::new(Vec::new())),
             )),
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
             gatherer: None,
             resolver: Arc::new(NoopContextResolver),
             entity_resolver: Arc::new(WorkspaceEntityResolver::new()),
@@ -11981,9 +12028,10 @@ mod tests {
             ],
             recorded_requests.clone(),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(RecordingSynthesizer::default());
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
+        bind_workspace_action_executor(&service, synthesizer.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -11991,7 +12039,7 @@ mod tests {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
                 planner_engine: planner,
-                synthesizer_engine: synthesizer,
+                synthesizer_engine: synthesizer as Arc<dyn SynthesizerEngine>,
                 gatherer: None,
             });
             service
@@ -13386,6 +13434,7 @@ mod tests {
             ),
         });
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
@@ -13523,6 +13572,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
@@ -13688,6 +13738,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
@@ -13851,6 +13902,7 @@ mod tests {
             ),
         });
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
@@ -14093,12 +14145,12 @@ mod tests {
             ],
             explanation: "two authored files remained tied".to_string(),
         };
-        let mut context = test_planner_loop_context(InitialEditInstruction {
+        let context = test_planner_loop_context(InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["src/application/mod.rs".to_string()],
             resolution: Some(resolution.clone()),
         });
-        context.synthesizer_engine = synthesizer.clone();
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
@@ -14238,6 +14290,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -14523,6 +14576,16 @@ mod tests {
             }
         }
 
+        impl WorkspaceActionExecutor for GovernedWriteSynthesizer {
+            fn execute_workspace_action(
+                &self,
+                action: &WorkspaceAction,
+                _frame: WorkspaceActionExecutionFrame<'_>,
+            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+                SynthesizerEngine::execute_workspace_action(self, action)
+            }
+        }
+
         let workspace = tempfile::tempdir().expect("workspace");
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
@@ -14562,6 +14625,8 @@ mod tests {
         ));
         let synthesizer = Arc::new(GovernedWriteSynthesizer);
         let service = test_service(workspace.path());
+        service
+            .set_workspace_action_executor(synthesizer.clone() as Arc<dyn WorkspaceActionExecutor>);
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -14586,6 +14651,133 @@ mod tests {
                     && decision.request.hand == ExecutionHandKind::WorkspaceEditor
                     && decision.outcome.kind == ExecutionGovernanceOutcomeKind::Allowed
         )));
+    }
+
+    #[test]
+    fn planner_workspace_actions_route_through_application_owned_executor_boundary() {
+        #[derive(Default)]
+        struct PanicOnWorkspaceActionSynthesizer;
+
+        impl SynthesizerEngine for PanicOnWorkspaceActionSynthesizer {
+            fn set_verbose(&self, _level: u8) {}
+
+            fn respond_for_turn(
+                &self,
+                _prompt: &str,
+                _turn_intent: TurnIntent,
+                _gathered_evidence: Option<&EvidenceBundle>,
+                _handoff: &SynthesisHandoff,
+                _event_sink: Arc<dyn TurnEventSink>,
+            ) -> Result<String> {
+                Ok("executor boundary preserved".to_string())
+            }
+
+            fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+
+            fn execute_workspace_action(
+                &self,
+                action: &WorkspaceAction,
+            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+                panic!(
+                    "synthesizer should not execute planner workspace action: {}",
+                    action.label()
+                );
+            }
+        }
+
+        #[derive(Default)]
+        struct RecordingWorkspaceActionExecutor {
+            actions: Mutex<Vec<WorkspaceAction>>,
+        }
+
+        impl WorkspaceActionExecutor for RecordingWorkspaceActionExecutor {
+            fn execute_workspace_action(
+                &self,
+                action: &WorkspaceAction,
+                _frame: WorkspaceActionExecutionFrame<'_>,
+            ) -> Result<crate::domain::ports::WorkspaceActionResult> {
+                self.actions
+                    .lock()
+                    .expect("workspace action executor actions lock")
+                    .push(action.clone());
+                Ok(crate::domain::ports::WorkspaceActionResult {
+                    name: action.label().to_string(),
+                    summary: format!("executed {}", action.summary()),
+                    applied_edit: None,
+                    governance_request: None,
+                    governance_outcome: None,
+                })
+            }
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "README.md".to_string(),
+                    },
+                },
+                "read the workspace artifact before answering",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "workspace read was enough".to_string(),
+                },
+                rationale: "stop after the bounded action".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(PanicOnWorkspaceActionSynthesizer);
+        let executor = Arc::new(RecordingWorkspaceActionExecutor::default());
+        let service = test_service(workspace.path());
+        service.set_workspace_action_executor(executor.clone() as Arc<dyn WorkspaceActionExecutor>);
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt("read the repo state first")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "executor boundary preserved");
+        assert_eq!(
+            executor
+                .actions
+                .lock()
+                .expect("workspace action executor actions lock")
+                .as_slice(),
+            [WorkspaceAction::Read {
+                path: "README.md".to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -14703,6 +14895,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -14766,6 +14959,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -14836,6 +15030,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -14900,6 +15095,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15006,6 +15202,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15144,6 +15341,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15324,6 +15522,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15460,6 +15659,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15564,6 +15764,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15728,6 +15929,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {
@@ -15947,6 +16149,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -16273,6 +16476,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
         let session = service.shared_conversation_session();
 
@@ -16371,6 +16575,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
         let session = service.shared_conversation_session();
 
@@ -16651,6 +16856,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let reply = runtime.block_on(async {

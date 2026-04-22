@@ -1,5 +1,6 @@
 pub mod agent_memory;
 pub mod http_provider;
+pub(crate) mod local_workspace_action_executor;
 pub(crate) mod local_workspace_editor;
 
 pub mod context1_gatherer;
