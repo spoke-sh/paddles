@@ -1,0 +1,20 @@
+---
+# system-managed
+id: VHURpKWnF
+status: active
+created_at: 2026-04-21T21:18:03
+updated_at: 2026-04-21T21:22:56
+# authored
+title: Stabilize Stream Rendering And Recursive Loop Architecture
+watch: ~
+activated_at: 2026-04-21T21:22:56
+---
+
+# Stabilize Stream Rendering And Recursive Loop Architecture
+
+## Documents
+
+| Document | Description |
+|----------|-------------|
+| [CHARTER.md](CHARTER.md) | Mission goals, constraints, and halting rules |
+| [LOG.md](LOG.md) | Decision journal and session digest |

@@ -365,6 +365,14 @@
 |--------|--------|
 | [Establish A Replayable Multi-Agent Delegation Substrate](epics/VGb1c2DBj/voyages/VGdaQAncW/) | done |
 
+### [Coherent Rendering And Recursive Harness Boundaries](epics/VHURpL4nG/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Canonical Render Truth And Projection Convergence](epics/VHURpL4nG/voyages/VHUS4nctz/) | in-progress |
+| [Single Recursive Control Plane](epics/VHURpL4nG/voyages/VHUS5RqZf/) | planned |
+| [Chamber Services And Read-Model Boundaries](epics/VHURpL4nG/voyages/VHUS6H0Kd/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
