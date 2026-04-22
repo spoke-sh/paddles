@@ -1,4 +1,5 @@
 mod conversation_read_model;
+mod deliberation;
 mod interpretation_chamber;
 pub mod read_model;
 mod recursive_control;
@@ -6,6 +7,10 @@ mod synthesis_chamber;
 mod turn_orchestration;
 
 use self::conversation_read_model::ConversationReadModelChamber;
+pub use self::deliberation::{
+    DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
+    extract_deliberation_signals,
+};
 use self::interpretation_chamber::InterpretationChamber;
 pub use self::read_model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
