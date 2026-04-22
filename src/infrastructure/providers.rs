@@ -49,10 +49,30 @@ pub enum DeliberationSupport {
     Unsupported,
 }
 
+impl DeliberationSupport {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NativeContinuation => "native_continuation",
+            Self::SummaryOnly => "summary_only",
+            Self::ToggleOnly => "toggle_only",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliberationStateContract {
     OpaqueRoundTrip,
     None,
+}
+
+impl DeliberationStateContract {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OpaqueRoundTrip => "opaque_round_trip",
+            Self::None => "none",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

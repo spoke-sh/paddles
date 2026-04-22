@@ -37,6 +37,7 @@ const MAX_RETRIES: u32 = 3;
 const RETRY_BASE_DELAY_MS: u64 = 2000;
 const OPENAI_PLANNER_TOOL_NAME: &str = "select_planner_action";
 const OPENAI_MAX_COMPLETION_TOKENS: u32 = 4096;
+const MAX_PROVIDER_DELIBERATION_ARTIFACT_CHARS: usize = 400;
 
 #[derive(Clone)]
 struct ExchangeCapture<'a> {
@@ -483,6 +484,87 @@ impl HttpProviderAdapter {
         ))
     }
 
+    fn record_provider_deliberation_artifact(
+        &self,
+        capture: Option<&ExchangeCapture<'_>>,
+        deliberation_state: Option<&DeliberationState>,
+        parent_artifact_id: Option<TraceArtifactId>,
+    ) -> Option<TraceArtifactId> {
+        let capture = capture?;
+        let deliberation_state = deliberation_state?;
+        if deliberation_state.provider() != ModelProvider::Moonshot {
+            return None;
+        }
+        let assistant = deliberation_state.payload().get("assistant")?;
+        let reasoning_content = assistant.get("reasoning_content")?.as_str()?;
+        let tool_calls = assistant
+            .get("tool_calls")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let tool_call_ids = tool_calls
+            .iter()
+            .filter_map(|tool_call| tool_call.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        let tool_names = tool_calls
+            .iter()
+            .filter_map(|tool_call| {
+                tool_call
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+            })
+            .collect::<Vec<_>>();
+        let truncated =
+            reasoning_content.chars().count() > MAX_PROVIDER_DELIBERATION_ARTIFACT_CHARS;
+        let mut labels = BTreeMap::new();
+        labels.insert("scope".to_string(), "debug".to_string());
+        labels.insert("artifact_class".to_string(), "deliberation".to_string());
+        labels.insert(
+            "state_contract".to_string(),
+            self.capabilities
+                .deliberation
+                .state_contract
+                .label()
+                .to_string(),
+        );
+        labels.insert(
+            "support".to_string(),
+            self.capabilities.deliberation.support.label().to_string(),
+        );
+        labels.insert(
+            "runtime_model_id".to_string(),
+            deliberation_state.runtime_model_id().to_string(),
+        );
+        self.record_exchange_artifact(
+            capture,
+            ExchangeArtifactRecord {
+                phase: TraceModelExchangePhase::RawProviderResponse,
+                summary: format!(
+                    "{} {} provider deliberation",
+                    capture.lane.label(),
+                    capture.category.label()
+                ),
+                content: json!({
+                    "kind": "provider_deliberation",
+                    "provider": deliberation_state.provider().name(),
+                    "runtime_model_id": deliberation_state.runtime_model_id(),
+                    "reasoning_excerpt": truncate(
+                        reasoning_content,
+                        MAX_PROVIDER_DELIBERATION_ARTIFACT_CHARS,
+                    ),
+                    "tool_call_ids": tool_call_ids,
+                    "tool_names": tool_names,
+                    "truncated": truncated,
+                })
+                .to_string(),
+                mime_type: "application/json".to_string(),
+                parent_artifact_id,
+                labels,
+            },
+        )
+    }
+
     fn provider_label(&self) -> &'static str {
         match self.provider_name.as_str() {
             "openai" => "openai",
@@ -671,7 +753,7 @@ impl HttpProviderAdapter {
                     ("Content-Type".to_string(), "application/json".to_string()),
                 ],
                 &body,
-                capture,
+                capture.clone(),
                 assembled_context_id,
             )
             .await?;
@@ -686,10 +768,16 @@ impl HttpProviderAdapter {
         if content.is_empty() && message.tool_calls.is_none() {
             return Err(anyhow!("empty OpenAI response"));
         }
+        let deliberation_state = self.capture_openai_deliberation_state(message);
+        self.record_provider_deliberation_artifact(
+            capture.as_ref(),
+            deliberation_state.as_ref(),
+            raw_response_artifact_id.clone(),
+        );
         Ok(ProviderTurnResponse {
             content,
             raw_response_artifact_id,
-            deliberation_state: self.capture_openai_deliberation_state(message),
+            deliberation_state,
         })
     }
 
@@ -2939,9 +3027,9 @@ mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
     use crate::application::{MechSuitService, RuntimeLaneConfig};
     use crate::domain::model::{
-        ExternalCapabilityInvocation, NullTurnEventSink, TraceModelExchangeCategory,
-        TraceModelExchangeLane, TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink,
-        TurnIntent,
+        ExternalCapabilityInvocation, ForensicArtifactCapture, ForensicTraceSink,
+        NullTurnEventSink, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
+        TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
@@ -2998,6 +3086,47 @@ mod tests {
     impl TurnEventSink for RecordingTurnEventSink {
         fn emit(&self, event: TurnEvent) {
             self.events.lock().expect("event lock").push(event);
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingForensicSink {
+        captures: Mutex<Vec<ForensicArtifactCapture>>,
+    }
+
+    impl RecordingForensicSink {
+        fn captures(&self) -> Vec<ForensicArtifactCapture> {
+            self.captures.lock().expect("captures lock").clone()
+        }
+    }
+
+    impl TurnEventSink for RecordingForensicSink {
+        fn emit(&self, _event: TurnEvent) {}
+
+        fn forensic_trace_sink(&self) -> Option<&dyn ForensicTraceSink> {
+            Some(self)
+        }
+    }
+
+    impl ForensicTraceSink for RecordingForensicSink {
+        fn allocate_model_exchange_id(
+            &self,
+            _lane: TraceModelExchangeLane,
+            _category: TraceModelExchangeCategory,
+        ) -> String {
+            let next = self.captures.lock().expect("captures lock").len() + 1;
+            format!("exchange-{next:04}")
+        }
+
+        fn record_forensic_artifact(
+            &self,
+            capture: ForensicArtifactCapture,
+        ) -> Option<TraceArtifactId> {
+            let mut captures = self.captures.lock().expect("captures lock");
+            let artifact_id =
+                TraceArtifactId::new(format!("capture-{:04}", captures.len() + 1)).expect("id");
+            captures.push(capture);
+            Some(artifact_id)
         }
     }
 
@@ -4594,6 +4723,128 @@ mod tests {
             requests[1].body["messages"][3]["content"],
             json!("stream 'paddles.task.task-000001.root' already exists")
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn moonshot_reasoning_artifacts_record_on_forensic_debug_path_only() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let reasoning_content = "trace-recorder fallback evidence ".repeat(24);
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: moonshot_reasoning_tool_call_response(
+                &reasoning_content,
+                "search",
+                r#"{"query":"trace recorder fallback"}"#,
+            ),
+        }])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "moonshot",
+            "kimi-k2.6",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::PromptEnvelope,
+        );
+        let sink = RecordingForensicSink::default();
+
+        let response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: Some(super::ExchangeCapture {
+                    event_sink: &sink,
+                    exchange_id: "exchange-0001".to_string(),
+                    lane: TraceModelExchangeLane::Synthesizer,
+                    category: TraceModelExchangeCategory::TurnResponse,
+                }),
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("moonshot tool response");
+
+        assert!(response.content.is_empty());
+        assert!(!response.content.contains(&reasoning_content));
+
+        let captures = sink.captures();
+        let deliberation = captures
+            .iter()
+            .find(|capture| {
+                capture.labels.get("artifact_class").map(String::as_str) == Some("deliberation")
+            })
+            .expect("deliberation artifact");
+        let payload: Value =
+            serde_json::from_str(&deliberation.content).expect("deliberation artifact json");
+
+        assert_eq!(deliberation.mime_type, "application/json");
+        assert_eq!(
+            deliberation.labels.get("scope").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(payload["kind"].as_str(), Some("provider_deliberation"));
+        assert_eq!(payload["provider"].as_str(), Some("moonshot"));
+        assert_eq!(payload["runtime_model_id"].as_str(), Some("kimi-k2.6"));
+        assert_eq!(payload["tool_call_ids"][0].as_str(), Some("call_test"));
+        assert_eq!(payload["tool_names"][0].as_str(), Some("search"));
+        assert_eq!(payload["truncated"].as_bool(), Some(true));
+        let excerpt = payload["reasoning_excerpt"]
+            .as_str()
+            .expect("reasoning excerpt");
+        assert!(excerpt.len() < reasoning_content.len());
+        assert_eq!(
+            excerpt,
+            super::truncate(
+                &reasoning_content,
+                super::MAX_PROVIDER_DELIBERATION_ARTIFACT_CHARS,
+            )
+        );
+        assert!(captures.iter().all(|capture| {
+            capture.phase != TraceModelExchangePhase::RenderedResponse
+                || !capture.content.contains(&reasoning_content)
+        }));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_toggle_only_models_do_not_emit_deliberation_artifacts() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![MockResponse {
+            status: StatusCode::OK,
+            body: provider_response(ApiFormat::OpenAi, "Plain response."),
+        }])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "openai",
+            "gpt-5.4",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::PromptEnvelope,
+        );
+        let sink = RecordingForensicSink::default();
+
+        let response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "User prompt",
+                capture: Some(super::ExchangeCapture {
+                    event_sink: &sink,
+                    exchange_id: "exchange-0002".to_string(),
+                    lane: TraceModelExchangeLane::Synthesizer,
+                    category: TraceModelExchangeCategory::TurnResponse,
+                }),
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("openai plain response");
+
+        assert_eq!(response.content, "Plain response.");
+        assert!(sink.captures().iter().all(|capture| {
+            capture.labels.get("artifact_class").map(String::as_str) != Some("deliberation")
+        }));
     }
 
     #[test]

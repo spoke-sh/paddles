@@ -377,7 +377,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Deliberation Substrate And Continuation Contracts](epics/VHXJWQaFC/voyages/VHXJipEBj/) | in-progress |
+| [Deliberation Substrate And Continuation Contracts](epics/VHXJWQaFC/voyages/VHXJipEBj/) | done |
 | [Cross-Provider Deliberation Rollout And Verification](epics/VHXJWQaFC/voyages/VHXJipyBc/) | planned |
 | [Normalized Deliberation Signals And Rationale Compilation](epics/VHXJWQaFC/voyages/VHXJiqMD1/) | planned |
 
