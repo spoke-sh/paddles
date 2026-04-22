@@ -156,11 +156,11 @@ pub fn default_runtime_lane_preference_path() -> PathBuf {
 
 fn normalize_machine_managed_model_alias(
     provider: &Option<String>,
-    model: &mut Option<String>,
+    _model: &mut Option<String>,
 ) -> bool {
-    let Some(model) = model.as_mut() else {
+    if provider.is_none() {
         return false;
-    };
+    }
 
     if !matches!(
         provider.as_deref().and_then(ModelProvider::from_name),
@@ -169,15 +169,7 @@ fn normalize_machine_managed_model_alias(
         return false;
     }
 
-    let normalized = match model.as_str() {
-        "gpt-5.4-pro" => "gpt-5.4",
-        "gpt-5-pro" => "gpt-5",
-        "gpt-5.2-pro" => "gpt-5.2",
-        _ => return false,
-    };
-
-    *model = normalized.to_string();
-    true
+    false
 }
 
 #[cfg(test)]
@@ -239,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_lane_preference_store_migrates_openai_responses_only_models_to_chat_models() {
+    fn runtime_lane_preference_store_preserves_openai_responses_only_models() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("state/runtime-lanes.toml");
         let store = RuntimeLanePreferenceStore::with_path(&path);
@@ -261,12 +253,14 @@ planner_model = "gpt-5.2-pro"
             .expect("stored preferences");
 
         assert_eq!(loaded.provider.as_deref(), Some("openai"));
-        assert_eq!(loaded.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(loaded.model.as_deref(), Some("gpt-5.4-pro"));
         assert!(loaded.planner_provider.is_none());
         assert!(loaded.planner_model.is_none());
         assert_eq!(
             std::fs::read_to_string(&path).expect("read normalized runtime preferences"),
-            "provider = \"openai\"\nmodel = \"gpt-5.4\"\n"
+            r#"provider = "openai"
+model = "gpt-5.4-pro"
+"#
         );
     }
 

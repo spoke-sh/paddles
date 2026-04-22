@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VHXJipyBc
-status: planned
+status: in-progress
 epic: VHXJWQaFC
 created_at: 2026-04-22T09:04:40
 # authored
 title: Cross-Provider Deliberation Rollout And Verification
 index: 2
 updated_at: 2026-04-22T09:14:06
+started_at: 2026-04-22T09:42:05
 ---
 
 # Cross-Provider Deliberation Rollout And Verification
@@ -26,11 +27,11 @@ updated_at: 2026-04-22T09:14:06
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Complete Native Continuation Paths For OpenAI Anthropic And Gemini](../../../../stories/VHXK92JZH/README.md) | feat | backlog |
+| [Complete Native Continuation Paths For OpenAI Anthropic And Gemini](../../../../stories/VHXK92JZH/README.md) | feat | done |
 | [Add Limited Or No-Op Deliberation Modes For Inception Ollama And Sift](../../../../stories/VHXK92haY/README.md) | feat | backlog |
 | [Publish Provider Capability Matrix Tests And Operator Docs](../../../../stories/VHXK942dC/README.md) | feat | backlog |
 | [Expose Thinking Modes Across Supported Providers](../../../../stories/VHXLSDBjB/README.md) | feat | backlog |

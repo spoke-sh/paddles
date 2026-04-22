@@ -708,12 +708,9 @@ mod tests {
     use paddles::infrastructure::providers::ModelProvider;
 
     #[test]
-    fn remote_provider_transport_rejects_openai_responses_only_models() {
-        let error = ensure_remote_provider_transport_support(ModelProvider::Openai, "gpt-5.4-pro")
-            .expect_err("responses-only OpenAI model should be rejected");
-
-        assert!(error.to_string().contains("Responses API only"));
-        assert!(error.to_string().contains("openai:gpt-5.4"));
+    fn remote_provider_transport_allows_openai_responses_models() {
+        ensure_remote_provider_transport_support(ModelProvider::Openai, "gpt-5.4-pro")
+            .expect("responses-capable OpenAI model should be allowed");
     }
 
     #[test]

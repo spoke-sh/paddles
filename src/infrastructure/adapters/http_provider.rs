@@ -100,6 +100,34 @@ impl ProviderToolResult {
         message.insert("content".to_string(), self.content.clone());
         Value::Object(message)
     }
+
+    fn as_openai_responses_item(&self) -> Value {
+        json!({
+            "type": "function_call_output",
+            "call_id": self.tool_call_id,
+            "output": self.content,
+        })
+    }
+
+    fn as_anthropic_tool_result_block(&self) -> Value {
+        let mut block = serde_json::Map::new();
+        block.insert("type".to_string(), Value::String("tool_result".to_string()));
+        block.insert(
+            "tool_use_id".to_string(),
+            Value::String(self.tool_call_id.clone()),
+        );
+        block.insert("content".to_string(), self.content.clone());
+        Value::Object(block)
+    }
+
+    fn as_gemini_function_response_part(&self) -> Value {
+        json!({
+            "functionResponse": {
+                "name": self.name.clone().unwrap_or_else(|| "tool".to_string()),
+                "response": self.content,
+            }
+        })
+    }
 }
 
 struct ProviderTurnResponse {
@@ -294,22 +322,24 @@ impl HttpProviderAdapter {
                 .await?
             }
             ApiFormat::Anthropic => {
-                let (content, raw_response_artifact_id) =
-                    self.send_anthropic(system, user, capture).await?;
-                ProviderTurnResponse {
-                    content,
-                    raw_response_artifact_id,
-                    deliberation_state: None,
-                }
+                self.send_anthropic(
+                    system,
+                    user,
+                    capture,
+                    deliberation_state.as_ref(),
+                    &tool_results,
+                )
+                .await?
             }
             ApiFormat::Gemini => {
-                let (content, raw_response_artifact_id) =
-                    self.send_gemini(system, user, capture).await?;
-                ProviderTurnResponse {
-                    content,
-                    raw_response_artifact_id,
-                    deliberation_state: None,
-                }
+                self.send_gemini(
+                    system,
+                    user,
+                    capture,
+                    deliberation_state.as_ref(),
+                    &tool_results,
+                )
+                .await?
             }
         };
 
@@ -480,6 +510,131 @@ impl HttpProviderAdapter {
                     "reasoning_content": reasoning_content,
                     "tool_calls": tool_calls,
                 }
+            }),
+        ))
+    }
+
+    fn uses_openai_responses_transport(&self) -> bool {
+        self.provider_name == ModelProvider::Openai.name()
+            && self.capabilities.deliberation.support == DeliberationSupport::NativeContinuation
+    }
+
+    fn build_anthropic_messages(
+        &self,
+        user: &str,
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<Vec<Value>> {
+        let uses_interleaved_blocks = deliberation_state.is_some() || !tool_results.is_empty();
+        let initial_user_content = if uses_interleaved_blocks {
+            json!([{ "type": "text", "text": user }])
+        } else {
+            Value::String(user.to_string())
+        };
+        let mut messages = vec![json!({
+            "role": "user",
+            "content": initial_user_content,
+        })];
+        if let Some(deliberation_state) = deliberation_state {
+            let assistant = deliberation_state
+                .payload()
+                .get("assistant")
+                .cloned()
+                .ok_or_else(|| anyhow!("anthropic deliberation state missing assistant payload"))?;
+            messages.push(assistant);
+        }
+        if !tool_results.is_empty() {
+            messages.push(json!({
+                "role": "user",
+                "content": tool_results
+                    .iter()
+                    .map(ProviderToolResult::as_anthropic_tool_result_block)
+                    .collect::<Vec<_>>(),
+            }));
+        }
+        Ok(messages)
+    }
+
+    fn capture_anthropic_deliberation_state(
+        &self,
+        blocks: &[AnthropicBlock],
+    ) -> Option<DeliberationState> {
+        let has_tool_use = blocks
+            .iter()
+            .any(|block| block.kind.as_deref() == Some("tool_use"));
+        let has_thinking = blocks.iter().any(|block| {
+            matches!(
+                block.kind.as_deref(),
+                Some("thinking") | Some("redacted_thinking")
+            )
+        });
+        if !has_tool_use || !has_thinking {
+            return None;
+        }
+        Some(DeliberationState::new(
+            ModelProvider::Anthropic,
+            self.model_id.clone(),
+            json!({
+                "kind": "anthropic_messages",
+                "assistant": {
+                    "role": "assistant",
+                    "content": blocks,
+                }
+            }),
+        ))
+    }
+
+    fn build_gemini_contents(
+        &self,
+        user: &str,
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<Vec<Value>> {
+        let mut contents = vec![json!({
+            "role": "user",
+            "parts": [{ "text": user }],
+        })];
+        if let Some(deliberation_state) = deliberation_state {
+            let model_content = deliberation_state
+                .payload()
+                .get("model")
+                .cloned()
+                .ok_or_else(|| anyhow!("gemini deliberation state missing model payload"))?;
+            contents.push(model_content);
+        }
+        if !tool_results.is_empty() {
+            contents.push(json!({
+                "role": "user",
+                "parts": tool_results
+                    .iter()
+                    .map(ProviderToolResult::as_gemini_function_response_part)
+                    .collect::<Vec<_>>(),
+            }));
+        }
+        Ok(contents)
+    }
+
+    fn capture_gemini_deliberation_state(
+        &self,
+        content: &GeminiContent,
+    ) -> Option<DeliberationState> {
+        let has_function_call = content
+            .parts
+            .iter()
+            .any(|part| part.function_call.is_some());
+        let has_thought_signature = content
+            .parts
+            .iter()
+            .any(|part| part.thought_signature.is_some());
+        if !has_function_call || !has_thought_signature {
+            return None;
+        }
+        Some(DeliberationState::new(
+            ModelProvider::Google,
+            self.model_id.clone(),
+            json!({
+                "kind": "gemini_generate_content",
+                "model": content,
             }),
         ))
     }
@@ -724,6 +879,11 @@ impl HttpProviderAdapter {
         deliberation_state: Option<&DeliberationState>,
         tool_results: &[ProviderToolResult],
     ) -> Result<ProviderTurnResponse> {
+        if self.uses_openai_responses_transport() {
+            return self
+                .send_openai_responses(system, user, capture, deliberation_state, tool_results)
+                .await;
+        }
         let url = format!(
             "{}/v1/chat/completions",
             self.base_url.trim_end_matches('/')
@@ -774,6 +934,106 @@ impl HttpProviderAdapter {
             deliberation_state.as_ref(),
             raw_response_artifact_id.clone(),
         );
+        Ok(ProviderTurnResponse {
+            content,
+            raw_response_artifact_id,
+            deliberation_state,
+        })
+    }
+
+    async fn send_openai_responses(
+        &self,
+        system: &str,
+        user: &str,
+        capture: Option<ExchangeCapture<'_>>,
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<ProviderTurnResponse> {
+        let url = format!("{}/v1/responses", self.base_url.trim_end_matches('/'));
+        let mut body = json!({
+            "model": self.request_model_id(),
+            "instructions": system,
+            "store": true,
+            "max_output_tokens": OPENAI_MAX_COMPLETION_TOKENS,
+        });
+        let input = if deliberation_state.is_some() && !tool_results.is_empty() {
+            tool_results
+                .iter()
+                .map(ProviderToolResult::as_openai_responses_item)
+                .collect::<Vec<_>>()
+        } else {
+            vec![json!({
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": user,
+                    }
+                ]
+            })]
+        };
+        if let Some(object) = body.as_object_mut() {
+            object.insert("input".to_string(), Value::Array(input));
+            if let Some(previous_response_id) = deliberation_state
+                .and_then(|state| state.payload().get("previous_response_id"))
+                .and_then(Value::as_str)
+            {
+                object.insert(
+                    "previous_response_id".to_string(),
+                    Value::String(previous_response_id.to_string()),
+                );
+            }
+        }
+        self.apply_openai_responses_reasoning_effort(&mut body);
+
+        let assembled_context_id = capture
+            .as_ref()
+            .and_then(|capture| self.record_assembled_context(capture, system, user));
+        let (text, raw_response_artifact_id) = self
+            .post_json_with_capture(
+                "OpenAI",
+                &url,
+                &[
+                    (
+                        "Authorization".to_string(),
+                        format!("Bearer {}", self.api_key),
+                    ),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ],
+                &body,
+                capture,
+                assembled_context_id,
+            )
+            .await?;
+
+        let parsed: OpenAiResponsesResponse = serde_json::from_str(&text)?;
+        let has_function_call = parsed
+            .output
+            .iter()
+            .any(|item| item.kind == "function_call");
+        let content = parsed
+            .output
+            .iter()
+            .filter(|item| item.kind == "message")
+            .flat_map(|item| item.content.iter())
+            .filter(|item| item.kind == "output_text")
+            .filter_map(|item| item.text.clone())
+            .collect::<Vec<_>>()
+            .join("");
+        if content.is_empty() && !has_function_call {
+            return Err(anyhow!("empty OpenAI Responses response"));
+        }
+        let deliberation_state = has_function_call.then(|| {
+            DeliberationState::new(
+                ModelProvider::Openai,
+                self.model_id.clone(),
+                json!({
+                    "kind": "openai_responses",
+                    "previous_response_id": parsed.id,
+                }),
+            )
+        });
         Ok(ProviderTurnResponse {
             content,
             raw_response_artifact_id,
@@ -960,20 +1220,43 @@ impl HttpProviderAdapter {
         );
     }
 
+    fn apply_openai_responses_reasoning_effort(&self, body: &mut Value) {
+        let Some(provider) = ModelProvider::from_name(&self.provider_name) else {
+            return;
+        };
+        let Some(reasoning_effort) = provider.runtime_model_thinking_mode(&self.model_id) else {
+            return;
+        };
+        let Some(body_object) = body.as_object_mut() else {
+            return;
+        };
+        body_object.insert(
+            "reasoning".to_string(),
+            json!({
+                "effort": reasoning_effort,
+            }),
+        );
+    }
+
     async fn send_anthropic(
         &self,
         system: &str,
         user: &str,
         capture: Option<ExchangeCapture<'_>>,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<ProviderTurnResponse> {
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+        let messages = self.build_anthropic_messages(user, deliberation_state, tool_results)?;
         let body = serde_json::json!({
             "model": self.model_id,
             "max_tokens": 4096,
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 1024,
+            },
             "system": system,
-            "messages": [
-                { "role": "user", "content": user },
-            ],
+            "messages": messages,
         });
 
         let assembled_context_id = capture
@@ -986,6 +1269,10 @@ impl HttpProviderAdapter {
                 &[
                     ("x-api-key".to_string(), self.api_key.clone()),
                     ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                    (
+                        "anthropic-beta".to_string(),
+                        "interleaved-thinking-2025-05-14".to_string(),
+                    ),
                     ("Content-Type".to_string(), "application/json".to_string()),
                 ],
                 &body,
@@ -995,12 +1282,23 @@ impl HttpProviderAdapter {
             .await?;
 
         let parsed: AnthropicResponse = serde_json::from_str(&text)?;
+        let has_tool_use = parsed
+            .content
+            .iter()
+            .any(|block| block.kind.as_deref() == Some("tool_use"));
         let content = parsed
             .content
-            .first()
-            .and_then(|b| b.text.clone())
-            .ok_or_else(|| anyhow!("empty Anthropic response"))?;
-        Ok((content, raw_response_artifact_id))
+            .iter()
+            .find_map(|b| b.text.clone())
+            .unwrap_or_default();
+        if content.is_empty() && !has_tool_use {
+            return Err(anyhow!("empty Anthropic response"));
+        }
+        Ok(ProviderTurnResponse {
+            content,
+            raw_response_artifact_id,
+            deliberation_state: self.capture_anthropic_deliberation_state(&parsed.content),
+        })
     }
 
     async fn send_anthropic_structured_answer(
@@ -1071,16 +1369,24 @@ impl HttpProviderAdapter {
         system: &str,
         user: &str,
         capture: Option<ExchangeCapture<'_>>,
-    ) -> Result<(String, Option<TraceArtifactId>)> {
+        deliberation_state: Option<&DeliberationState>,
+        tool_results: &[ProviderToolResult],
+    ) -> Result<ProviderTurnResponse> {
         let url = format!(
             "{}/v1beta/models/{}:generateContent?key={}",
             self.base_url.trim_end_matches('/'),
             self.model_id,
             self.api_key
         );
+        let contents = self.build_gemini_contents(user, deliberation_state, tool_results)?;
         let body = serde_json::json!({
             "system_instruction": { "parts": [{ "text": system }] },
-            "contents": [{ "parts": [{ "text": user }] }],
+            "contents": contents,
+            "generationConfig": {
+                "thinkingConfig": {
+                    "includeThoughts": true,
+                }
+            }
         });
 
         let assembled_context_id = capture
@@ -1098,13 +1404,30 @@ impl HttpProviderAdapter {
             .await?;
 
         let parsed: GeminiResponse = serde_json::from_str(&text)?;
-        let content = parsed
+        let candidate = parsed
             .candidates
-            .and_then(|c| c.first().cloned())
-            .and_then(|c| c.content.parts.first().cloned())
-            .and_then(|p| p.text)
+            .and_then(|candidates| candidates.first().cloned())
             .ok_or_else(|| anyhow!("empty Gemini response"))?;
-        Ok((content, raw_response_artifact_id))
+        let has_function_call = candidate
+            .content
+            .parts
+            .iter()
+            .any(|part| part.function_call.is_some());
+        let content = candidate
+            .content
+            .parts
+            .iter()
+            .filter_map(|part| part.text.clone())
+            .collect::<Vec<_>>()
+            .join("");
+        if content.is_empty() && !has_function_call {
+            return Err(anyhow!("empty Gemini response"));
+        }
+        Ok(ProviderTurnResponse {
+            content,
+            raw_response_artifact_id,
+            deliberation_state: self.capture_gemini_deliberation_state(&candidate.content),
+        })
     }
 
     async fn send_gemini_json_schema(
@@ -1311,9 +1634,16 @@ Rules:
                     bail!("planner structured-json transport is unsupported for Anthropic format")
                 }
             },
-            PlannerToolCallCapability::PromptEnvelope => {
-                self.send_anthropic(system, user, capture).await
-            }
+            PlannerToolCallCapability::PromptEnvelope => self
+                .send_deliberating_async(ProviderTurnRequest {
+                    system,
+                    user,
+                    capture,
+                    deliberation_state: None,
+                    tool_results: Vec::new(),
+                })
+                .await
+                .map(ProviderTurnResponse::into_plain_response),
         }
     }
 
@@ -1995,6 +2325,29 @@ struct OpenAiResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+struct OpenAiResponsesResponse {
+    id: String,
+    #[serde(default)]
+    output: Vec<OpenAiResponsesOutputItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+struct OpenAiResponsesOutputItem {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    content: Vec<OpenAiResponsesContentItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+struct OpenAiResponsesContentItem {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct OpenAiChoice {
     message: OpenAiMessage,
 }
@@ -2024,40 +2377,62 @@ struct OpenAiFunctionCall {
     arguments: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct AnthropicResponse {
     content: Vec<AnthropicBlock>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct AnthropicBlock {
     #[serde(rename = "type", default)]
     kind: Option<String>,
     #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     input: Option<Value>,
+    #[serde(default)]
+    thinking: Option<String>,
+    #[serde(default)]
+    signature: Option<String>,
+    #[serde(default)]
+    data: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct GeminiResponse {
     candidates: Option<Vec<GeminiCandidate>>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct GeminiCandidate {
     content: GeminiContent,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct GeminiContent {
+    #[serde(default)]
+    role: Option<String>,
     parts: Vec<GeminiPart>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 struct GeminiPart {
+    #[serde(default)]
     text: Option<String>,
+    #[serde(default, rename = "thoughtSignature")]
+    thought_signature: Option<String>,
+    #[serde(default, rename = "functionCall")]
+    function_call: Option<GeminiFunctionCall>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+struct GeminiFunctionCall {
+    name: String,
+    args: Value,
 }
 
 #[derive(Deserialize)]
@@ -3357,6 +3732,127 @@ mod tests {
         .to_string()
     }
 
+    fn openai_responses_function_call_response(
+        response_id: &str,
+        call_id: &str,
+        name: &str,
+        arguments: &str,
+    ) -> String {
+        json!({
+            "id": response_id,
+            "output": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_test"
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_test",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": arguments
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn openai_responses_text_response(response_id: &str, text: &str) -> String {
+        json!({
+            "id": response_id,
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": text
+                        }
+                    ]
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn anthropic_thinking_tool_use_response(
+        thinking: &str,
+        signature: &str,
+        tool_use_id: &str,
+        name: &str,
+        input: Value,
+    ) -> String {
+        json!({
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": thinking,
+                    "signature": signature
+                },
+                {
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": name,
+                    "input": input
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn anthropic_text_response(text: &str) -> String {
+        json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": text
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn gemini_function_call_response(thought_signature: &str, name: &str, args: Value) -> String {
+        json!({
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "thoughtSignature": thought_signature,
+                                "functionCall": {
+                                    "name": name,
+                                    "args": args
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    fn gemini_text_response(text: &str) -> String {
+        json!({
+            "candidates": [
+                {
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "text": text
+                            }
+                        ]
+                    }
+                }
+            ]
+        })
+        .to_string()
+    }
+
     fn planner_json_answer() -> String {
         json!({
             "action": "answer",
@@ -4569,6 +5065,251 @@ mod tests {
             Some(4096)
         );
         assert!(requests[0].body.get("max_tokens").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_responses_transport_replays_previous_response_id_for_tool_results() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_responses_function_call_response(
+                    "resp_1",
+                    "call_test",
+                    "search",
+                    r#"{"query":"trace recorder fallback"}"#,
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_responses_text_response("resp_2", "Recovered final answer."),
+            },
+        ])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "openai",
+            "gpt-5.4-pro",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::PromptEnvelope,
+        );
+
+        let first_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("openai responses tool call");
+
+        assert!(first_response.content.is_empty());
+        assert_eq!(
+            first_response.deliberation_state.as_ref(),
+            Some(&DeliberationState::new(
+                ModelProvider::Openai,
+                "gpt-5.4-pro",
+                json!({
+                    "kind": "openai_responses",
+                    "previous_response_id": "resp_1"
+                })
+            ))
+        );
+
+        let second_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: first_response.deliberation_state.clone(),
+                tool_results: vec![super::ProviderToolResult::new(
+                    "call_test",
+                    json!("stream 'paddles.task.task-000001.root' already exists"),
+                )],
+            })
+            .await
+            .expect("openai responses final answer");
+
+        assert_eq!(second_response.content, "Recovered final answer.");
+        let requests = server.recorded_requests();
+        assert_eq!(requests[0].uri, "/v1/responses");
+        assert_eq!(requests[1].uri, "/v1/responses");
+        assert_eq!(
+            requests[1].body["previous_response_id"].as_str(),
+            Some("resp_1")
+        );
+        assert_eq!(
+            requests[1].body["input"][0]["type"].as_str(),
+            Some("function_call_output")
+        );
+        assert_eq!(
+            requests[1].body["input"][0]["call_id"].as_str(),
+            Some("call_test")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn anthropic_prompt_envelope_replays_thinking_blocks_with_tool_results() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: anthropic_thinking_tool_use_response(
+                    "check the trace recorder state before searching",
+                    "sig_thinking",
+                    "toolu_test",
+                    "search",
+                    json!({ "query": "trace recorder fallback" }),
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: anthropic_text_response("Recovered final answer."),
+            },
+        ])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::Anthropic,
+            RenderCapability::PromptEnvelope,
+        );
+
+        let first_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("anthropic tool response");
+
+        assert!(first_response.content.is_empty());
+
+        let second_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: first_response.deliberation_state.clone(),
+                tool_results: vec![
+                    super::ProviderToolResult::new(
+                        "toolu_test",
+                        json!("stream 'paddles.task.task-000001.root' already exists"),
+                    )
+                    .with_name("search"),
+                ],
+            })
+            .await
+            .expect("anthropic final answer");
+
+        assert_eq!(second_response.content, "Recovered final answer.");
+
+        let requests = server.recorded_requests();
+        assert_eq!(
+            requests[1].headers["anthropic-beta"],
+            "interleaved-thinking-2025-05-14"
+        );
+        assert_eq!(
+            requests[1].body["thinking"]["type"].as_str(),
+            Some("enabled")
+        );
+        assert_eq!(
+            requests[1].body["messages"][1]["role"].as_str(),
+            Some("assistant")
+        );
+        assert_eq!(
+            requests[1].body["messages"][1]["content"][0]["type"].as_str(),
+            Some("thinking")
+        );
+        assert_eq!(
+            requests[1].body["messages"][2]["content"][0]["type"].as_str(),
+            Some("tool_result")
+        );
+        assert_eq!(
+            requests[1].body["messages"][2]["content"][0]["tool_use_id"].as_str(),
+            Some("toolu_test")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gemini_prompt_envelope_replays_thought_signatures_before_function_responses() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: gemini_function_call_response(
+                    "sig_gemini",
+                    "search",
+                    json!({ "query": "trace recorder fallback" }),
+                ),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: gemini_text_response("Recovered final answer."),
+            },
+        ])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "google",
+            "gemini-2.5-flash",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::Gemini,
+            RenderCapability::PromptEnvelope,
+        );
+
+        let first_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: None,
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("gemini function call response");
+
+        assert!(first_response.content.is_empty());
+
+        let second_response = adapter
+            .send_deliberating_async(super::ProviderTurnRequest {
+                system: "System prompt",
+                user: "Why did the trace recorder fall back?",
+                capture: None,
+                deliberation_state: first_response.deliberation_state.clone(),
+                tool_results: vec![
+                    super::ProviderToolResult::new(
+                        "call_test",
+                        json!({ "status": "already_exists" }),
+                    )
+                    .with_name("search"),
+                ],
+            })
+            .await
+            .expect("gemini final answer");
+
+        assert_eq!(second_response.content, "Recovered final answer.");
+
+        let requests = server.recorded_requests();
+        assert_eq!(
+            requests[1].body["contents"][1]["parts"][0]["thoughtSignature"].as_str(),
+            Some("sig_gemini")
+        );
+        assert_eq!(
+            requests[1].body["contents"][2]["parts"][0]["functionResponse"]["name"].as_str(),
+            Some("search")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
