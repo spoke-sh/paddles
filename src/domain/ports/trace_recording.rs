@@ -20,6 +20,7 @@ pub struct TraceSessionWake {
     pub latest_sequence: Option<u64>,
     pub checkpoints: Vec<TraceSessionCheckpointCursor>,
     pub hosted_cursors: Vec<TraceSessionHostedCursor>,
+    pub hosted_materializations: Vec<TraceSessionHostedMaterialization>,
 }
 
 impl TraceSessionWake {
@@ -52,6 +53,7 @@ impl TraceSessionWake {
             latest_sequence,
             checkpoints,
             hosted_cursors: Vec::new(),
+            hosted_materializations: Vec::new(),
         }
     }
 }
@@ -62,6 +64,17 @@ pub struct TraceSessionHostedCursor {
     pub cursor_id: String,
     pub stream_id: String,
     pub position: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceSessionHostedMaterialization {
+    pub materialization_id: String,
+    pub stream_id: String,
+    pub checkpoint_offset: u64,
+    pub replay_from_offset: u64,
+    pub source_next_offset: u64,
+    pub replay_revision: u64,
+    pub produced_at: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,10 +1,15 @@
+use crate::application::ConversationProjectionSnapshot;
 use crate::domain::model::{
     TaskTraceId, TraceBranch, TraceBranchId, TraceCheckpointId, TraceRecord, TraceRecordId,
     TraceRecordKind, TraceReplay,
 };
-use crate::domain::ports::{TraceRecorder, TraceRecorderCapability, TraceSessionHostedCursor};
+use crate::domain::ports::{
+    TraceRecorder, TraceRecorderCapability, TraceSessionHostedCursor,
+    TraceSessionHostedMaterialization,
+};
 use anyhow::{Context, Result, anyhow, ensure};
 use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -16,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use transit_client::TransitClient;
 use transit_core::engine::{LocalEngine, LocalEngineConfig};
 use transit_core::kernel::{CursorId, LineageMetadata, Offset, StreamId, StreamPosition};
+use transit_core::materialization::HostedMaterializationCheckpoint;
 use transit_core::membership::NodeId;
 use transit_core::storage::LineageCheckpoint;
 
@@ -157,6 +163,22 @@ pub(crate) struct HostedTransitTaskState {
     pub(crate) branch_streams: HashMap<TraceBranchId, StreamId>,
     pub(crate) record_positions: HashMap<TraceRecordId, StreamPosition>,
     pub(crate) consumer_cursors: HashMap<String, TraceSessionHostedCursor>,
+    pub(crate) projection_materializations: HashMap<String, TraceSessionHostedMaterialization>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedProjectionMaterializationResume {
+    pub snapshot: ConversationProjectionSnapshot,
+    pub pending_records: Vec<TraceRecord>,
+    pub checkpoints: Vec<TraceSessionHostedMaterialization>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct HostedProjectionCheckpointState {
+    task_id: TaskTraceId,
+    replay_revision: u64,
+    snapshot: ConversationProjectionSnapshot,
+    stream_offsets: BTreeMap<String, u64>,
 }
 
 impl TransitTraceRecorder {
@@ -620,6 +642,283 @@ impl HostedTransitTraceRecorder {
         cursors
     }
 
+    fn projection_materialization_id(&self, task_id: &TaskTraceId) -> String {
+        format!(
+            "paddles.projection.session.{}",
+            sanitize_stream_component(task_id.as_str())
+        )
+    }
+
+    fn projection_stream_offsets(task: &HostedTransitTaskState) -> BTreeMap<String, u64> {
+        let mut offsets = BTreeMap::new();
+        for position in task.record_positions.values() {
+            offsets
+                .entry(position.stream_id.as_str().to_string())
+                .and_modify(|current: &mut u64| *current = (*current).max(position.offset.value()))
+                .or_insert(position.offset.value());
+        }
+        offsets
+    }
+
+    fn projection_materialization_state(
+        task_id: &TaskTraceId,
+        snapshot: &ConversationProjectionSnapshot,
+        task: &HostedTransitTaskState,
+    ) -> HostedProjectionCheckpointState {
+        HostedProjectionCheckpointState {
+            task_id: task_id.clone(),
+            replay_revision: snapshot.version(),
+            snapshot: snapshot.clone(),
+            stream_offsets: Self::projection_stream_offsets(task),
+        }
+    }
+
+    fn task_streams(task: &HostedTransitTaskState) -> Vec<StreamId> {
+        let mut streams = vec![task.root_stream.clone()];
+        streams.extend(task.branch_streams.values().cloned());
+        streams.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        streams
+    }
+
+    fn materialization_summary(
+        state: &HostedProjectionCheckpointState,
+        checkpoint: &HostedMaterializationCheckpoint,
+        replay_from: Offset,
+        source_next_offset: Offset,
+    ) -> TraceSessionHostedMaterialization {
+        TraceSessionHostedMaterialization {
+            materialization_id: checkpoint.materialization_id().to_string(),
+            stream_id: checkpoint.source_stream_id().as_str().to_string(),
+            checkpoint_offset: checkpoint.lineage_anchor().head_offset.value(),
+            replay_from_offset: replay_from.value(),
+            source_next_offset: source_next_offset.value(),
+            replay_revision: state.replay_revision,
+            produced_at: checkpoint.produced_at(),
+        }
+    }
+
+    fn load_projection_materializations(
+        &self,
+        task_id: &TaskTraceId,
+        root_stream: &StreamId,
+    ) -> Result<HashMap<String, TraceSessionHostedMaterialization>> {
+        let materialization_id = self.projection_materialization_id(task_id);
+        let mut materializations = HashMap::new();
+
+        let Ok(checkpoint) = self
+            .client
+            .get_materialization_checkpoint(materialization_id.clone(), root_stream)
+        else {
+            return Ok(materializations);
+        };
+        let checkpoint = checkpoint.into_body();
+        let state =
+            serde_json::from_slice::<HostedProjectionCheckpointState>(checkpoint.opaque_state())
+                .context("deserialize hosted projection checkpoint state")?;
+        let resume = self
+            .client
+            .resume_materialization_cursor(&checkpoint)
+            .with_context(|| {
+                format!(
+                    "resume hosted projection materialization cursor '{}'",
+                    checkpoint.materialization_id()
+                )
+            })?;
+        let summary = Self::materialization_summary(
+            &state,
+            &checkpoint,
+            resume.body().replay_from(),
+            resume.body().source_next_offset(),
+        );
+        materializations.insert(summary.stream_id.clone(), summary);
+
+        Ok(materializations)
+    }
+
+    fn hosted_materialization_snapshot(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Vec<TraceSessionHostedMaterialization> {
+        let mut materializations = self
+            .state
+            .lock()
+            .expect("hosted trace recorder lock")
+            .tasks
+            .get(task_id)
+            .map(|task| {
+                task.projection_materializations
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        materializations.sort_by(|left, right| {
+            left.stream_id
+                .cmp(&right.stream_id)
+                .then(left.materialization_id.cmp(&right.materialization_id))
+        });
+        materializations
+    }
+
+    pub fn checkpoint_projection_materialization(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<HostedProjectionMaterializationResume> {
+        let replay = self.replay(task_id)?;
+        let snapshot = ConversationProjectionSnapshot::from_trace_replay(&replay);
+        let (root_stream, opaque_state) = {
+            let guard = self.state.lock().expect("hosted trace recorder lock");
+            let task = guard.tasks.get(task_id).ok_or_else(|| {
+                anyhow!(
+                    "missing hosted task state for projection materialization '{}'",
+                    task_id.as_str()
+                )
+            })?;
+            let state = Self::projection_materialization_state(task_id, &snapshot, task);
+            let encoded = serde_json::to_vec(&state)
+                .context("serialize hosted projection checkpoint state")?;
+            (task.root_stream.clone(), encoded)
+        };
+
+        let materialization_id = self.projection_materialization_id(task_id);
+        let checkpoint = self
+            .client
+            .materialize_checkpoint(&root_stream, materialization_id.clone(), opaque_state)
+            .with_context(|| {
+                format!(
+                    "checkpoint hosted projection materialization '{}' for '{}'",
+                    materialization_id,
+                    root_stream.as_str()
+                )
+            })?
+            .into_body();
+        let state =
+            serde_json::from_slice::<HostedProjectionCheckpointState>(checkpoint.opaque_state())
+                .context("deserialize hosted projection checkpoint state")?;
+        let resume = self
+            .client
+            .resume_materialization_cursor(&checkpoint)
+            .with_context(|| {
+                format!(
+                    "resume hosted projection materialization cursor '{}'",
+                    materialization_id
+                )
+            })?;
+        let checkpoints = vec![Self::materialization_summary(
+            &state,
+            &checkpoint,
+            resume.body().replay_from(),
+            resume.body().source_next_offset(),
+        )];
+
+        let mut guard = self.state.lock().expect("hosted trace recorder lock");
+        let task = guard.tasks.get_mut(task_id).ok_or_else(|| {
+            anyhow!(
+                "missing hosted task state after materialization checkpoint '{}'",
+                task_id.as_str()
+            )
+        })?;
+        task.projection_materializations = checkpoints
+            .iter()
+            .cloned()
+            .map(|checkpoint| (checkpoint.stream_id.clone(), checkpoint))
+            .collect();
+
+        Ok(HostedProjectionMaterializationResume {
+            snapshot,
+            pending_records: Vec::new(),
+            checkpoints,
+        })
+    }
+
+    pub fn resume_projection_materialization(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<Option<HostedProjectionMaterializationResume>> {
+        let _ = self.ensure_task_loaded(task_id)?;
+        let (root_stream, streams) = {
+            let guard = self.state.lock().expect("hosted trace recorder lock");
+            let Some(task) = guard.tasks.get(task_id) else {
+                return Ok(None);
+            };
+            (task.root_stream.clone(), Self::task_streams(task))
+        };
+        let materialization_id = self.projection_materialization_id(task_id);
+        let checkpoint = match self
+            .client
+            .get_materialization_checkpoint(materialization_id.clone(), &root_stream)
+        {
+            Ok(checkpoint) => checkpoint.into_body(),
+            Err(_) => return Ok(None),
+        };
+        let state =
+            serde_json::from_slice::<HostedProjectionCheckpointState>(checkpoint.opaque_state())
+                .context("deserialize hosted projection checkpoint state")?;
+        let resume = self
+            .client
+            .materialize_resume(&checkpoint)
+            .with_context(|| {
+                format!(
+                    "resume hosted projection materialization '{}'",
+                    materialization_id
+                )
+            })?;
+        let mut pending_records = Vec::new();
+        for remote_record in resume.pending_records() {
+            pending_records.push(
+                serde_json::from_slice::<TraceRecord>(remote_record.payload())
+                    .context("deserialize hosted projection pending record")?,
+            );
+        }
+        for stream_id in streams
+            .into_iter()
+            .filter(|stream_id| stream_id != &root_stream)
+        {
+            let resume_from = state
+                .stream_offsets
+                .get(stream_id.as_str())
+                .copied()
+                .map(Offset::new);
+            for (record, position) in self.read_stream_records(&stream_id)? {
+                if resume_from.is_none_or(|offset| position.offset.value() > offset.value()) {
+                    pending_records.push(record);
+                }
+            }
+        }
+        let mut checkpoints = vec![Self::materialization_summary(
+            &state,
+            &checkpoint,
+            resume.replay_from(),
+            resume.source_next_offset(),
+        )];
+
+        pending_records.sort_by(|left, right| {
+            left.sequence
+                .cmp(&right.sequence)
+                .then(left.record_id.as_str().cmp(right.record_id.as_str()))
+        });
+        checkpoints.sort_by(|left, right| left.stream_id.cmp(&right.stream_id));
+
+        let mut guard = self.state.lock().expect("hosted trace recorder lock");
+        let task = guard.tasks.get_mut(task_id).ok_or_else(|| {
+            anyhow!(
+                "missing hosted task state after materialization resume '{}'",
+                task_id.as_str()
+            )
+        })?;
+        task.projection_materializations = checkpoints
+            .iter()
+            .cloned()
+            .map(|checkpoint| (checkpoint.stream_id.clone(), checkpoint))
+            .collect();
+
+        Ok(Some(HostedProjectionMaterializationResume {
+            snapshot: state.snapshot,
+            pending_records,
+            checkpoints,
+        }))
+    }
+
     fn stream_family_prefix(&self) -> String {
         format!(
             "{}.paddles.trace.{}",
@@ -716,6 +1015,7 @@ impl HostedTransitTraceRecorder {
             branch_streams: HashMap::new(),
             record_positions: HashMap::new(),
             consumer_cursors: HashMap::new(),
+            projection_materializations: HashMap::new(),
         };
 
         let branch_prefix = format!(
@@ -741,6 +1041,8 @@ impl HostedTransitTraceRecorder {
             .chain(task.branch_streams.values().cloned())
             .collect::<Vec<_>>();
         task.consumer_cursors = self.load_consumer_cursors(task_id, &streams)?;
+        task.projection_materializations =
+            self.load_projection_materializations(task_id, &task.root_stream)?;
 
         Ok(Some(task))
     }
@@ -821,6 +1123,7 @@ impl HostedTransitTraceRecorder {
                 branch_streams: HashMap::new(),
                 record_positions: HashMap::new(),
                 consumer_cursors: HashMap::new(),
+                projection_materializations: HashMap::new(),
             },
         );
         Ok(root_stream)
@@ -1107,6 +1410,7 @@ impl TraceRecorder for HostedTransitTraceRecorder {
         let replay = self.replay(task_id)?;
         let mut wake = crate::domain::ports::TraceSessionWake::from_replay(&replay);
         wake.hosted_cursors = self.hosted_cursor_snapshot(task_id);
+        wake.hosted_materializations = self.hosted_materialization_snapshot(task_id);
         Ok(wake)
     }
 
@@ -1217,10 +1521,12 @@ mod tests {
         HostedTransitTraceRecorder, InMemoryTraceRecorder, TransitTraceRecorder,
         default_trace_recorder_for_workspace_under_root,
     };
+    use crate::application::ConversationProjectionSnapshot;
     use crate::domain::model::{
-        ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceCheckpointId,
-        TraceCheckpointKind, TraceCompletionCheckpoint, TraceLineage, TraceRecord, TraceRecordId,
-        TraceRecordKind, TraceTaskRoot, TraceTurnStarted, TurnTraceId,
+        ArtifactEnvelope, ArtifactKind, TaskTraceId, TraceArtifactId, TraceBranch, TraceBranchId,
+        TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+        TraceLineage, TraceRecord, TraceRecordId, TraceRecordKind, TraceTaskRoot, TraceTurnStarted,
+        TurnTraceId,
     };
     use crate::domain::ports::{
         TraceRecorder, TraceRecorderCapability, TraceReplaySliceAnchor, TraceReplaySliceRequest,
@@ -1309,6 +1615,80 @@ mod tests {
         ))
         .expect("bind hosted transit server");
         (temp, server)
+    }
+
+    fn branch_declared_record(
+        task_id: &TaskTraceId,
+        turn_id: &TurnTraceId,
+        record_id: &str,
+        sequence: u64,
+        parent_record_id: &str,
+        branch_id: &TraceBranchId,
+        label: &str,
+    ) -> TraceRecord {
+        TraceRecord {
+            record_id: TraceRecordId::new(record_id).expect("record id"),
+            sequence,
+            lineage: TraceLineage {
+                task_id: task_id.clone(),
+                turn_id: turn_id.clone(),
+                branch_id: Some(branch_id.clone()),
+                parent_record_id: Some(
+                    TraceRecordId::new(parent_record_id).expect("parent record id"),
+                ),
+            },
+            kind: TraceRecordKind::PlannerBranchDeclared(TraceBranch {
+                branch_id: branch_id.clone(),
+                label: label.to_string(),
+                status: TraceBranchStatus::Active,
+                rationale: Some("investigate in branch".to_string()),
+                parent_branch_id: None,
+                created_from_record_id: Some(
+                    TraceRecordId::new(parent_record_id).expect("parent record id"),
+                ),
+            }),
+        }
+    }
+
+    fn branch_turn_started_record(
+        task_id: &TaskTraceId,
+        turn_id: &TurnTraceId,
+        branch_id: &TraceBranchId,
+        record_id: &str,
+        sequence: u64,
+        parent_record_id: &str,
+        content: &str,
+    ) -> TraceRecord {
+        TraceRecord {
+            record_id: TraceRecordId::new(record_id).expect("record id"),
+            sequence,
+            lineage: TraceLineage {
+                task_id: task_id.clone(),
+                turn_id: turn_id.clone(),
+                branch_id: Some(branch_id.clone()),
+                parent_record_id: Some(
+                    TraceRecordId::new(parent_record_id).expect("parent record id"),
+                ),
+            },
+            kind: TraceRecordKind::TurnStarted(TraceTurnStarted {
+                prompt: ArtifactEnvelope::text(
+                    TraceArtifactId::new(format!("artifact-{record_id}")).expect("artifact"),
+                    ArtifactKind::Prompt,
+                    format!("prompt {record_id}"),
+                    content,
+                    256,
+                ),
+                interpretation: None,
+                planner_model: "qwen-1.5b".to_string(),
+                synthesizer_model: "qwen-1.5b".to_string(),
+                harness_profile: crate::domain::model::TraceHarnessProfileSelection {
+                    requested_profile_id: "recursive-structured-v1".to_string(),
+                    active_profile_id: "recursive-structured-v1".to_string(),
+                    downgrade_reason: None,
+                },
+                thread: crate::domain::model::ConversationThreadRef::Mainline,
+            }),
+        }
     }
 
     #[test]
@@ -1719,5 +2099,116 @@ mod tests {
                     && cursor.cursor_id.contains("lifecycle-reader")
                     && cursor.position == 0)
         );
+    }
+
+    #[test]
+    fn hosted_projection_materialization_checkpoints_capture_replay_derived_snapshots() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-projection");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+        let branch_id = TraceBranchId::new("branch-1").expect("branch");
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(branch_declared_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                &branch_id,
+                "branch view",
+            ))
+            .expect("record hosted branch declaration");
+        recorder
+            .record(branch_turn_started_record(
+                &task_id,
+                &turn_id,
+                &branch_id,
+                "record-3",
+                3,
+                "record-2",
+                "branch prompt",
+            ))
+            .expect("record hosted branch turn");
+
+        let materialization = recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        let replay = recorder.replay(&task_id).expect("hosted replay");
+        let expected = ConversationProjectionSnapshot::from_trace_replay(&replay);
+
+        assert_eq!(materialization.snapshot, expected);
+        assert_eq!(materialization.snapshot.version(), 3);
+        assert_eq!(materialization.pending_records.len(), 0);
+        assert_eq!(materialization.checkpoints.len(), 1);
+        assert!(materialization.checkpoints.iter().any(|checkpoint| {
+            checkpoint.stream_id.ends_with(".root")
+                && checkpoint.replay_revision == 3
+                && checkpoint.replay_from_offset == checkpoint.source_next_offset
+        }));
+    }
+
+    #[test]
+    fn hosted_projection_materializers_resume_without_local_checkpoint_store() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-resume");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+        let branch_id = TraceBranchId::new("branch-1").expect("branch");
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(branch_declared_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                &branch_id,
+                "branch view",
+            ))
+            .expect("record hosted branch declaration");
+        recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        recorder
+            .record(branch_turn_started_record(
+                &task_id,
+                &turn_id,
+                &branch_id,
+                "record-3",
+                3,
+                "record-2",
+                "after checkpoint",
+            ))
+            .expect("record hosted post-checkpoint branch turn");
+
+        let resumed =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("resumed hosted recorder")
+                .resume_projection_materialization(&task_id)
+                .expect("resume projection materialization")
+                .expect("materialization present");
+
+        assert_eq!(resumed.snapshot.version(), 2);
+        assert_eq!(resumed.pending_records.len(), 1);
+        assert_eq!(resumed.pending_records[0].sequence, 3);
+        assert_eq!(
+            resumed.pending_records[0].record_id,
+            TraceRecordId::new("record-3").expect("record id")
+        );
+        assert_eq!(resumed.checkpoints.len(), 1);
+        assert_eq!(resumed.checkpoints[0].checkpoint_offset, 0);
+        assert_eq!(resumed.checkpoints[0].replay_from_offset, 1);
+        assert_eq!(resumed.checkpoints[0].source_next_offset, 1);
+        assert_eq!(resumed.checkpoints[0].replay_revision, 2);
     }
 }

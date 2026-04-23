@@ -48,7 +48,7 @@ pub use trace_recording::{
     NoopTraceRecorder, TraceRecorder, TraceRecorderCapability, TraceReplaySlice,
     TraceReplaySliceAnchor, TraceReplaySliceDirection, TraceReplaySliceRequest,
     TraceSessionCheckpointCursor, TraceSessionContextQuery, TraceSessionContextSlice,
-    TraceSessionHostedCursor, TraceSessionWake,
+    TraceSessionHostedCursor, TraceSessionHostedMaterialization, TraceSessionWake,
 };
 pub use workspace_action_execution::{
     WorkspaceActionCapability, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,

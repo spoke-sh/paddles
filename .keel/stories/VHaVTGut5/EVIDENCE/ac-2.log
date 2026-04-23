@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:39:11.094868405-07:00
+mode: manual
+files: ["/tmp/tmp.7LAjXK1srL"]
+---
+
+--- File: tmp.7LAjXK1srL ---
+cargo test hosted_projection_materializers_resume_without_local_checkpoint_store --lib -- --nocapture
+PASS: hosted_projection_materializers_resume_without_local_checkpoint_store
+

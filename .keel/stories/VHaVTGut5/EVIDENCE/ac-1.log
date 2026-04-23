@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:39:11.053055739-07:00
+mode: manual
+files: ["/tmp/tmp.EROvAwfsr9"]
+---
+
+--- File: tmp.EROvAwfsr9 ---
+cargo test hosted_projection_materialization_checkpoints_ --lib -- --nocapture
+PASS: hosted_projection_materialization_checkpoints_capture_replay_derived_snapshots
+

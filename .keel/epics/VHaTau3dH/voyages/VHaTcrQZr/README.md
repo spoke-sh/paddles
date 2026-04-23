@@ -27,11 +27,11 @@ started_at: 2026-04-22T23:21:26
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Add Hosted Consumer Cursor Resume For Session Readers](../../../../stories/VHaVRxBd9/README.md) | feat | done |
-| [Add Hosted Materialization Checkpoints For Projection Rebuilds](../../../../stories/VHaVTGut5/README.md) | feat | backlog |
+| [Add Hosted Materialization Checkpoints For Projection Rebuilds](../../../../stories/VHaVTGut5/README.md) | feat | done |
 | [Verify Hosted Restart Resume Fidelity Against Authoritative Transit History](../../../../stories/VHaVTnOQ4/README.md) | feat | backlog |
 <!-- END GENERATED -->
