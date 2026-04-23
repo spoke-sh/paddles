@@ -820,6 +820,55 @@ Operator surfaces are reported as one of:
 - `listening`: the optional operator surface is bound and serving
 - `degraded`: the hosted authority is live, but the optional operator surface failed to bind
 
+Hosted Transit service mode also publishes a versioned external contract under
+the stream root `"<namespace>.paddles.hosted.<service_identity>"`. The current
+contract version is `paddles.hosted.transit.v1`, and consumers should reject
+messages that declare any other version.
+
+The versioned stream families are:
+
+- `command.bootstrap`
+- `command.turn`
+- `command.restore`
+- `event.progress`
+- `event.completion`
+- `event.failure`
+- `event.projection-rebuild`
+- `projection.session`
+
+Every public hosted Transit envelope carries:
+
+- `contract_version`
+- `kind`
+- `provenance.account_id`
+- `provenance.session_id`
+- `provenance.workspace_id`
+- `provenance.route`
+- `provenance.request_id`
+- `provenance.workspace_posture`
+
+The published `session_projection` payload is consumer-facing and replay-derived.
+It contains:
+
+- `task_id`
+- `replay_revision`
+  This is the latest authoritative trace sequence for the replay-derived view.
+- `transcript_rows`
+- `turn_statuses`
+- `detail_availability`
+  This advertises whether trace, manifold, forensic, and delegation detail
+  surfaces are present in the replay-derived snapshot.
+- `restore_context`
+
+Payload invariants:
+
+- hosted projection payloads are derived from authoritative Transit-backed
+  replay, not from HTTP/web session state
+- `replay_revision` is monotonic for a given task because it is sourced from
+  the authoritative trace sequence
+- consumers should treat Transit as canonical; HTTP/web operator surfaces may
+  mirror the same state for debugging, but they do not define the contract
+
 `query_session_context` is the stable harness-facing slice contract over the recorder:
 
 - `AdaptiveReplay { turn_limit }` yields recent turn-bounded transcript context and turn summaries

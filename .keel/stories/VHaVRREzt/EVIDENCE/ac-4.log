@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-22T23:19:54.291100258-07:00
+mode: manual
+---
+Documented the v1 hosted Transit stream families, projection payload invariants, and compatibility expectations in CONFIGURATION.md.
