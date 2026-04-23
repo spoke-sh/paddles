@@ -791,12 +791,34 @@ service_identity = "paddles-primary"
 
 - `service_mode.enabled = true` refuses implicit recorder fallback. You must
   choose a `trace_authority.mode`.
-- Hosted mode currently requires all three hosted fields:
+- Hosted service mode requires all three hosted fields:
   `endpoint`, `namespace`, and `service_identity`.
 - Explicit local/dev fallback modes remain available as
   `mode = "embedded_local"` and `mode = "in_memory"`.
 - When `service_mode.enabled = false`, the existing local-first default remains
   the embedded local Transit recorder rooted in machine-managed state.
+- `service_mode.enabled = true` runs Paddles as a long-lived non-interactive
+  service. It does not drop into the TUI or plain interactive loop.
+- `service_mode.operator_surfaces_enabled = false` keeps hosted Transit as the
+  primary runtime path and skips the HTTP/web operator surface entirely.
+
+Hosted service mode emits an explicit runtime status snapshot on stdout so
+operators can observe readiness or failure without attaching the TUI or the web
+UI:
+
+```json
+{"mode":"service","state":"ready","authority_backend":"hosted_transit","authority_location":"127.0.0.1:7171#namespace=prod;service=paddles-primary","operator_surfaces":{"status":"disabled"}}
+```
+
+```json
+{"mode":"service","state":"failed","authority_backend":"hosted_transit","authority_location":"127.0.0.1:7171#namespace=prod;service=paddles-primary","operator_surfaces":{"status":"disabled"},"failure":"..."}
+```
+
+Operator surfaces are reported as one of:
+
+- `disabled`: hosted service mode is running without the HTTP/web operator surface
+- `listening`: the optional operator surface is bound and serving
+- `degraded`: the hosted authority is live, but the optional operator surface failed to bind
 
 `query_session_context` is the stable harness-facing slice contract over the recorder:
 

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use serde::Serialize;
 use std::env;
 use std::io::IsTerminal;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
@@ -271,6 +273,115 @@ fn build_trace_recorder_from_config(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ServiceRuntimeState {
+    Ready,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum OperatorSurfaceRuntimeStatus {
+    Disabled,
+    Listening { bind_target: String },
+    Degraded { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ServiceRuntimeStatus {
+    mode: String,
+    state: ServiceRuntimeState,
+    authority_backend: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authority_location: Option<String>,
+    operator_surfaces: OperatorSurfaceRuntimeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OperatorSurfaceBootstrap {
+    Start,
+    Skip,
+}
+
+struct OperatorSurfaceBootOutcome {
+    runtime_status: OperatorSurfaceRuntimeStatus,
+    web_server_addr: Option<SocketAddr>,
+}
+
+fn resolve_operator_surface_bootstrap(
+    service_mode_enabled: bool,
+    operator_surfaces_enabled: bool,
+) -> OperatorSurfaceBootstrap {
+    if service_mode_enabled && !operator_surfaces_enabled {
+        OperatorSurfaceBootstrap::Skip
+    } else {
+        OperatorSurfaceBootstrap::Start
+    }
+}
+
+fn service_runtime_ready_status(
+    capability: &paddles::domain::ports::TraceRecorderCapability,
+    operator_surfaces: OperatorSurfaceRuntimeStatus,
+) -> ServiceRuntimeStatus {
+    let (authority_backend, authority_location) = match capability {
+        paddles::domain::ports::TraceRecorderCapability::Persistent { backend, location } => {
+            (backend.clone(), Some(location.clone()))
+        }
+        paddles::domain::ports::TraceRecorderCapability::Ephemeral { backend, reason } => {
+            (backend.clone(), Some(reason.clone()))
+        }
+        paddles::domain::ports::TraceRecorderCapability::Unsupported { reason } => {
+            ("unsupported".to_string(), Some(reason.clone()))
+        }
+    };
+
+    ServiceRuntimeStatus {
+        mode: "service".to_string(),
+        state: ServiceRuntimeState::Ready,
+        authority_backend,
+        authority_location,
+        operator_surfaces,
+        failure: None,
+    }
+}
+
+fn service_runtime_failure_status(
+    selection: &TraceAuthoritySelection,
+    failure: impl Into<String>,
+) -> ServiceRuntimeStatus {
+    let (authority_backend, authority_location) = match selection {
+        TraceAuthoritySelection::EmbeddedLocal { .. } => ("embedded_local".to_string(), None),
+        TraceAuthoritySelection::InMemory { .. } => ("in_memory".to_string(), None),
+        TraceAuthoritySelection::HostedTransit(hosted) => (
+            "hosted_transit".to_string(),
+            Some(format!(
+                "{}#namespace={};service={}",
+                hosted.endpoint, hosted.namespace, hosted.service_identity
+            )),
+        ),
+    };
+
+    ServiceRuntimeStatus {
+        mode: "service".to_string(),
+        state: ServiceRuntimeState::Failed,
+        authority_backend,
+        authority_location,
+        operator_surfaces: OperatorSurfaceRuntimeStatus::Disabled,
+        failure: Some(failure.into()),
+    }
+}
+
+fn emit_service_runtime_status(status: &ServiceRuntimeStatus) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string(status).context("serialize service runtime status")?
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -292,7 +403,10 @@ async fn main() -> Result<()> {
         .resolve_trace_authority_selection()
         .map_err(anyhow::Error::msg)?;
     let authored_port_configured = PaddlesConfig::authored_port_is_configured(&root_path);
+    let service_mode_enabled = config.service_mode.enabled;
+    let service_operator_surfaces_enabled = config.service_mode.operator_surfaces_enabled;
 
+    let run_result: Result<()> = async {
     // Merge: CLI flags override config values.
     let shared_provider = cli
         .provider
@@ -589,97 +703,151 @@ async fn main() -> Result<()> {
         println!("[BOOT] Runtime lanes ready.");
     }
 
-    // Start HTTP API server
-    let (web_router, web_observer) = paddles::infrastructure::web::router(
-        Arc::clone(&service),
-        trace_recorder,
-        config.native_transports.clone(),
-        Arc::clone(&transport_mediator),
-    );
-    service.register_event_observer(web_observer);
     let http_transport = &config.native_transports.http_request_response;
     let sse_transport = &config.native_transports.server_sent_events;
     let websocket_transport = &config.native_transports.websocket;
     let transit_transport = &config.native_transports.transit;
-    let default_bind_target = format!("0.0.0.0:{requested_port}");
-    let resolved_bind_target = match resolve_shared_web_bind_target(
-        http_transport,
-        sse_transport,
-        websocket_transport,
-        transit_transport,
-        &default_bind_target,
+    let operator_surface_boot = match resolve_operator_surface_bootstrap(
+        service_mode_enabled,
+        service_operator_surfaces_enabled,
     ) {
-        Ok(bind_target) => bind_target,
-        Err(error) => {
-            record_transport_failure(&native_transport_registry, http_transport, error.clone());
-            record_transport_failure(&native_transport_registry, sse_transport, error.clone());
-            record_transport_failure(
-                &native_transport_registry,
-                websocket_transport,
-                error.clone(),
+        OperatorSurfaceBootstrap::Skip => OperatorSurfaceBootOutcome {
+            runtime_status: OperatorSurfaceRuntimeStatus::Disabled,
+            web_server_addr: None,
+        },
+        OperatorSurfaceBootstrap::Start => 'operator_surface: {
+            let (web_router, web_observer) = paddles::infrastructure::web::router(
+                Arc::clone(&service),
+                trace_recorder,
+                config.native_transports.clone(),
+                Arc::clone(&transport_mediator),
             );
-            record_transport_failure(&native_transport_registry, transit_transport, error.clone());
-            return Err(anyhow::anyhow!(error));
-        }
-    };
-    record_binding_started(&native_transport_registry, http_transport);
-    record_binding_started(&native_transport_registry, sse_transport);
-    record_binding_started(&native_transport_registry, websocket_transport);
-    record_binding_started(&native_transport_registry, transit_transport);
-    let listener = match tokio::net::TcpListener::bind(&resolved_bind_target).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            record_transport_failure(
+            service.register_event_observer(web_observer);
+            let default_bind_target = format!("0.0.0.0:{requested_port}");
+            let resolved_bind_target = match resolve_shared_web_bind_target(
+                http_transport,
+                sse_transport,
+                websocket_transport,
+                transit_transport,
+                &default_bind_target,
+            ) {
+                Ok(bind_target) => bind_target,
+                Err(error) if service_mode_enabled => {
+                    record_transport_failure(
+                        &native_transport_registry,
+                        http_transport,
+                        error.clone(),
+                    );
+                    record_transport_failure(
+                        &native_transport_registry,
+                        sse_transport,
+                        error.clone(),
+                    );
+                    record_transport_failure(
+                        &native_transport_registry,
+                        websocket_transport,
+                        error.clone(),
+                    );
+                    record_transport_failure(
+                        &native_transport_registry,
+                        transit_transport,
+                        error.clone(),
+                    );
+                    break 'operator_surface OperatorSurfaceBootOutcome {
+                        runtime_status: OperatorSurfaceRuntimeStatus::Degraded { reason: error },
+                        web_server_addr: None,
+                    };
+                }
+                Err(error) => return Err(anyhow::anyhow!(error)),
+            };
+            record_binding_started(&native_transport_registry, http_transport);
+            record_binding_started(&native_transport_registry, sse_transport);
+            record_binding_started(&native_transport_registry, websocket_transport);
+            record_binding_started(&native_transport_registry, transit_transport);
+            let listener = match tokio::net::TcpListener::bind(&resolved_bind_target).await {
+                Ok(listener) => listener,
+                Err(error) if service_mode_enabled => {
+                    record_transport_failure(
+                        &native_transport_registry,
+                        http_transport,
+                        error.to_string(),
+                    );
+                    record_transport_failure(
+                        &native_transport_registry,
+                        sse_transport,
+                        error.to_string(),
+                    );
+                    record_transport_failure(
+                        &native_transport_registry,
+                        websocket_transport,
+                        error.to_string(),
+                    );
+                    record_transport_failure(
+                        &native_transport_registry,
+                        transit_transport,
+                        error.to_string(),
+                    );
+                    break 'operator_surface OperatorSurfaceBootOutcome {
+                        runtime_status: OperatorSurfaceRuntimeStatus::Degraded {
+                            reason: error.to_string(),
+                        },
+                        web_server_addr: None,
+                    };
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let web_server_addr = listener.local_addr()?;
+            record_bound_transport(
                 &native_transport_registry,
                 http_transport,
-                error.to_string(),
+                &web_server_addr.to_string(),
             );
-            record_transport_failure(&native_transport_registry, sse_transport, error.to_string());
-            record_transport_failure(
+            record_bound_transport(
+                &native_transport_registry,
+                sse_transport,
+                &web_server_addr.to_string(),
+            );
+            record_bound_transport(
                 &native_transport_registry,
                 websocket_transport,
-                error.to_string(),
+                &web_server_addr.to_string(),
             );
-            record_transport_failure(
+            record_bound_transport(
                 &native_transport_registry,
                 transit_transport,
-                error.to_string(),
+                &web_server_addr.to_string(),
             );
-            return Err(error.into());
-        }
+            if verbose >= 3 {
+                println!(
+                    "[BOOT] HTTP API server listening on {}.",
+                    paddles::infrastructure::web::web_server_url(web_server_addr)
+                );
+            }
+            tokio::spawn(async move {
+                if let Err(err) = axum::serve(listener, web_router).await {
+                    eprintln!("[ERROR] HTTP server failed: {err}");
+                }
+            });
+            break 'operator_surface OperatorSurfaceBootOutcome {
+                runtime_status: OperatorSurfaceRuntimeStatus::Listening {
+                    bind_target: paddles::infrastructure::web::web_server_url(web_server_addr),
+                },
+                web_server_addr: Some(web_server_addr),
+            };
+        },
     };
-    let web_server_addr = listener.local_addr()?;
-    record_bound_transport(
-        &native_transport_registry,
-        http_transport,
-        &web_server_addr.to_string(),
-    );
-    record_bound_transport(
-        &native_transport_registry,
-        sse_transport,
-        &web_server_addr.to_string(),
-    );
-    record_bound_transport(
-        &native_transport_registry,
-        websocket_transport,
-        &web_server_addr.to_string(),
-    );
-    record_bound_transport(
-        &native_transport_registry,
-        transit_transport,
-        &web_server_addr.to_string(),
-    );
-    if verbose >= 3 {
-        println!(
-            "[BOOT] HTTP API server listening on {}.",
-            paddles::infrastructure::web::web_server_url(web_server_addr)
+
+    if service_mode_enabled {
+        let status = service_runtime_ready_status(
+            &service.trace_recorder_capability(),
+            operator_surface_boot.runtime_status.clone(),
         );
+        emit_service_runtime_status(&status)?;
+        tokio::signal::ctrl_c()
+            .await
+            .context("wait for service shutdown signal")?;
+        return Ok(());
     }
-    tokio::spawn(async move {
-        if let Err(err) = axum::serve(listener, web_router).await {
-            eprintln!("[ERROR] HTTP server failed: {err}");
-        }
-    });
 
     if let Some(prompt) = cli.prompt {
         let response = service.process_prompt(&prompt).await?;
@@ -687,6 +855,9 @@ async fn main() -> Result<()> {
     } else {
         match frontend {
             InteractiveFrontend::Tui => {
+                let web_server_addr = operator_surface_boot
+                    .web_server_addr
+                    .expect("interactive TUI requires operator web surfaces");
                 let tui_ctx = TuiContext {
                     credential_store: Arc::clone(&credential_store),
                     runtime_preference_store: Arc::clone(&runtime_preference_store),
@@ -698,6 +869,19 @@ async fn main() -> Result<()> {
             }
             InteractiveFrontend::PlainLines => run_plain_interactive_loop(service).await?,
         }
+    }
+
+        Ok(())
+    }
+    .await;
+
+    if let Err(error) = run_result {
+        if service_mode_enabled {
+            let status =
+                service_runtime_failure_status(&trace_authority_selection, format!("{error:#}"));
+            let _ = emit_service_runtime_status(&status);
+        }
+        return Err(error);
     }
 
     Ok(())
@@ -739,7 +923,12 @@ async fn run_plain_interactive_loop(service: Arc<MechSuitService>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{build_trace_recorder_from_config, ensure_remote_provider_transport_support};
+    use super::{
+        OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
+        build_trace_recorder_from_config, ensure_remote_provider_transport_support,
+        resolve_operator_surface_bootstrap, service_runtime_failure_status,
+        service_runtime_ready_status,
+    };
     use paddles::infrastructure::config::{HostedTransitAuthorityConfig, TraceAuthoritySelection};
     use paddles::infrastructure::providers::ModelProvider;
     use std::path::Path;
@@ -790,5 +979,55 @@ mod tests {
             paddles::domain::ports::TraceRecorderCapability::Persistent { backend, .. }
                 if backend == "hosted_transit"
         ));
+    }
+
+    #[test]
+    fn hosted_service_runtime_reports_readiness_and_failure_state() {
+        let ready = service_runtime_ready_status(
+            &paddles::domain::ports::TraceRecorderCapability::Persistent {
+                backend: "hosted_transit".to_string(),
+                location: "127.0.0.1:7171#namespace=test;service=svc-main".to_string(),
+            },
+            OperatorSurfaceRuntimeStatus::Disabled,
+        );
+
+        assert_eq!(ready.state, ServiceRuntimeState::Ready);
+        assert_eq!(ready.authority_backend, "hosted_transit".to_string());
+        assert_eq!(
+            ready.operator_surfaces,
+            OperatorSurfaceRuntimeStatus::Disabled
+        );
+        assert_eq!(ready.failure, None);
+
+        let failed = service_runtime_failure_status(
+            &TraceAuthoritySelection::HostedTransit(HostedTransitAuthorityConfig {
+                endpoint: "127.0.0.1:7171".to_string(),
+                namespace: "test".to_string(),
+                service_identity: "svc-main".to_string(),
+            }),
+            "hosted transit unavailable",
+        );
+
+        assert_eq!(failed.state, ServiceRuntimeState::Failed);
+        assert_eq!(
+            failed.failure.as_deref(),
+            Some("hosted transit unavailable")
+        );
+    }
+
+    #[test]
+    fn hosted_service_mode_keeps_operator_surfaces_optional() {
+        assert_eq!(
+            resolve_operator_surface_bootstrap(false, true),
+            OperatorSurfaceBootstrap::Start
+        );
+        assert_eq!(
+            resolve_operator_surface_bootstrap(true, true),
+            OperatorSurfaceBootstrap::Start
+        );
+        assert_eq!(
+            resolve_operator_surface_bootstrap(true, false),
+            OperatorSurfaceBootstrap::Skip
+        );
     }
 }
