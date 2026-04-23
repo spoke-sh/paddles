@@ -345,6 +345,29 @@ fn nix_package_tracks_locked_sift_revision_for_vendoring() {
 }
 
 #[test]
+fn nix_package_tracks_locked_transit_revision_for_vendoring() {
+    let cargo_lock = read_repo_file("Cargo.lock");
+    let flake = read_repo_file("flake.nix");
+    let needle = "git+https://github.com/spoke-sh/transit.git?branch=main#";
+    let revision_start = cargo_lock
+        .find(needle)
+        .map(|index| index + needle.len())
+        .expect("Cargo.lock should pin the transit git dependency by revision");
+    let revision = &cargo_lock[revision_start..revision_start + 40];
+    let expected_hash = match revision {
+        "b5fb008a241bc6abe3bbde570cc9e773a4a7d341" => {
+            "sha256-KRsbmHsTZoH9AZTPIiIkozchXBfWZ1XK3rXkXnBsh1U="
+        }
+        _ => panic!("update the nix transit output hash contract for transit revision {revision}"),
+    };
+
+    assert!(
+        flake.contains(&format!("\"transit-core-0.1.0\" = \"{expected_hash}\";")),
+        "flake should pin the transit-core vendored source hash for the locked transit revision:\nCargo.lock rev: {revision}\nExpected hash: {expected_hash}\n{flake}",
+    );
+}
+
+#[test]
 fn root_workspace_lockfile_exists_for_clean_ci_installs() {
     assert!(
         repo_file("package-lock.json").exists(),

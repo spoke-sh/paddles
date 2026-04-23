@@ -122,7 +122,7 @@
                 "candle-kernels-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
                 "candle-ug-0.9.2" = "sha256-ywjfKjuViDvJEho/IO2jR73ObwbMznWwQgSrAbJS1v0=";
                 "sift-0.2.0" = "sha256-mlOVOWZFB0vrWlCy/ntlj3LRcn8HiojN4Wv+K9hnQ5U=";
-                "transit-core-0.1.0" = "sha256-4VvRHAf+ABRDe1q5giH/VtsJo66JJjsCKbmP/7RlXN0=";
+                "transit-core-0.1.0" = "sha256-KRsbmHsTZoH9AZTPIiIkozchXBfWZ1XK3rXkXnBsh1U=";
               };
             };
             nativeBuildInputs = [ pkgs.pkg-config ] ++ pkgs.lib.optionals (isLinux && cudaEnabled) [ cudaToolkit ];
