@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VHaTcsMav
-status: planned
+status: in-progress
 epic: VHaTau3dH
 created_at: 2026-04-22T22:02:50
 # authored
 title: Versioned Hosted Transit Contract And Projection Surface
 index: 3
 updated_at: 2026-04-22T22:12:23
+started_at: 2026-04-22T23:07:03
 ---
 
 # Versioned Hosted Transit Contract And Projection Surface
@@ -26,11 +27,11 @@ updated_at: 2026-04-22T22:12:23
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Versioned Hosted Transit Envelopes And Stream Families](../../../../stories/VHaVQDBoj/README.md) | feat | backlog |
+| [Define Versioned Hosted Transit Envelopes And Stream Families](../../../../stories/VHaVQDBoj/README.md) | feat | done |
 | [Carry External Provenance Through Transit Commands Events And Projections](../../../../stories/VHaVQpePa/README.md) | feat | backlog |
 | [Publish Consumer-Facing Paddles Projection Payloads](../../../../stories/VHaVRREzt/README.md) | feat | backlog |
 <!-- END GENERATED -->

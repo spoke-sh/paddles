@@ -7,6 +7,7 @@ pub mod execution_governance;
 pub mod execution_hand;
 pub mod external_capability;
 pub mod harness_profile;
+pub mod hosted_transit_contract;
 pub mod native_transport;
 pub mod providers;
 pub mod rendering;
