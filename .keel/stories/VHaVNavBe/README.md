@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VHaVNavBe
-status: in-progress
+status: done
 created_at: 2026-04-22T22:09:48
-updated_at: 2026-04-22T22:12:31
+updated_at: 2026-04-22T22:48:28
 # authored
 title: Define Hosted Transit Authority Config And Runtime Contract
 type: feat
@@ -11,6 +11,7 @@ operator-signal:
 scope: VHaTau3dH/VHaTcrsZq
 index: 1
 started_at: 2026-04-22T22:12:31
+completed_at: 2026-04-22T22:48:28
 ---
 
 # Define Hosted Transit Authority Config And Runtime Contract
@@ -23,6 +24,6 @@ fallbacks before recorder and resume implementation begins.
 
 ## Acceptance Criteria
 
-- [ ] Runtime configuration can select hosted Transit authority mode explicitly, including Transit endpoint, namespace, and service identity requirements. [SRS-02/AC-01] <!-- verify: cargo test hosted_transit_authority_config_ -- --nocapture, SRS-02:start:end -->
-- [ ] Hosted service-mode config rejects implicit fallback to embedded local storage when required hosted fields are missing. [SRS-02/AC-02] <!-- verify: cargo test hosted_service_mode_rejects_implicit_local_fallback -- --nocapture, SRS-02:start:end -->
-- [ ] Local/dev fallback modes remain explicit and separate from hosted first-party deployment semantics. [SRS-03/AC-03] <!-- verify: cargo test recorder_authority_modes_require_explicit_selection -- --nocapture, SRS-03:start:end -->
+- [x] Runtime configuration can select hosted Transit authority mode explicitly, including Transit endpoint, namespace, and service identity requirements. [SRS-02/AC-01] <!-- verify: cargo test hosted_transit_authority_config_ -- --nocapture, SRS-02:start:end, proof: ac-1.log-->
+- [x] Hosted service-mode config rejects implicit fallback to embedded local storage when required hosted fields are missing. [SRS-02/AC-02] <!-- verify: cargo test hosted_service_mode_rejects_implicit_local_fallback -- --nocapture, SRS-02:start:end, proof: ac-2.log-->
+- [x] Local/dev fallback modes remain explicit and separate from hosted first-party deployment semantics. [SRS-03/AC-03] <!-- verify: cargo test recorder_authority_modes_require_explicit_selection -- --nocapture, SRS-03:start:end, proof: ac-3.log-->

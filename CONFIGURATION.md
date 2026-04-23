@@ -775,6 +775,29 @@ The runtime recorder boundary is independent of transcript rendering:
 
 This keeps the live runtime local-first and safe while making durable session recording the normal path instead of optional metadata.
 
+Authority selection is now explicit when you run non-interactive service mode:
+
+```toml
+[service_mode]
+enabled = true
+operator_surfaces_enabled = true
+
+[trace_authority]
+mode = "hosted_transit"
+endpoint = "127.0.0.1:7171"
+namespace = "prod"
+service_identity = "paddles-primary"
+```
+
+- `service_mode.enabled = true` refuses implicit recorder fallback. You must
+  choose a `trace_authority.mode`.
+- Hosted mode currently requires all three hosted fields:
+  `endpoint`, `namespace`, and `service_identity`.
+- Explicit local/dev fallback modes remain available as
+  `mode = "embedded_local"` and `mode = "in_memory"`.
+- When `service_mode.enabled = false`, the existing local-first default remains
+  the embedded local Transit recorder rooted in machine-managed state.
+
 `query_session_context` is the stable harness-facing slice contract over the recorder:
 
 - `AdaptiveReplay { turn_limit }` yields recent turn-bounded transcript context and turn summaries

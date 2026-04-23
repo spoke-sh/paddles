@@ -12,6 +12,41 @@ const CONFIG_FILE_NAME: &str = "paddles.toml";
 const USER_CONFIG_RELATIVE_PATH: &str = ".config/paddles/paddles.toml";
 const SYSTEM_CONFIG_PATH: &str = "/etc/paddles/paddles.toml";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceAuthorityMode {
+    EmbeddedLocal,
+    InMemory,
+    HostedTransit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ServiceModeConfig {
+    pub enabled: bool,
+    pub operator_surfaces_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TraceAuthorityConfig {
+    pub mode: Option<TraceAuthorityMode>,
+    pub endpoint: Option<String>,
+    pub namespace: Option<String>,
+    pub service_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedTransitAuthorityConfig {
+    pub endpoint: String,
+    pub namespace: String,
+    pub service_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceAuthoritySelection {
+    EmbeddedLocal { explicit: bool },
+    InMemory { explicit: bool },
+    HostedTransit(HostedTransitAuthorityConfig),
+}
+
 /// Paddles configuration loaded from paddles.toml.
 ///
 /// Layering order:
@@ -38,6 +73,8 @@ pub struct PaddlesConfig {
     pub weights: f64,
     pub biases: f64,
     pub reality_mode: bool,
+    pub service_mode: ServiceModeConfig,
+    pub trace_authority: TraceAuthorityConfig,
     pub native_transports: NativeTransportConfigurations,
 }
 
@@ -75,6 +112,22 @@ struct NativeTransportConfigurationsOverlay {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
+struct ServiceModeOverlay {
+    enabled: Option<bool>,
+    operator_surfaces_enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct TraceAuthorityOverlay {
+    mode: Option<String>,
+    endpoint: Option<String>,
+    namespace: Option<String>,
+    service_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 struct PaddlesConfigOverlay {
     provider: Option<String>,
     provider_url: Option<String>,
@@ -95,6 +148,8 @@ struct PaddlesConfigOverlay {
     weights: Option<f64>,
     biases: Option<f64>,
     reality_mode: Option<bool>,
+    service_mode: Option<ServiceModeOverlay>,
+    trace_authority: Option<TraceAuthorityOverlay>,
     native_transports: Option<NativeTransportConfigurationsOverlay>,
 }
 
@@ -119,6 +174,11 @@ impl Default for PaddlesConfig {
             weights: 0.5,
             biases: 0.0,
             reality_mode: false,
+            service_mode: ServiceModeConfig {
+                enabled: false,
+                operator_surfaces_enabled: true,
+            },
+            trace_authority: TraceAuthorityConfig::default(),
             native_transports: NativeTransportConfigurations::default(),
         }
     }
@@ -267,6 +327,12 @@ impl PaddlesConfig {
         if let Some(reality_mode) = overlay.reality_mode {
             self.reality_mode = reality_mode;
         }
+        if let Some(service_mode) = overlay.service_mode {
+            apply_service_mode(&mut self.service_mode, service_mode);
+        }
+        if let Some(trace_authority) = overlay.trace_authority {
+            apply_trace_authority(&mut self.trace_authority, trace_authority);
+        }
         if let Some(native_transports) = overlay.native_transports {
             apply_native_transport_configurations(&mut self.native_transports, native_transports);
         }
@@ -296,6 +362,73 @@ impl PaddlesConfig {
         self.synthesizer_model = None;
         self.planner_provider = None;
         self.planner_model = None;
+    }
+
+    pub fn resolve_trace_authority_selection(
+        &self,
+    ) -> std::result::Result<TraceAuthoritySelection, String> {
+        match self.trace_authority.mode {
+            Some(TraceAuthorityMode::HostedTransit) => {
+                let mut missing = Vec::new();
+                let endpoint = self
+                    .trace_authority
+                    .endpoint
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        missing.push("endpoint");
+                        None
+                    });
+                let namespace = self
+                    .trace_authority
+                    .namespace
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        missing.push("namespace");
+                        None
+                    });
+                let service_identity = self
+                    .trace_authority
+                    .service_identity
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        missing.push("service_identity");
+                        None
+                    });
+                if !missing.is_empty() {
+                    return Err(format!(
+                        "hosted trace_authority.mode requires explicit {}",
+                        missing.join(", ")
+                    ));
+                }
+                Ok(TraceAuthoritySelection::HostedTransit(
+                    HostedTransitAuthorityConfig {
+                        endpoint: endpoint.expect("hosted endpoint"),
+                        namespace: namespace.expect("hosted namespace"),
+                        service_identity: service_identity.expect("hosted service identity"),
+                    },
+                ))
+            }
+            Some(TraceAuthorityMode::EmbeddedLocal) => {
+                Ok(TraceAuthoritySelection::EmbeddedLocal { explicit: true })
+            }
+            Some(TraceAuthorityMode::InMemory) => {
+                Ok(TraceAuthoritySelection::InMemory { explicit: true })
+            }
+            None if self.service_mode.enabled => Err(
+                "service mode requires an explicit trace_authority.mode; refusing implicit local fallback"
+                    .to_string(),
+            ),
+            None => Ok(TraceAuthoritySelection::EmbeddedLocal { explicit: false }),
+        }
     }
 }
 
@@ -450,6 +583,42 @@ fn parse_native_transport_auth_mode(value: String) -> NativeTransportAuthMode {
     match value.trim().to_ascii_lowercase().as_str() {
         "bearer_token" => NativeTransportAuthMode::BearerToken,
         _ => NativeTransportAuthMode::Open,
+    }
+}
+
+fn apply_service_mode(service_mode: &mut ServiceModeConfig, overlay: ServiceModeOverlay) {
+    if let Some(enabled) = overlay.enabled {
+        service_mode.enabled = enabled;
+    }
+    if let Some(operator_surfaces_enabled) = overlay.operator_surfaces_enabled {
+        service_mode.operator_surfaces_enabled = operator_surfaces_enabled;
+    }
+}
+
+fn apply_trace_authority(
+    trace_authority: &mut TraceAuthorityConfig,
+    overlay: TraceAuthorityOverlay,
+) {
+    if let Some(mode) = overlay.mode {
+        trace_authority.mode = parse_trace_authority_mode(mode);
+    }
+    if let Some(endpoint) = overlay.endpoint {
+        trace_authority.endpoint = normalize_optional_string(endpoint);
+    }
+    if let Some(namespace) = overlay.namespace {
+        trace_authority.namespace = normalize_optional_string(namespace);
+    }
+    if let Some(service_identity) = overlay.service_identity {
+        trace_authority.service_identity = normalize_optional_string(service_identity);
+    }
+}
+
+fn parse_trace_authority_mode(value: String) -> Option<TraceAuthorityMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "embedded_local" | "embedded" | "local" => Some(TraceAuthorityMode::EmbeddedLocal),
+        "in_memory" | "memory" => Some(TraceAuthorityMode::InMemory),
+        "hosted_transit" | "hosted" => Some(TraceAuthorityMode::HostedTransit),
+        _ => None,
     }
 }
 
@@ -753,6 +922,109 @@ model = "claude-sonnet-4-20250514"
         let config = PaddlesConfig::load(dir.path());
         assert_eq!(config.provider, "sift");
         assert_eq!(config.model, "qwen-1.5b");
+    }
+
+    #[test]
+    fn hosted_transit_authority_config_requires_endpoint_namespace_and_service_identity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace-paddles.toml");
+        fs::write(
+            &workspace,
+            r#"
+[service_mode]
+enabled = true
+
+[trace_authority]
+mode = "hosted_transit"
+namespace = "prod"
+"#,
+        )
+        .expect("write workspace config");
+
+        let config =
+            PaddlesConfig::load_from_explicit_paths(Some(workspace.as_path()), None, None, None);
+        let error = config
+            .resolve_trace_authority_selection()
+            .expect_err("hosted mode should reject incomplete authority config");
+
+        assert!(error.contains("endpoint"));
+        assert!(error.contains("service_identity"));
+    }
+
+    #[test]
+    fn hosted_service_mode_rejects_implicit_local_fallback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace-paddles.toml");
+        fs::write(
+            &workspace,
+            r#"
+[service_mode]
+enabled = true
+"#,
+        )
+        .expect("write workspace config");
+
+        let config =
+            PaddlesConfig::load_from_explicit_paths(Some(workspace.as_path()), None, None, None);
+        let error = config
+            .resolve_trace_authority_selection()
+            .expect_err("service mode should not silently fall back to embedded local authority");
+
+        assert!(error.contains("trace_authority.mode"));
+        assert!(error.contains("service mode"));
+    }
+
+    #[test]
+    fn recorder_authority_modes_require_explicit_selection() {
+        let default_selection = PaddlesConfig::default()
+            .resolve_trace_authority_selection()
+            .expect("default config should keep the local-first embedded recorder");
+        assert_eq!(
+            default_selection,
+            TraceAuthoritySelection::EmbeddedLocal { explicit: false }
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace-paddles.toml");
+        fs::write(
+            &workspace,
+            r#"
+[service_mode]
+enabled = true
+
+[trace_authority]
+mode = "in_memory"
+"#,
+        )
+        .expect("write workspace config");
+        let in_memory =
+            PaddlesConfig::load_from_explicit_paths(Some(workspace.as_path()), None, None, None)
+                .resolve_trace_authority_selection()
+                .expect("explicit in-memory fallback should remain available");
+        assert_eq!(
+            in_memory,
+            TraceAuthoritySelection::InMemory { explicit: true }
+        );
+
+        fs::write(
+            &workspace,
+            r#"
+[service_mode]
+enabled = true
+
+[trace_authority]
+mode = "embedded_local"
+"#,
+        )
+        .expect("rewrite workspace config");
+        let embedded =
+            PaddlesConfig::load_from_explicit_paths(Some(workspace.as_path()), None, None, None)
+                .resolve_trace_authority_selection()
+                .expect("explicit embedded local fallback should remain available");
+        assert_eq!(
+            embedded,
+            TraceAuthoritySelection::EmbeddedLocal { explicit: true }
+        );
     }
 
     #[test]

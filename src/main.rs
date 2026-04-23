@@ -18,13 +18,14 @@ use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathere
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
 use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
+use paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::default_trace_recorder_for_workspace;
 use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
 use paddles::infrastructure::config::{
-    PaddlesConfig, normalize_gatherer_provider_alias, normalize_provider_model_alias,
-    resolve_runtime_verbosity, resolve_web_server_port,
+    PaddlesConfig, TraceAuthoritySelection, normalize_gatherer_provider_alias,
+    normalize_provider_model_alias, resolve_runtime_verbosity, resolve_web_server_port,
 };
 use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
@@ -239,6 +240,31 @@ fn build_planner_engine(
     }
 }
 
+fn build_trace_recorder_from_config(
+    root_path: &Path,
+    selection: &TraceAuthoritySelection,
+) -> Result<Arc<dyn paddles::domain::ports::TraceRecorder>> {
+    match selection {
+        TraceAuthoritySelection::EmbeddedLocal { explicit } => {
+            if *explicit {
+                eprintln!("[BOOT] Trace authority: explicit embedded local Transit recorder.");
+            }
+            Ok(default_trace_recorder_for_workspace(root_path))
+        }
+        TraceAuthoritySelection::InMemory { .. } => {
+            Ok(Arc::new(InMemoryTraceRecorder::new_ephemeral(
+                "configured explicit in-memory trace authority mode",
+            )))
+        }
+        TraceAuthoritySelection::HostedTransit(hosted) => bail!(
+            "hosted trace authority mode selected for endpoint `{}` in namespace `{}` with service identity `{}`, but hosted transit recorder bootstrap is not available in this build yet",
+            hosted.endpoint,
+            hosted.namespace,
+            hosted.service_identity
+        ),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -256,6 +282,9 @@ async fn main() -> Result<()> {
     // Load layered config: system -> user -> workspace -> runtime lane state.
     let config =
         PaddlesConfig::load_with_runtime_preferences(&root_path, runtime_preferences.as_ref());
+    let trace_authority_selection = config
+        .resolve_trace_authority_selection()
+        .map_err(anyhow::Error::msg)?;
     let authored_port_configured = PaddlesConfig::authored_port_is_configured(&root_path);
 
     // Merge: CLI flags override config values.
@@ -297,7 +326,7 @@ async fn main() -> Result<()> {
     });
     let mut planner_model = cli.planner_model.or(config.planner_model);
     let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
-    let provider_url = cli.provider_url.or(config.provider_url);
+    let provider_url = cli.provider_url.or(config.provider_url.clone());
 
     let provider_name = provider.name();
     let normalized_shared_model =
@@ -475,7 +504,7 @@ async fn main() -> Result<()> {
             }
         },
     );
-    let trace_recorder = default_trace_recorder_for_workspace(&root_path);
+    let trace_recorder = build_trace_recorder_from_config(&root_path, &trace_authority_selection)?;
     let service = Arc::new(MechSuitService::with_trace_recorder(
         root_path,
         registry,
