@@ -251,7 +251,7 @@ impl WorkspaceActionExecutor for LocalWorkspaceActionExecutor {
                 ),
                 WorkspaceActionCapability::new(
                     "inspect",
-                    "run a read-only shell probe through the terminal hand",
+                    "run a single read-only shell probe through the terminal hand",
                     false,
                 ),
                 WorkspaceActionCapability::new(
@@ -288,7 +288,7 @@ impl WorkspaceActionExecutor for LocalWorkspaceActionExecutor {
                 .cloned()
                 .collect(),
             notes: vec![
-                "local tools are discovered on demand; probe the exact program you need with `inspect` `command -v <tool>` and the harness will cache the result".to_string(),
+                "local tools are discovered on demand; probe the exact program you need with a single-step `inspect` `command -v <tool>` and the harness will cache the result".to_string(),
                 "cached tool observations are session-local and reflect prior probes or executed commands, not a prebaked whitelist".to_string(),
                 "search and refine are provided by the configured gatherer, not the local workspace executor".to_string(),
                 "external_capability actions are routed through the external capability broker, not the local workspace executor".to_string(),

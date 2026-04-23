@@ -5538,7 +5538,9 @@ fn build_planner_execution_contract(
     let mut completion_contract = vec![
         "Choose only actions supported by the capability manifest. If a capability is blocked or unavailable, choose a different bounded action."
             .to_string(),
-        "When a task depends on a local program that is not already observed in the capability manifest, choose a bounded probe such as `inspect` `command -v <tool>` before depending on it."
+        "When a task depends on a local program that is not already observed in the capability manifest, choose a bounded single-step probe such as `inspect` `command -v <tool>` before depending on it."
+            .to_string(),
+        "`inspect` is only for single read-only probes. Do not chain commands or use redirection; use `shell` for broader governed workspace command execution."
             .to_string(),
     ];
 
@@ -8006,7 +8008,9 @@ fn validate_inspect_command(command: &str) -> Result<()> {
         || normalized.contains('>')
         || normalized.contains('<')
     {
-        anyhow::bail!("planner inspect command must stay read-only and single-step");
+        anyhow::bail!(
+            "planner inspect command must be a single read-only probe without chaining or redirection"
+        );
     }
     Ok(())
 }
@@ -9821,7 +9825,7 @@ mod tests {
                 actions: vec![
                     WorkspaceActionCapability::new(
                         "inspect",
-                        "run a read-only shell probe through the terminal hand",
+                        "run a single read-only shell probe through the terminal hand",
                         false,
                     ),
                     WorkspaceActionCapability::new(
@@ -9871,7 +9875,7 @@ mod tests {
             &WorkspaceCapabilitySurface {
                 actions: vec![WorkspaceActionCapability::new(
                     "inspect",
-                    "run a read-only shell probe through the terminal hand",
+                    "run a single read-only shell probe through the terminal hand",
                     false,
                 )],
                 tools: vec![WorkspaceToolCapability::new(
@@ -9904,7 +9908,7 @@ mod tests {
                 actions: vec![
                     WorkspaceActionCapability::new(
                         "inspect",
-                        "run a read-only shell probe through the terminal hand",
+                        "run a single read-only shell probe through the terminal hand",
                         false,
                     ),
                     WorkspaceActionCapability::new(
@@ -9939,6 +9943,49 @@ mod tests {
                 .procedures
                 .iter()
                 .any(|procedure| { procedure.label == "Diagnose CI Or Actions" })
+        );
+    }
+
+    #[test]
+    fn planner_execution_contract_describes_inspect_as_single_step() {
+        let contract =
+            super::build_planner_execution_contract(super::PlannerExecutionContractContext {
+                workspace_capability_surface: &WorkspaceCapabilitySurface {
+                    actions: vec![
+                        WorkspaceActionCapability::new(
+                            "inspect",
+                            "run a single read-only shell probe through the terminal hand",
+                            false,
+                        ),
+                        WorkspaceActionCapability::new(
+                            "shell",
+                            "run a governed workspace command when a command should execute now",
+                            true,
+                        ),
+                    ],
+                    tools: Vec::new(),
+                    notes: Vec::new(),
+                },
+                execution_hands: &[],
+                governance_profile: None,
+                external_capabilities: &[],
+                gatherer: None,
+                collaboration: &CollaborationModeResult::default(),
+                instruction_frame: None,
+                grounding: None,
+            });
+
+        assert!(contract.capability_manifest.iter().any(|line| line.contains(
+            "workspace action inspect: available (read-only) — run a single read-only shell probe through the terminal hand"
+        )));
+        assert!(contract.completion_contract.iter().any(|line| {
+            line.contains("bounded single-step probe such as `inspect` `command -v <tool>`")
+        }));
+        assert!(
+            contract
+                .completion_contract
+                .iter()
+                .any(|line| line.contains("`inspect` is only for single read-only probes"))
         );
     }
 

@@ -2577,12 +2577,12 @@ Rules:\n\
 - If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 - For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request.\n\
-- Use inspect for read-only shell commands and shell for broader workspace command execution.\n\
+- Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 - When the user requests a code change, you MUST use write_file, replace_in_file, or apply_patch to make the edit — never describe the edit for the user to apply manually.\n\
 - Search, list_files, read, inspect, shell, diff, refine, or branch when more workspace evidence or action is needed.\n\
 - Stop when the turn should not recurse further before synthesis.\n\
 - Never answer the user directly here.\n\
-- Inspect commands must stay read-only.\n\
+- Inspect commands must be single-step and read-only.\n\
 {}\n\
 \n\
 Workspace root:\n\
@@ -2662,6 +2662,7 @@ When the user requests a specific code or UI change, use at most one bounded sea
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+- Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 {}\n\
 \n\
 Interpretation context:\n\
@@ -2739,6 +2740,7 @@ When the user requests a specific code or UI change, use at most one bounded sea
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+- Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 {}\n\
 \n\
 Interpretation context:\n\
@@ -2824,7 +2826,7 @@ Rules:\n\
 - When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly — never describe the edit for the user to apply manually.\n\
 - If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 - Never answer the user directly here.\n\
-- Inspect commands must stay read-only.\n\
+- Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 {}\n\
 \n\
 Workspace root:\n\
@@ -2904,6 +2906,7 @@ Action produces information. Once you have a plausible target file, prefer readi
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+- Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 {}\n\
 \n\
 Interpretation context:\n\
@@ -2979,6 +2982,7 @@ If one likely target file is already known or already read, move into exact-diff
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
+- Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 {}\n\
 \n\
 Interpretation context:\n\
@@ -5570,6 +5574,8 @@ mod tests {
         assert!(prompt.contains(
             "When the user requests a code change, use write_file, replace_in_file, or apply_patch"
         ));
+        assert!(prompt.contains("single read-only probe"));
+        assert!(prompt.contains("Do not chain inspect commands"));
     }
 
     #[test]
