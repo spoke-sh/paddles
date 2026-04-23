@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:43:49.898467932-07:00
+mode: manual
+files: ["/tmp/tmp.9isgRR6U3b"]
+---
+
+--- File: tmp.9isgRR6U3b ---
+cargo test hosted_resume_preserves_replay_derived_truth --lib -- --nocapture
+PASS: hosted_resume_preserves_replay_derived_truth
+

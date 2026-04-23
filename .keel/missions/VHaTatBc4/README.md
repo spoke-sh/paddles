@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VHaTatBc4
-status: active
+status: achieved
 created_at: 2026-04-22T22:02:42
-updated_at: 2026-04-22T22:12:27
+updated_at: 2026-04-22T23:46:28
 # authored
 title: Support Hosted Transit-Backed First-Party Paddles Service Mode
 watch: ~
 activated_at: 2026-04-22T22:12:27
+achieved_at: 2026-04-22T23:46:28
 ---
 
 # Support Hosted Transit-Backed First-Party Paddles Service Mode

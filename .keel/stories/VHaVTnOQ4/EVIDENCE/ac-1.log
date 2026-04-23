@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:43:49.827474381-07:00
+mode: manual
+files: ["/tmp/tmp.f74JOErluL"]
+---
+
+--- File: tmp.f74JOErluL ---
+cargo test hosted_restart_resume_fidelity_ --lib -- --nocapture
+PASS: hosted_restart_resume_fidelity_preserves_pending_record_order_without_loss_or_duplication
+

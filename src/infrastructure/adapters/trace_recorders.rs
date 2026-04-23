@@ -173,6 +173,23 @@ pub struct HostedProjectionMaterializationResume {
     pub checkpoints: Vec<TraceSessionHostedMaterialization>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostedProjectionResumeMode {
+    HostedResume,
+    AuthoritativeReplay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedProjectionResumeOutcome {
+    pub mode: HostedProjectionResumeMode,
+    pub snapshot: ConversationProjectionSnapshot,
+    pub pending_records: Vec<TraceRecord>,
+    pub checkpoints: Vec<TraceSessionHostedMaterialization>,
+    pub checkpoint_revision: Option<u64>,
+    pub authoritative_revision: u64,
+    pub fallback_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct HostedProjectionCheckpointState {
     task_id: TaskTraceId,
@@ -712,18 +729,14 @@ impl HostedTransitTraceRecorder {
             return Ok(materializations);
         };
         let checkpoint = checkpoint.into_body();
-        let state =
+        let Ok(state) =
             serde_json::from_slice::<HostedProjectionCheckpointState>(checkpoint.opaque_state())
-                .context("deserialize hosted projection checkpoint state")?;
-        let resume = self
-            .client
-            .resume_materialization_cursor(&checkpoint)
-            .with_context(|| {
-                format!(
-                    "resume hosted projection materialization cursor '{}'",
-                    checkpoint.materialization_id()
-                )
-            })?;
+        else {
+            return Ok(materializations);
+        };
+        let Ok(resume) = self.client.resume_materialization_cursor(&checkpoint) else {
+            return Ok(materializations);
+        };
         let summary = Self::materialization_summary(
             &state,
             &checkpoint,
@@ -917,6 +930,53 @@ impl HostedTransitTraceRecorder {
             pending_records,
             checkpoints,
         }))
+    }
+
+    pub fn resume_projection_or_replay(
+        &self,
+        task_id: &TaskTraceId,
+    ) -> Result<HostedProjectionResumeOutcome> {
+        let authoritative_replay = self.replay(task_id)?;
+        let authoritative_snapshot =
+            ConversationProjectionSnapshot::from_trace_replay(&authoritative_replay);
+        let authoritative_revision = authoritative_snapshot.version();
+
+        match self.resume_projection_materialization(task_id) {
+            Ok(Some(resume)) => Ok(HostedProjectionResumeOutcome {
+                mode: HostedProjectionResumeMode::HostedResume,
+                checkpoint_revision: Some(resume.snapshot.version()),
+                authoritative_revision,
+                snapshot: resume.snapshot,
+                pending_records: resume.pending_records,
+                checkpoints: resume.checkpoints,
+                fallback_reason: None,
+            }),
+            Ok(None) => Ok(HostedProjectionResumeOutcome {
+                mode: HostedProjectionResumeMode::AuthoritativeReplay,
+                checkpoint_revision: None,
+                authoritative_revision,
+                snapshot: authoritative_snapshot,
+                pending_records: Vec::new(),
+                checkpoints: self.hosted_materialization_snapshot(task_id),
+                fallback_reason: Some(
+                    "missing hosted projection materialization checkpoint".to_string(),
+                ),
+            }),
+            Err(error) => Ok(HostedProjectionResumeOutcome {
+                mode: HostedProjectionResumeMode::AuthoritativeReplay,
+                checkpoint_revision: self
+                    .hosted_materialization_snapshot(task_id)
+                    .first()
+                    .map(|checkpoint| checkpoint.replay_revision),
+                authoritative_revision,
+                snapshot: authoritative_snapshot,
+                pending_records: Vec::new(),
+                checkpoints: self.hosted_materialization_snapshot(task_id),
+                fallback_reason: Some(format!(
+                    "hosted projection materialization resume failed: {error:#}"
+                )),
+            }),
+        }
     }
 
     fn stream_family_prefix(&self) -> String {
@@ -1518,8 +1578,8 @@ fn stable_workspace_hash(workspace_root: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        HostedTransitTraceRecorder, InMemoryTraceRecorder, TransitTraceRecorder,
-        default_trace_recorder_for_workspace_under_root,
+        HostedProjectionResumeMode, HostedTransitTraceRecorder, InMemoryTraceRecorder,
+        TransitTraceRecorder, default_trace_recorder_for_workspace_under_root,
     };
     use crate::application::ConversationProjectionSnapshot;
     use crate::domain::model::{
@@ -2210,5 +2270,293 @@ mod tests {
         assert_eq!(resumed.checkpoints[0].replay_from_offset, 1);
         assert_eq!(resumed.checkpoints[0].source_next_offset, 1);
         assert_eq!(resumed.checkpoints[0].replay_revision, 2);
+    }
+
+    #[test]
+    fn hosted_restart_resume_fidelity_preserves_pending_record_order_without_loss_or_duplication() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-fidelity");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+        let branch_id = TraceBranchId::new("branch-1").expect("branch");
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(branch_declared_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                &branch_id,
+                "branch view",
+            ))
+            .expect("record hosted branch declaration");
+        recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-3",
+                3,
+                "record-1",
+                "root after checkpoint",
+            ))
+            .expect("record hosted root turn");
+        recorder
+            .record(branch_turn_started_record(
+                &task_id,
+                &turn_id,
+                &branch_id,
+                "record-4",
+                4,
+                "record-2",
+                "branch after checkpoint",
+            ))
+            .expect("record hosted branch turn");
+
+        let resumed =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("resumed hosted recorder")
+                .resume_projection_materialization(&task_id)
+                .expect("resume projection materialization")
+                .expect("materialization present");
+        let authoritative = recorder.replay(&task_id).expect("authoritative replay");
+        let expected_pending = authoritative
+            .records
+            .into_iter()
+            .filter(|record| record.sequence > resumed.snapshot.version())
+            .collect::<Vec<_>>();
+
+        assert_eq!(resumed.pending_records, expected_pending);
+    }
+
+    #[test]
+    fn hosted_resume_falls_back_to_authoritative_replay() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-fallback");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                "checkpoint me",
+            ))
+            .expect("record hosted turn");
+        recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-3",
+                3,
+                "record-2",
+                "authoritative replay only",
+            ))
+            .expect("record hosted post-checkpoint turn");
+
+        let root_stream = recorder.root_stream_id(&task_id).expect("root stream id");
+        let materialization_id = recorder.projection_materialization_id(&task_id);
+        recorder
+            .client
+            .materialize_checkpoint(&root_stream, materialization_id, b"not-json".to_vec())
+            .expect("corrupt hosted projection checkpoint");
+
+        let resumed =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("resumed hosted recorder")
+                .resume_projection_or_replay(&task_id)
+                .expect("resume or replay");
+        let authoritative = ConversationProjectionSnapshot::from_trace_replay(
+            &recorder.replay(&task_id).expect("authoritative replay"),
+        );
+
+        assert_eq!(
+            resumed.mode,
+            HostedProjectionResumeMode::AuthoritativeReplay
+        );
+        assert_eq!(resumed.snapshot, authoritative);
+        assert_eq!(resumed.authoritative_revision, authoritative.version());
+        assert!(
+            resumed
+                .fallback_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("failed")
+        );
+    }
+
+    #[test]
+    fn hosted_resume_preserves_replay_derived_truth() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-truth");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+        let branch_id = TraceBranchId::new("branch-1").expect("branch");
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(branch_declared_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                &branch_id,
+                "branch view",
+            ))
+            .expect("record hosted branch declaration");
+        recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        recorder
+            .record(branch_turn_started_record(
+                &task_id,
+                &turn_id,
+                &branch_id,
+                "record-3",
+                3,
+                "record-2",
+                "branch after checkpoint",
+            ))
+            .expect("record hosted branch turn");
+
+        let resumed =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("resumed hosted recorder")
+                .resume_projection_or_replay(&task_id)
+                .expect("resume or replay");
+        let authoritative_replay = recorder.replay(&task_id).expect("authoritative replay");
+        let expected_pending = authoritative_replay
+            .records
+            .iter()
+            .filter(|record| record.sequence > resumed.snapshot.version())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        assert_eq!(resumed.mode, HostedProjectionResumeMode::HostedResume);
+        assert_eq!(resumed.snapshot.version(), 2);
+        assert_eq!(resumed.authoritative_revision, 3);
+        assert_eq!(resumed.pending_records, expected_pending);
+    }
+
+    #[test]
+    fn hosted_restart_resume_is_deterministic() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-deterministic");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                "before checkpoint",
+            ))
+            .expect("record hosted turn");
+        recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-3",
+                3,
+                "record-2",
+                "after checkpoint",
+            ))
+            .expect("record hosted post-checkpoint turn");
+
+        let left =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("left resumed hosted recorder")
+                .resume_projection_or_replay(&task_id)
+                .expect("left resume or replay");
+        let right =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("right resumed hosted recorder")
+                .resume_projection_or_replay(&task_id)
+                .expect("right resume or replay");
+
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn hosted_projection_resume_metadata_is_exposed() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-metadata");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                "before checkpoint",
+            ))
+            .expect("record hosted turn");
+        recorder
+            .checkpoint_projection_materialization(&task_id)
+            .expect("checkpoint projection materialization");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-3",
+                3,
+                "record-2",
+                "after checkpoint",
+            ))
+            .expect("record hosted post-checkpoint turn");
+
+        let resumed =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("resumed hosted recorder");
+        let wake = resumed.wake(&task_id).expect("hosted wake");
+        let outcome = resumed
+            .resume_projection_or_replay(&task_id)
+            .expect("resume or replay");
+
+        assert_eq!(wake.hosted_cursors.len(), 2);
+        assert_eq!(wake.hosted_materializations.len(), 1);
+        assert_eq!(wake.hosted_materializations[0].replay_revision, 2);
+        assert_eq!(outcome.checkpoint_revision, Some(2));
+        assert_eq!(outcome.authoritative_revision, 3);
+        assert_eq!(outcome.checkpoints.len(), 1);
+        assert_eq!(outcome.checkpoints[0].checkpoint_offset, 1);
     }
 }

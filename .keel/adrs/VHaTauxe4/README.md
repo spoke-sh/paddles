@@ -2,7 +2,7 @@
 # system-managed
 id: VHaTauxe4
 index: 3
-status: proposed
+status: accepted
 decided_at: 2026-04-22T22:02:42
 supersedes: []
 superseded-by: null

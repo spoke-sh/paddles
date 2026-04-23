@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:43:49.856744347-07:00
+mode: manual
+files: ["/tmp/tmp.sOBf5pAtTq"]
+---
+
+--- File: tmp.sOBf5pAtTq ---
+cargo test hosted_resume_falls_back_to_authoritative_replay --lib -- --nocapture
+PASS: hosted_resume_falls_back_to_authoritative_replay
+

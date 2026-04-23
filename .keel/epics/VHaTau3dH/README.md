@@ -22,10 +22,10 @@ mission: VHaTatBc4
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 voyages complete, 8/9 stories done
+**Progress:** 3/3 voyages complete, 9/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted Cursor Resume And Projection Rebuild Semantics](voyages/VHaTcrQZr/) | in-progress | 2/3 |
+| [Hosted Cursor Resume And Projection Rebuild Semantics](voyages/VHaTcrQZr/) | done | 3/3 |
 | [Hosted Transit Authority And Service Runtime Mode](voyages/VHaTcrsZq/) | done | 3/3 |
 | [Versioned Hosted Transit Contract And Projection Surface](voyages/VHaTcsMav/) | done | 3/3 |
 <!-- END GENERATED -->

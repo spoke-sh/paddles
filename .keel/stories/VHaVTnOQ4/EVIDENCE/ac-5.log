@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:43:49.929295249-07:00
+mode: manual
+files: ["/tmp/tmp.7cUlhLt9vt"]
+---
+
+--- File: tmp.7cUlhLt9vt ---
+cargo test hosted_projection_resume_metadata_is_exposed --lib -- --nocapture
+PASS: hosted_projection_resume_metadata_is_exposed
+

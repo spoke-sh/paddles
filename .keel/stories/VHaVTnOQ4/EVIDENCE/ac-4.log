@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-04-22T23:43:49.960720839-07:00
+mode: manual
+files: ["/tmp/tmp.wxTbCDUt39"]
+---
+
+--- File: tmp.wxTbCDUt39 ---
+cargo test hosted_restart_resume_is_deterministic --lib -- --nocapture
+PASS: hosted_restart_resume_is_deterministic
+
