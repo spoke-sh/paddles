@@ -6,12 +6,15 @@ use crate::domain::ports::{TraceRecorder, TraceRecorderCapability};
 use anyhow::{Context, Result, anyhow, ensure};
 use directories::ProjectDirs;
 use std::any::Any;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use transit_core::engine::{LocalEngine, LocalEngineConfig};
 use transit_core::kernel::{LineageMetadata, StreamId, StreamPosition};
+use transit_core::membership::NodeId;
 use transit_core::storage::LineageCheckpoint;
 
 pub struct InMemoryTraceRecorder {
@@ -124,6 +127,16 @@ pub(crate) struct TransitTaskState {
 }
 
 impl TransitTraceRecorder {
+    fn local_node_id(data_dir: impl AsRef<Path>) -> NodeId {
+        let canonical = data_dir
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| data_dir.as_ref().to_path_buf());
+        let mut hasher = DefaultHasher::new();
+        canonical.hash(&mut hasher);
+        NodeId::new(format!("paddles-local-{:016x}", hasher.finish()))
+    }
+
     fn root_stream_id(task_id: &TaskTraceId) -> Result<StreamId> {
         StreamId::new(format!("paddles.task.{}.root", task_id.as_str()))
             .context("construct task root stream id")
@@ -278,8 +291,11 @@ impl TransitTraceRecorder {
                 data_dir.as_ref().display()
             )
         })?;
-        let engine = LocalEngine::open(LocalEngineConfig::new(data_dir.as_ref()))
-            .context("open embedded transit engine")?;
+        let engine = LocalEngine::open(LocalEngineConfig::new(
+            data_dir.as_ref(),
+            Self::local_node_id(data_dir.as_ref()),
+        ))
+        .context("open embedded transit engine")?;
         Ok(Self {
             data_dir: data_dir.as_ref().to_path_buf(),
             engine: Arc::new(engine),
@@ -937,5 +953,27 @@ mod tests {
                 if backend == "in_memory"
                     && reason.contains("embedded transit session spine")
         ));
+    }
+
+    #[test]
+    fn transit_recorder_node_identity_is_stable_for_the_same_root() {
+        let temp = tempdir().expect("tempdir");
+
+        let first = TransitTraceRecorder::local_node_id(temp.path());
+        let second = TransitTraceRecorder::local_node_id(temp.path());
+
+        assert_eq!(first, second);
+        assert!(first.as_str().starts_with("paddles-local-"));
+    }
+
+    #[test]
+    fn transit_recorder_node_identity_differs_for_different_roots() {
+        let left = tempdir().expect("left tempdir");
+        let right = tempdir().expect("right tempdir");
+
+        let left_node = TransitTraceRecorder::local_node_id(left.path());
+        let right_node = TransitTraceRecorder::local_node_id(right.path());
+
+        assert_ne!(left_node, right_node);
     }
 }
