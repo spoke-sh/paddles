@@ -1013,8 +1013,8 @@ impl HttpProviderAdapter {
             .iter()
             .any(|item| item.kind == "function_call");
         let content = self.extract_openai_responses_output_text(&parsed);
-        if content.is_empty() && !has_function_call {
-            return Err(anyhow!("empty OpenAI Responses response"));
+        if content.is_empty() && !has_function_call && self.verbose.load(Ordering::Relaxed) >= 1 {
+            eprintln!("[HTTP] {}", self.openai_responses_empty_summary(&parsed));
         }
         let deliberation_state = has_function_call.then(|| {
             DeliberationState::new(
@@ -1156,8 +1156,8 @@ impl HttpProviderAdapter {
 
         let parsed: OpenAiResponsesResponse = serde_json::from_str(&text)?;
         let content = self.extract_openai_responses_output_text(&parsed);
-        if content.is_empty() {
-            return Err(anyhow!("empty OpenAI Responses response"));
+        if content.is_empty() && self.verbose.load(Ordering::Relaxed) >= 1 {
+            eprintln!("[HTTP] {}", self.openai_responses_empty_summary(&parsed));
         }
         Ok((content, raw_response_artifact_id))
     }
@@ -1304,8 +1304,8 @@ impl HttpProviderAdapter {
         }
 
         let content = self.extract_openai_responses_output_text(&parsed);
-        if content.is_empty() {
-            return Err(anyhow!("empty OpenAI Responses response"));
+        if content.is_empty() && self.verbose.load(Ordering::Relaxed) >= 1 {
+            eprintln!("[HTTP] {}", self.openai_responses_empty_summary(&parsed));
         }
         Ok((content, raw_response_artifact_id))
     }
@@ -1339,7 +1339,7 @@ impl HttpProviderAdapter {
     }
 
     fn extract_openai_responses_output_text(&self, parsed: &OpenAiResponsesResponse) -> String {
-        parsed
+        let content = parsed
             .output
             .iter()
             .filter(|item| item.kind == "message")
@@ -1347,7 +1347,38 @@ impl HttpProviderAdapter {
             .filter(|item| item.kind == "output_text")
             .filter_map(|item| item.text.clone())
             .collect::<Vec<_>>()
-            .join("")
+            .join("");
+        if !content.trim().is_empty() {
+            return content;
+        }
+
+        parsed
+            .output_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+            .unwrap_or_default()
+    }
+
+    fn openai_responses_empty_summary(&self, parsed: &OpenAiResponsesResponse) -> String {
+        if let Some(error) = parsed.error.as_ref() {
+            return format!("OpenAI Responses response failed: {}", error.message);
+        }
+
+        if matches!(parsed.status.as_deref(), Some("incomplete")) {
+            if let Some(reason) = parsed
+                .incomplete_details
+                .as_ref()
+                .and_then(|details| details.reason.as_deref())
+                .filter(|reason| !reason.is_empty())
+            {
+                return format!("OpenAI Responses response incomplete: {reason}");
+            }
+            return "OpenAI Responses response incomplete".to_string();
+        }
+
+        "empty OpenAI Responses response".to_string()
     }
 
     fn extract_openai_responses_function_arguments(
@@ -2136,7 +2167,7 @@ impl SynthesizerEngine for HttpProviderAdapter {
             }
         }
 
-        let capture = ExchangeCapture {
+        let mut capture = ExchangeCapture {
             event_sink: event_sink.as_ref(),
             exchange_id: event_sink
                 .forensic_trace_sink()
@@ -2150,13 +2181,55 @@ impl SynthesizerEngine for HttpProviderAdapter {
             lane: TraceModelExchangeLane::Synthesizer,
             category: TraceModelExchangeCategory::TurnResponse,
         };
-        let (raw_response, raw_response_artifact_id) = self.send_structured_answer_blocking(
+        let (raw_response, mut raw_response_artifact_id) = self.send_structured_answer_blocking(
             &system,
             &user_msg,
             gathered_evidence.is_some(),
             Some(capture.clone()),
         )?;
         let mut response = normalize_assistant_response(&raw_response);
+        if response.trim().is_empty() {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "turn-response-retry".to_string(),
+                reason: "empty provider response; asking the synthesizer to restate the assistant response".to_string(),
+            });
+            capture = ExchangeCapture {
+                event_sink: event_sink.as_ref(),
+                exchange_id: event_sink
+                    .forensic_trace_sink()
+                    .map(|sink| {
+                        sink.allocate_model_exchange_id(
+                            TraceModelExchangeLane::Synthesizer,
+                            TraceModelExchangeCategory::TurnResponse,
+                        )
+                    })
+                    .unwrap_or_else(|| "exchange:untracked".to_string()),
+                lane: TraceModelExchangeLane::Synthesizer,
+                category: TraceModelExchangeCategory::TurnResponse,
+            };
+            let retry_user_msg = format!(
+                "{user_msg}\n\n## Response Repair\nYour previous response was empty. Return the full assistant response now."
+            );
+            let (retry_response, retry_raw_response_artifact_id) = self
+                .send_structured_answer_blocking(
+                    &system,
+                    &retry_user_msg,
+                    gathered_evidence.is_some(),
+                    Some(capture.clone()),
+                )?;
+            raw_response_artifact_id = retry_raw_response_artifact_id;
+            response = normalize_assistant_response(&retry_response);
+        }
+        if response.trim().is_empty() {
+            event_sink.emit(TurnEvent::Fallback {
+                stage: "turn-response-fallback".to_string(),
+                reason: "repeated empty provider response; emitting a local fallback reply"
+                    .to_string(),
+            });
+            response =
+                "I couldn't produce a usable response. Ask again or request a concrete workspace action."
+                    .to_string();
+        }
         let verified_external_urls = gathered_evidence
             .map(verified_external_urls_from_evidence)
             .unwrap_or_default();
@@ -2611,7 +2684,28 @@ struct OpenAiResponse {
 struct OpenAiResponsesResponse {
     id: String,
     #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    output_text: Option<String>,
+    #[serde(default)]
+    error: Option<OpenAiResponsesError>,
+    #[serde(default)]
+    incomplete_details: Option<OpenAiResponsesIncompleteDetails>,
+    #[serde(default)]
     output: Vec<OpenAiResponsesOutputItem>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+struct OpenAiResponsesError {
+    #[serde(default)]
+    code: Option<String>,
+    message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+struct OpenAiResponsesIncompleteDetails {
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -4067,6 +4161,7 @@ mod tests {
     fn openai_responses_text_response(response_id: &str, text: &str) -> String {
         json!({
             "id": response_id,
+            "status": "completed",
             "output": [
                 {
                     "type": "message",
@@ -4079,6 +4174,16 @@ mod tests {
                     ]
                 }
             ]
+        })
+        .to_string()
+    }
+
+    fn openai_responses_empty_response(response_id: &str) -> String {
+        json!({
+            "id": response_id,
+            "status": "completed",
+            "output": [],
+            "output_text": ""
         })
         .to_string()
     }
@@ -5811,6 +5916,57 @@ mod tests {
             requests[1].body["input"][0]["call_id"].as_str(),
             Some("call_test")
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn openai_responses_synthesizer_retries_after_an_empty_response() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let server = start_mock_server(vec![
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_responses_empty_response("resp_empty"),
+            },
+            MockResponse {
+                status: StatusCode::OK,
+                body: openai_responses_text_response(
+                    "resp_retry",
+                    &structured_answer_json("Recovered final answer."),
+                ),
+            },
+        ])
+        .await;
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "openai",
+            "gpt-5.4@@thinking=high",
+            "test-key",
+            server.base_url.clone(),
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let response = adapter
+            .respond_for_turn(
+                "Summarize the recovery.",
+                TurnIntent::DirectResponse,
+                None,
+                &SynthesisHandoff::default(),
+                sink.clone(),
+            )
+            .expect("response after retry");
+
+        assert_eq!(response, "Recovered final answer.");
+        let requests = server.recorded_requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].uri, "/v1/responses");
+        assert_eq!(requests[1].uri, "/v1/responses");
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::Fallback { stage, reason }
+                if stage == "turn-response-retry"
+                    && reason.contains("empty provider response")
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread")]

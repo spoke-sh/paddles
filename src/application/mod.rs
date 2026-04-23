@@ -3656,15 +3656,25 @@ impl MechSuitService {
                                             output.governance_outcome,
                                         );
                                         if !output.command_succeeded {
+                                            let summary =
+                                                format!("inspect failed: {}", output.summary);
                                             trace.emit(TurnEvent::ToolFinished {
                                                 call_id,
                                                 tool_name: "inspect".to_string(),
-                                                summary: format!(
-                                                    "inspect failed: {}",
-                                                    output.summary
-                                                ),
+                                                summary: summary.clone(),
                                             });
-                                            format!("inspect failed: {}", output.summary)
+                                            append_evidence_item(
+                                                &mut loop_state.evidence_items,
+                                                EvidenceItem {
+                                                    source: format!("command: {command}"),
+                                                    snippet: trim_for_planner(&summary, 800),
+                                                    rationale: decision.rationale.clone(),
+                                                    rank: 0,
+                                                },
+                                                budget.max_evidence_items,
+                                            );
+                                            used_workspace_resources = true;
+                                            summary
                                         } else {
                                             let summary = planner_terminal_tool_success_summary(
                                                 "inspect",
@@ -3690,12 +3700,24 @@ impl MechSuitService {
                                         }
                                     }
                                     Err(err) => {
+                                        let summary = format!("inspect failed: {err:#}");
                                         trace.emit(TurnEvent::ToolFinished {
                                             call_id,
                                             tool_name: "inspect".to_string(),
-                                            summary: format!("inspect failed: {err:#}"),
+                                            summary: summary.clone(),
                                         });
-                                        format!("inspect failed: {err:#}")
+                                        append_evidence_item(
+                                            &mut loop_state.evidence_items,
+                                            EvidenceItem {
+                                                source: format!("command: {command}"),
+                                                snippet: trim_for_planner(&summary, 800),
+                                                rationale: decision.rationale.clone(),
+                                                rank: 0,
+                                            },
+                                            budget.max_evidence_items,
+                                        );
+                                        used_workspace_resources = true;
+                                        summary
                                     }
                                 }
                             }
@@ -3766,9 +3788,6 @@ impl MechSuitService {
                                             budget.max_evidence_items,
                                         );
                                         used_workspace_resources = true;
-                                        stop_reason.get_or_insert_with(|| {
-                                            "workspace-action-failed".to_string()
-                                        });
                                         summary
                                     }
                                 }
@@ -3790,9 +3809,6 @@ impl MechSuitService {
                                         budget.max_evidence_items,
                                     );
                                     used_workspace_resources = true;
-                                    stop_reason.get_or_insert_with(|| {
-                                        "workspace-action-failed".to_string()
-                                    });
                                     summary
                                 }
                             }
@@ -3942,9 +3958,6 @@ impl MechSuitService {
                                             budget.max_evidence_items,
                                         );
                                         used_workspace_resources = true;
-                                        stop_reason.get_or_insert_with(|| {
-                                            "workspace-action-failed".to_string()
-                                        });
                                         summary
                                     }
                                 }
@@ -10685,7 +10698,7 @@ mod tests {
         let sink = Arc::new(RecordingTurnEventSink::default());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-        runtime.block_on(async {
+        let _reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
                 planner_engine: planner,
@@ -14643,6 +14656,106 @@ mod tests {
         assert!(stdout_index < finished_index);
         assert!(stderr_index < finished_index);
         assert_eq!(finished_summary, "command completed");
+    }
+
+    #[test]
+    fn failed_shell_actions_stay_in_the_loop_as_evidence_for_recovery() {
+        let workspace = tempfile::tempdir().expect("workspace");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let answer =
+            "The shell command failed; inspect the hook output and adjust the commit step instead of ending the turn."
+                .to_string();
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Shell {
+                        command: "false".to_string(),
+                    },
+                },
+                "run the shell command first so the harness can reason from the exact failure",
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "failure captured and next steps are clear".to_string(),
+                },
+                rationale: "the failed shell output is enough to decide the next bounded step"
+                    .to_string(),
+                answer: Some(answer.clone()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+
+                deliberation_state: None,
+            }],
+            recorded_requests.clone(),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let _reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink(
+                    "Run the shell command and keep reasoning if it fails.",
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(
+            requests.len() >= 2,
+            "a failed shell action should still permit a follow-on planner decision"
+        );
+        assert!(
+            requests
+                .iter()
+                .skip(1)
+                .flat_map(|request| request.loop_state.evidence_items.iter())
+                .any(|item| item.snippet.contains("Tool `shell` failed")
+                    && item.snippet.contains("Exit status")),
+            "the failed shell action should remain available as evidence for the next decision"
+        );
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolFinished { tool_name, summary, .. }
+                if tool_name == "shell" && summary.contains("Tool `shell` failed")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerSummary {
+                stop_reason: Some(reason),
+                ..
+            } if reason == "failure captured and next steps are clear"
+        )));
     }
 
     #[test]
