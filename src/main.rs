@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::env;
 use std::io::IsTerminal;
@@ -18,6 +18,7 @@ use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathere
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
 use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
+use paddles::infrastructure::adapters::trace_recorders::HostedTransitTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::default_trace_recorder_for_workspace;
 use paddles::infrastructure::cli::interactive_tui::{
@@ -256,12 +257,17 @@ fn build_trace_recorder_from_config(
                 "configured explicit in-memory trace authority mode",
             )))
         }
-        TraceAuthoritySelection::HostedTransit(hosted) => bail!(
-            "hosted trace authority mode selected for endpoint `{}` in namespace `{}` with service identity `{}`, but hosted transit recorder bootstrap is not available in this build yet",
-            hosted.endpoint,
-            hosted.namespace,
-            hosted.service_identity
-        ),
+        TraceAuthoritySelection::HostedTransit(hosted) => {
+            let endpoint = hosted
+                .endpoint
+                .parse()
+                .with_context(|| format!("parse hosted transit endpoint `{}`", hosted.endpoint))?;
+            Ok(Arc::new(HostedTransitTraceRecorder::connect(
+                endpoint,
+                hosted.namespace.clone(),
+                hosted.service_identity.clone(),
+            )?))
+        }
     }
 }
 
@@ -733,8 +739,24 @@ async fn run_plain_interactive_loop(service: Arc<MechSuitService>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_remote_provider_transport_support;
+    use super::{build_trace_recorder_from_config, ensure_remote_provider_transport_support};
+    use paddles::infrastructure::config::{HostedTransitAuthorityConfig, TraceAuthoritySelection};
     use paddles::infrastructure::providers::ModelProvider;
+    use std::path::Path;
+    use tempfile::tempdir;
+    use transit_core::engine::LocalEngineConfig;
+    use transit_core::membership::NodeId;
+    use transit_core::server::{ServerConfig, ServerHandle};
+
+    fn hosted_server() -> (tempfile::TempDir, ServerHandle) {
+        let temp = tempdir().expect("tempdir");
+        let server = ServerHandle::bind(ServerConfig::new(
+            LocalEngineConfig::new(temp.path(), NodeId::new("main-hosted-transit-test-node")),
+            "127.0.0.1:0".parse().expect("listen addr"),
+        ))
+        .expect("bind hosted transit server");
+        (temp, server)
+    }
 
     #[test]
     fn remote_provider_transport_allows_openai_responses_models() {
@@ -746,5 +768,27 @@ mod tests {
     fn remote_provider_transport_allows_supported_openai_chat_models() {
         ensure_remote_provider_transport_support(ModelProvider::Openai, "gpt-5.4")
             .expect("supported OpenAI chat model should remain allowed");
+    }
+
+    #[test]
+    fn hosted_service_mode_does_not_require_embedded_transit_core() {
+        let (_server_root, server) = hosted_server();
+        let workspace = tempdir().expect("workspace");
+
+        let recorder = build_trace_recorder_from_config(
+            Path::new(workspace.path()),
+            &TraceAuthoritySelection::HostedTransit(HostedTransitAuthorityConfig {
+                endpoint: server.local_addr().to_string(),
+                namespace: "test-hosted".to_string(),
+                service_identity: "svc-main".to_string(),
+            }),
+        )
+        .expect("hosted service-mode recorder");
+
+        assert!(matches!(
+            recorder.capability(),
+            paddles::domain::ports::TraceRecorderCapability::Persistent { backend, .. }
+                if backend == "hosted_transit"
+        ));
     }
 }

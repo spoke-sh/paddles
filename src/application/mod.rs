@@ -29,10 +29,7 @@ use self::turn_orchestration::TurnOrchestrationChamber;
 
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::local_workspace_action_executor::LocalWorkspaceActionExecutor;
-use crate::infrastructure::adapters::trace_recorders::{
-    TransitTraceRecorder, default_trace_recorder_for_workspace,
-};
-use crate::infrastructure::adapters::transit_resolver::NoopContextResolver;
+use crate::infrastructure::adapters::trace_recorders::default_trace_recorder_for_workspace;
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::execution_governance::{

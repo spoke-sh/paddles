@@ -310,16 +310,9 @@ impl<'a> TurnOrchestrationChamber<'a> {
                         .synthesis_chamber()
                         .recent_turn_summaries(&session, synthesizer_engine.as_ref())?;
 
-                    let resolver: Arc<dyn ContextResolver> = if let Some(transit) = self
-                        .service
-                        .trace_recorder
-                        .as_any()
-                        .downcast_ref::<TransitTraceRecorder>()
-                    {
-                        Arc::new(TransitContextResolver::new(Arc::new(transit.clone())))
-                    } else {
-                        Arc::new(NoopContextResolver)
-                    };
+                    let resolver: Arc<dyn ContextResolver> = Arc::new(TransitContextResolver::new(
+                        Arc::clone(&self.service.trace_recorder),
+                    ));
 
                     self.service
                         .recursive_control()

@@ -27,11 +27,11 @@ started_at: 2026-04-22T22:12:29
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Hosted Transit Authority Config And Runtime Contract](../../../../stories/VHaVNavBe/README.md) | feat | done |
-| [Implement Hosted Transit Recorder And Service Bootstrap](../../../../stories/VHaVP94kM/README.md) | feat | backlog |
+| [Implement Hosted Transit Recorder And Service Bootstrap](../../../../stories/VHaVP94kM/README.md) | feat | done |
 | [Add Hosted Service Readiness And Operator Surface Boundaries](../../../../stories/VHaVPgBE0/README.md) | feat | backlog |
 <!-- END GENERATED -->

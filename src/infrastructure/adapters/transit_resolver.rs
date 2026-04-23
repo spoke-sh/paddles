@@ -1,19 +1,23 @@
 use crate::domain::model::traces::TraceRecordKind;
 use crate::domain::ports::{ContextResolver, TraceRecorder};
-use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use paddles_conversation::ContextLocator;
 use std::sync::Arc;
 
-#[derive(Debug)]
 pub struct TransitContextResolver {
-    recorder: Arc<TransitTraceRecorder>,
+    recorder: Arc<dyn TraceRecorder>,
 }
 
 impl TransitContextResolver {
-    pub fn new(recorder: Arc<TransitTraceRecorder>) -> Self {
+    pub fn new(recorder: Arc<dyn TraceRecorder>) -> Self {
         Self { recorder }
+    }
+}
+
+impl std::fmt::Debug for TransitContextResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransitContextResolver").finish()
     }
 }
 
@@ -24,7 +28,7 @@ impl ContextResolver for TransitContextResolver {
             ContextLocator::Inline { content } => Ok(content.clone()),
             ContextLocator::Transit { task_id, record_id } => {
                 // Replay the task to find the specific record.
-                // Note: This is a synchronous operation in TransitTraceRecorder today.
+                // Note: This is a synchronous operation in TraceRecorder today.
                 let replay = self.recorder.replay(task_id)?;
                 let record = replay
                     .records
@@ -91,6 +95,7 @@ mod tests {
     use crate::domain::model::traces::{TraceLineage, TraceRecord, TraceRecordKind, TraceTaskRoot};
     use crate::domain::model::{ArtifactEnvelope, ArtifactKind};
     use crate::domain::ports::TraceRecorder;
+    use crate::infrastructure::adapters::trace_recorders::TransitTraceRecorder;
     use paddles_conversation::{TaskTraceId, TraceArtifactId, TraceRecordId, TurnTraceId};
     use std::sync::Arc;
     use tempfile::tempdir;
