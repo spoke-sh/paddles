@@ -24,16 +24,63 @@ pub enum HostedTransitEnvelopeKind {
 pub struct HostedTransitEnvelope<T> {
     pub contract_version: String,
     pub kind: HostedTransitEnvelopeKind,
+    pub provenance: HostedTransitProvenance,
     pub payload: T,
 }
 
 impl<T> HostedTransitEnvelope<T> {
-    pub fn new(kind: HostedTransitEnvelopeKind, payload: T) -> Self {
-        Self {
+    pub fn new(
+        kind: HostedTransitEnvelopeKind,
+        provenance: HostedTransitProvenance,
+        payload: T,
+    ) -> Result<Self> {
+        provenance.validate()?;
+        Ok(Self {
             contract_version: HOSTED_TRANSIT_CONTRACT_VERSION.to_string(),
             kind,
+            provenance,
             payload,
-        }
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedTransitProvenance {
+    pub account_id: String,
+    pub session_id: String,
+    pub workspace_id: String,
+    pub route: String,
+    pub request_id: String,
+    pub workspace_posture: String,
+}
+
+impl HostedTransitProvenance {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            !self.account_id.trim().is_empty(),
+            "hosted transit provenance requires account_id"
+        );
+        ensure!(
+            !self.session_id.trim().is_empty(),
+            "hosted transit provenance requires session_id"
+        );
+        ensure!(
+            !self.workspace_id.trim().is_empty(),
+            "hosted transit provenance requires workspace_id"
+        );
+        ensure!(
+            !self.route.trim().is_empty(),
+            "hosted transit provenance requires route"
+        );
+        ensure!(
+            !self.request_id.trim().is_empty(),
+            "hosted transit provenance requires request_id"
+        );
+        ensure!(
+            !self.workspace_posture.trim().is_empty(),
+            "hosted transit provenance requires workspace_posture"
+        );
+        Ok(())
     }
 }
 
@@ -108,9 +155,20 @@ fn sanitize_stream_component(component: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        HostedTransitEnvelope, HostedTransitEnvelopeKind, HostedTransitStreamFamilies,
-        HostedTransitStreamLayout, hosted_transit_contract_version,
+        HostedTransitEnvelope, HostedTransitEnvelopeKind, HostedTransitProvenance,
+        HostedTransitStreamFamilies, HostedTransitStreamLayout, hosted_transit_contract_version,
     };
+
+    fn sample_provenance() -> HostedTransitProvenance {
+        HostedTransitProvenance {
+            account_id: "acct-1".to_string(),
+            session_id: "session-1".to_string(),
+            workspace_id: "workspace-1".to_string(),
+            route: "hub/workbench".to_string(),
+            request_id: "request-1".to_string(),
+            workspace_posture: "workspace_write".to_string(),
+        }
+    }
 
     #[test]
     fn hosted_transit_contract_versions_define_envelopes_for_bootstrap_turn_progress_rebuild_completion_failure_and_restore()
@@ -129,7 +187,12 @@ mod tests {
         ];
 
         for kind in kinds {
-            let envelope = HostedTransitEnvelope::new(kind.clone(), serde_json::json!({"ok":true}));
+            let envelope = HostedTransitEnvelope::new(
+                kind.clone(),
+                sample_provenance(),
+                serde_json::json!({"ok":true}),
+            )
+            .expect("versioned envelope");
             assert_eq!(envelope.contract_version, version);
             assert_eq!(envelope.kind, kind);
         }
@@ -161,5 +224,43 @@ mod tests {
             layout.contract_version,
             hosted_transit_contract_version().to_string()
         );
+    }
+
+    #[test]
+    fn transit_provenance_envelopes_carry_account_session_workspace_route_request_and_posture() {
+        let provenance = sample_provenance();
+        let envelope = HostedTransitEnvelope::new(
+            HostedTransitEnvelopeKind::SessionProjection,
+            provenance.clone(),
+            serde_json::json!({"projection":"session"}),
+        )
+        .expect("projection envelope");
+
+        assert_eq!(envelope.provenance, provenance);
+        assert_eq!(envelope.provenance.account_id, "acct-1");
+        assert_eq!(envelope.provenance.session_id, "session-1");
+        assert_eq!(envelope.provenance.workspace_id, "workspace-1");
+        assert_eq!(envelope.provenance.route, "hub/workbench");
+        assert_eq!(envelope.provenance.request_id, "request-1");
+        assert_eq!(envelope.provenance.workspace_posture, "workspace_write");
+    }
+
+    #[test]
+    fn transit_contract_rejects_missing_provenance() {
+        let error = HostedTransitEnvelope::new(
+            HostedTransitEnvelopeKind::TurnSubmissionCommand,
+            HostedTransitProvenance {
+                account_id: String::new(),
+                session_id: "session-1".to_string(),
+                workspace_id: "workspace-1".to_string(),
+                route: "hub/workbench".to_string(),
+                request_id: "request-1".to_string(),
+                workspace_posture: "workspace_write".to_string(),
+            },
+            serde_json::json!({"prompt":"fix it"}),
+        )
+        .expect_err("missing provenance should reject");
+
+        assert!(error.to_string().contains("account_id"));
     }
 }
