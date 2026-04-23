@@ -28,13 +28,25 @@ Model selection is an architectural decision that shapes every turn.
 - **Intent Before Size**: Models are chosen by workload shape first — direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
 - **Interpretation Before Routing**: Operator memory and foundational guidance are available to the planner before any routing commitment.
 - **Model-Directed Action Selection**: The planner selects its next bounded action through a constrained model response after interpretation context is assembled.
+- **Runtime Capability Disclosure Before Reasoning**: Planner and synthesizer
+  lanes receive the live, dynamically discovered harness capability surface,
+  execution posture, and completion contract as runtime data before they decide
+  what to do next.
 - **Controller Owns Validation and Safety**: The controller remains authoritative for schema validation, budgets, safe command allowlists, deterministic execution, and fail-closed behavior. The model drives direction; the controller ensures safety.
 - **Intent Lives In Model Decisions, Not Controller Heuristics**: The controller must not infer workspace engagement or direct-answer intent from prompt-token heuristics. Intent routing comes from the planner's typed decision.
+- **No Synthetic Planning Surfaces**: The controller must not replace model
+  reasoning with generic obligation prose, canned checklists, or other
+  pseudo-plan language. User-visible plan state should come from model-authored
+  control artifacts or not exist at all.
 
 ### Planning and Synthesis
 - **Recursive Planning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
 - **Planner Action Contract**: Turns flow through a constrained planner contract: answer/synthesize, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), refine, branch, and stop.
 - **Turns Plan First**: The primary mech-suit runtime asks the planner for its first bounded action before route selection. This recursive path is the primary mode of operation.
+- **Reasoning Budget Is For Reasoning**: Recursive budget exists to let the
+  model think through the harness' dynamically available capabilities and
+  enforced constraints. The harness may bound the loop, but it should not
+  pre-chew the model's plan into generic fallback language.
 - **Separate Planner From Synthesizer**: Planning and final answer generation are distinct steps, each routed to the model best suited for that workload.
 - **Grounded Answers Cite Sources**: Repository-question answers include file citations by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
 - **Final Answer Rendering Stays Typed**: Planner-direct answers and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.

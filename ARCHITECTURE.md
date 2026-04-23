@@ -21,11 +21,22 @@ By the time the planner sees the prompt, it already knows the operator's priorit
 
 **`PlannerLane`** drives an iterative investigation. The planner model evaluates the assembled context and selects its next bounded action: answer directly, search the workspace, read a file, inspect state, run a shell command, refine a query, branch into subqueries, or stop.
 
+That planner must be given real room to think. Paddles should present the
+planner with the live harness capability surface, execution posture, and
+completion contract as runtime data, then let it spend recursive budget
+reasoning within those bounds. The harness should not crowd that reasoning with
+controller-authored pseudo-plans, generic obligation language, or synthetic
+checklists.
+
 **`RecursiveExecutionLoop`** validates each action against schema and budget contracts, executes it safely, appends the output back into context, and loops. Each pass through the loop adds real evidence — file contents, search results, tool outputs — grounding the eventual answer in workspace reality.
 
 The loop continues until the planner determines it has enough evidence, the budget is met, or an explicit stop is reached.
 
-The important routing boundary is that the controller does not infer intent from prompt-token heuristics. The planner decides whether a turn should answer directly, inspect locally, recurse, or stop. The controller validates that choice and keeps the loop safe.
+The important routing boundary is that the controller does not infer intent from
+prompt-token heuristics and does not invent a fake plan on the model's behalf.
+The planner decides whether a turn should answer directly, inspect locally,
+recurse, edit, or stop. The controller validates that choice and keeps the loop
+safe.
 
 One fail-closed exception now exists for repository-scoped follow-ups. If the planner selects a direct answer for a turn that appears to refer to local architecture or ownership without grounded evidence, the controller bootstraps a local read-only probe before synthesis instead of permitting an ungrounded reply.
 
@@ -211,13 +222,20 @@ without inventing a second, adapter-specific readiness language.
 Three properties of this architecture compound to raise effective model performance:
 
 1. **Interpretation arrives first.** Operator memory and project guidance shape the planner's priorities before it commits to any action. The model reasons within the operator's context from the start.
-2. **Recursive evidence gathering earns the answer.** Instead of generating an answer from memory alone, the planner iteratively reads, searches, and refines until it has concrete evidence. Small models with tools consistently outperform the same models without them.
-3. **Planning and synthesis are separate workloads.** The best recursive investigator may differ from the best answer composer. Separating these roles lets each be optimized independently and routed to the smallest capable model.
+2. **Capability and constraint surfaces arrive before control decisions.** The harness discloses its live recursive capabilities, execution posture, and completion contract before asking the model what to do next.
+3. **Recursive evidence gathering earns the answer.** Instead of generating an answer from memory alone, the planner iteratively reads, searches, and refines until it has concrete evidence. Small models with tools consistently outperform the same models without them.
+4. **Planning and synthesis are separate workloads.** The best recursive investigator may differ from the best answer composer. Separating these roles lets each be optimized independently and routed to the smallest capable model.
 
 ## Core Commitments
 
 - **Interpretation before routing.** The model sees full context and chooses its own path.
+- **Live capabilities before prompt folklore.** The harness discloses what it
+  can actually do right now, along with the constraints it will enforce, before
+  the model commits to a recursive path.
 - **Model-directed action selection.** The planner selects from a constrained action schema; the controller validates and executes.
+- **Harness-authored safety, model-authored plans.** The harness owns
+  validation, execution, and fail-closed boundaries. Concrete plan state should
+  come from the model's own control artifacts, not synthetic controller prose.
 - **`AGENTS.md` as the interpretation root.** Operator memory shapes investigation, priorities, and procedures — additional guidance flows through the model-derived graph.
 - **Planner and synthesizer as distinct roles.** Each can use different models optimized for their workload.
 - **Project artifacts as context.** Keel, board state, and domain knowledge enter through memory, search, and tools — keeping the harness general-purpose.

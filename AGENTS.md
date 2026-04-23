@@ -29,6 +29,11 @@ policy, defer to the documents listed below.
    tradeoffs need input.
 7. **Update The Right Source Of Truth**: When behavior changes, update the doc
    that owns that behavior. Each contract lives in exactly one place.
+8. **Expose Runtime Reality, Not Synthetic Plans**: Give the model the live,
+   dynamically discovered harness capability surface, execution constraints, and
+   completion contract, then leave enough recursive budget for it to reason
+   within those bounds. Do not replace that reasoning with generic obligation
+   language, synthetic checklists, or controller-authored pseudo-plans.
 
 ## Canonical Turn Loop
 
@@ -92,6 +97,10 @@ how it does it.
 - If board-mutating lifecycle commands produce `.keel` churn, include that churn
   in the same sealing commit.
 - Re-run orientation after each sealing commit instead of stopping at “done.”
+- When changing prompts, routing, or planner control surfaces, prefer explicit
+  disclosure of dynamically available capabilities and enforced constraints over
+  extra heuristics. The harness sets boundaries and validates results; the
+  model owns the recursive reasoning path.
 - Keep docs synchronized with behavior changes, but update the owning docs:
   `README.md`, `POLICY.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`,
   `INSTRUCTIONS.md`, or planning artifacts as appropriate.

@@ -125,6 +125,14 @@ impl<'a> TurnOrchestrationChamber<'a> {
                 .synthesis_chamber()
                 .specialist_runtime_notes(&current_prompt, &session, &prepared);
             let recent_thread_summary = session.recent_thread_summary(&active_thread);
+            let controller_edit =
+                controller_prompt_edit_instruction(&self.service.workspace_root, &current_prompt);
+            let controller_commit_instruction =
+                controller_prompt_commit_instruction(&current_prompt);
+            let request_instruction_frame = merge_instruction_frames(
+                instruction_frame_from_initial_edit(&controller_edit),
+                controller_commit_instruction.clone(),
+            );
             let request = PlannerRequest::new(
                 &current_prompt,
                 self.service.workspace_root.clone(),
@@ -139,6 +147,12 @@ impl<'a> TurnOrchestrationChamber<'a> {
                 &specialist_runtime_notes,
                 &collaboration,
             ))
+            .with_execution_contract(self.service.planner_execution_contract(
+                gatherer.as_ref(),
+                &collaboration,
+                request_instruction_frame.as_ref(),
+                None,
+            ))
             .with_entity_resolver(Arc::clone(&self.service.entity_resolver));
 
             let execution_plan = match planner_capability {
@@ -146,10 +160,6 @@ impl<'a> TurnOrchestrationChamber<'a> {
                     let mut decision = planner_engine
                         .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
                         .await?;
-                    let controller_edit = controller_prompt_edit_instruction(
-                        &self.service.workspace_root,
-                        &current_prompt,
-                    );
                     let provider_edit_missing =
                         !decision.edit.known_edit && controller_edit.known_edit;
                     decision.edit =
@@ -172,8 +182,6 @@ impl<'a> TurnOrchestrationChamber<'a> {
                             ),
                         });
                     }
-                    let controller_commit_instruction =
-                        controller_prompt_commit_instruction(&current_prompt);
                     if collaboration.active.mutation_posture.allows_mutation()
                         && let Some(bootstrapped) =
                             bootstrap_git_commit_initial_action(&current_prompt, &decision)
@@ -288,18 +296,12 @@ impl<'a> TurnOrchestrationChamber<'a> {
                 }
             };
 
-            let mut execution_checklist =
-                build_execution_checklist(&current_prompt, &recent_turns, &execution_plan);
-
             trace.emit(TurnEvent::IntentClassified {
                 intent: execution_plan.intent.clone(),
             });
             trace.emit(TurnEvent::RouteSelected {
                 summary: execution_plan.route_summary.clone(),
             });
-            if let Some(checklist) = execution_checklist.as_mut() {
-                checklist.emit(trace.as_ref());
-            }
 
             let planner_outcome = match execution_plan.path {
                 PromptExecutionPath::PlannerThenSynthesize => {
@@ -329,6 +331,18 @@ impl<'a> TurnOrchestrationChamber<'a> {
                                 gatherer,
                                 resolver,
                                 entity_resolver: Arc::clone(&self.service.entity_resolver),
+                                workspace_capability_surface: self
+                                    .service
+                                    .workspace_action_executor()
+                                    .capability_surface(),
+                                execution_hands: self.service.execution_hand_diagnostics(),
+                                governance_profile: self
+                                    .service
+                                    .execution_hand_registry()
+                                    .governance_profile(),
+                                external_capabilities: self
+                                    .service
+                                    .external_capability_descriptors(),
                                 interpretation: interpretation.clone(),
                                 recent_turns,
                                 recent_thread_summary: recent_thread_summary.clone(),
@@ -339,7 +353,6 @@ impl<'a> TurnOrchestrationChamber<'a> {
                                 grounding: execution_plan.grounding.clone(),
                             },
                             execution_plan.initial_planner_decision.clone(),
-                            execution_checklist,
                             Arc::clone(&trace),
                         )
                         .await?

@@ -36,8 +36,9 @@ pub use planning::{
     InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
     InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
     PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, RefinementPolicy,
-    RefinementTrigger, RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
+    PlannerExecutionContract, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+    RecursivePlanner, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
+    ThreadDecisionRequest, WorkspaceAction,
 };
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,
@@ -50,7 +51,8 @@ pub use trace_recording::{
     TraceSessionWake,
 };
 pub use workspace_action_execution::{
-    WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceActionResult,
+    WorkspaceActionCapability, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+    WorkspaceActionResult, WorkspaceCapabilitySurface, WorkspaceToolCapability,
 };
 pub use workspace_editing::WorkspaceEditor;
 

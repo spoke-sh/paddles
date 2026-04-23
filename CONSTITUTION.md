@@ -8,6 +8,12 @@
 ## 1. The Prime Directive
 `paddles` provides a high-fidelity, local-first harness for agentic SDLC execution. Software development is treated as a rigorous simulation where intent is calibrated, execution is verified, and drift is eliminated. The recursive harness amplifies what small local models can accomplish by giving them structured tools, bounded investigation, and accumulated evidence.
 
+The mech suit must therefore preserve **reasoning latitude**. The harness should
+present live, dynamically discovered capability surfaces, explicit constraints,
+and visible completion contracts, then give the model enough recursive budget
+to reason within those bounds. It must not crowd out that reasoning with
+synthetic plans, generic obligation prose, or controller-authored pseudo-intent.
+
 ## 2. Environmental Calibration
 A mech suit tunes itself to its pilot and environment.
 - **Credits**: The energy and inheritance allocated to a session — each turn earns its budget through bounded work.
@@ -18,6 +24,9 @@ A mech suit tunes itself to its pilot and environment.
 `paddles` follows the 2-queue pull model defined by Keel:
 - **Humans** author the physics (ADRs, PRDs, Dogma). They define the strategic "Why" and "What".
 - **Agents** execute within the physics through recursive planning. They handle the tactical "How" and implementation, earning their answers through iterative evidence gathering.
+- **The Harness** exposes the recursive capabilities, budgets, and boundaries of
+  the suit as runtime data. It validates and records execution, but it does not
+  substitute its own canned plan for the model's reasoning.
 - **Verification** bridges the gap — confirming the simulation matches the requirement.
 
 ## 4. Core Invariants

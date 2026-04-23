@@ -1,7 +1,8 @@
 use super::local_workspace_editor::{LocalWorkspaceEditor, relative_path, resolve_workspace_path};
 use crate::domain::ports::{
-    WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceActionResult,
-    WorkspaceEditor,
+    WorkspaceAction, WorkspaceActionCapability, WorkspaceActionExecutionFrame,
+    WorkspaceActionExecutor, WorkspaceActionResult, WorkspaceCapabilitySurface, WorkspaceEditor,
+    WorkspaceToolCapability,
 };
 use crate::infrastructure::execution_governance::{
     GovernedTerminalCommandResult, summarize_governance_outcome,
@@ -11,9 +12,10 @@ use crate::infrastructure::terminal::run_background_terminal_command_with_runtim
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const MAX_TOOL_OUTPUT_CHARS: usize = 12_000;
 const MAX_FILE_CHARS: usize = 16_000;
@@ -24,6 +26,7 @@ pub struct LocalWorkspaceActionExecutor {
     workspace_root: PathBuf,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
+    observed_tools: Arc<Mutex<BTreeMap<String, WorkspaceToolCapability>>>,
 }
 
 impl LocalWorkspaceActionExecutor {
@@ -46,6 +49,7 @@ impl LocalWorkspaceActionExecutor {
             workspace_root: workspace_root.into(),
             execution_hand_registry,
             transport_mediator,
+            observed_tools: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -113,6 +117,11 @@ impl LocalWorkspaceActionExecutor {
                         governance_request,
                         governance_outcome,
                     } => {
+                        self.record_tool_observations(
+                            command,
+                            Some(output.status.success()),
+                            Some(String::from_utf8_lossy(&output.stderr).as_ref()),
+                        );
                         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         let rendered = if stderr.trim().is_empty() {
@@ -173,6 +182,11 @@ impl LocalWorkspaceActionExecutor {
                         governance_request,
                         governance_outcome,
                     } => {
+                        self.record_tool_observations(
+                            command,
+                            Some(output.status.success()),
+                            Some(String::from_utf8_lossy(&output.stderr).as_ref()),
+                        );
                         let summary = format_command_summary("Shell command", command, &output);
                         if !output.status.success() {
                             bail!("{summary}");
@@ -204,9 +218,84 @@ impl LocalWorkspaceActionExecutor {
             }
         }
     }
+
+    fn record_tool_observations(
+        &self,
+        command: &str,
+        succeeded: Option<bool>,
+        stderr: Option<&str>,
+    ) {
+        let mut observed = self
+            .observed_tools
+            .lock()
+            .expect("observed tool cache lock");
+        for capability in tool_observations_from_command(command, succeeded, stderr) {
+            observed.insert(capability.tool.clone(), capability);
+        }
+    }
 }
 
 impl WorkspaceActionExecutor for LocalWorkspaceActionExecutor {
+    fn capability_surface(&self) -> WorkspaceCapabilitySurface {
+        WorkspaceCapabilitySurface {
+            actions: vec![
+                WorkspaceActionCapability::new(
+                    "list_files",
+                    "enumerate workspace files within the repository boundary",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "read",
+                    "open a specific workspace file or artifact",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "inspect",
+                    "run a read-only shell probe through the terminal hand",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "diff",
+                    "inspect current workspace diffs without mutating files",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "shell",
+                    "run a governed workspace command when a command should execute now",
+                    true,
+                ),
+                WorkspaceActionCapability::new(
+                    "write_file",
+                    "replace an entire workspace file with authored contents",
+                    true,
+                ),
+                WorkspaceActionCapability::new(
+                    "replace_in_file",
+                    "apply an exact in-file text replacement",
+                    true,
+                ),
+                WorkspaceActionCapability::new(
+                    "apply_patch",
+                    "apply a bounded patch directly to the workspace",
+                    true,
+                ),
+            ],
+            tools: self
+                .observed_tools
+                .lock()
+                .expect("observed tool cache lock")
+                .values()
+                .cloned()
+                .collect(),
+            notes: vec![
+                "local tools are discovered on demand; probe the exact program you need with `inspect` `command -v <tool>` and the harness will cache the result".to_string(),
+                "cached tool observations are session-local and reflect prior probes or executed commands, not a prebaked whitelist".to_string(),
+                "search and refine are provided by the configured gatherer, not the local workspace executor".to_string(),
+                "external_capability actions are routed through the external capability broker, not the local workspace executor".to_string(),
+            ],
+        }
+    }
+
     fn execute_workspace_action(
         &self,
         action: &WorkspaceAction,
@@ -214,6 +303,121 @@ impl WorkspaceActionExecutor for LocalWorkspaceActionExecutor {
     ) -> Result<WorkspaceActionResult> {
         self.execute_local_action(action, frame)
     }
+}
+
+fn tool_observations_from_command(
+    command: &str,
+    succeeded: Option<bool>,
+    stderr: Option<&str>,
+) -> Vec<WorkspaceToolCapability> {
+    if let Some(tool) = explicit_tool_probe_target(command) {
+        let summary = if succeeded.unwrap_or(false) {
+            format!("observed available from prior tool probe `{command}`")
+        } else {
+            format!("observed unavailable from prior tool probe `{command}`")
+        };
+        return vec![WorkspaceToolCapability::new(
+            tool.clone(),
+            summary,
+            Some(WorkspaceAction::Inspect {
+                command: format!("command -v {tool}"),
+            }),
+        )];
+    }
+
+    if command_failed_with_missing_binary(succeeded, stderr) {
+        return Vec::new();
+    }
+
+    command_tool_candidates(command)
+        .into_iter()
+        .map(|tool| {
+            WorkspaceToolCapability::new(
+                tool.clone(),
+                format!("observed available from prior workspace command `{command}`"),
+                Some(WorkspaceAction::Inspect {
+                    command: format!("command -v {tool}"),
+                }),
+            )
+        })
+        .collect()
+}
+
+fn explicit_tool_probe_target(command: &str) -> Option<String> {
+    let tokens = shell_like_tokens(command);
+    match tokens.as_slice() {
+        [first, flag, tool] if *first == "command" && *flag == "-v" => normalized_tool_name(tool),
+        [first, tool] if *first == "which" => normalized_tool_name(tool),
+        _ => None,
+    }
+}
+
+fn command_tool_candidates(command: &str) -> Vec<String> {
+    let tokens = shell_like_tokens(command);
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+
+    let mut tools = BTreeSet::new();
+    if let Some(first) = first_command_token(&tokens)
+        && let Some(tool) = normalized_tool_name(first)
+    {
+        tools.insert(tool);
+    }
+
+    for window in tokens.windows(2) {
+        if matches!(window, [flag, _] if *flag == "--command" || *flag == "-c")
+            && let Some(tool) = normalized_tool_name(window[1])
+        {
+            tools.insert(tool);
+        }
+    }
+
+    tools.into_iter().collect()
+}
+
+fn first_command_token<'a>(tokens: &'a [&'a str]) -> Option<&'a str> {
+    for token in tokens {
+        if token.is_empty() || token.contains('=') || matches!(*token, "env" | "command" | "which")
+        {
+            continue;
+        }
+        return Some(*token);
+    }
+    None
+}
+
+fn normalized_tool_name(token: &str) -> Option<String> {
+    let trimmed = token.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+    if trimmed.is_empty()
+        || trimmed.starts_with('<')
+        || trimmed.contains('/')
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn shell_like_tokens(command: &str) -> Vec<&str> {
+    command
+        .split_whitespace()
+        .map(|token| token.trim_matches(|ch| matches!(ch, '(' | ')' | ',')))
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn command_failed_with_missing_binary(succeeded: Option<bool>, stderr: Option<&str>) -> bool {
+    if succeeded == Some(true) {
+        return false;
+    }
+
+    stderr.is_some_and(|stderr| {
+        let lower = stderr.to_ascii_lowercase();
+        lower.contains("command not found") || lower.contains("not recognized as an internal")
+    })
 }
 
 fn list_files(workspace_root: &Path, pattern: Option<&str>) -> Result<Vec<String>> {
@@ -328,4 +532,62 @@ fn validate_inspect_command(command: &str) -> Result<()> {
         bail!("inspect command must be a single read-only command");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LocalWorkspaceActionExecutor;
+    use crate::domain::model::NullTurnEventSink;
+    use crate::domain::ports::{
+        WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+    };
+    use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    #[test]
+    fn capability_surface_starts_without_prebaked_local_tool_list() {
+        let workspace = tempdir().expect("tempdir");
+        let executor = LocalWorkspaceActionExecutor::with_execution_hand_registry(
+            workspace.path(),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
+        );
+
+        let surface = executor.capability_surface();
+
+        assert!(
+            surface.tools.is_empty(),
+            "fresh capability surfaces should not hardcode a known-program list"
+        );
+    }
+
+    #[test]
+    fn capability_surface_records_tool_observations_after_a_probe() {
+        let workspace = tempdir().expect("tempdir");
+        let executor = LocalWorkspaceActionExecutor::with_execution_hand_registry(
+            workspace.path(),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
+        );
+
+        executor
+            .execute_workspace_action(
+                &WorkspaceAction::Inspect {
+                    command: "command -v sh".to_string(),
+                },
+                WorkspaceActionExecutionFrame {
+                    call_id: "test-call",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
+            .expect("inspect should succeed");
+
+        let surface = executor.capability_surface();
+        let observed = surface
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "sh")
+            .expect("tool observation should be cached");
+
+        assert!(observed.summary.contains("observed available"));
+    }
 }

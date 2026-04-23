@@ -175,10 +175,17 @@ pub struct PlannerRequest {
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
     pub runtime_notes: Vec<String>,
+    pub execution_contract: PlannerExecutionContract,
     pub loop_state: PlannerLoopState,
     pub budget: PlannerBudget,
     pub resolver: Option<Arc<dyn ContextResolver>>,
     pub entity_resolver: Option<Arc<dyn EntityResolver>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PlannerExecutionContract {
+    pub capability_manifest: Vec<String>,
+    pub completion_contract: Vec<String>,
 }
 
 impl PlannerRequest {
@@ -196,6 +203,7 @@ impl PlannerRequest {
             recent_turns: Vec::new(),
             recent_thread_summary: None,
             runtime_notes: Vec::new(),
+            execution_contract: PlannerExecutionContract::default(),
             loop_state: PlannerLoopState::default(),
             budget,
             resolver: None,
@@ -225,6 +233,11 @@ impl PlannerRequest {
 
     pub fn with_runtime_notes(mut self, runtime_notes: Vec<String>) -> Self {
         self.runtime_notes = runtime_notes;
+        self
+    }
+
+    pub fn with_execution_contract(mut self, execution_contract: PlannerExecutionContract) -> Self {
+        self.execution_contract = execution_contract;
         self
     }
 

@@ -56,11 +56,11 @@ use crate::domain::model::{
     CollaborationModeRequest, CollaborationModeRequestTarget, CollaborationModeResult,
     CompactionDecision, CompactionPlan, ControlOperation, ControlResult, ControlResultStatus,
     ControlSubject, ConversationReplayView, ConversationThreadRef, ExecutionGovernanceDecision,
-    ExecutionGovernanceOutcome, ExecutionHandDiagnostic, ExecutionPermissionRequest,
-    ExternalCapabilityDescriptor, ExternalCapabilityInvocation, ExternalCapabilityResultStatus,
-    ExternalCapabilitySourceRecord, ForensicArtifactCapture, ForensicTraceSink, InstructionFrame,
-    InstructionIntent, MultiplexEventSink, NativeTransportDiagnostic, PlanChecklistItem,
-    PlanChecklistItemStatus, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionHandDiagnostic,
+    ExecutionPermissionRequest, ExternalCapabilityDescriptor, ExternalCapabilityInvocation,
+    ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord, ForensicArtifactCapture,
+    ForensicTraceSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
+    NativeTransportDiagnostic, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
     StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
     StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
     ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
@@ -85,12 +85,13 @@ use crate::domain::ports::{
     InitialEditInstruction, InterpretationContext, InterpretationProcedure,
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
     ModelRegistry, NormalizedEntityHint, OperatorMemory, PlannerAction, PlannerBudget,
-    PlannerCapability, PlannerConfig, PlannerLoopState, PlannerRequest, PlannerStepRecord,
-    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RecursivePlanner,
-    RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
-    SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest,
-    TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
-    WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+    PlannerCapability, PlannerConfig, PlannerExecutionContract, PlannerLoopState, PlannerRequest,
+    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+    RetrieverOption, SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine,
+    ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery,
+    WorkspaceAction, WorkspaceActionCapability, WorkspaceActionExecutionFrame,
+    WorkspaceActionExecutor, WorkspaceCapabilitySurface, WorkspaceToolCapability,
 };
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
@@ -100,7 +101,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 /// Factory that constructs a synthesizer engine for a given model ID.
@@ -348,6 +349,10 @@ struct PlannerLoopContext {
     gatherer: Option<Arc<dyn ContextGatherer>>,
     resolver: Arc<dyn ContextResolver>,
     entity_resolver: Arc<dyn EntityResolver>,
+    workspace_capability_surface: WorkspaceCapabilitySurface,
+    execution_hands: Vec<ExecutionHandDiagnostic>,
+    governance_profile: Option<ExecutionGovernanceProfile>,
+    external_capabilities: Vec<ExternalCapabilityDescriptor>,
     interpretation: InterpretationContext,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
@@ -2387,6 +2392,30 @@ impl MechSuitService {
         self.external_capability_broker().descriptors()
     }
 
+    pub fn planner_execution_contract(
+        &self,
+        gatherer: Option<&Arc<dyn ContextGatherer>>,
+        collaboration: &CollaborationModeResult,
+        instruction_frame: Option<&InstructionFrame>,
+        grounding: Option<&GroundingRequirement>,
+    ) -> PlannerExecutionContract {
+        let workspace_capability_surface = self.workspace_action_executor().capability_surface();
+        let execution_hand_registry = self.execution_hand_registry();
+        let execution_hands = execution_hand_registry.diagnostics();
+        let governance_profile = execution_hand_registry.governance_profile();
+        let external_capabilities = self.external_capability_descriptors();
+        build_planner_execution_contract(PlannerExecutionContractContext {
+            workspace_capability_surface: &workspace_capability_surface,
+            execution_hands: &execution_hands,
+            governance_profile: governance_profile.as_ref(),
+            external_capabilities: &external_capabilities,
+            gatherer,
+            collaboration,
+            instruction_frame,
+            grounding,
+        })
+    }
+
     pub fn set_native_transport_registry(&self, registry: Arc<NativeTransportRegistry>) {
         *self
             .native_transport_registry
@@ -3378,9 +3407,9 @@ impl MechSuitService {
         };
 
         enrich_interpretation_with_external_capabilities(
-            enrich_interpretation_with_local_harness_profile(
+            enrich_interpretation_with_workspace_capability_surface(
                 interpretation,
-                local_harness_capabilities(),
+                &self.workspace_action_executor().capability_surface(),
             ),
             &self.external_capability_descriptors(),
         )
@@ -3391,11 +3420,9 @@ impl MechSuitService {
         prompt: &str,
         context: PlannerLoopContext,
         initial_decision: Option<RecursivePlannerDecision>,
-        execution_checklist: Option<ExecutionChecklistState>,
         trace: Arc<StructuredTurnTrace>,
     ) -> Result<PlannerLoopOutcome> {
         let mut context = context;
-        let mut execution_checklist = execution_checklist;
         let base_budget =
             planner_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
         let mut budget = planner_budget_for_replan_attempt(&base_budget, 0);
@@ -3405,9 +3432,6 @@ impl MechSuitService {
             refinement_policy: harness_profile.active_refinement_policy(),
             ..PlannerLoopState::default()
         };
-        if let Some(checklist) = execution_checklist.as_ref() {
-            checklist.sync_loop_state_notes(&mut loop_state);
-        }
         let mut used_workspace_resources = false;
         let mut stop_reason = None;
         let mut direct_answer = None;
@@ -3441,7 +3465,6 @@ impl MechSuitService {
                         completed_replans: &mut replan_count,
                         budget: &mut budget,
                         loop_state: &mut loop_state,
-                        execution_checklist: execution_checklist.as_mut(),
                         trace: trace.as_ref(),
                     },
                 ) {
@@ -3456,6 +3479,8 @@ impl MechSuitService {
             let mut decision = if let Some(decision) = pending_initial_decision.take() {
                 decision
             } else {
+                context.workspace_capability_surface =
+                    self.workspace_action_executor().capability_surface();
                 let request = PlannerRequest::new(
                     prompt,
                     self.workspace_root.clone(),
@@ -3469,6 +3494,18 @@ impl MechSuitService {
                     context.gatherer.as_ref(),
                     &context.specialist_runtime_notes,
                     &context.collaboration,
+                ))
+                .with_execution_contract(build_planner_execution_contract(
+                    PlannerExecutionContractContext {
+                        workspace_capability_surface: &context.workspace_capability_surface,
+                        execution_hands: &context.execution_hands,
+                        governance_profile: context.governance_profile.as_ref(),
+                        external_capabilities: &context.external_capabilities,
+                        gatherer: context.gatherer.as_ref(),
+                        collaboration: &context.collaboration,
+                        instruction_frame: instruction_frame.as_ref(),
+                        grounding: context.grounding.as_ref(),
+                    },
                 ))
                 .with_loop_state(loop_state.clone())
                 .with_resolver(context.resolver.clone())
@@ -3534,7 +3571,6 @@ impl MechSuitService {
             });
 
             let mut accepted_stop = false;
-            let mut completed_exact_edit = false;
             let outcome = if let Some(outcome) = collaboration_boundary_for_action(
                 &context.collaboration,
                 &decision.action,
@@ -3858,8 +3894,6 @@ impl MechSuitService {
                                                 governance_outcome,
                                             );
                                         }
-                                        completed_exact_edit =
-                                            decision_is_exact_edit(&decision.action);
                                         if let Some(frame) = instruction_frame.as_mut() {
                                             frame.note_successful_workspace_action(action);
                                         }
@@ -4015,30 +4049,6 @@ impl MechSuitService {
                 extract_deliberation_signals(decision.deliberation_state.as_ref());
             sync_deliberation_signal_note(&mut loop_state, &pending_deliberation_signals);
 
-            if let Some(checklist) = execution_checklist.as_mut() {
-                let mut changed = false;
-                if sequence == 1 {
-                    changed |= checklist.mark_completed("initial-action");
-                }
-                if completed_exact_edit {
-                    changed |= checklist.mark_completed("apply-edit");
-                }
-                if decision_is_git_commit(&decision.action) {
-                    changed |= checklist.mark_completed("record-commit");
-                }
-                if accepted_stop
-                    && !instruction_frame
-                        .as_ref()
-                        .is_some_and(|frame| frame.has_pending_workspace_obligation())
-                {
-                    changed |= checklist.mark_completed("finalize");
-                }
-                checklist.sync_loop_state_notes(&mut loop_state);
-                if changed {
-                    checklist.emit(trace.as_ref());
-                }
-            }
-
             let evidence_count_after = loop_state.evidence_items.len();
             if evidence_count_after > evidence_count_before {
                 steps_without_new_evidence = 0;
@@ -4118,7 +4128,6 @@ impl MechSuitService {
                         completed_replans: &mut replan_count,
                         budget: &mut budget,
                         loop_state: &mut loop_state,
-                        execution_checklist: execution_checklist.as_mut(),
                         trace: trace.as_ref(),
                     },
                 ) {
@@ -4373,140 +4382,6 @@ struct PlannerLoopContinuation {
     summary: String,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ExecutionChecklistPressure {
-    continuation: bool,
-    multi_phase: bool,
-    edit_goal: bool,
-    commit_goal: bool,
-    grounding_goal: bool,
-}
-
-impl ExecutionChecklistPressure {
-    fn is_active(self) -> bool {
-        self.continuation
-            || self.multi_phase
-            || self.edit_goal
-            || self.commit_goal
-            || self.grounding_goal
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ExecutionChecklistState {
-    items: Vec<PlanChecklistItem>,
-    last_emitted_items: Option<Vec<PlanChecklistItem>>,
-}
-
-impl ExecutionChecklistState {
-    fn stream_items(&self) -> Vec<PlanChecklistItem> {
-        let visible = self
-            .items
-            .iter()
-            .filter(|item| item.id != "initial-action")
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if visible.is_empty() {
-            return self.items.clone();
-        }
-
-        visible
-    }
-
-    fn emit(&mut self, trace: &StructuredTurnTrace) {
-        let items = self.stream_items();
-        if self.last_emitted_items.as_ref() == Some(&items) {
-            return;
-        }
-
-        trace.emit(TurnEvent::PlanUpdated {
-            items: items.clone(),
-        });
-        self.last_emitted_items = Some(items);
-    }
-
-    fn sync_loop_state_notes(&self, loop_state: &mut PlannerLoopState) {
-        const EXECUTION_CHECKLIST_NOTE_PREFIX: &str = "Execution checklist:";
-
-        loop_state
-            .notes
-            .retain(|note| !note.starts_with(EXECUTION_CHECKLIST_NOTE_PREFIX));
-
-        let pending = self
-            .items
-            .iter()
-            .filter(|item| item.status == PlanChecklistItemStatus::Pending)
-            .collect::<Vec<_>>();
-        if pending.is_empty() {
-            return;
-        }
-
-        let mut lines = vec![
-            "Execution checklist: advance the next unfinished item before opening new work."
-                .to_string(),
-        ];
-        lines.extend(pending.into_iter().map(|item| format!("- {}", item.label)));
-        loop_state.notes.push(lines.join("\n"));
-    }
-
-    fn mark_completed(&mut self, item_id: &str) -> bool {
-        let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) else {
-            return false;
-        };
-        if item.status == PlanChecklistItemStatus::Completed {
-            return false;
-        }
-        item.status = PlanChecklistItemStatus::Completed;
-        true
-    }
-
-    fn note_replan(&mut self, stop_reason: &str) -> bool {
-        let label = format!(
-            "Replanned from current evidence after {}.",
-            planner_budget_stop_reason_label(stop_reason)
-        );
-
-        if let Some(item) = self.items.iter_mut().find(|item| item.id == "replan") {
-            let changed = item.label != label || item.status != PlanChecklistItemStatus::Completed;
-            item.label = label;
-            item.status = PlanChecklistItemStatus::Completed;
-            return changed;
-        }
-
-        let insert_at = self
-            .items
-            .iter()
-            .position(|item| item.id == "apply-edit")
-            .unwrap_or_else(|| {
-                self.items
-                    .iter()
-                    .position(|item| item.id == "finalize")
-                    .unwrap_or(self.items.len())
-            });
-        self.items.insert(
-            insert_at,
-            PlanChecklistItem {
-                id: "replan".to_string(),
-                label,
-                status: PlanChecklistItemStatus::Completed,
-            },
-        );
-        true
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct LocalHarnessCapabilities {
-    git: bool,
-    rg: bool,
-    gh: bool,
-    cargo: bool,
-    just: bool,
-    nix: bool,
-    keel: bool,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptExecutionPath {
     SynthesizerOnly,
@@ -4555,106 +4430,6 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
         initial_edit: InitialEditInstruction::default(),
         grounding: None,
     }
-}
-
-fn execution_checklist_pressure(
-    prompt: &str,
-    recent_turns: &[String],
-    execution_plan: &PromptExecutionPlan,
-) -> ExecutionChecklistPressure {
-    let instruction_frame = execution_plan.instruction_frame.as_ref();
-    ExecutionChecklistPressure {
-        continuation: !recent_turns.is_empty(),
-        multi_phase: prompt_has_execution_chain(prompt),
-        edit_goal: instruction_frame.is_some_and(InstructionFrame::requires_applied_edit),
-        commit_goal: instruction_frame.is_some_and(InstructionFrame::requires_applied_commit),
-        grounding_goal: execution_plan.grounding.is_some(),
-    }
-}
-
-fn build_execution_checklist(
-    prompt: &str,
-    recent_turns: &[String],
-    execution_plan: &PromptExecutionPlan,
-) -> Option<ExecutionChecklistState> {
-    if execution_plan.path != PromptExecutionPath::PlannerThenSynthesize {
-        return None;
-    }
-
-    let pressure = execution_checklist_pressure(prompt, recent_turns, execution_plan);
-    if !pressure.is_active() {
-        return None;
-    }
-
-    let initial_decision = execution_plan.initial_planner_decision.as_ref()?;
-    let mut items = vec![PlanChecklistItem {
-        id: "initial-action".to_string(),
-        label: sentence_case(&initial_decision.action.summary()),
-        status: PlanChecklistItemStatus::Pending,
-    }];
-
-    if execution_plan
-        .instruction_frame
-        .as_ref()
-        .is_some_and(InstructionFrame::requires_applied_edit)
-        && !decision_is_exact_edit(&initial_decision.action)
-    {
-        items.push(PlanChecklistItem {
-            id: "apply-edit".to_string(),
-            label: "Apply the requested repository change.".to_string(),
-            status: PlanChecklistItemStatus::Pending,
-        });
-    }
-
-    if execution_plan
-        .instruction_frame
-        .as_ref()
-        .is_some_and(InstructionFrame::requires_applied_commit)
-        && !decision_is_git_commit(&initial_decision.action)
-    {
-        items.push(PlanChecklistItem {
-            id: "record-commit".to_string(),
-            label: "Record the requested git commit.".to_string(),
-            status: PlanChecklistItemStatus::Pending,
-        });
-    }
-
-    let finalize_label = if execution_plan
-        .instruction_frame
-        .as_ref()
-        .is_some_and(|frame| frame.requires_applied_edit() && frame.requires_applied_commit())
-    {
-        "Verify the workspace change and commit, then summarize the outcome.".to_string()
-    } else if execution_plan
-        .instruction_frame
-        .as_ref()
-        .is_some_and(InstructionFrame::requires_applied_edit)
-    {
-        "Verify the change and summarize the outcome.".to_string()
-    } else if execution_plan
-        .instruction_frame
-        .as_ref()
-        .is_some_and(InstructionFrame::requires_applied_commit)
-    {
-        "Verify the commit and summarize the outcome.".to_string()
-    } else if execution_plan.grounding.is_some() {
-        "Assemble the required evidence and summarize the answer.".to_string()
-    } else if pressure.continuation || pressure.multi_phase {
-        "Carry the remaining turn work to completion and summarize the result.".to_string()
-    } else {
-        "Verify the result and summarize the outcome.".to_string()
-    };
-
-    items.push(PlanChecklistItem {
-        id: "finalize".to_string(),
-        label: finalize_label,
-        status: PlanChecklistItemStatus::Pending,
-    });
-
-    Some(ExecutionChecklistState {
-        items,
-        last_emitted_items: None,
-    })
 }
 
 fn planner_budget_stop_reason_label(stop_reason: &str) -> String {
@@ -4735,7 +4510,6 @@ struct ReplanActivation<'a> {
     completed_replans: &'a mut usize,
     budget: &'a mut PlannerBudget,
     loop_state: &'a mut PlannerLoopState,
-    execution_checklist: Option<&'a mut ExecutionChecklistState>,
     trace: &'a StructuredTurnTrace,
 }
 
@@ -4746,7 +4520,6 @@ fn activate_replan(stop_reason: &str, activation: ReplanActivation<'_>) -> bool 
         completed_replans,
         budget,
         loop_state,
-        execution_checklist,
         trace,
     } = activation;
 
@@ -4762,14 +4535,6 @@ fn activate_replan(stop_reason: &str, activation: ReplanActivation<'_>) -> bool 
     *completed_replans += 1;
     *budget = planner_budget_for_replan_attempt(base_budget, *completed_replans);
     sync_replan_note(loop_state, stop_reason, instruction_frame);
-
-    if let Some(checklist) = execution_checklist {
-        let changed = checklist.note_replan(stop_reason);
-        checklist.sync_loop_state_notes(loop_state);
-        if changed {
-            checklist.emit(trace);
-        }
-    }
 
     trace.emit(TurnEvent::Fallback {
         stage: "replan".to_string(),
@@ -4982,31 +4747,6 @@ fn prompt_requests_git_commit(prompt: &str) -> bool {
             .collect::<Vec<_>>();
         tokens.contains(&"git") && tokens.contains(&"commit")
     }
-}
-
-fn prompt_has_execution_chain(prompt: &str) -> bool {
-    let lower = format!(" {} ", prompt.to_ascii_lowercase());
-    [
-        " then ",
-        " after ",
-        " before ",
-        " next ",
-        " finally ",
-        " also ",
-        " and ",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-}
-
-fn sentence_case(input: &str) -> String {
-    let mut chars = input.chars();
-    let Some(first) = chars.next() else {
-        return String::new();
-    };
-    let mut rendered = first.to_uppercase().collect::<String>();
-    rendered.push_str(chars.as_str());
-    rendered
 }
 
 fn prompt_requires_repository_grounding(prompt: &str) -> bool {
@@ -5716,6 +5456,220 @@ fn planner_runtime_notes(
     notes
 }
 
+struct PlannerExecutionContractContext<'a> {
+    workspace_capability_surface: &'a WorkspaceCapabilitySurface,
+    execution_hands: &'a [ExecutionHandDiagnostic],
+    governance_profile: Option<&'a ExecutionGovernanceProfile>,
+    external_capabilities: &'a [ExternalCapabilityDescriptor],
+    gatherer: Option<&'a Arc<dyn ContextGatherer>>,
+    collaboration: &'a CollaborationModeResult,
+    instruction_frame: Option<&'a InstructionFrame>,
+    grounding: Option<&'a GroundingRequirement>,
+}
+
+fn build_planner_execution_contract(
+    context: PlannerExecutionContractContext<'_>,
+) -> PlannerExecutionContract {
+    let PlannerExecutionContractContext {
+        workspace_capability_surface,
+        execution_hands,
+        governance_profile,
+        external_capabilities,
+        gatherer,
+        collaboration,
+        instruction_frame,
+        grounding,
+    } = context;
+    let mut capability_manifest = workspace_capability_surface
+        .actions
+        .iter()
+        .map(|capability| format_workspace_action_capability(capability, collaboration))
+        .collect::<Vec<_>>();
+    capability_manifest.extend(
+        workspace_capability_surface
+            .tools
+            .iter()
+            .map(format_workspace_tool_capability),
+    );
+    capability_manifest.extend(
+        workspace_capability_surface
+            .notes
+            .iter()
+            .map(|note| format!("workspace note: {note}")),
+    );
+    capability_manifest.extend(
+        execution_hands
+            .iter()
+            .map(format_execution_hand_capability_line),
+    );
+    capability_manifest.extend(retrieval_capability_lines(gatherer));
+    capability_manifest.extend(external_capabilities.iter().map(|descriptor| {
+        format!(
+            "external capability {}: {}",
+            descriptor.id,
+            format_external_capability_catalog_entry(descriptor)
+        )
+    }));
+    capability_manifest.push(match governance_profile {
+        Some(profile) => {
+            format!(
+                "execution governance: {} {}",
+                profile.summary(),
+                profile.detail()
+            )
+        }
+        None => "execution governance: unavailable; mutating or networked actions may fail closed"
+            .to_string(),
+    });
+
+    let mut completion_contract = vec![
+        "Choose only actions supported by the capability manifest. If a capability is blocked or unavailable, choose a different bounded action."
+            .to_string(),
+        "When a task depends on a local program that is not already observed in the capability manifest, choose a bounded probe such as `inspect` `command -v <tool>` before depending on it."
+            .to_string(),
+    ];
+
+    match collaboration.active.mode {
+        CollaborationMode::Planning => completion_contract.push(
+            "Planning mode is read-only. Do not choose mutating workspace actions or shell commands that could change the repository."
+                .to_string(),
+        ),
+        CollaborationMode::Review => completion_contract.push(
+            "Review mode is read-only. Inspect local evidence and stop at findings; do not choose mutating workspace actions."
+                .to_string(),
+        ),
+        CollaborationMode::Execution => completion_contract.push(
+            "Execution mode allows mutating workspace actions, but they still run through execution governance and may be denied or downgraded."
+                .to_string(),
+        ),
+    }
+
+    if let Some(frame) = instruction_frame {
+        if frame.requires_applied_edit() {
+            let mut line =
+                "The turn is not complete until an applied workspace edit succeeds.".to_string();
+            if let Some(candidates) = frame.candidate_summary() {
+                line.push_str(&format!(" Current candidate files: {candidates}."));
+            }
+            completion_contract.push(line);
+        }
+        if frame.requires_applied_commit() {
+            completion_contract.push(
+                "The turn is not complete until the requested git commit has been recorded in the workspace."
+                    .to_string(),
+            );
+        }
+    }
+
+    if let Some(grounding) = grounding {
+        let mut line = format!(
+            "Do not stop with a final answer until {} evidence has been assembled.",
+            grounding_domain_label(grounding.domain)
+        );
+        if let Some(reason) = grounding
+            .reason
+            .as_deref()
+            .filter(|reason| !reason.trim().is_empty())
+        {
+            line.push_str(&format!(" Reason: {}.", reason.trim()));
+        }
+        completion_contract.push(line);
+    }
+
+    PlannerExecutionContract {
+        capability_manifest,
+        completion_contract,
+    }
+}
+
+fn format_workspace_action_capability(
+    capability: &WorkspaceActionCapability,
+    collaboration: &CollaborationModeResult,
+) -> String {
+    if capability.mutating && !collaboration.active.mutation_posture.allows_mutation() {
+        return format!(
+            "workspace action {}: blocked by {} mode read-only boundary — {}",
+            capability.action,
+            collaboration.active.mode.label(),
+            capability.summary
+        );
+    }
+
+    let posture = if capability.mutating {
+        "mutating"
+    } else {
+        "read-only"
+    };
+    format!(
+        "workspace action {}: available ({posture}) — {}",
+        capability.action, capability.summary
+    )
+}
+
+fn format_workspace_tool_capability(tool: &WorkspaceToolCapability) -> String {
+    match tool.suggested_probe.as_ref() {
+        Some(action) => format!(
+            "workspace tool observation {}: {} — re-probe via {}",
+            tool.tool,
+            tool.summary,
+            action.summary()
+        ),
+        None => format!("workspace tool observation {}: {}", tool.tool, tool.summary),
+    }
+}
+
+fn format_execution_hand_capability_line(diagnostic: &ExecutionHandDiagnostic) -> String {
+    let operations = diagnostic
+        .supported_operations
+        .iter()
+        .map(|operation| operation.label())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "execution hand {}: {}, authority={}, operations=[{}] — {}",
+        diagnostic.hand.label(),
+        diagnostic.phase.label(),
+        diagnostic.authority.label(),
+        operations,
+        diagnostic.summary
+    )
+}
+
+fn retrieval_capability_lines(gatherer: Option<&Arc<dyn ContextGatherer>>) -> Vec<String> {
+    let Some(gatherer) = gatherer else {
+        return vec![
+            "search/refine via bm25: unavailable — no gatherer is configured".to_string(),
+            "search/refine via vector: unavailable — no gatherer is configured".to_string(),
+        ];
+    };
+
+    let lexical = gatherer.capability_for_planning(
+        &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Lexical),
+    );
+    let vector = gatherer.capability_for_planning(
+        &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Vector),
+    );
+
+    vec![
+        format!(
+            "search/refine via bm25: {}",
+            format_gatherer_capability(&lexical)
+        ),
+        format!(
+            "search/refine via vector: {}",
+            format_gatherer_capability(&vector)
+        ),
+    ]
+}
+
+fn grounding_domain_label(domain: GroundingDomain) -> &'static str {
+    match domain {
+        GroundingDomain::Repository => "repository",
+        GroundingDomain::External => "external",
+        GroundingDomain::Mixed => "mixed repository and external",
+    }
+}
+
 fn format_planner_capability(capability: &PlannerCapability) -> String {
     match capability {
         PlannerCapability::Available => "available".to_string(),
@@ -5854,73 +5808,38 @@ fn planner_budget_for_turn(
     }
 }
 
-fn local_harness_capabilities() -> &'static LocalHarnessCapabilities {
-    static CAPABILITIES: OnceLock<LocalHarnessCapabilities> = OnceLock::new();
-    CAPABILITIES.get_or_init(LocalHarnessCapabilities::probe)
-}
-
-impl LocalHarnessCapabilities {
-    fn probe() -> Self {
-        Self {
-            git: command_available("git"),
-            rg: command_available("rg"),
-            gh: command_available("gh"),
-            cargo: command_available("cargo"),
-            just: command_available("just"),
-            nix: command_available("nix"),
-            keel: command_available("keel"),
-        }
-    }
-
-    fn labels(&self) -> Vec<&'static str> {
-        let mut labels = Vec::new();
-        if self.git {
-            labels.push("git");
-        }
-        if self.rg {
-            labels.push("rg");
-        }
-        if self.gh {
-            labels.push("gh");
-        }
-        if self.cargo {
-            labels.push("cargo");
-        }
-        if self.just {
-            labels.push("just");
-        }
-        if self.nix {
-            labels.push("nix");
-        }
-        if self.keel {
-            labels.push("keel");
-        }
-        labels
-    }
-}
-
-fn command_available(command: &str) -> bool {
-    std::process::Command::new("sh")
-        .arg("-lc")
-        .arg(format!("command -v {command} >/dev/null 2>&1"))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn enrich_interpretation_with_local_harness_profile(
+fn enrich_interpretation_with_workspace_capability_surface(
     mut context: InterpretationContext,
-    capabilities: &LocalHarnessCapabilities,
+    surface: &WorkspaceCapabilitySurface,
 ) -> InterpretationContext {
-    let available = capabilities.labels();
-    if available.is_empty() {
+    if surface.actions.is_empty() && surface.tools.is_empty() && surface.notes.is_empty() {
         return context;
     }
 
     let source = "paddles-harness";
+    let action_labels = surface
+        .actions
+        .iter()
+        .map(|capability| capability.action.as_str())
+        .collect::<Vec<_>>();
+    let tool_labels = surface
+        .tools
+        .iter()
+        .map(|capability| capability.tool.as_str())
+        .collect::<Vec<_>>();
+    let mut summary_parts = Vec::new();
+    if !action_labels.is_empty() {
+        summary_parts.push(format!("Workspace actions: {}.", action_labels.join(", ")));
+    }
+    if !tool_labels.is_empty() {
+        summary_parts.push(format!("Observed local tools: {}.", tool_labels.join(", ")));
+    }
+    if !surface.notes.is_empty() {
+        summary_parts.extend(surface.notes.iter().cloned());
+    }
     let capability_summary = format!(
-        "Paddles can execute local workspace actions through the harness. Available local tools: {}.",
-        available.join(", ")
+        "Paddles can execute local workspace actions through the harness. {}",
+        summary_parts.join(" ")
     );
     if context.summary.trim().is_empty() {
         context.summary = capability_summary.clone();
@@ -5931,54 +5850,19 @@ fn enrich_interpretation_with_local_harness_profile(
         context.summary = format!("{}\n\n{}", context.summary.trim(), capability_summary);
     }
 
-    if capabilities.git {
+    if surface
+        .actions
+        .iter()
+        .any(|capability| capability.action == "inspect")
+    {
         append_interpretation_tool_hint(
             &mut context,
             InterpretationToolHint {
                 source: source.to_string(),
                 action: WorkspaceAction::Inspect {
-                    command: "git status --short".to_string(),
+                    command: "command -v <tool>".to_string(),
                 },
-                note: "Start by checking the local workspace state before asking the user for repository status.".to_string(),
-            },
-        );
-    }
-
-    if capabilities.rg {
-        append_interpretation_tool_hint(
-            &mut context,
-            InterpretationToolHint {
-                source: source.to_string(),
-                action: WorkspaceAction::Inspect {
-                    command: "rg --files".to_string(),
-                },
-                note: "Prefer `rg --files` for file discovery and `rg -n` for text search; prefer `rg` over `grep` in this harness.".to_string(),
-            },
-        );
-    }
-
-    if capabilities.keel {
-        append_interpretation_tool_hint(
-            &mut context,
-            InterpretationToolHint {
-                source: source.to_string(),
-                action: WorkspaceAction::Inspect {
-                    command: "keel doctor --status".to_string(),
-                },
-                note: "Use keel directly for board health and structural drift when the task touches missions, stories, or repo health.".to_string(),
-            },
-        );
-    }
-
-    if capabilities.gh {
-        append_interpretation_tool_hint(
-            &mut context,
-            InterpretationToolHint {
-                source: source.to_string(),
-                action: WorkspaceAction::Inspect {
-                    command: "gh run list --limit 10".to_string(),
-                },
-                note: "Use the GitHub CLI locally when repository work touches pull requests, checks, Actions runs, or workflow state.".to_string(),
+                note: "When the task depends on a local program, probe that exact tool first and let the harness cache the observation for later planning steps.".to_string(),
             },
         );
     }
@@ -5987,23 +5871,11 @@ fn enrich_interpretation_with_local_harness_profile(
         &mut context,
         InterpretationProcedure {
             source: source.to_string(),
-            label: "Inspect Local Workspace".to_string(),
-            purpose: "Probe local repository state and find the relevant files before asking the user for information the harness can discover itself.".to_string(),
-            steps: local_workspace_procedure_steps(capabilities),
+            label: "Probe Required Local Tools".to_string(),
+            purpose: "Decide which local program the task actually needs, probe that exact tool through the harness, and then reuse cached observations instead of relying on a prebaked whitelist.".to_string(),
+            steps: dynamic_tool_probe_procedure_steps(surface),
         },
     );
-
-    if capabilities.gh {
-        append_interpretation_procedure(
-            &mut context,
-            InterpretationProcedure {
-                source: source.to_string(),
-                label: "Diagnose CI Or Actions".to_string(),
-                purpose: "Use local and GitHub-aware tools to inspect failing CI and reproduce the failure inside the harness when possible.".to_string(),
-                steps: ci_diagnostic_procedure_steps(capabilities),
-            },
-        );
-    }
 
     context
 }
@@ -6127,77 +5999,44 @@ fn sample_external_capability_invocation(
     )
 }
 
-fn local_workspace_procedure_steps(
-    capabilities: &LocalHarnessCapabilities,
+fn dynamic_tool_probe_procedure_steps(
+    surface: &WorkspaceCapabilitySurface,
 ) -> Vec<InterpretationProcedureStep> {
     let mut steps = Vec::new();
-    if capabilities.git {
+    if surface
+        .actions
+        .iter()
+        .any(|capability| capability.action == "inspect")
+    {
         steps.push(InterpretationProcedureStep {
             index: steps.len(),
             action: WorkspaceAction::Inspect {
-                command: "git status --short".to_string(),
+                command: "command -v <tool>".to_string(),
             },
-            note: "Read the local workspace state first.".to_string(),
-        });
-    }
-    if capabilities.rg {
-        steps.push(InterpretationProcedureStep {
-            index: steps.len(),
-            action: WorkspaceAction::Inspect {
-                command: "rg --files".to_string(),
-            },
-            note: "Use ripgrep for fast file discovery; prefer it over slower directory scans."
+            note: "Probe the exact tool you think the task needs and let the harness cache the result."
                 .to_string(),
         });
         steps.push(InterpretationProcedureStep {
             index: steps.len(),
             action: WorkspaceAction::Inspect {
-                command: "rg -n \"pattern\" src".to_string(),
+                command: "<tool> --version".to_string(),
             },
-            note: "Use `rg -n` for targeted text search; prefer it over `grep` in this harness."
+            note: "Use a narrow read-only probe to confirm syntax or version before depending on the tool."
                 .to_string(),
         });
     }
-    steps
-}
-
-fn ci_diagnostic_procedure_steps(
-    capabilities: &LocalHarnessCapabilities,
-) -> Vec<InterpretationProcedureStep> {
-    let mut steps = Vec::new();
-    if capabilities.gh {
-        steps.push(InterpretationProcedureStep {
-            index: steps.len(),
-            action: WorkspaceAction::Inspect {
-                command: "gh run list --limit 10".to_string(),
-            },
-            note: "Inspect recent GitHub Actions runs locally.".to_string(),
-        });
-    }
-    if capabilities.nix && capabilities.just {
+    if surface
+        .actions
+        .iter()
+        .any(|capability| capability.action == "shell")
+    {
         steps.push(InterpretationProcedureStep {
             index: steps.len(),
             action: WorkspaceAction::Shell {
-                command: "nix develop --command just test".to_string(),
+                command: "<tool> <args>".to_string(),
             },
-            note: "Reproduce the CI test path locally inside the Nix shell when possible."
+            note: "Once the required tool is justified and available, run the narrowest governed command that advances the task."
                 .to_string(),
-        });
-    } else if capabilities.just {
-        steps.push(InterpretationProcedureStep {
-            index: steps.len(),
-            action: WorkspaceAction::Shell {
-                command: "just test".to_string(),
-            },
-            note: "Reproduce the repo test path locally with just.".to_string(),
-        });
-    } else if capabilities.cargo {
-        steps.push(InterpretationProcedureStep {
-            index: steps.len(),
-            action: WorkspaceAction::Shell {
-                command: "cargo test -q".to_string(),
-            },
-            note: "Reproduce the Rust test path locally.".to_string(),
         });
     }
     steps
@@ -6446,6 +6285,18 @@ async fn review_decision_under_signals(
         context.gatherer.as_ref(),
         &context.specialist_runtime_notes,
         &context.collaboration,
+    ))
+    .with_execution_contract(build_planner_execution_contract(
+        PlannerExecutionContractContext {
+            workspace_capability_surface: &context.workspace_capability_surface,
+            execution_hands: &context.execution_hands,
+            governance_profile: context.governance_profile.as_ref(),
+            external_capabilities: &context.external_capabilities,
+            gatherer: context.gatherer.as_ref(),
+            collaboration: &context.collaboration,
+            instruction_frame: context.instruction_frame.as_ref(),
+            grounding: context.grounding.as_ref(),
+        },
     ))
     .with_loop_state(review_loop_state)
     .with_resolver(context.resolver.clone())
@@ -8722,7 +8573,8 @@ mod tests {
         PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision,
         RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
         SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
-        WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+        WorkspaceAction, WorkspaceActionCapability, WorkspaceActionExecutionFrame,
+        WorkspaceActionExecutor, WorkspaceCapabilitySurface, WorkspaceToolCapability,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -9514,6 +9366,10 @@ mod tests {
             gatherer: None,
             resolver: Arc::new(NoopContextResolver),
             entity_resolver: Arc::new(WorkspaceEntityResolver::new()),
+            workspace_capability_surface: WorkspaceCapabilitySurface::default(),
+            execution_hands: Vec::new(),
+            governance_profile: None,
+            external_capabilities: Vec::new(),
             interpretation: InterpretationContext::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
@@ -9945,13 +9801,24 @@ mod tests {
     }
 
     #[test]
-    fn local_harness_enrichment_adds_tool_preferences_and_workspace_procedure() {
-        let context = super::enrich_interpretation_with_local_harness_profile(
+    fn workspace_capability_enrichment_adds_generic_probe_guidance() {
+        let context = super::enrich_interpretation_with_workspace_capability_surface(
             InterpretationContext::default(),
-            &super::LocalHarnessCapabilities {
-                git: true,
-                rg: true,
-                ..Default::default()
+            &WorkspaceCapabilitySurface {
+                actions: vec![
+                    WorkspaceActionCapability::new(
+                        "inspect",
+                        "run a read-only shell probe through the terminal hand",
+                        false,
+                    ),
+                    WorkspaceActionCapability::new(
+                        "shell",
+                        "run a governed workspace command when a command should execute now",
+                        true,
+                    ),
+                ],
+                tools: Vec::new(),
+                notes: Vec::new(),
             },
         );
 
@@ -9963,44 +9830,8 @@ mod tests {
         assert!(context.tool_hints.iter().any(|hint| {
             matches!(
                 hint.action,
-                WorkspaceAction::Inspect { ref command } if command == "git status --short"
-            )
-        }));
-        assert!(context.tool_hints.iter().any(|hint| {
-            matches!(
-                hint.action,
-                WorkspaceAction::Inspect { ref command } if command == "rg --files"
-            ) && hint.note.contains("prefer `rg` over `grep`")
-        }));
-        assert!(context.decision_framework.procedures.iter().any(|procedure| {
-            procedure.label == "Inspect Local Workspace"
-                && procedure
-                    .steps
-                    .iter()
-                    .any(|step| matches!(
-                        step.action,
-                        WorkspaceAction::Inspect { ref command } if command == "rg -n \"pattern\" src"
-                    ))
-        }));
-    }
-
-    #[test]
-    fn local_harness_enrichment_adds_general_github_hint_and_ci_procedure_when_available() {
-        let context = super::enrich_interpretation_with_local_harness_profile(
-            InterpretationContext::default(),
-            &super::LocalHarnessCapabilities {
-                gh: true,
-                just: true,
-                nix: true,
-                ..Default::default()
-            },
-        );
-
-        assert!(context.tool_hints.iter().any(|hint| {
-            matches!(
-                hint.action,
-                WorkspaceAction::Inspect { ref command } if command == "gh run list --limit 10"
-            )
+                WorkspaceAction::Inspect { ref command } if command == "command -v <tool>"
+            ) && hint.note.contains("probe that exact tool first")
         }));
         assert!(
             context
@@ -10008,32 +9839,94 @@ mod tests {
                 .procedures
                 .iter()
                 .any(|procedure| {
-                    procedure.label == "Diagnose CI Or Actions"
-                        && procedure.steps.iter().any(|step| {
-                            matches!(
-                                step.action,
-                                WorkspaceAction::Shell { ref command }
-                                    if command == "nix develop --command just test"
-                            )
-                        })
+                    procedure.label == "Probe Required Local Tools"
+                && procedure
+                    .steps
+                    .iter()
+                    .any(|step| matches!(
+                        step.action,
+                        WorkspaceAction::Inspect { ref command } if command == "command -v <tool>"
+                    ))
                 })
         );
     }
 
     #[test]
-    fn local_harness_enrichment_no_longer_uses_prompt_intent_to_gate_github_hints() {
-        let context = super::enrich_interpretation_with_local_harness_profile(
+    fn workspace_capability_enrichment_surfaces_observed_tools_without_prebaked_tool_hints() {
+        let context = super::enrich_interpretation_with_workspace_capability_surface(
             InterpretationContext::default(),
-            &super::LocalHarnessCapabilities {
-                gh: true,
-                ..Default::default()
+            &WorkspaceCapabilitySurface {
+                actions: vec![WorkspaceActionCapability::new(
+                    "inspect",
+                    "run a read-only shell probe through the terminal hand",
+                    false,
+                )],
+                tools: vec![WorkspaceToolCapability::new(
+                    "cargo",
+                    "observed available from prior tool probe `command -v cargo`",
+                    Some(WorkspaceAction::Inspect {
+                        command: "command -v cargo".to_string(),
+                    }),
+                )],
+                notes: Vec::new(),
             },
         );
 
-        assert!(context.tool_hints.iter().any(|hint| matches!(
+        assert!(context.summary.contains("Observed local tools: cargo."));
+        assert!(!context.tool_hints.iter().any(|hint| matches!(
             hint.action,
             WorkspaceAction::Inspect { ref command } if command == "gh run list --limit 10"
         )));
+        assert!(!context.tool_hints.iter().any(|hint| matches!(
+            hint.action,
+            WorkspaceAction::Inspect { ref command } if command == "git status --short"
+        )));
+    }
+
+    #[test]
+    fn workspace_capability_enrichment_does_not_emit_tool_specific_ci_procedures() {
+        let context = super::enrich_interpretation_with_workspace_capability_surface(
+            InterpretationContext::default(),
+            &WorkspaceCapabilitySurface {
+                actions: vec![
+                    WorkspaceActionCapability::new(
+                        "inspect",
+                        "run a read-only shell probe through the terminal hand",
+                        false,
+                    ),
+                    WorkspaceActionCapability::new(
+                        "shell",
+                        "run a governed workspace command when a command should execute now",
+                        true,
+                    ),
+                ],
+                tools: vec![
+                    WorkspaceToolCapability::new(
+                        "nix",
+                        "observed available from prior shell command `nix --version`",
+                        Some(WorkspaceAction::Inspect {
+                            command: "command -v nix".to_string(),
+                        }),
+                    ),
+                    WorkspaceToolCapability::new(
+                        "just",
+                        "observed available from prior shell command `just --version`",
+                        Some(WorkspaceAction::Inspect {
+                            command: "command -v just".to_string(),
+                        }),
+                    ),
+                ],
+                notes: Vec::new(),
+            },
+        );
+
+        assert!(
+            !context
+                .decision_framework
+                .procedures
+                .iter()
+                .any(|procedure| { procedure.label == "Diagnose CI Or Actions" })
+        );
     }
 
     #[test]
@@ -10724,7 +10617,7 @@ mod tests {
                 .decision_framework
                 .procedures
                 .iter()
-                .any(|procedure| procedure.label == "Inspect Local Workspace")
+                .any(|procedure| procedure.label == "Probe Required Local Tools")
         );
 
         let events = sink.recorded();
@@ -12233,7 +12126,7 @@ mod tests {
     }
 
     #[test]
-    fn process_prompt_emits_plan_updates_and_containment_notes_for_edit_turns() {
+    fn process_prompt_does_not_emit_generic_plan_updates_for_edit_turns() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
             workspace.path().join("AGENTS.md"),
@@ -12338,46 +12231,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(
-            !plan_updates.is_empty(),
-            "edit-oriented planned turns should emit at least one plan update"
-        );
-        assert!(
-            plan_updates
-                .iter()
-                .all(|items| items.iter().all(|item| item.id != "initial-action")),
-            "stream-visible plan updates should show remaining work, not restate the current planner step"
-        );
-        assert!(
-            plan_updates.windows(2).all(|window| window[0] != window[1]),
-            "plan updates should not replay identical visible checklists after the first planner step"
-        );
-        assert_eq!(
-            plan_updates[0]
-                .iter()
-                .map(|item| item.status)
-                .collect::<Vec<_>>(),
-            vec![
-                crate::domain::model::PlanChecklistItemStatus::Pending,
-                crate::domain::model::PlanChecklistItemStatus::Pending,
-            ]
-        );
-        assert!(
-            plan_updates[0][0]
-                .label
-                .contains("Apply the requested repository change"),
-            "edit turns should keep an explicit apply-change checklist item"
-        );
-        assert_eq!(
-            plan_updates
-                .last()
-                .expect("final plan update")
-                .iter()
-                .map(|item| item.status)
-                .collect::<Vec<_>>(),
-            vec![
-                crate::domain::model::PlanChecklistItemStatus::Completed,
-                crate::domain::model::PlanChecklistItemStatus::Completed,
-            ]
+            plan_updates.is_empty(),
+            "edit turns should not emit generic plan updates when the planner did not author any concrete remaining work"
         );
 
         let requests = recorded_requests
@@ -12389,8 +12244,8 @@ mod tests {
                 .iter()
                 .skip(1)
                 .flat_map(|request| request.loop_state.notes.iter())
-                .any(|note| note.contains("Execution checklist")),
-            "follow-on planner requests should carry the containment checklist note"
+                .all(|note| !note.contains("Execution checklist")),
+            "follow-on planner requests should not receive generic execution checklist notes"
         );
     }
 
@@ -14514,7 +14369,6 @@ mod tests {
 
                         deliberation_state: None,
                     }),
-                    None,
                     trace,
                 )
                 .await
@@ -16622,10 +16476,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(
-            plan_updates
-                .iter()
-                .any(|items| items.iter().any(|item| item.id == "replan")),
-            "replanning should surface through the shared execution checklist"
+            plan_updates.is_empty(),
+            "replanning should not reintroduce synthetic checklist plan updates"
         );
     }
 

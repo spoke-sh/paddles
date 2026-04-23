@@ -14,17 +14,10 @@ impl<'a> RecursiveControlChamber<'a> {
         prompt: &str,
         context: PlannerLoopContext,
         initial_decision: Option<RecursivePlannerDecision>,
-        execution_checklist: Option<ExecutionChecklistState>,
         trace: Arc<StructuredTurnTrace>,
     ) -> Result<PlannerLoopOutcome> {
         self.service
-            .execute_recursive_planner_loop(
-                prompt,
-                context,
-                initial_decision,
-                execution_checklist,
-                trace,
-            )
+            .execute_recursive_planner_loop(prompt, context, initial_decision, trace)
             .await
     }
 

@@ -7,9 +7,13 @@
 
 ## Backbone Architecture
 
-The architecture rests on four commitments:
+The architecture rests on five commitments:
 
 - **Let the model reason first.** Interpretation context — operator memory, guidance graphs, tool hints, derived procedures — arrives before any routing decision. The model sees the full picture and chooses its own next action.
+- **Disclose live capabilities and constraints before planning.** The harness
+  exposes its dynamically available recursive capabilities, execution posture,
+  and completion contract to the model before asking it to decide what to do
+  next, and leaves enough recursive budget for the model to reason with them.
 - **Earn the answer through recursive work.** Small models become dramatically more capable when the harness gives them bounded tools to gather evidence iteratively rather than answering in one shot.
 - **Separate planning from synthesis.** Recursive context gathering and final answer generation are distinct workloads, each routed to the smallest model that excels at that role.
 - **Keep every step visible.** The harness shows its recursive work — planner actions, evidence gathered, decisions made — so the operator always knows why an answer was produced.
@@ -46,7 +50,11 @@ flowchart TD
     style O fill:#e8f4f8,stroke:#2196F3
 ```
 
-This is the heart of Paddles: a bounded recursive loop where the model drives its own investigation within safe guardrails. Each pass through the loop adds evidence, refines understanding, and brings the answer closer to ground truth.
+This is the heart of Paddles: a bounded recursive loop where the model drives
+its own investigation within explicit harness guardrails. Each pass through the
+loop adds evidence, refines understanding, and brings the answer closer to
+ground truth. The harness sets boundaries and validates outcomes; it should not
+collapse that reasoning into generic controller-authored pseudo-plans.
 
 ### Model Routing
 

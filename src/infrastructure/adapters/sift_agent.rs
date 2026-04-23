@@ -2542,7 +2542,7 @@ fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
 Choose the NEXT bounded action for this turn after reading the interpretation context.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
-Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
+Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -2606,6 +2606,8 @@ Active thread summary:\n\
 Runtime notes:\n\
 {}\n\
 \n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         planner_grounding_rules(),
@@ -2620,6 +2622,7 @@ Current user request:\n\
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
         format_runtime_notes(&prompt.request.runtime_notes),
+        format_execution_contract(prompt.request),
         prompt.user_prompt,
     )
 }
@@ -2629,7 +2632,7 @@ fn build_initial_action_retry_prompt(request: &PlannerRequest) -> String {
         "Your last top-level routing reply was empty or invalid.\n\
 Return ONLY one valid JSON initial action.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
-Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
+Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -2679,6 +2682,8 @@ Active thread summary:\n\
 Runtime notes:\n\
 {}\n\
 \n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         planner_grounding_rules(),
@@ -2691,6 +2696,7 @@ Current user request:\n\
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
         format_runtime_notes(&request.runtime_notes),
+        format_execution_contract(request),
         request.user_prompt,
     )
 }
@@ -2702,7 +2708,7 @@ Make one final constrained routing decision.\n\
 If no workspace action is clearly justified by the interpretation context, return stop.\n\
 Return ONLY one valid JSON object.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
-Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
+Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
 Allowed actions:\n\
 - {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
@@ -2753,6 +2759,8 @@ Active thread summary:\n\
 Runtime notes:\n\
 {}\n\
 \n\
+{}\n\
+\n\
 Current user request:\n\
 {}\n",
         trim_for_context(invalid_reply, 800),
@@ -2766,6 +2774,7 @@ Current user request:\n\
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
         format_runtime_notes(&request.runtime_notes),
+        format_execution_contract(request),
         request.user_prompt,
     )
 }
@@ -2775,7 +2784,7 @@ fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
         "You are the recursive planner lane for Paddles.\n\
 Choose the NEXT bounded workspace resource action for this turn.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
-Core mission: when the user asks for a safe, reasonable repository change, make the workspace edit in this turn rather than stop at diagnosis or advice once local evidence is sufficient.\n\
+Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
 Allowed actions:\n\
 	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
@@ -2839,6 +2848,8 @@ Active thread summary:\n\
 Runtime notes:\n\
 {}\n\
 \n\
+{}\n\
+\n\
 Current loop state:\n\
 {}\n\
 \n\
@@ -2856,6 +2867,7 @@ Current user request:\n\
             .as_deref()
             .unwrap_or("No recent thread-local summary."),
         format_runtime_notes(&prompt.request.runtime_notes),
+        format_execution_contract(prompt.request),
         format_planner_loop_state_digest(prompt.request),
         prompt.user_prompt,
     )
@@ -3590,6 +3602,24 @@ fn format_runtime_notes(runtime_notes: &[String]) -> String {
     } else {
         runtime_notes.join("\n")
     }
+}
+
+fn format_execution_contract(request: &PlannerRequest) -> String {
+    let capability_manifest = if request.execution_contract.capability_manifest.is_empty() {
+        "No additional capability metadata was supplied.".to_string()
+    } else {
+        request.execution_contract.capability_manifest.join("\n")
+    };
+    let completion_contract = if request.execution_contract.completion_contract.is_empty() {
+        "Complete the turn once the current evidence is sufficient.".to_string()
+    } else {
+        request.execution_contract.completion_contract.join("\n")
+    };
+
+    format!(
+        "Capability manifest:\n{}\n\nCompletion contract:\n{}",
+        capability_manifest, completion_contract
+    )
 }
 
 fn planner_likely_target_files(
@@ -5470,13 +5500,19 @@ mod tests {
         assert!(prompt.contains("Workspace retrieval readiness: bm25=warming, vector=warming"));
         assert!(prompt.contains("\"edit\":\"yes|no\""));
         assert!(prompt.contains("\"candidate_files\":[\"path1\",\"path2\",\"path3\"]"));
+        assert!(prompt.contains("Capability manifest"));
+        assert!(prompt.contains("Completion contract"));
         assert!(prompt.contains("exact-diff state space"));
         assert!(prompt.contains("replace_in_file"));
         assert!(prompt.contains("apply_patch"));
         assert!(prompt.contains("external_capability"));
         assert!(prompt.contains("\"capability_id\":\"web.search|mcp.tool|connector.app_action\""));
-        assert!(prompt.contains("safe, reasonable repository change"));
-        assert!(prompt.contains("make the workspace edit in this turn"));
+        assert!(prompt.contains(
+            "Use the capability manifest and completion contract below as the harness source of truth."
+        ));
+        assert!(prompt.contains(
+            "When the user requests a code change, you MUST use write_file, replace_in_file, or apply_patch"
+        ));
     }
 
     #[test]
@@ -5529,8 +5565,11 @@ mod tests {
         assert!(prompt.contains("apply_patch"));
         assert!(prompt.contains("external_capability"));
         assert!(prompt.contains("Steering review [action-bias]"));
-        assert!(prompt.contains("safe, reasonable repository change"));
-        assert!(prompt.contains("make the workspace edit in this turn"));
+        assert!(prompt.contains("Capability manifest"));
+        assert!(prompt.contains("Completion contract"));
+        assert!(prompt.contains(
+            "When the user requests a code change, use write_file, replace_in_file, or apply_patch"
+        ));
     }
 
     #[test]
