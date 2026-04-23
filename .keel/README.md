@@ -381,6 +381,14 @@
 | [Cross-Provider Deliberation Rollout And Verification](epics/VHXJWQaFC/voyages/VHXJipyBc/) | done |
 | [Normalized Deliberation Signals And Rationale Compilation](epics/VHXJWQaFC/voyages/VHXJiqMD1/) | done |
 
+### [Hosted Transit Authority And External Service Contract](epics/VHaTau3dH/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted Cursor Resume And Projection Rebuild Semantics](epics/VHaTau3dH/voyages/VHaTcrQZr/) | planned |
+| [Hosted Transit Authority And Service Runtime Mode](epics/VHaTau3dH/voyages/VHaTcrsZq/) | in-progress |
+| [Versioned Hosted Transit Contract And Projection Surface](epics/VHaTau3dH/voyages/VHaTcsMav/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
