@@ -2,7 +2,7 @@ use crate::domain::model::{
     TaskTraceId, TraceBranch, TraceBranchId, TraceCheckpointId, TraceRecord, TraceRecordId,
     TraceRecordKind, TraceReplay,
 };
-use crate::domain::ports::{TraceRecorder, TraceRecorderCapability};
+use crate::domain::ports::{TraceRecorder, TraceRecorderCapability, TraceSessionHostedCursor};
 use anyhow::{Context, Result, anyhow, ensure};
 use directories::ProjectDirs;
 use std::any::Any;
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use transit_client::TransitClient;
 use transit_core::engine::{LocalEngine, LocalEngineConfig};
-use transit_core::kernel::{LineageMetadata, StreamId, StreamPosition};
+use transit_core::kernel::{CursorId, LineageMetadata, Offset, StreamId, StreamPosition};
 use transit_core::membership::NodeId;
 use transit_core::storage::LineageCheckpoint;
 
@@ -156,6 +156,7 @@ pub(crate) struct HostedTransitTaskState {
     pub(crate) root_stream: StreamId,
     pub(crate) branch_streams: HashMap<TraceBranchId, StreamId>,
     pub(crate) record_positions: HashMap<TraceRecordId, StreamPosition>,
+    pub(crate) consumer_cursors: HashMap<String, TraceSessionHostedCursor>,
 }
 
 impl TransitTraceRecorder {
@@ -480,6 +481,145 @@ impl HostedTransitTraceRecorder {
         })
     }
 
+    fn consumer_roles() -> [(&'static str, &'static str); 2] {
+        [
+            ("session_reader", "session-reader"),
+            ("lifecycle_reader", "lifecycle-reader"),
+        ]
+    }
+
+    fn consumer_cursor_id(
+        &self,
+        task_id: &TaskTraceId,
+        consumer_segment: &str,
+        stream_id: &StreamId,
+    ) -> Result<CursorId> {
+        CursorId::new(format!(
+            "{}/{}/task/{}/{}/{}",
+            sanitize_stream_component(&self.namespace),
+            sanitize_stream_component(&self.service_identity),
+            sanitize_stream_component(task_id.as_str()),
+            consumer_segment,
+            sanitize_stream_component(stream_id.as_str()),
+        ))
+        .context("construct hosted consumer cursor id")
+    }
+
+    fn consumer_cursor_metadata(
+        &self,
+        task_id: &TaskTraceId,
+        consumer: &str,
+        stream_id: &StreamId,
+    ) -> LineageMetadata {
+        LineageMetadata::new(Some("paddles".into()), Some(consumer.to_string()))
+            .with_label("authority", "hosted_transit")
+            .with_label("namespace", self.namespace.clone())
+            .with_label("service_identity", self.service_identity.clone())
+            .with_label("task_id", task_id.as_str())
+            .with_label("stream_id", stream_id.as_str())
+    }
+
+    fn load_consumer_cursors(
+        &self,
+        task_id: &TaskTraceId,
+        streams: &[StreamId],
+    ) -> Result<HashMap<String, TraceSessionHostedCursor>> {
+        let mut cursors = HashMap::new();
+
+        for stream_id in streams {
+            for (consumer, cursor_segment) in Self::consumer_roles() {
+                let cursor_id = self.consumer_cursor_id(task_id, cursor_segment, stream_id)?;
+                let Ok(cursor) = self.client.get_cursor(&cursor_id) else {
+                    continue;
+                };
+                let cursor = cursor.into_body();
+                cursors.insert(
+                    cursor.cursor_id.as_str().to_string(),
+                    TraceSessionHostedCursor {
+                        consumer: consumer.to_string(),
+                        cursor_id: cursor.cursor_id.as_str().to_string(),
+                        stream_id: cursor.stream_id.as_str().to_string(),
+                        position: cursor.position.value(),
+                    },
+                );
+            }
+        }
+
+        Ok(cursors)
+    }
+
+    fn sync_consumer_cursors(
+        &self,
+        task_id: &TaskTraceId,
+        stream_id: &StreamId,
+        position: Offset,
+    ) -> Result<Vec<TraceSessionHostedCursor>> {
+        let mut synchronized = Vec::new();
+
+        for (consumer, cursor_segment) in Self::consumer_roles() {
+            let cursor_id = self.consumer_cursor_id(task_id, cursor_segment, stream_id)?;
+            let mut current_position = position;
+
+            match self.client.get_cursor(&cursor_id) {
+                Ok(existing) => {
+                    let existing = existing.into_body();
+                    if existing.position.value() < position.value() {
+                        self.client
+                            .ack_cursor(&cursor_id, position)
+                            .with_context(|| {
+                                format!("ack hosted cursor '{}'", cursor_id.as_str())
+                            })?;
+                    } else {
+                        current_position = existing.position;
+                    }
+                }
+                Err(_) => {
+                    let metadata = self.consumer_cursor_metadata(task_id, consumer, stream_id);
+                    match self
+                        .client
+                        .create_cursor(&cursor_id, stream_id, position, metadata)
+                    {
+                        Ok(_) => {}
+                        Err(error) => {
+                            if self.client.get_cursor(&cursor_id).is_err() {
+                                return Err(anyhow!(error)).with_context(|| {
+                                    format!("create hosted cursor '{}'", cursor_id.as_str())
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            synchronized.push(TraceSessionHostedCursor {
+                consumer: consumer.to_string(),
+                cursor_id: cursor_id.as_str().to_string(),
+                stream_id: stream_id.as_str().to_string(),
+                position: current_position.value(),
+            });
+        }
+
+        Ok(synchronized)
+    }
+
+    fn hosted_cursor_snapshot(&self, task_id: &TaskTraceId) -> Vec<TraceSessionHostedCursor> {
+        let mut cursors = self
+            .state
+            .lock()
+            .expect("hosted trace recorder lock")
+            .tasks
+            .get(task_id)
+            .map(|task| task.consumer_cursors.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        cursors.sort_by(|left, right| {
+            left.consumer
+                .cmp(&right.consumer)
+                .then(left.stream_id.cmp(&right.stream_id))
+                .then(left.cursor_id.cmp(&right.cursor_id))
+        });
+        cursors
+    }
+
     fn stream_family_prefix(&self) -> String {
         format!(
             "{}.paddles.trace.{}",
@@ -575,6 +715,7 @@ impl HostedTransitTraceRecorder {
             root_stream: root_stream.clone(),
             branch_streams: HashMap::new(),
             record_positions: HashMap::new(),
+            consumer_cursors: HashMap::new(),
         };
 
         let branch_prefix = format!(
@@ -595,6 +736,11 @@ impl HostedTransitTraceRecorder {
                     .insert(record.record_id.clone(), position);
             }
         }
+
+        let streams = std::iter::once(task.root_stream.clone())
+            .chain(task.branch_streams.values().cloned())
+            .collect::<Vec<_>>();
+        task.consumer_cursors = self.load_consumer_cursors(task_id, &streams)?;
 
         Ok(Some(task))
     }
@@ -674,6 +820,7 @@ impl HostedTransitTraceRecorder {
                 root_stream: root_stream.clone(),
                 branch_streams: HashMap::new(),
                 record_positions: HashMap::new(),
+                consumer_cursors: HashMap::new(),
             },
         );
         Ok(root_stream)
@@ -914,6 +1061,14 @@ impl TraceRecorder for HostedTransitTraceRecorder {
             })?;
         task.record_positions
             .insert(record.record_id.clone(), outcome.body().position().clone());
+        for cursor in self.sync_consumer_cursors(
+            &record.lineage.task_id,
+            &stream_id,
+            outcome.body().position().offset,
+        )? {
+            task.consumer_cursors
+                .insert(cursor.cursor_id.clone(), cursor);
+        }
         Ok(())
     }
 
@@ -946,6 +1101,13 @@ impl TraceRecorder for HostedTransitTraceRecorder {
             task_id: task_id.clone(),
             records: records.into_values().collect(),
         })
+    }
+
+    fn wake(&self, task_id: &TaskTraceId) -> Result<crate::domain::ports::TraceSessionWake> {
+        let replay = self.replay(task_id)?;
+        let mut wake = crate::domain::ports::TraceSessionWake::from_replay(&replay);
+        wake.hosted_cursors = self.hosted_cursor_snapshot(task_id);
+        Ok(wake)
     }
 
     fn task_ids(&self) -> Vec<TaskTraceId> {
@@ -1491,6 +1653,71 @@ mod tests {
                 .expect("hosted server streams dir")
                 .next()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn hosted_session_cursor_resume_persists_positions_across_restarts() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-cursor");
+        let task_id = root.lineage.task_id.clone();
+        let turn_id = root.lineage.turn_id.clone();
+
+        recorder.record(root).expect("record hosted root");
+        recorder
+            .record(turn_started_record(
+                &task_id,
+                &turn_id,
+                "record-2",
+                2,
+                "record-1",
+                "resume me",
+            ))
+            .expect("record hosted turn");
+
+        let initial_wake = recorder.wake(&task_id).expect("initial hosted wake");
+        assert_eq!(initial_wake.latest_sequence, Some(2));
+        assert_eq!(initial_wake.hosted_cursors.len(), 2);
+
+        let resumed =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("resumed hosted recorder");
+        let resumed_wake = resumed.wake(&task_id).expect("resumed hosted wake");
+
+        assert_eq!(resumed_wake.latest_sequence, Some(2));
+        assert_eq!(resumed_wake.hosted_cursors, initial_wake.hosted_cursors);
+    }
+
+    #[test]
+    fn hosted_session_cursor_resume_metadata_is_exposed() {
+        let (_server_root, server) = hosted_server();
+        let recorder =
+            HostedTransitTraceRecorder::connect(server.local_addr(), "test-hosted", "svc-main")
+                .expect("hosted recorder");
+        let root = root_record("task-hosted-metadata");
+        let task_id = root.lineage.task_id.clone();
+
+        recorder.record(root).expect("record hosted root");
+
+        let wake = recorder.wake(&task_id).expect("hosted wake");
+
+        assert_eq!(wake.hosted_cursors.len(), 2);
+        assert!(
+            wake.hosted_cursors
+                .iter()
+                .any(|cursor| cursor.consumer == "session_reader"
+                    && cursor.cursor_id.contains("session-reader")
+                    && cursor.position == 0)
+        );
+        assert!(
+            wake.hosted_cursors
+                .iter()
+                .any(|cursor| cursor.consumer == "lifecycle_reader"
+                    && cursor.cursor_id.contains("lifecycle-reader")
+                    && cursor.position == 0)
         );
     }
 }

@@ -19,6 +19,7 @@ pub struct TraceSessionWake {
     pub latest_record_id: Option<TraceRecordId>,
     pub latest_sequence: Option<u64>,
     pub checkpoints: Vec<TraceSessionCheckpointCursor>,
+    pub hosted_cursors: Vec<TraceSessionHostedCursor>,
 }
 
 impl TraceSessionWake {
@@ -50,8 +51,17 @@ impl TraceSessionWake {
             latest_record_id,
             latest_sequence,
             checkpoints,
+            hosted_cursors: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceSessionHostedCursor {
+    pub consumer: String,
+    pub cursor_id: String,
+    pub stream_id: String,
+    pub position: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

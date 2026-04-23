@@ -385,7 +385,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted Cursor Resume And Projection Rebuild Semantics](epics/VHaTau3dH/voyages/VHaTcrQZr/) | planned |
+| [Hosted Cursor Resume And Projection Rebuild Semantics](epics/VHaTau3dH/voyages/VHaTcrQZr/) | in-progress |
 | [Hosted Transit Authority And Service Runtime Mode](epics/VHaTau3dH/voyages/VHaTcrsZq/) | done |
 | [Versioned Hosted Transit Contract And Projection Surface](epics/VHaTau3dH/voyages/VHaTcsMav/) | done |
 
