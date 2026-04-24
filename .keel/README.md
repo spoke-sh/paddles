@@ -389,6 +389,19 @@
 | [Hosted Transit Authority And Service Runtime Mode](epics/VHaTau3dH/voyages/VHaTcrsZq/) | done |
 | [Versioned Hosted Transit Contract And Projection Surface](epics/VHaTau3dH/voyages/VHaTcsMav/) | done |
 
+### [Capability-Negotiated Harness Foundation](epics/VHkfpJJc4/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Implement Governed External Capability Broker](epics/VHkfpJJc4/voyages/VHkgG2aro/) | in-progress |
+| [Install Codex-Grade Execution Policy](epics/VHkfpJJc4/voyages/VHkgKreip/) | in-progress |
+| [Harden Workspace Editing And LSP Hands](epics/VHkfpJJc4/voyages/VHkgLtij9/) | in-progress |
+| [Activate Recursive Delegation Runtime](epics/VHkfpJJc4/voyages/VHkgMxksP/) | in-progress |
+| [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | in-progress |
+| [Create Recursive Harness Eval Suite](epics/VHkfpJJc4/voyages/VHkgOF9KK/) | in-progress |
+| [Split Application Into Hexagonal Boundaries](epics/VHkfpJJc4/voyages/VHkgP8L7k/) | in-progress |
+| [Expose Operator Surfaces And Provider Registry](epics/VHkfpJJc4/voyages/VHkgPmlyS/) | in-progress |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
