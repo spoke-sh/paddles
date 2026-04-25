@@ -8,6 +8,7 @@ mod interpretation_chamber;
 mod planner_loop;
 pub mod read_model;
 mod recursive_control;
+mod runtime_posture_projection;
 mod synthesis_chamber;
 mod turn_orchestration;
 mod worker_runtime;
@@ -30,6 +31,12 @@ pub use self::external_capability::ExternalCapabilityBrokerRegistry;
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 use self::recursive_control::RecursiveControlChamber;
+pub use self::runtime_posture_projection::{
+    RuntimeCapabilityPostureEvent, RuntimeDiagnosticPostureEvent, RuntimeEvalOutcomePostureEvent,
+    RuntimeEvalPostureEvent, RuntimeGovernancePostureEvent, RuntimePostureProjectionInput,
+    RuntimePostureProjectionService, RuntimePostureProjectionSnapshot,
+    RuntimeProvenancePostureEvent, RuntimeWorkerPostureEvent,
+};
 use self::synthesis_chamber::SynthesisChamber;
 use self::turn_orchestration::TurnOrchestrationChamber;
 pub use self::worker_runtime::{
