@@ -4,6 +4,7 @@ mod evals;
 mod execution_contract;
 mod execution_policy;
 mod external_capability;
+mod harness_capability_posture;
 mod interpretation_chamber;
 mod planner_loop;
 pub mod read_model;
@@ -28,6 +29,12 @@ pub use self::execution_policy::{
     representative_execution_policy_fixtures,
 };
 pub use self::external_capability::ExternalCapabilityBrokerRegistry;
+pub use self::harness_capability_posture::{
+    HarnessCapabilityRuntimeStatus, HarnessEvalRuntimeStatus,
+    HarnessExecutionPolicyRuleRuntimeStatus, HarnessExecutionPolicyRuntimeStatus,
+    HarnessExternalCapabilityRuntimeStatus, HarnessProviderModelRuntimeStatus,
+    HarnessProviderRegistryRuntimeStatus, RuntimeHarnessCapabilityPostureService,
+};
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 use self::recursive_control::RecursiveControlChamber;

@@ -22,7 +22,7 @@ mission: VHkfg16CU
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 7/8 voyages complete, 23/24 stories done
+**Progress:** 8/8 voyages complete, 24/24 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Implement Governed External Capability Broker](voyages/VHkgG2aro/) | done | 3/3 |
@@ -32,5 +32,5 @@ mission: VHkfg16CU
 | [Persist Replayable Sessions And Context](voyages/VHkgNakSc/) | done | 3/3 |
 | [Create Recursive Harness Eval Suite](voyages/VHkgOF9KK/) | done | 3/3 |
 | [Split Application Into Hexagonal Boundaries](voyages/VHkgP8L7k/) | done | 3/3 |
-| [Expose Operator Surfaces And Provider Registry](voyages/VHkgPmlyS/) | in-progress | 2/3 |
+| [Expose Operator Surfaces And Provider Registry](voyages/VHkgPmlyS/) | done | 3/3 |
 <!-- END GENERATED -->

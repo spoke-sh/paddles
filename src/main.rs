@@ -9,7 +9,9 @@ use std::sync::Arc;
 use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
 use paddles::application::{
-    GathererProvider, MechSuitService, PreparedGathererLane, PreparedModelLane, RuntimeLaneConfig,
+    ExternalCapabilityBrokerRegistry, GathererProvider, HarnessCapabilityRuntimeStatus,
+    MechSuitService, PreparedGathererLane, PreparedModelLane,
+    RuntimeHarnessCapabilityPostureService, RuntimeLaneConfig,
 };
 use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
@@ -297,6 +299,8 @@ struct ServiceRuntimeStatus {
     authority_location: Option<String>,
     operator_surfaces: OperatorSurfaceRuntimeStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
+    harness_posture: Option<HarnessCapabilityRuntimeStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     failure: Option<String>,
 }
 
@@ -325,6 +329,7 @@ fn resolve_operator_surface_bootstrap(
 fn service_runtime_ready_status(
     capability: &paddles::domain::ports::TraceRecorderCapability,
     operator_surfaces: OperatorSurfaceRuntimeStatus,
+    harness_posture: Option<HarnessCapabilityRuntimeStatus>,
 ) -> ServiceRuntimeStatus {
     let (authority_backend, authority_location) = match capability {
         paddles::domain::ports::TraceRecorderCapability::Persistent { backend, location } => {
@@ -344,6 +349,7 @@ fn service_runtime_ready_status(
         authority_backend,
         authority_location,
         operator_surfaces,
+        harness_posture,
         failure: None,
     }
 }
@@ -370,6 +376,7 @@ fn service_runtime_failure_status(
         authority_backend,
         authority_location,
         operator_surfaces: OperatorSurfaceRuntimeStatus::Disabled,
+        harness_posture: None,
         failure: Some(failure.into()),
     }
 }
@@ -635,6 +642,11 @@ async fn main() -> Result<()> {
         trace_recorder.clone(),
     ));
     service.set_execution_hand_registry(Arc::clone(&execution_hand_registry));
+    service.set_external_capability_broker(Arc::new(
+        ExternalCapabilityBrokerRegistry::from_local_configuration(
+            config.external_capabilities.clone(),
+        ),
+    ));
     service.set_conversation_history_store(conversation_history_store);
     let native_transport_registry = Arc::new(NativeTransportRegistry::new(
         config.native_transports.clone(),
@@ -698,7 +710,7 @@ async fn main() -> Result<()> {
         .with_planner_provider(planner_provider)
         .with_gatherer_provider(gatherer_provider)
         .with_context1_harness_ready(context1_harness_ready);
-    let _prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
+    let prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
     if verbose >= 3 {
         println!("[BOOT] Runtime lanes ready.");
     }
@@ -838,9 +850,14 @@ async fn main() -> Result<()> {
     };
 
     if service_mode_enabled {
+        let harness_posture = RuntimeHarnessCapabilityPostureService::project(
+            &prepared_lanes,
+            &service.external_capability_descriptors(),
+        );
         let status = service_runtime_ready_status(
             &service.trace_recorder_capability(),
             operator_surface_boot.runtime_status.clone(),
+            Some(harness_posture),
         );
         emit_service_runtime_status(&status)?;
         tokio::signal::ctrl_c()
@@ -929,6 +946,11 @@ mod tests {
         resolve_operator_surface_bootstrap, service_runtime_failure_status,
         service_runtime_ready_status,
     };
+    use paddles::application::{
+        PreparedModelLane, PreparedRuntimeLanes, RuntimeHarnessCapabilityPostureService,
+        RuntimeLaneRole,
+    };
+    use paddles::domain::model::{ExternalCapabilityCatalog, ExternalCapabilityCatalogConfig};
     use paddles::infrastructure::config::{HostedTransitAuthorityConfig, TraceAuthoritySelection};
     use paddles::infrastructure::providers::ModelProvider;
     use std::path::Path;
@@ -989,6 +1011,7 @@ mod tests {
                 location: "127.0.0.1:7171#namespace=test;service=svc-main".to_string(),
             },
             OperatorSurfaceRuntimeStatus::Disabled,
+            None,
         );
 
         assert_eq!(ready.state, ServiceRuntimeState::Ready);
@@ -1029,5 +1052,78 @@ mod tests {
             resolve_operator_surface_bootstrap(true, false),
             OperatorSurfaceBootstrap::Skip
         );
+    }
+
+    #[test]
+    fn runtime_entrypoint_smoke_exposes_harness_capability_configuration_posture() {
+        let prepared_lanes = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Google,
+                model_id: "gemini-2.5-flash".to_string(),
+                paths: None,
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Openai,
+                model_id: "gpt-5.4".to_string(),
+                paths: None,
+            },
+            gatherer: None,
+        };
+        let external_capabilities = ExternalCapabilityCatalog::from_local_configuration(
+            &ExternalCapabilityCatalogConfig::default().enable("web.search"),
+        )
+        .descriptors();
+
+        let status = RuntimeHarnessCapabilityPostureService::project(
+            &prepared_lanes,
+            &external_capabilities,
+        );
+
+        assert!(status.external_capabilities.iter().any(|capability| {
+            capability.id == "web.search"
+                && capability.availability == "available"
+                && capability.effects == "read_only"
+        }));
+        assert!(status.external_capabilities.iter().any(|capability| {
+            capability.id == "mcp.tool"
+                && capability.availability == "unavailable"
+                && capability.auth == "optional"
+        }));
+        assert_eq!(
+            status.execution_policy.profile_id,
+            "recursive-structured-v1"
+        );
+        assert_eq!(status.execution_policy.sandbox_mode, "workspace_write");
+        assert!(
+            status
+                .execution_policy
+                .supported_reuse_scopes
+                .contains(&"command_prefix".to_string())
+        );
+        assert!(status.execution_policy.rules.iter().any(|rule| {
+            rule.id == "allow-external-capability-through-governance" && rule.decision == "allow"
+        }));
+        assert!(status.evals.offline);
+        assert_eq!(status.evals.failed_reports, 0);
+        assert!(
+            status
+                .evals
+                .scenario_ids
+                .contains(&"replay-local".to_string())
+        );
+        assert!(status.provider_registry.offline_safe);
+        assert!(!status.provider_registry.network_discovery_required);
+        assert!(status.provider_registry.entries.iter().any(|entry| {
+            entry.provider == "google"
+                && entry.model_id == "gemini-2.5-flash"
+                && entry.status == "configured"
+        }));
+        assert!(status.provider_registry.entries.iter().any(|entry| {
+            entry.provider == "openai"
+                && entry.model_id == "gpt-5.4"
+                && entry.status == "configured"
+        }));
     }
 }

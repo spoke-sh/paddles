@@ -389,7 +389,7 @@
 | [Hosted Transit Authority And Service Runtime Mode](epics/VHaTau3dH/voyages/VHaTcrsZq/) | done |
 | [Versioned Hosted Transit Contract And Projection Surface](epics/VHaTau3dH/voyages/VHaTcsMav/) | done |
 
-### [Capability-Negotiated Harness Foundation](epics/VHkfpJJc4/) (active)
+### [Capability-Negotiated Harness Foundation](epics/VHkfpJJc4/) (done)
 
 | Voyage | Status |
 |--------|--------|
@@ -400,7 +400,7 @@
 | [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | done |
 | [Create Recursive Harness Eval Suite](epics/VHkfpJJc4/voyages/VHkgOF9KK/) | done |
 | [Split Application Into Hexagonal Boundaries](epics/VHkfpJJc4/voyages/VHkgP8L7k/) | done |
-| [Expose Operator Surfaces And Provider Registry](epics/VHkfpJJc4/voyages/VHkgPmlyS/) | in-progress |
+| [Expose Operator Surfaces And Provider Registry](epics/VHkfpJJc4/voyages/VHkgPmlyS/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

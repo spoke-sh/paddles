@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-24T19:20:07.921460098-07:00
+mode: manual
+---
+CONFIGURATION.md documents [external_capabilities] enablement, execution policy posture, deterministic eval usage, provider registry posture, local-first boundaries, and service-mode harness_posture.

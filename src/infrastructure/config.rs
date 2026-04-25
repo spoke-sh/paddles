@@ -2,8 +2,8 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 use crate::domain::model::{
-    NativeTransportAuth, NativeTransportAuthMode, NativeTransportConfiguration,
-    NativeTransportConfigurations, NativeTransportKind,
+    ExternalCapabilityCatalogConfig, NativeTransportAuth, NativeTransportAuthMode,
+    NativeTransportConfiguration, NativeTransportConfigurations, NativeTransportKind,
 };
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::runtime_preferences::RuntimeLanePreferences;
@@ -76,6 +76,7 @@ pub struct PaddlesConfig {
     pub service_mode: ServiceModeConfig,
     pub trace_authority: TraceAuthorityConfig,
     pub native_transports: NativeTransportConfigurations,
+    pub external_capabilities: ExternalCapabilityCatalogConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -128,6 +129,12 @@ struct TraceAuthorityOverlay {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
+struct ExternalCapabilitiesOverlay {
+    enabled: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 struct PaddlesConfigOverlay {
     provider: Option<String>,
     provider_url: Option<String>,
@@ -151,6 +158,7 @@ struct PaddlesConfigOverlay {
     service_mode: Option<ServiceModeOverlay>,
     trace_authority: Option<TraceAuthorityOverlay>,
     native_transports: Option<NativeTransportConfigurationsOverlay>,
+    external_capabilities: Option<ExternalCapabilitiesOverlay>,
 }
 
 impl Default for PaddlesConfig {
@@ -180,6 +188,7 @@ impl Default for PaddlesConfig {
             },
             trace_authority: TraceAuthorityConfig::default(),
             native_transports: NativeTransportConfigurations::default(),
+            external_capabilities: ExternalCapabilityCatalogConfig::default(),
         }
     }
 }
@@ -335,6 +344,9 @@ impl PaddlesConfig {
         }
         if let Some(native_transports) = overlay.native_transports {
             apply_native_transport_configurations(&mut self.native_transports, native_transports);
+        }
+        if let Some(external_capabilities) = overlay.external_capabilities {
+            apply_external_capabilities(&mut self.external_capabilities, external_capabilities);
         }
     }
 
@@ -595,6 +607,22 @@ fn apply_service_mode(service_mode: &mut ServiceModeConfig, overlay: ServiceMode
     }
 }
 
+fn apply_external_capabilities(
+    external_capabilities: &mut ExternalCapabilityCatalogConfig,
+    overlay: ExternalCapabilitiesOverlay,
+) {
+    if let Some(enabled) = overlay.enabled {
+        let mut next = ExternalCapabilityCatalogConfig::default();
+        for capability_id in enabled {
+            let capability_id = capability_id.trim();
+            if !capability_id.is_empty() {
+                next = next.enable(capability_id.to_string());
+            }
+        }
+        *external_capabilities = next;
+    }
+}
+
 fn apply_trace_authority(
     trace_authority: &mut TraceAuthorityConfig,
     overlay: TraceAuthorityOverlay,
@@ -781,6 +809,27 @@ bind_target = "127.0.0.1:4100"
         );
         assert!(!config.native_transports.websocket.enabled);
         assert!(!config.native_transports.transit.enabled);
+    }
+
+    #[test]
+    fn load_parses_external_capability_enablement() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("paddles.toml"),
+            r#"
+[external_capabilities]
+enabled = ["web.search", "mcp.tool", "  "]
+"#,
+        )
+        .expect("write config");
+
+        let config = PaddlesConfig::load(dir.path());
+        let enabled = config
+            .external_capabilities
+            .enabled_capability_ids()
+            .collect::<Vec<_>>();
+
+        assert_eq!(enabled, vec!["mcp.tool", "web.search"]);
     }
 
     #[test]

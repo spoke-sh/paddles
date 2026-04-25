@@ -245,6 +245,70 @@ If a fabric is missing, stale, unauthenticated, or blocked by governance, the
 runtime keeps those fields explicit in transcript, trace, and API payloads
 instead of projecting a generic success string.
 
+### Harness Capability Configuration
+
+Harness capability posture is configured and reported as four concrete
+surfaces: external capabilities, execution policy, evals, and provider
+registry posture. Service-mode startup emits the same shape in the
+`harness_posture` field so operators can compare authored configuration with
+the runtime's prepared lanes.
+
+External capabilities are local-first and unavailable by default. Enable only
+the fabrics this runtime is allowed to advertise:
+
+```toml
+[external_capabilities]
+enabled = ["web.search"]
+```
+
+Recognized capability ids are:
+
+- `web.search` for citation-backed public web evidence
+- `mcp.tool` for MCP-mediated tool calls
+- `connector.app_action` for connector-backed app actions
+
+Enablement changes the catalog posture from `unavailable` to `available`; it
+does not bypass governance, credential mediation, or the local executor
+boundary. `web.search` is read-only and requires `access_network`.
+`mcp.tool` and `connector.app_action` may be potentially mutating and require
+credential-mediated transport. When credentials, network authority, or a local
+executor are absent, the runtime still returns typed `unavailable`, `denied`,
+or `degraded` evidence instead of pretending the capability succeeded.
+
+Execution policy is resolved from the active harness profile and the local
+policy table. The default local policy denies `rm -rf /`, allows the local
+workspace tools (`inspect`, `shell`, `diff`, `write_file`,
+`replace_in_file`, and `apply_patch`) within the active sandbox, and routes
+`external_capability` through the descriptor-governed transport boundary. The
+profile still owns the sandbox, approval policy, allowed permissions, and
+permission-reuse scopes; model or provider selection can downgrade those values
+when the prepared planner or synthesizer surface requires prompt envelopes.
+
+Run the deterministic harness eval corpus with:
+
+```bash
+cargo test eval_corpus_covers_initial_recursive_harness_contracts -- --nocapture
+```
+
+The corpus is offline by default and currently covers capability disclosure,
+recursive evidence, tool recovery, edit obligations, delegation, context
+pressure, and replay. Networked scenarios must opt into network permission; an
+offline run fails them with the `offline-guard` contract rather than opening a
+network path implicitly.
+
+Provider registry posture is also local-first. The runtime entrypoint reports
+the prepared planner and synthesizer provider/model pairs as `configured` and
+keeps `network_discovery_required = false` unless a future caller explicitly
+requests discovery. The posture vocabulary is `configured`, `discovered`,
+`unavailable`, and `deprecated`; consumers should preserve those labels instead
+of collapsing them into a generic provider list.
+
+Use this smoke check when changing the documented surfaces:
+
+```bash
+cargo test runtime_entrypoint_smoke -- --nocapture
+```
+
 Current specialist-brain contract:
 
 - `session-continuity-v1` is registered under both profiles so the planner contract stays stable across models
