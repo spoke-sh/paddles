@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-24T17:17:58.626665772-07:00
+mode: manual
+---
+ARCHITECTURE.md now states that the boundary split preserves the recursive planner/synthesizer contract: the planner sees live capabilities and owns action selection, the harness validates, executes, records, and budgets actions, the synthesizer authors from gathered evidence, controller-authored pseudo-plans stay out of planner control, and local-first runtime constraints remain the default with network dependencies opt-in and ADR-justified.

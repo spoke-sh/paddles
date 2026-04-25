@@ -242,6 +242,129 @@ Three properties of this architecture compound to raise effective model performa
 - **Bounded and observable recursion.** Every planner action is validated, budgeted, and visible to the operator.
 - **Local-first by default.** The core loop runs on local models; heavier lanes are opt-in and degrade gracefully.
 
+## Domain-Driven Hexagonal Boundary Map
+
+The recursive harness is being split along domain-driven and hexagonal
+boundaries. The goal is not to change recursive behavior. The goal is to make
+the behavior easier to test, replace, and inspect by keeping policy vocabulary,
+application orchestration, and concrete adapters in their own places.
+
+### Domain Layer
+
+Domain code lives under `src/domain`. It owns the words and invariants that make
+Paddles a recursive coding harness:
+
+- planner actions, planner summaries, budget stop reasons, and evidence records
+- synthesis and render contracts that separate answer authoring from projection
+- trace, recorder, context locator, conversation, and execution-hand vocabulary
+- eval scenarios, reports, and outcome contracts for harness regression checks
+- ports that describe required capabilities without choosing an implementation
+
+Domain modules must stay free of provider clients, CLI/TUI state, web routes,
+filesystem traversal, shell execution, and persistence details. They may expose
+serde-compatible value types and ports, but they should not know whether a
+planner is local Sift, remote HTTP, embedded Transit, a browser route, or a test
+double.
+
+### Application Layer
+
+Application code lives under `src/application`. It owns use cases and
+orchestration. This is where the harness coordinates a turn:
+
+- assemble interpretation context from ports and domain values
+- disclose the live capability surface, execution posture, and completion
+  contract before planner control decisions
+- run the recursive planner loop and enforce budget, schema, and completion
+  validation
+- hand gathered evidence to synthesis without leaking planner rationale into the
+  final answer
+- coordinate eval runs, session replay slices, and other operator workflows
+
+Application services may depend on domain models and ports. They should receive
+infrastructure through injected interfaces and configuration, not by importing
+provider SDKs, web server types, concrete terminal runners, or storage engines.
+The application layer validates and sequences work; it does not become an
+adapter.
+
+### Infrastructure Layer
+
+Infrastructure code lives under `src/infrastructure`, `apps/*`, and concrete
+adapter crates. It owns the outside world:
+
+- local model, remote provider, gatherer, and synthesizer adapters
+- `AGENTS.md` loading, filesystem reads, workspace editing, and terminal
+  execution
+- recorder implementations, embedded `transit-core`, native transports, web
+  routes, TUI projection, and browser runtime integration
+- credential handling, permission gates, health diagnostics, and configuration
+  loading
+
+Infrastructure implements domain/application ports and composes concrete
+runtime services. It may depend inward on application and domain contracts, but
+domain and application code must not depend outward on infrastructure adapter
+types.
+
+### Entrypoints And Composition
+
+Entrypoints such as `src/main.rs`, CLI commands, web routes, tests, and future
+API hosts are driving adapters. They parse operator intent, load configuration,
+construct infrastructure adapters, inject them into application services, and
+project results back to the active surface.
+
+Entrypoints should stay thin. If an entrypoint starts carrying planner policy,
+recursion state, provider-specific branching, or trace-shaping logic, that logic
+belongs in an application service or domain contract instead.
+
+### Boundary Rules
+
+Refactor slices for this mission follow these dependency rules:
+
+| From | May Depend On | Must Not Depend On |
+|------|---------------|--------------------|
+| `src/domain` | standard value types, serde, domain-local modules | application services, infrastructure adapters, provider SDKs, CLI/web/runtime state |
+| `src/application` | domain models and ports, injected service traits | concrete providers, terminal runners, web framework types, storage implementations |
+| `src/infrastructure` | application services, domain models and ports, concrete external crates | hidden policy that bypasses domain/application contracts |
+| entrypoints | composition roots, application services, infrastructure adapters | durable harness policy or recursive loop logic |
+
+New modules should use the existing ownership vocabulary: domain models and
+ports under `src/domain/model` and `src/domain/ports`, orchestration services
+under `src/application`, and concrete adapters under `src/infrastructure` or
+surface-specific app packages.
+
+### Recursive Contract Preservation
+
+The boundary split must preserve the recursive planner/synthesizer contract:
+
+- the planner sees the live harness capability surface, execution constraints,
+  and completion contract before choosing actions
+- the planner owns the recursive reasoning path and action selection
+- the harness owns validation, execution, budget boundaries, trace recording,
+  and fail-closed safety
+- the synthesizer authors the final response from gathered evidence and trace
+  state, rather than selecting workspace actions
+- controller-authored pseudo-plans, generic obligation prose, and synthetic
+  checklists must not replace model-authored planner control artifacts
+
+The local-first runtime remains the default constraint across every boundary.
+Local inference, local filesystem state, local trace durability, and local
+execution hands are the baseline. Network-backed providers, connectors, and
+external capability fabrics stay opt-in, disclose degraded or unavailable
+states explicitly, and require ADR justification when they become new runtime
+dependencies.
+
+### Extraction Order
+
+The safest extraction order is behavior-preserving:
+
+1. Document the boundary map and add tests that pin it.
+2. Extract execution contract and capability disclosure assembly into
+   application services.
+3. Extract recursive planner-loop orchestration behind application services.
+4. Extract evidence, recorder, and session-query flows behind focused ports.
+5. Add architecture boundary checks that prevent dependency drift.
+6. Grow the eval harness so each extraction can prove unchanged recursive
+   behavior.
+
 ## The Planner Loop In Detail
 
 The planner loop is the heart of the backbone. Each cycle follows a clear rhythm:

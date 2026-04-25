@@ -518,6 +518,29 @@ fn runtime_web_app_uses_tanstack_router_instead_of_react_router() {
 }
 
 #[test]
+fn ddd_hexagonal_boundary_map_is_documented_for_recursive_harness() {
+    let architecture = read_repo_file("ARCHITECTURE.md");
+
+    assert!(
+        architecture.contains("## Domain-Driven Hexagonal Boundary Map"),
+        "ARCHITECTURE should define the DDD and hexagonal boundary map before large refactor slices land",
+    );
+    assert!(
+        architecture.contains("### Domain Layer")
+            && architecture.contains("### Application Layer")
+            && architecture.contains("### Infrastructure Layer")
+            && architecture.contains("### Entrypoints And Composition"),
+        "ARCHITECTURE should name domain, application, infrastructure, and entrypoint responsibilities",
+    );
+    assert!(
+        architecture.contains("recursive planner/synthesizer contract")
+            && architecture.contains("local-first")
+            && architecture.contains("controller-authored pseudo-plans"),
+        "ARCHITECTURE should preserve recursive planner/synthesizer semantics and local-first constraints in the boundary map",
+    );
+}
+
+#[test]
 fn runtime_web_tests_follow_domain_partitioning() {
     assert!(
         repo_file("apps/web/src/test-support/runtime-harness.tsx").exists(),

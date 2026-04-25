@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-24T17:17:54.408949797-07:00
+mode: manual
+---
+ARCHITECTURE.md now defines the Domain-Driven Hexagonal Boundary Map with explicit domain, application, infrastructure, entrypoint, dependency, naming, and extraction responsibilities for the recursive harness. Red/green proof: cargo test ddd_hexagonal_boundary_map_is_documented_for_recursive_harness -- --nocapture failed before the section existed and passes after the doc update.
