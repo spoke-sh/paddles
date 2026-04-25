@@ -33,8 +33,9 @@ use self::recursive_control::RecursiveControlChamber;
 use self::synthesis_chamber::SynthesisChamber;
 use self::turn_orchestration::TurnOrchestrationChamber;
 pub use self::worker_runtime::{
-    BoundedWorkerRuntime, WorkerRuntimeBudget, WorkerRuntimePort, WorkerRuntimeSpawnOutcome,
-    WorkerRuntimeSpawnRequest,
+    BoundedWorkerRuntime, WorkerRuntimeAuthorityDecision, WorkerRuntimeBudget,
+    WorkerRuntimeCapabilityPosture, WorkerRuntimeContext, WorkerRuntimePort,
+    WorkerRuntimeSpawnOutcome, WorkerRuntimeSpawnRequest,
 };
 pub use crate::domain::model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,

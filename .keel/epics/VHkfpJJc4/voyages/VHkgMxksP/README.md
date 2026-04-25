@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:05:25
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Worker Runtime Port And Lifecycle](../../../../stories/VHkhsY1Nk/README.md) | feat | done |
-| [Inherit Governance And Budgets Into Workers](../../../../stories/VHkhtDl5C/README.md) | feat | icebox |
+| [Inherit Governance And Budgets Into Workers](../../../../stories/VHkhtDl5C/README.md) | feat | done |
 | [Integrate Worker Evidence In Parent Trace](../../../../stories/VHkhtzhw7/README.md) | feat | icebox |
 <!-- END GENERATED -->
