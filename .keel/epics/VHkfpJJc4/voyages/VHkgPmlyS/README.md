@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:05:36
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Surface Runtime Posture In Operator Projections](../../../../stories/VHkhxGnGQ/README.md) | feat | done |
-| [Add Provider Model Registry Posture](../../../../stories/VHkhxz6zK/README.md) | feat | icebox |
+| [Add Provider Model Registry Posture](../../../../stories/VHkhxz6zK/README.md) | feat | done |
 | [Document Harness Capability Configuration](../../../../stories/VHkhz3Y8v/README.md) | feat | icebox |
 <!-- END GENERATED -->

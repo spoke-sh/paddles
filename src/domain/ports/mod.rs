@@ -3,6 +3,7 @@ mod context_resolution;
 mod entity_resolution;
 mod execution_hands;
 mod external_capabilities;
+mod model_registry;
 mod operator_memory;
 mod planning;
 mod semantic_workspace;
@@ -12,9 +13,6 @@ mod synthesis;
 mod trace_recording;
 mod workspace_action_execution;
 mod workspace_editing;
-
-use async_trait::async_trait;
-use std::path::PathBuf;
 
 pub use context_gathering::{
     ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBudget, EvidenceBundle,
@@ -30,6 +28,10 @@ pub use entity_resolution::{
 };
 pub use execution_hands::ExecutionHand;
 pub use external_capabilities::ExternalCapabilityBroker;
+pub use model_registry::{
+    ModelPaths, ModelRegistry, ProviderModelPostureEntry, ProviderModelPostureStatus,
+    ProviderRegistryPosture, ProviderRegistryPostureRequest,
+};
 pub use operator_memory::OperatorMemory;
 pub use planning::{
     CompactionPlan, CompactionRequest, GroundingDomain, GroundingRequirement, GuidanceCategory,
@@ -70,18 +72,50 @@ pub use workspace_action_execution::{
 };
 pub use workspace_editing::WorkspaceEditor;
 
-/// Port for model discovery and acquisition.
-#[async_trait]
-pub trait ModelRegistry: Send + Sync {
-    /// Get the local paths for a model by its ID.
-    async fn get_model_paths(&self, model_id: &str) -> Result<ModelPaths, anyhow::Error>;
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Paths to local model assets.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ModelPaths {
-    pub weights: Vec<PathBuf>,
-    pub tokenizer: PathBuf,
-    pub config: PathBuf,
-    pub generation_config: Option<PathBuf>,
+    #[test]
+    fn provider_registry_posture_reports_configured_discovered_unavailable_and_deprecated_entries()
+    {
+        let posture = ProviderRegistryPosture::local_first(vec![
+            ProviderModelPostureEntry::configured("sift", "qwen-1.5b"),
+            ProviderModelPostureEntry::discovered("ollama", "qwen3:8b"),
+            ProviderModelPostureEntry::unavailable("openai", "gpt-5.4", "missing API key"),
+            ProviderModelPostureEntry::deprecated(
+                "openai",
+                "gpt-4o",
+                "kept for compatibility; prefer gpt-5.4",
+            ),
+        ]);
+
+        assert!(posture.has_status(ProviderModelPostureStatus::Configured));
+        assert!(posture.has_status(ProviderModelPostureStatus::Discovered));
+        assert!(posture.has_status(ProviderModelPostureStatus::Unavailable));
+        assert!(posture.has_status(ProviderModelPostureStatus::Deprecated));
+        assert_eq!(
+            posture.entries_by_status(ProviderModelPostureStatus::Unavailable)[0].reason,
+            Some("missing API key".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_registry_offline_builds_local_first_posture_without_network_discovery() {
+        let request = ProviderRegistryPostureRequest::local_first();
+        let posture = ProviderRegistryPosture::from_configured_models(
+            request,
+            vec![("sift", "qwen-1.5b"), ("openai", "gpt-5.4")],
+        );
+
+        assert!(!posture.network_discovery_required);
+        assert!(posture.is_offline_safe());
+        assert_eq!(posture.entries.len(), 2);
+        assert!(
+            posture
+                .entries
+                .iter()
+                .all(|entry| entry.status == ProviderModelPostureStatus::Configured)
+        );
+    }
 }
