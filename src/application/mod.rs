@@ -10,6 +10,7 @@ pub mod read_model;
 mod recursive_control;
 mod synthesis_chamber;
 mod turn_orchestration;
+mod worker_runtime;
 
 use self::conversation_read_model::ConversationReadModelChamber;
 pub use self::deliberation::{
@@ -31,6 +32,10 @@ use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 use self::recursive_control::RecursiveControlChamber;
 use self::synthesis_chamber::SynthesisChamber;
 use self::turn_orchestration::TurnOrchestrationChamber;
+pub use self::worker_runtime::{
+    BoundedWorkerRuntime, WorkerRuntimeBudget, WorkerRuntimePort, WorkerRuntimeSpawnOutcome,
+    WorkerRuntimeSpawnRequest,
+};
 pub use crate::domain::model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
     ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
