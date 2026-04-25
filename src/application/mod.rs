@@ -7820,15 +7820,7 @@ fn external_capability_result_evidence_items(
 ) -> Vec<EvidenceItem> {
     let mut items = vec![EvidenceItem {
         source: format!("external_capability:{}", result.descriptor.id),
-        snippet: trim_for_planner(
-            &format!(
-                "status={}\nsummary={}\ndetail={}",
-                result.status.label(),
-                result.summary,
-                result.detail
-            ),
-            1_200,
-        ),
+        snippet: trim_for_planner(&summarize_external_capability_result(result), 1_200),
         rationale: rationale.to_string(),
         rank: 0,
     }];
@@ -9632,7 +9624,7 @@ mod tests {
     }
 
     #[test]
-    fn external_capability_actions_route_through_discovery_governance_and_evidence() {
+    fn external_capability_evidence_appends_result_and_source_provenance_to_planner_loop() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
@@ -9786,6 +9778,13 @@ mod tests {
             .lock()
             .expect("gathered bundles lock");
         let bundle = bundles.last().expect("gathered evidence bundle");
+        assert!(bundle.items.iter().any(|item| {
+            item.source == "external_capability:web.search"
+                && item.snippet.contains("status=succeeded")
+                && item
+                    .snippet
+                    .contains("provenance=OpenAI docs -> https://example.com/docs")
+        }));
         assert!(bundle.items.iter().any(|item| {
             item.source.contains("web.search")
                 && item.snippet.contains("latest external capability docs")
@@ -10029,7 +10028,7 @@ mod tests {
     }
 
     #[test]
-    fn degraded_external_capability_results_project_honest_state_across_trace_and_transcript() {
+    fn external_capability_projection_exposes_provenance_and_degraded_state() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
             workspace.path().join("AGENTS.md"),
