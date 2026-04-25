@@ -12,14 +12,130 @@ use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
 use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_EDITOR_OUTPUT_CHARS: usize = 12_000;
+const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+static WORKSPACE_EDIT_LOCKS: OnceLock<Mutex<BTreeSet<PathBuf>>> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileLineEnding {
+    Lf,
+    Crlf,
+    Cr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceFileFormat {
+    has_utf8_bom: bool,
+    line_ending: FileLineEnding,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkspaceFileText {
+    text: String,
+    format: WorkspaceFileFormat,
+}
+
+struct WorkspaceEditLock {
+    path: PathBuf,
+}
+
+impl Drop for WorkspaceEditLock {
+    fn drop(&mut self) {
+        if let Some(locks) = WORKSPACE_EDIT_LOCKS.get() {
+            locks
+                .lock()
+                .expect("workspace edit lock registry")
+                .remove(&self.path);
+        }
+    }
+}
+
+fn acquire_workspace_edit_lock(path: &Path) -> Result<WorkspaceEditLock> {
+    let locks = WORKSPACE_EDIT_LOCKS.get_or_init(|| Mutex::new(BTreeSet::new()));
+    let mut guard = locks
+        .lock()
+        .map_err(|_| anyhow!("workspace edit lock registry is poisoned"))?;
+    let path = path.to_path_buf();
+    if !guard.insert(path.clone()) {
+        bail!("workspace edit lock is already held for {}", path.display());
+    }
+    Ok(WorkspaceEditLock { path })
+}
+
+fn acquire_workspace_edit_locks(paths: Vec<PathBuf>) -> Result<Vec<WorkspaceEditLock>> {
+    let mut locks = Vec::new();
+    let unique_paths = paths.into_iter().collect::<BTreeSet<_>>();
+    for path in unique_paths {
+        locks.push(acquire_workspace_edit_lock(&path)?);
+    }
+    Ok(locks)
+}
+
+fn read_workspace_file_text(path: &Path) -> Result<WorkspaceFileText> {
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    decode_workspace_file_text(&bytes)
+        .with_context(|| format!("failed to decode {}", path.display()))
+}
+
+fn decode_workspace_file_text(bytes: &[u8]) -> Result<WorkspaceFileText> {
+    let has_utf8_bom = bytes.starts_with(UTF8_BOM);
+    let body = if has_utf8_bom {
+        &bytes[UTF8_BOM.len()..]
+    } else {
+        bytes
+    };
+    let text = String::from_utf8(body.to_vec()).context("workspace file is not valid UTF-8")?;
+    let format = WorkspaceFileFormat {
+        has_utf8_bom,
+        line_ending: detect_line_ending(&text),
+    };
+    Ok(WorkspaceFileText { text, format })
+}
+
+fn detect_line_ending(text: &str) -> FileLineEnding {
+    let bytes = text.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        match byte {
+            b'\n' => return FileLineEnding::Lf,
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => return FileLineEnding::Crlf,
+            b'\r' => return FileLineEnding::Cr,
+            _ => {}
+        }
+    }
+    FileLineEnding::Lf
+}
+
+fn encode_workspace_file_text(text: &str, format: WorkspaceFileFormat) -> Vec<u8> {
+    let normalized = normalize_line_endings_for_format(text, format.line_ending);
+    let mut bytes = Vec::with_capacity(normalized.len() + UTF8_BOM.len());
+    if format.has_utf8_bom {
+        bytes.extend_from_slice(UTF8_BOM);
+    }
+    bytes.extend_from_slice(normalized.as_bytes());
+    bytes
+}
+
+fn normalize_line_endings_for_format(text: &str, line_ending: FileLineEnding) -> String {
+    let normalized = normalize_line_endings_to_lf(text);
+    match line_ending {
+        FileLineEnding::Lf => normalized,
+        FileLineEnding::Crlf => normalized.replace('\n', "\r\n"),
+        FileLineEnding::Cr => normalized.replace('\n', "\r"),
+    }
+}
+
+fn normalize_line_endings_to_lf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
 
 #[derive(Clone, Debug)]
 pub struct LocalWorkspaceEditor {
@@ -260,22 +376,35 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
         self.record_execution_started(format!("workspace editor writing {path}"));
         let result: Result<WorkspaceActionResult> = (|| {
             let resolved = resolve_workspace_path(&self.workspace_root, path, true)?;
-            let before = if resolved.exists() {
-                fs::read_to_string(&resolved)
-                    .with_context(|| format!("failed to read {}", resolved.display()))?
+            let _edit_lock = acquire_workspace_edit_lock(&resolved)?;
+            let existing = if resolved.exists() {
+                Some(read_workspace_file_text(&resolved)?)
             } else {
-                String::new()
+                None
             };
+            let before = existing
+                .as_ref()
+                .map(|file_text| file_text.text.clone())
+                .unwrap_or_default();
+            let after = existing
+                .as_ref()
+                .map(|file_text| {
+                    normalize_line_endings_for_format(content, file_text.format.line_ending)
+                })
+                .unwrap_or_else(|| content.to_string());
             if let Some(parent) = resolved.parent() {
                 fs::create_dir_all(parent).with_context(|| {
                     format!("failed to create parent directory {}", parent.display())
                 })?;
             }
-            fs::write(&resolved, content)
+            let bytes = existing
+                .as_ref()
+                .map(|file_text| encode_workspace_file_text(&after, file_text.format))
+                .unwrap_or_else(|| after.as_bytes().to_vec());
+            fs::write(&resolved, bytes)
                 .with_context(|| format!("failed to write {}", resolved.display()))?;
             let rel = relative_path(&self.workspace_root, &resolved);
-            let applied_edit =
-                build_applied_edit(&rel, &before, content, &self.transport_mediator)?;
+            let applied_edit = build_applied_edit(&rel, &before, &after, &self.transport_mediator)?;
             Ok(WorkspaceActionResult {
                 name: "write_file".to_string(),
                 summary: summarize_applied_edit("write_file", &applied_edit),
@@ -335,21 +464,26 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
         self.record_execution_started(format!("workspace editor replacing in {path}"));
         let result: Result<WorkspaceActionResult> = (|| {
             let resolved = resolve_workspace_path(&self.workspace_root, path, false)?;
-            let original = fs::read_to_string(&resolved)
-                .with_context(|| format!("failed to read {}", resolved.display()))?;
-            if !original.contains(old) {
+            let _edit_lock = acquire_workspace_edit_lock(&resolved)?;
+            let original = read_workspace_file_text(&resolved)?;
+            let old = normalize_line_endings_for_format(old, original.format.line_ending);
+            let new = normalize_line_endings_for_format(new, original.format.line_ending);
+            if !original.text.contains(&old) {
                 bail!("pattern not found in {}", resolved.display());
             }
             let updated = if replace_all {
-                original.replace(old, new)
+                original.text.replace(&old, &new)
             } else {
-                original.replacen(old, new, 1)
+                original.text.replacen(&old, &new, 1)
             };
-            fs::write(&resolved, &updated)
-                .with_context(|| format!("failed to write {}", resolved.display()))?;
+            fs::write(
+                &resolved,
+                encode_workspace_file_text(&updated, original.format),
+            )
+            .with_context(|| format!("failed to write {}", resolved.display()))?;
             let rel = relative_path(&self.workspace_root, &resolved);
             let applied_edit =
-                build_applied_edit(&rel, &original, &updated, &self.transport_mediator)?;
+                build_applied_edit(&rel, &original.text, &updated, &self.transport_mediator)?;
             Ok(WorkspaceActionResult {
                 name: "replace_in_file".to_string(),
                 summary: summarize_applied_edit("replace_in_file", &applied_edit),
@@ -410,6 +544,18 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             for path in &patch_paths {
                 ensure_authored_workspace_path(&path_policy, path)?;
             }
+            let resolved_paths = patch_paths
+                .iter()
+                .map(|path| resolve_workspace_path(&self.workspace_root, path, true))
+                .collect::<Result<Vec<_>>>()?;
+            let _edit_locks = acquire_workspace_edit_locks(resolved_paths.clone())?;
+            let original_formats = resolved_paths
+                .iter()
+                .filter(|path| path.exists())
+                .map(|path| {
+                    read_workspace_file_text(path).map(|file_text| (path.clone(), file_text.format))
+                })
+                .collect::<Result<Vec<_>>>()?;
 
             let mut command = Command::new("git");
             command
@@ -436,6 +582,14 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 summarize_apply_patch_result(patch, "git apply --whitespace=nowarn -", &output);
             if !output.status.success() {
                 bail!("{summary}");
+            }
+            for (path, format) in original_formats {
+                if !path.exists() {
+                    continue;
+                }
+                let patched = read_workspace_file_text(&path)?;
+                fs::write(&path, encode_workspace_file_text(&patched.text, format))
+                    .with_context(|| format!("failed to preserve format for {}", path.display()))?;
             }
             let applied_edit = build_patch_applied_edit(patch);
             Ok(WorkspaceActionResult {
@@ -914,6 +1068,73 @@ mod tests {
         assert_eq!(
             escalation.reuse_scope,
             Some(ExecutionPermissionReuseScope::Turn)
+        );
+    }
+
+    #[test]
+    fn workspace_edit_preserves_format_for_write_replace_and_patch() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let editor = LocalWorkspaceEditor::new(workspace.path());
+
+        fs::write(
+            workspace.path().join("write.txt"),
+            b"\xEF\xBB\xBFold\r\nvalue\r\n",
+        )
+        .expect("seed write file");
+        editor
+            .write_file("write.txt", "new\nvalue\n")
+            .expect("write_file result");
+        assert_eq!(
+            fs::read(workspace.path().join("write.txt")).expect("read write file"),
+            b"\xEF\xBB\xBFnew\r\nvalue\r\n"
+        );
+
+        fs::write(
+            workspace.path().join("replace.txt"),
+            b"\xEF\xBB\xBFhello\r\nold\r\n",
+        )
+        .expect("seed replace file");
+        editor
+            .replace_in_file("replace.txt", "old", "new\nline", false)
+            .expect("replace_in_file result");
+        assert_eq!(
+            fs::read(workspace.path().join("replace.txt")).expect("read replace file"),
+            b"\xEF\xBB\xBFhello\r\nnew\r\nline\r\n"
+        );
+
+        fs::write(
+            workspace.path().join("patch.txt"),
+            b"\xEF\xBB\xBFalpha\r\nbeta\r\n",
+        )
+        .expect("seed patch file");
+        let patch = "diff --git a/patch.txt b/patch.txt\n--- a/patch.txt\n+++ b/patch.txt\n@@ -2 +2 @@\n-beta\r\n+gamma\r\n";
+        editor.apply_patch(patch).expect("apply_patch result");
+        assert_eq!(
+            fs::read(workspace.path().join("patch.txt")).expect("read patch file"),
+            b"\xEF\xBB\xBFalpha\r\ngamma\r\n"
+        );
+    }
+
+    #[test]
+    fn workspace_edit_locking_rejects_overlapping_file_edits_with_clear_evidence() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("locked.txt"), "old\n").expect("seed locked file");
+        let editor = LocalWorkspaceEditor::new(workspace.path());
+        let resolved = super::resolve_workspace_path(workspace.path(), "locked.txt", false)
+            .expect("resolve file");
+        let _held_lock = super::acquire_workspace_edit_lock(&resolved).expect("hold edit lock");
+
+        let error = editor
+            .write_file("locked.txt", "new\n")
+            .expect_err("overlapping edit should be rejected");
+
+        assert!(
+            error.to_string().contains("workspace edit lock"),
+            "lock rejection should explain the locked file"
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("locked.txt")).expect("read locked file"),
+            "old\n"
         );
     }
 }
