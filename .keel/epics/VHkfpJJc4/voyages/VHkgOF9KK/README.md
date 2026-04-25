@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:04:42
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Add Harness Eval Runner](../../../../stories/VHkhT82GA/README.md) | feat | in-progress |
+| [Add Harness Eval Runner](../../../../stories/VHkhT82GA/README.md) | feat | done |
 | [Seed Recursive Harness Eval Corpus](../../../../stories/VHkhYur59/README.md) | feat | backlog |
 | [Add Hexagonal Boundary Eval Checks](../../../../stories/VHkhZxl8K/README.md) | refactor | backlog |
 <!-- END GENERATED -->

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-24T17:13:34.712965829-07:00
+mode: manual
+---
+Red proof: cargo test eval_runner -- --nocapture initially failed because EvalRunner returned zero reports. Green proof: after minimal implementation, cargo test eval_runner -- --nocapture and cargo test eval_runner_offline -- --nocapture passed.

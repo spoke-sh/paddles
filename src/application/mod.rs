@@ -1,5 +1,6 @@
 mod conversation_read_model;
 mod deliberation;
+mod evals;
 mod interpretation_chamber;
 pub mod read_model;
 mod recursive_control;
@@ -11,6 +12,7 @@ pub use self::deliberation::{
     DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
     extract_deliberation_signals,
 };
+pub use self::evals::EvalRunner;
 use self::interpretation_chamber::InterpretationChamber;
 pub use self::read_model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,

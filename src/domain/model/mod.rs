@@ -5,6 +5,7 @@ pub mod compaction;
 pub mod context_quality;
 pub mod control;
 pub mod delegation;
+pub mod evaluation;
 pub mod execution_hand;
 pub mod external_capability;
 pub mod generative;
@@ -54,6 +55,7 @@ pub use delegation::{
     WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
     WorkerRole,
 };
+pub use evaluation::{EvalOutcome, EvalReport, EvalRunConfig, EvalScenario, EvalStatus};
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
     ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,
