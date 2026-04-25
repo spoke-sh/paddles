@@ -2,6 +2,7 @@ mod conversation_read_model;
 mod deliberation;
 mod evals;
 mod interpretation_chamber;
+mod planner_loop;
 pub mod read_model;
 mod recursive_control;
 mod synthesis_chamber;
@@ -14,6 +15,7 @@ pub use self::deliberation::{
 };
 pub use self::evals::{EvalRunner, recursive_harness_eval_corpus};
 use self::interpretation_chamber::InterpretationChamber;
+use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 use self::recursive_control::RecursiveControlChamber;
 use self::synthesis_chamber::SynthesisChamber;
 use self::turn_orchestration::TurnOrchestrationChamber;
@@ -2493,6 +2495,10 @@ impl MechSuitService {
         RecursiveControlChamber::new(self)
     }
 
+    fn planner_loop_service(&self) -> PlannerLoopService {
+        PlannerLoopService::new()
+    }
+
     fn synthesis_chamber(&self) -> SynthesisChamber<'_> {
         SynthesisChamber::new(self)
     }
@@ -3424,7 +3430,8 @@ impl MechSuitService {
         let mut context = context;
         let base_budget =
             planner_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
-        let mut budget = planner_budget_for_replan_attempt(&base_budget, 0);
+        let planner_loop_service = self.planner_loop_service();
+        let mut budget = planner_loop_service.budget_for_replan_attempt(&base_budget, 0);
         let harness_profile = context.prepared.harness_profile();
         let mut loop_state = PlannerLoopState {
             target_resolution: context.initial_edit.resolution.clone(),
@@ -3456,17 +3463,20 @@ impl MechSuitService {
             }
 
             if sequence > budget.max_steps {
-                if activate_replan(
+                if let Some(replan_event) = planner_loop_service.activate_replan(
                     "planner-budget-exhausted",
-                    ReplanActivation {
+                    PlannerLoopReplanActivation {
                         instruction_frame: instruction_frame.as_ref(),
                         base_budget: &base_budget,
                         completed_replans: &mut replan_count,
                         budget: &mut budget,
                         loop_state: &mut loop_state,
-                        trace: trace.as_ref(),
                     },
                 ) {
+                    trace.emit(TurnEvent::Fallback {
+                        stage: replan_event.stage.to_string(),
+                        reason: replan_event.reason,
+                    });
                     continue;
                 }
                 break;
@@ -4132,17 +4142,20 @@ impl MechSuitService {
             }
 
             if let Some(reason) = stop_reason.clone() {
-                if activate_replan(
+                if let Some(replan_event) = planner_loop_service.activate_replan(
                     &reason,
-                    ReplanActivation {
+                    PlannerLoopReplanActivation {
                         instruction_frame: instruction_frame.as_ref(),
                         base_budget: &base_budget,
                         completed_replans: &mut replan_count,
                         budget: &mut budget,
                         loop_state: &mut loop_state,
-                        trace: trace.as_ref(),
                     },
                 ) {
+                    trace.emit(TurnEvent::Fallback {
+                        stage: replan_event.stage.to_string(),
+                        reason: replan_event.reason,
+                    });
                     stop_reason = None;
                     sequence += 1;
                     continue;
@@ -4442,124 +4455,6 @@ fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPl
         initial_edit: InitialEditInstruction::default(),
         grounding: None,
     }
-}
-
-fn planner_budget_stop_reason_label(stop_reason: &str) -> String {
-    stop_reason
-        .strip_suffix("-exhausted")
-        .unwrap_or(stop_reason)
-        .replace('-', " ")
-}
-
-fn planner_budget_for_replan_attempt(
-    base_budget: &PlannerBudget,
-    completed_replans: usize,
-) -> PlannerBudget {
-    let multiplier = completed_replans.saturating_add(1);
-    PlannerBudget {
-        max_steps: base_budget.max_steps.saturating_mul(multiplier),
-        max_branch_factor: base_budget.max_branch_factor,
-        max_evidence_items: base_budget.max_evidence_items,
-        max_reads: base_budget.max_reads.saturating_mul(multiplier),
-        max_inspects: base_budget.max_inspects.saturating_mul(multiplier),
-        max_searches: base_budget.max_searches.saturating_mul(multiplier),
-        max_replans: base_budget.max_replans,
-    }
-}
-
-fn stop_reason_supports_replan(stop_reason: &str) -> bool {
-    stop_reason.contains("budget-exhausted")
-        || stop_reason == "planner-budget-exhausted"
-        || stop_reason == "instruction-unsatisfied"
-}
-
-fn sync_replan_note(
-    loop_state: &mut PlannerLoopState,
-    stop_reason: &str,
-    instruction_frame: Option<&InstructionFrame>,
-) {
-    const REPLAN_NOTE_PREFIX: &str = "Replan from current evidence";
-
-    loop_state
-        .notes
-        .retain(|note| !note.starts_with(REPLAN_NOTE_PREFIX));
-
-    let mut lines = vec![format!(
-        "Replan from current evidence after {}.",
-        planner_budget_stop_reason_label(stop_reason)
-    )];
-    lines.push("Do not restart broad exploration or repeat missing or failed paths.".to_string());
-    let next_step_line = match instruction_frame {
-        Some(frame) if frame.requires_applied_edit() && frame.requires_applied_commit() => {
-            "Choose the single most direct next step toward the requested workspace change and git commit."
-        }
-        Some(frame) if frame.requires_applied_commit() => {
-            "Choose the single most direct next step toward recording the requested git commit."
-        }
-        _ => "Choose the single most direct next step toward an applied repository change.",
-    };
-    lines.push(next_step_line.to_string());
-    if let Some(summary) = instruction_frame.and_then(InstructionFrame::candidate_summary) {
-        lines.push(format!("Authored candidate files: {summary}"));
-    }
-    loop_state.notes.push(lines.join("\n"));
-}
-
-fn should_activate_replan(
-    stop_reason: &str,
-    instruction_frame: Option<&InstructionFrame>,
-    completed_replans: usize,
-    base_budget: &PlannerBudget,
-) -> bool {
-    instruction_frame.is_some_and(InstructionFrame::has_pending_workspace_obligation)
-        && completed_replans < base_budget.max_replans
-        && stop_reason_supports_replan(stop_reason)
-}
-
-struct ReplanActivation<'a> {
-    instruction_frame: Option<&'a InstructionFrame>,
-    base_budget: &'a PlannerBudget,
-    completed_replans: &'a mut usize,
-    budget: &'a mut PlannerBudget,
-    loop_state: &'a mut PlannerLoopState,
-    trace: &'a StructuredTurnTrace,
-}
-
-fn activate_replan(stop_reason: &str, activation: ReplanActivation<'_>) -> bool {
-    let ReplanActivation {
-        instruction_frame,
-        base_budget,
-        completed_replans,
-        budget,
-        loop_state,
-        trace,
-    } = activation;
-
-    if !should_activate_replan(
-        stop_reason,
-        instruction_frame,
-        *completed_replans,
-        base_budget,
-    ) {
-        return false;
-    }
-
-    *completed_replans += 1;
-    *budget = planner_budget_for_replan_attempt(base_budget, *completed_replans);
-    sync_replan_note(loop_state, stop_reason, instruction_frame);
-
-    trace.emit(TurnEvent::Fallback {
-        stage: "replan".to_string(),
-        reason: format!(
-            "pending edit remained open after {}; extending planner budget to {} steps, {} reads, {} inspects, and {} searches while continuing from current evidence",
-            planner_budget_stop_reason_label(stop_reason),
-            budget.max_steps,
-            budget.max_reads,
-            budget.max_inspects,
-            budget.max_searches,
-        ),
-    });
-    true
 }
 
 fn instruction_frame_from_initial_edit(edit: &InitialEditInstruction) -> Option<InstructionFrame> {

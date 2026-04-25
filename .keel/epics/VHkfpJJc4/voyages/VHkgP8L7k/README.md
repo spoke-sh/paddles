@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:04:56
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Document DDD Hexagonal Boundary Map](../../../../stories/VHkhWr2yk/README.md) | refactor | done |
 | [Extract Execution Contract Service](../../../../stories/VHkhgLErP/README.md) | refactor | backlog |
-| [Extract Planner Loop Service Slice](../../../../stories/VHkhhSvu8/README.md) | refactor | backlog |
+| [Extract Planner Loop Service Slice](../../../../stories/VHkhhSvu8/README.md) | refactor | done |
 <!-- END GENERATED -->
