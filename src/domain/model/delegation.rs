@@ -176,6 +176,7 @@ impl WorkerArtifactKind {
 pub enum WorkerIntegrationStatus {
     Integrated,
     Rejected,
+    NeedsIntegration,
     Stale,
     Unavailable,
 }
@@ -185,6 +186,7 @@ impl WorkerIntegrationStatus {
         match self {
             Self::Integrated => "integrated",
             Self::Rejected => "rejected",
+            Self::NeedsIntegration => "needs_integration",
             Self::Stale => "stale",
             Self::Unavailable => "unavailable",
         }
@@ -695,6 +697,7 @@ fn delegated_status_from_integration(status: WorkerIntegrationStatus) -> Delegat
     match status {
         WorkerIntegrationStatus::Integrated => DelegatedWorkerStatus::Integrated,
         WorkerIntegrationStatus::Rejected => DelegatedWorkerStatus::Rejected,
+        WorkerIntegrationStatus::NeedsIntegration => DelegatedWorkerStatus::AwaitingIntegration,
         WorkerIntegrationStatus::Stale => DelegatedWorkerStatus::Stale,
         WorkerIntegrationStatus::Unavailable => DelegatedWorkerStatus::Unavailable,
     }
@@ -726,9 +729,14 @@ fn progress_summary_for_worker(
         DelegatedWorkerStatus::Waiting => {
             format!("{artifact_count} artifact(s) visible; parent is waiting on the worker.")
         }
-        DelegatedWorkerStatus::AwaitingIntegration => {
-            format!("Completion ready with {artifact_count} artifact(s) visible to the parent.")
-        }
+        DelegatedWorkerStatus::AwaitingIntegration => match integration_status {
+            Some(WorkerIntegrationStatus::NeedsIntegration) => {
+                format!("Parent integration needed with {artifact_count} artifact(s) visible.")
+            }
+            _ => {
+                format!("Completion ready with {artifact_count} artifact(s) visible to the parent.")
+            }
+        },
         DelegatedWorkerStatus::Integrated => match integration_status {
             Some(WorkerIntegrationStatus::Integrated) => {
                 "Integrated into the recursive harness.".to_string()

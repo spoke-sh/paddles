@@ -3,11 +3,12 @@ use crate::domain::model::{
     ConversationThreadRef, DelegationEvidencePolicy, DelegationGovernancePolicy,
     ExecutionGovernanceSnapshot, ExecutionPolicy, ExecutionPolicyDecisionKind,
     ExecutionPolicyEvaluationInput, ExternalCapabilityDescriptor, TraceBranchId,
-    TraceWorkerLifecycle, WorkerDelegationContract, WorkerDelegationRequest,
-    WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus,
+    TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle, WorkerDelegationContract,
+    WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleOperation,
+    WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
     default_local_execution_policy,
 };
-use crate::domain::ports::WorkspaceCapabilitySurface;
+use crate::domain::ports::{EvidenceBundle, EvidenceItem, WorkspaceCapabilitySurface};
 use anyhow::{Result, bail};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -210,6 +211,213 @@ impl WorkerRuntimeAuthorityDecision {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkerEvidenceIntegrationStatus {
+    Accepted,
+    Rejected,
+    NeedsIntegration,
+}
+
+impl WorkerEvidenceIntegrationStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+            Self::NeedsIntegration => "needs-integration",
+        }
+    }
+
+    fn trace_status(self) -> WorkerIntegrationStatus {
+        match self {
+            Self::Accepted => WorkerIntegrationStatus::Integrated,
+            Self::Rejected => WorkerIntegrationStatus::Rejected,
+            Self::NeedsIntegration => WorkerIntegrationStatus::NeedsIntegration,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerEvidenceIntegrationRequest {
+    pub worker_id: String,
+    pub parent_thread: ConversationThreadRef,
+    pub worker_thread: ConversationThreadRef,
+    pub artifacts: Vec<TraceWorkerArtifact>,
+    pub requested_status: WorkerEvidenceIntegrationStatus,
+    pub detail: String,
+    pub worker_ownership: Option<WorkerOwnership>,
+    pub active_parent_ownerships: Vec<WorkerOwnership>,
+}
+
+impl WorkerEvidenceIntegrationRequest {
+    pub fn new(
+        worker_id: impl Into<String>,
+        parent_thread: ConversationThreadRef,
+        worker_thread: ConversationThreadRef,
+        artifacts: Vec<TraceWorkerArtifact>,
+    ) -> Self {
+        Self {
+            worker_id: worker_id.into(),
+            parent_thread,
+            worker_thread,
+            artifacts,
+            requested_status: WorkerEvidenceIntegrationStatus::NeedsIntegration,
+            detail: "Worker output is awaiting parent integration.".to_string(),
+            worker_ownership: None,
+            active_parent_ownerships: Vec::new(),
+        }
+    }
+
+    pub fn with_requested_status(mut self, status: WorkerEvidenceIntegrationStatus) -> Self {
+        self.requested_status = status;
+        self
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = detail.into();
+        self
+    }
+
+    pub fn with_worker_ownership(mut self, ownership: WorkerOwnership) -> Self {
+        self.worker_ownership = Some(ownership);
+        self
+    }
+
+    pub fn with_active_parent_ownerships(mut self, ownerships: Vec<WorkerOwnership>) -> Self {
+        self.active_parent_ownerships = ownerships;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerEvidenceIntegrationOutcome {
+    pub status: WorkerEvidenceIntegrationStatus,
+    pub evidence: EvidenceBundle,
+    pub integration: TraceWorkerIntegration,
+    pub applied_edit_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WorkerEvidenceIntegrator;
+
+impl WorkerEvidenceIntegrator {
+    pub fn integrate(
+        request: WorkerEvidenceIntegrationRequest,
+    ) -> Result<WorkerEvidenceIntegrationOutcome> {
+        if request.worker_id.trim().is_empty() {
+            bail!("worker evidence integration requires a worker id");
+        }
+        if request.artifacts.is_empty() {
+            bail!("worker evidence integration requires at least one worker artifact");
+        }
+
+        let mut status = request.requested_status;
+        let mut warnings = Vec::new();
+        let mut detail = if request.detail.trim().is_empty() {
+            format!("Parent recorded worker output as {}.", status.label())
+        } else {
+            request.detail.clone()
+        };
+
+        let conflicts = integration_conflicts(
+            request.worker_ownership.as_ref(),
+            request.active_parent_ownerships.as_slice(),
+        );
+        if !conflicts.is_empty() {
+            status = WorkerEvidenceIntegrationStatus::Rejected;
+            let conflict_summary = format!("ownership conflict on [{}]", conflicts.join(", "));
+            warnings.push(format!(
+                "Worker `{}` integration rejected due to {conflict_summary}.",
+                request.worker_id
+            ));
+            detail = format!("{conflict_summary}; {detail}");
+        }
+
+        let visible_artifacts = request
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.record.parent_visible)
+            .collect::<Vec<_>>();
+        if visible_artifacts.is_empty() {
+            bail!("worker evidence integration requires parent-visible artifacts");
+        }
+        let evidence_items = visible_artifacts
+            .iter()
+            .enumerate()
+            .map(|(index, artifact)| EvidenceItem {
+                source: format!(
+                    "worker:{}:{}:{}",
+                    request.worker_id,
+                    artifact.record.kind.label(),
+                    artifact.record.label
+                ),
+                snippet: worker_artifact_snippet(&artifact.artifact),
+                rationale: format!(
+                    "worker {} {} evidence: {}",
+                    request.worker_id,
+                    status.label(),
+                    artifact.record.summary
+                ),
+                rank: index + 1,
+            })
+            .collect::<Vec<_>>();
+        let integrated_artifact_ids = if status == WorkerEvidenceIntegrationStatus::Accepted {
+            visible_artifacts
+                .iter()
+                .map(|artifact| artifact.artifact.artifact_id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let evidence = EvidenceBundle::new(
+            format!(
+                "Worker {} {} with {} parent-visible artifact(s).",
+                request.worker_id,
+                status.label(),
+                evidence_items.len()
+            ),
+            evidence_items,
+        )
+        .with_warnings(warnings);
+
+        Ok(WorkerEvidenceIntegrationOutcome {
+            status,
+            evidence,
+            integration: TraceWorkerIntegration {
+                worker_id: request.worker_id,
+                parent_thread: request.parent_thread,
+                worker_thread: request.worker_thread,
+                status: status.trace_status(),
+                detail,
+                integrated_artifact_ids,
+            },
+            applied_edit_count: 0,
+        })
+    }
+}
+
+fn integration_conflicts(
+    worker_ownership: Option<&WorkerOwnership>,
+    active_parent_ownerships: &[WorkerOwnership],
+) -> Vec<String> {
+    let Some(worker_ownership) = worker_ownership else {
+        return Vec::new();
+    };
+    let mut conflicts = active_parent_ownerships
+        .iter()
+        .flat_map(|parent_ownership| worker_ownership.conflicting_write_scopes(parent_ownership))
+        .collect::<Vec<_>>();
+    conflicts.sort();
+    conflicts.dedup();
+    conflicts
+}
+
+fn worker_artifact_snippet(artifact: &crate::domain::model::ArtifactEnvelope) -> String {
+    artifact
+        .inline_content
+        .clone()
+        .unwrap_or_else(|| artifact.summary.clone())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkerRuntimeSpawnRequest {
     pub instruction: String,
@@ -317,13 +525,15 @@ mod tests {
         BoundedWorkerRuntime, WorkerRuntimeBudget, WorkerRuntimePort, WorkerRuntimeSpawnRequest,
     };
     use crate::domain::model::{
-        DelegationEvidencePolicy, DelegationGovernancePolicy, DelegationIntegrationOwner,
-        ExecutionApprovalPolicy, ExecutionGovernanceProfile, ExecutionGovernanceSnapshot,
-        ExecutionPermissionReuseScope, ExecutionPolicy, ExecutionPolicyDecisionKind,
-        ExecutionPolicyEvaluationInput, ExecutionPolicyMatcher, ExecutionPolicyRule,
-        ExecutionSandboxMode, ExternalCapabilityCatalog, ExternalCapabilityCatalogConfig,
-        TraceRecordKind, WorkerArtifactKind, WorkerDelegationContract, WorkerDelegationRequest,
-        WorkerLifecycleOperation, WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
+        ArtifactEnvelope, ArtifactKind, DelegationEvidencePolicy, DelegationGovernancePolicy,
+        DelegationIntegrationOwner, ExecutionApprovalPolicy, ExecutionGovernanceProfile,
+        ExecutionGovernanceSnapshot, ExecutionPermissionReuseScope, ExecutionPolicy,
+        ExecutionPolicyDecisionKind, ExecutionPolicyEvaluationInput, ExecutionPolicyMatcher,
+        ExecutionPolicyRule, ExecutionSandboxMode, ExternalCapabilityCatalog,
+        ExternalCapabilityCatalogConfig, TraceArtifactId, TraceBranchId, TraceRecordKind,
+        TraceWorkerArtifact, WorkerArtifactKind, WorkerArtifactRecord, WorkerDelegationContract,
+        WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleOperation,
+        WorkerLifecycleResultStatus, WorkerOwnership, WorkerRole,
     };
     use crate::domain::ports::{
         WorkspaceActionCapability, WorkspaceCapabilitySurface, WorkspaceToolCapability,
@@ -503,6 +713,119 @@ mod tests {
         );
     }
 
+    #[test]
+    fn worker_evidence_integration_projects_outputs_into_parent_loop_evidence_with_statuses() {
+        let parent_thread = ConversationThreadRef::Mainline;
+        let worker_thread =
+            ConversationThreadRef::Branch(TraceBranchId::new("worker-1-thread").expect("branch"));
+        let artifacts = worker_artifacts("worker-1");
+
+        for (status, trace_status, expected_integrated_count) in [
+            (
+                super::WorkerEvidenceIntegrationStatus::Accepted,
+                WorkerIntegrationStatus::Integrated,
+                artifacts.len(),
+            ),
+            (
+                super::WorkerEvidenceIntegrationStatus::Rejected,
+                WorkerIntegrationStatus::Rejected,
+                0,
+            ),
+            (
+                super::WorkerEvidenceIntegrationStatus::NeedsIntegration,
+                WorkerIntegrationStatus::NeedsIntegration,
+                0,
+            ),
+        ] {
+            let outcome = super::WorkerEvidenceIntegrator::integrate(
+                super::WorkerEvidenceIntegrationRequest::new(
+                    "worker-1",
+                    parent_thread.clone(),
+                    worker_thread.clone(),
+                    artifacts.clone(),
+                )
+                .with_requested_status(status)
+                .with_detail(format!(
+                    "Parent recorded worker output as {}",
+                    status.label()
+                )),
+            )
+            .expect("integrate worker evidence");
+
+            assert_eq!(outcome.status, status);
+            assert_eq!(outcome.integration.status, trace_status);
+            assert_eq!(outcome.evidence.items.len(), artifacts.len());
+            assert_eq!(
+                outcome.integration.integrated_artifact_ids.len(),
+                expected_integrated_count
+            );
+            assert!(outcome.evidence.items.iter().all(|item| {
+                item.source.starts_with("worker:worker-1")
+                    && item.rationale.contains(status.label())
+            }));
+        }
+    }
+
+    #[test]
+    fn worker_integration_conflicts_reject_parent_owned_write_scope_without_applying_worker_artifacts()
+     {
+        let parent_thread = ConversationThreadRef::Mainline;
+        let worker_thread = ConversationThreadRef::Branch(
+            TraceBranchId::new("worker-conflict-thread").expect("branch"),
+        );
+        let worker_ownership = WorkerOwnership::new(
+            "Worker proposes runtime edits",
+            vec!["src/application".to_string()],
+            vec!["src/application/worker_runtime.rs".to_string()],
+            DelegationIntegrationOwner::Parent,
+        );
+        let parent_ownership = WorkerOwnership::new(
+            "Parent owns runtime edits",
+            vec!["src/application".to_string()],
+            vec!["src/application".to_string()],
+            DelegationIntegrationOwner::Parent,
+        );
+
+        let outcome = super::WorkerEvidenceIntegrator::integrate(
+            super::WorkerEvidenceIntegrationRequest::new(
+                "worker-conflict",
+                parent_thread,
+                worker_thread,
+                worker_artifacts("worker-conflict"),
+            )
+            .with_requested_status(super::WorkerEvidenceIntegrationStatus::Accepted)
+            .with_detail("Parent attempted to accept a conflicting worker proposal.")
+            .with_worker_ownership(worker_ownership)
+            .with_active_parent_ownerships(vec![parent_ownership]),
+        )
+        .expect("integrate worker evidence");
+
+        assert_eq!(
+            outcome.status,
+            super::WorkerEvidenceIntegrationStatus::Rejected
+        );
+        assert_eq!(
+            outcome.integration.status,
+            WorkerIntegrationStatus::Rejected
+        );
+        assert!(outcome.integration.integrated_artifact_ids.is_empty());
+        assert_eq!(outcome.applied_edit_count, 0);
+        assert!(
+            outcome
+                .evidence
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("ownership conflict"))
+        );
+        assert!(
+            outcome
+                .evidence
+                .items
+                .iter()
+                .all(|item| item.rationale.contains("rejected"))
+        );
+    }
+
     fn worker_contract(summary: &str) -> WorkerDelegationContract {
         worker_contract_with_governance(
             summary,
@@ -589,6 +912,57 @@ mod tests {
                 &ExternalCapabilityCatalogConfig::default().enable("web.search"),
             )
             .descriptors(),
+        )
+    }
+
+    fn worker_artifacts(worker_id: &str) -> Vec<TraceWorkerArtifact> {
+        vec![
+            TraceWorkerArtifact {
+                record: WorkerArtifactRecord::tool_output(
+                    worker_id,
+                    "rg",
+                    "Located the recursive worker evidence boundary.",
+                ),
+                artifact: worker_artifact(
+                    worker_id,
+                    1,
+                    ArtifactKind::ToolOutput,
+                    "worker tool output",
+                    "src/application/worker_runtime.rs contains the worker runtime.",
+                ),
+            },
+            TraceWorkerArtifact {
+                record: WorkerArtifactRecord::completion_summary(
+                    worker_id,
+                    "Worker recommends parent integration of the runtime evidence.",
+                    vec![
+                        "Parent should review and integrate; no worker edits applied.".to_string(),
+                    ],
+                ),
+                artifact: worker_artifact(
+                    worker_id,
+                    2,
+                    ArtifactKind::EvidenceBundle,
+                    "worker completion",
+                    "Finding: worker outputs are evidence for the parent loop.",
+                ),
+            },
+        ]
+    }
+
+    fn worker_artifact(
+        worker_id: &str,
+        sequence: usize,
+        kind: ArtifactKind,
+        summary: &str,
+        content: &str,
+    ) -> ArtifactEnvelope {
+        ArtifactEnvelope::text(
+            TraceArtifactId::new(format!("{worker_id}-artifact-{sequence}")).expect("artifact"),
+            kind,
+            summary,
+            content,
+            1_000,
         )
     }
 }
