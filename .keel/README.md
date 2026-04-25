@@ -397,7 +397,7 @@
 | [Install Codex-Grade Execution Policy](epics/VHkfpJJc4/voyages/VHkgKreip/) | done |
 | [Harden Workspace Editing And LSP Hands](epics/VHkfpJJc4/voyages/VHkgLtij9/) | done |
 | [Activate Recursive Delegation Runtime](epics/VHkfpJJc4/voyages/VHkgMxksP/) | done |
-| [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | in-progress |
+| [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | done |
 | [Create Recursive Harness Eval Suite](epics/VHkfpJJc4/voyages/VHkgOF9KK/) | done |
 | [Split Application Into Hexagonal Boundaries](epics/VHkfpJJc4/voyages/VHkgP8L7k/) | done |
 | [Expose Operator Surfaces And Provider Registry](epics/VHkfpJJc4/voyages/VHkgPmlyS/) | in-progress |

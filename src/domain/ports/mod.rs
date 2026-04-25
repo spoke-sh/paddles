@@ -47,11 +47,12 @@ pub use semantic_workspace::{
     SemanticWorkspaceResult, SemanticWorkspaceStatus,
 };
 pub use session_store::{
-    SESSION_STORE_SCHEMA, SESSION_STORE_SCHEMA_VERSION, SessionEvidenceRecord,
-    SessionGovernanceRecord, SessionPlannerDecisionRecord, SessionRollbackAnchor,
-    SessionSnapshotRecord, SessionSnapshotReplayValidation, SessionSnapshotStatus,
-    SessionStorePort, SessionStoreRecord, SessionStoreRecordKind, SessionStoreSnapshot,
-    SessionTurnRecord, VersionedSessionStoreRecord,
+    SESSION_STORE_SCHEMA, SESSION_STORE_SCHEMA_VERSION, SessionCompactionLineage,
+    SessionCompactionRecord, SessionEvidenceRecord, SessionGovernanceRecord,
+    SessionModelVisibleContextEntry, SessionPlannerDecisionRecord, SessionReplayRecord,
+    SessionRollbackAnchor, SessionSnapshotRecord, SessionSnapshotReplayValidation,
+    SessionSnapshotStatus, SessionStorePort, SessionStoreRecord, SessionStoreRecordKind,
+    SessionStoreSnapshot, SessionTurnRecord, VersionedSessionStoreRecord,
 };
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,

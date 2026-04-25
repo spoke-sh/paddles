@@ -236,6 +236,159 @@ pub struct SessionSnapshotReplayValidation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionReplayRecord {
+    pub task_id: TaskTraceId,
+    pub turn_id: TurnTraceId,
+    pub sequence: u64,
+    pub thread: ConversationThreadRef,
+    pub source_record_id: TraceRecordId,
+    pub forked_from_record_id: Option<TraceRecordId>,
+    pub model_visible_summary: String,
+    pub evidence_artifact_ids: Vec<TraceArtifactId>,
+}
+
+impl SessionReplayRecord {
+    pub fn mainline(
+        task_id: TaskTraceId,
+        turn_id: TurnTraceId,
+        sequence: u64,
+        source_record_id: TraceRecordId,
+        model_visible_summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            task_id,
+            turn_id,
+            sequence,
+            thread: ConversationThreadRef::Mainline,
+            source_record_id,
+            forked_from_record_id: None,
+            model_visible_summary: model_visible_summary.into(),
+            evidence_artifact_ids: Vec::new(),
+        }
+    }
+
+    pub fn forked(
+        task_id: TaskTraceId,
+        turn_id: TurnTraceId,
+        sequence: u64,
+        thread: ConversationThreadRef,
+        source_record_id: TraceRecordId,
+        forked_from_record_id: TraceRecordId,
+        model_visible_summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            task_id,
+            turn_id,
+            sequence,
+            thread,
+            source_record_id,
+            forked_from_record_id: Some(forked_from_record_id),
+            model_visible_summary: model_visible_summary.into(),
+            evidence_artifact_ids: Vec::new(),
+        }
+    }
+
+    pub fn with_evidence(mut self, evidence_artifact_ids: Vec<TraceArtifactId>) -> Self {
+        self.evidence_artifact_ids = evidence_artifact_ids;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionModelVisibleContextEntry {
+    pub turn_id: TurnTraceId,
+    pub sequence: u64,
+    pub thread: ConversationThreadRef,
+    pub source_record_id: TraceRecordId,
+    pub forked_from_record_id: Option<TraceRecordId>,
+    pub model_visible_summary: String,
+    pub evidence_artifact_ids: Vec<TraceArtifactId>,
+}
+
+impl From<&SessionReplayRecord> for SessionModelVisibleContextEntry {
+    fn from(record: &SessionReplayRecord) -> Self {
+        Self {
+            turn_id: record.turn_id.clone(),
+            sequence: record.sequence,
+            thread: record.thread.clone(),
+            source_record_id: record.source_record_id.clone(),
+            forked_from_record_id: record.forked_from_record_id.clone(),
+            model_visible_summary: record.model_visible_summary.clone(),
+            evidence_artifact_ids: record.evidence_artifact_ids.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionCompactionRecord {
+    pub task_id: TaskTraceId,
+    pub turn_id: TurnTraceId,
+    pub summary_artifact_id: TraceArtifactId,
+    pub summary: String,
+    pub source_turn_ids: Vec<TurnTraceId>,
+    pub source_evidence_artifact_ids: Vec<TraceArtifactId>,
+    pub source_record_ids: Vec<TraceRecordId>,
+}
+
+impl SessionCompactionRecord {
+    pub fn new(
+        task_id: TaskTraceId,
+        turn_id: TurnTraceId,
+        summary_artifact_id: TraceArtifactId,
+        summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            task_id,
+            turn_id,
+            summary_artifact_id,
+            summary: summary.into(),
+            source_turn_ids: Vec::new(),
+            source_evidence_artifact_ids: Vec::new(),
+            source_record_ids: Vec::new(),
+        }
+    }
+
+    pub fn with_source_turns(mut self, source_turn_ids: Vec<TurnTraceId>) -> Self {
+        self.source_turn_ids = source_turn_ids;
+        self
+    }
+
+    pub fn with_source_evidence(
+        mut self,
+        source_evidence_artifact_ids: Vec<TraceArtifactId>,
+    ) -> Self {
+        self.source_evidence_artifact_ids = source_evidence_artifact_ids;
+        self
+    }
+
+    pub fn with_source_records(mut self, source_record_ids: Vec<TraceRecordId>) -> Self {
+        self.source_record_ids = source_record_ids;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionCompactionLineage {
+    pub summary_artifact_id: TraceArtifactId,
+    pub summary: String,
+    pub source_turn_ids: Vec<TurnTraceId>,
+    pub source_evidence_artifact_ids: Vec<TraceArtifactId>,
+    pub source_record_ids: Vec<TraceRecordId>,
+}
+
+impl From<&SessionCompactionRecord> for SessionCompactionLineage {
+    fn from(record: &SessionCompactionRecord) -> Self {
+        Self {
+            summary_artifact_id: record.summary_artifact_id.clone(),
+            summary: record.summary.clone(),
+            source_turn_ids: record.source_turn_ids.clone(),
+            source_evidence_artifact_ids: record.source_evidence_artifact_ids.clone(),
+            source_record_ids: record.source_record_ids.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
 pub enum SessionStoreRecordKind {
     Turn(SessionTurnRecord),
@@ -243,6 +396,8 @@ pub enum SessionStoreRecordKind {
     Evidence(SessionEvidenceRecord),
     Governance(Box<SessionGovernanceRecord>),
     Snapshot(Box<SessionSnapshotRecord>),
+    Replay(Box<SessionReplayRecord>),
+    Compaction(Box<SessionCompactionRecord>),
 }
 
 impl SessionStoreRecordKind {
@@ -253,6 +408,8 @@ impl SessionStoreRecordKind {
             Self::Evidence(record) => &record.task_id,
             Self::Governance(record) => &record.task_id,
             Self::Snapshot(record) => &record.task_id,
+            Self::Replay(record) => &record.task_id,
+            Self::Compaction(record) => &record.task_id,
         }
     }
 
@@ -263,6 +420,8 @@ impl SessionStoreRecordKind {
             Self::Evidence(record) => &record.turn_id,
             Self::Governance(record) => &record.turn_id,
             Self::Snapshot(record) => &record.turn_id,
+            Self::Replay(record) => &record.turn_id,
+            Self::Compaction(record) => &record.turn_id,
         }
     }
 }
@@ -318,6 +477,14 @@ impl VersionedSessionStoreRecord {
 
     pub fn snapshot(record: SessionSnapshotRecord) -> Self {
         Self::new(SessionStoreRecordKind::Snapshot(Box::new(record)))
+    }
+
+    pub fn replay(record: SessionReplayRecord) -> Self {
+        Self::new(SessionStoreRecordKind::Replay(Box::new(record)))
+    }
+
+    pub fn compaction(record: SessionCompactionRecord) -> Self {
+        Self::new(SessionStoreRecordKind::Compaction(Box::new(record)))
     }
 
     pub fn task_id(&self) -> &TaskTraceId {
@@ -409,6 +576,43 @@ impl SessionStoreSnapshot {
             })
             .collect()
     }
+
+    pub fn replay_records(&self) -> Vec<&SessionReplayRecord> {
+        self.records
+            .iter()
+            .filter_map(|record| match &record.record.kind {
+                SessionStoreRecordKind::Replay(replay) => Some(replay.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn model_visible_context(&self) -> Vec<SessionModelVisibleContextEntry> {
+        let mut context = self
+            .replay_records()
+            .into_iter()
+            .map(SessionModelVisibleContextEntry::from)
+            .collect::<Vec<_>>();
+        context.sort_by_key(|entry| entry.sequence);
+        context
+    }
+
+    pub fn compactions(&self) -> Vec<&SessionCompactionRecord> {
+        self.records
+            .iter()
+            .filter_map(|record| match &record.record.kind {
+                SessionStoreRecordKind::Compaction(compaction) => Some(compaction.as_ref()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn compaction_lineage(&self) -> Vec<SessionCompactionLineage> {
+        self.compactions()
+            .into_iter()
+            .map(SessionCompactionLineage::from)
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -417,7 +621,8 @@ mod tests {
     use crate::domain::model::{
         ConversationThreadRef, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
         ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequest,
-        ExecutionPermissionRequirement, TaskTraceId, TraceArtifactId, TraceRecordId, TurnTraceId,
+        ExecutionPermissionRequirement, TaskTraceId, TraceArtifactId, TraceBranchId, TraceRecordId,
+        TurnTraceId,
     };
     use anyhow::Result;
     use std::sync::Mutex;
@@ -608,6 +813,94 @@ mod tests {
                 && !entry.rollback_available
                 && entry.detail.contains("rollback anchor was not recorded")
         }));
+    }
+
+    #[test]
+    fn session_replay_reconstructs_model_visible_context_from_replay_metadata() {
+        let store = InMemorySessionStore::default();
+        let task_id = TaskTraceId::new("session-task").expect("task");
+        let first_turn = TurnTraceId::new("session-task.turn-0001").expect("turn");
+        let forked_turn = TurnTraceId::new("session-task.turn-0002").expect("turn");
+        let root_record = TraceRecordId::new("record-root").expect("record");
+        let fork_record = TraceRecordId::new("record-fork").expect("record");
+
+        let forked = SessionReplayRecord::forked(
+            task_id.clone(),
+            forked_turn.clone(),
+            2,
+            ConversationThreadRef::Branch(TraceBranchId::new("thread-analysis").expect("branch")),
+            fork_record.clone(),
+            root_record.clone(),
+            "Forked analysis keeps failed test evidence visible.",
+        )
+        .with_evidence(vec![
+            TraceArtifactId::new("evidence-test").expect("artifact"),
+        ]);
+        let mainline = SessionReplayRecord::mainline(
+            task_id.clone(),
+            first_turn.clone(),
+            1,
+            root_record.clone(),
+            "User asked for replayable local session storage.",
+        );
+
+        store
+            .persist_record(VersionedSessionStoreRecord::replay(forked))
+            .expect("persist forked replay");
+        store
+            .persist_record(VersionedSessionStoreRecord::replay(mainline))
+            .expect("persist mainline replay");
+
+        let context = store
+            .load_session(&task_id)
+            .expect("load session")
+            .model_visible_context();
+
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[0].turn_id, first_turn);
+        assert_eq!(context[0].source_record_id, root_record);
+        assert_eq!(
+            context[1].forked_from_record_id.as_ref(),
+            Some(&TraceRecordId::new("record-root").expect("record"))
+        );
+        assert_eq!(
+            context[1].evidence_artifact_ids,
+            vec![TraceArtifactId::new("evidence-test").expect("artifact")]
+        );
+    }
+
+    #[test]
+    fn session_compaction_lineage_links_summaries_to_source_turns_and_evidence() {
+        let task_id = TaskTraceId::new("session-task").expect("task");
+        let compacted_turn = TurnTraceId::new("session-task.turn-0003").expect("turn");
+        let source_turn = TurnTraceId::new("session-task.turn-0001").expect("turn");
+        let source_evidence = TraceArtifactId::new("evidence-1").expect("artifact");
+        let source_record = TraceRecordId::new("record-source").expect("record");
+        let summary_artifact = TraceArtifactId::new("summary-1").expect("artifact");
+        let compaction = SessionCompactionRecord::new(
+            task_id.clone(),
+            compacted_turn,
+            summary_artifact.clone(),
+            "Summarized earlier investigation and verification evidence.",
+        )
+        .with_source_turns(vec![source_turn.clone()])
+        .with_source_evidence(vec![source_evidence.clone()])
+        .with_source_records(vec![source_record.clone()]);
+        let snapshot = SessionStoreSnapshot::new(
+            task_id,
+            vec![VersionedSessionStoreRecord::compaction(compaction)],
+        );
+
+        let lineage = snapshot.compaction_lineage();
+
+        assert_eq!(lineage.len(), 1);
+        assert_eq!(lineage[0].summary_artifact_id, summary_artifact);
+        assert_eq!(lineage[0].source_turn_ids, vec![source_turn]);
+        assert_eq!(
+            lineage[0].source_evidence_artifact_ids,
+            vec![source_evidence]
+        );
+        assert_eq!(lineage[0].source_record_ids, vec![source_record]);
     }
 
     fn sample_governance_decision() -> ExecutionGovernanceDecision {
