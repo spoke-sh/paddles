@@ -21,7 +21,10 @@ use self::execution_contract::{
     ExecutionContractContext, ExecutionContractService, format_external_capability_catalog_entry,
     format_gatherer_capability, gatherer_readiness_label,
 };
-pub use self::execution_policy::ExecutionPolicyEvaluator;
+pub use self::execution_policy::{
+    ExecutionPolicyDecisionFixture, ExecutionPolicyEvaluator,
+    representative_execution_policy_fixtures,
+};
 pub use self::external_capability::ExternalCapabilityBrokerRegistry;
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};

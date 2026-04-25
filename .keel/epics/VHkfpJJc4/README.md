@@ -22,11 +22,11 @@ mission: VHkfg16CU
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/8 voyages complete, 11/24 stories done
+**Progress:** 4/8 voyages complete, 12/24 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Implement Governed External Capability Broker](voyages/VHkgG2aro/) | done | 3/3 |
-| [Install Codex-Grade Execution Policy](voyages/VHkgKreip/) | in-progress | 2/3 |
+| [Install Codex-Grade Execution Policy](voyages/VHkgKreip/) | done | 3/3 |
 | [Harden Workspace Editing And LSP Hands](voyages/VHkgLtij9/) | in-progress | 0/3 |
 | [Activate Recursive Delegation Runtime](voyages/VHkgMxksP/) | in-progress | 0/3 |
 | [Persist Replayable Sessions And Context](voyages/VHkgNakSc/) | in-progress | 0/3 |

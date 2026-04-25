@@ -141,14 +141,15 @@ impl ExecutionPolicyPermissionGate {
                         outcome.reason
                     );
                 }
-                outcome
+                outcome.with_policy_decision(decision)
             }
             ExecutionPolicyDecisionKind::Deny => ExecutionGovernanceOutcome::denied(
                 summarize_policy_decision(&decision),
                 request.requirement.clone(),
-            ),
+            )
+            .with_policy_decision(decision),
             ExecutionPolicyDecisionKind::Prompt => {
-                prompt_required_outcome(profile, request, &decision)
+                prompt_required_outcome(profile, request, &decision).with_policy_decision(decision)
             }
         }
     }
@@ -385,5 +386,99 @@ mod tests {
             ExecutionGovernanceOutcomeKind::PolicyUnavailable
         );
         assert!(invalid.reason.contains("invalid"));
+    }
+
+    #[test]
+    fn execution_policy_projection_emits_policy_decision_evidence_through_governance_events() {
+        fn evaluate_policy_decision(
+            policy: ExecutionPolicy,
+            input: ExecutionPolicyEvaluationInput,
+        ) -> crate::domain::model::ExecutionGovernanceDecision {
+            let profile = default_local_execution_governance_profile();
+            let request = super::terminal_command_permission_request("cargo test", "shell");
+            let outcome = ExecutionPolicyPermissionGate::evaluate(
+                Some(&policy),
+                Some(&profile),
+                &request,
+                &input,
+            );
+
+            crate::domain::model::ExecutionGovernanceDecision::new(
+                Some("call".to_string()),
+                Some("shell".to_string()),
+                request,
+                outcome,
+            )
+        }
+
+        let cases = [
+            (
+                "allow",
+                ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+                    "allow-cargo-test",
+                    ExecutionPolicyMatcher::command_prefix(["cargo", "test"]),
+                    ExecutionPolicyDecisionKind::Allow,
+                    "tests are allowed",
+                )]),
+                ExecutionPolicyDecisionKind::Allow,
+                ExecutionGovernanceOutcomeKind::Allowed,
+            ),
+            (
+                "prompt",
+                ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+                    "prompt-cargo-test",
+                    ExecutionPolicyMatcher::command_prefix(["cargo", "test"]),
+                    ExecutionPolicyDecisionKind::Prompt,
+                    "tests need operator review",
+                )]),
+                ExecutionPolicyDecisionKind::Prompt,
+                ExecutionGovernanceOutcomeKind::EscalationRequired,
+            ),
+            (
+                "deny",
+                ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+                    "deny-cargo-test",
+                    ExecutionPolicyMatcher::command_prefix(["cargo", "test"]),
+                    ExecutionPolicyDecisionKind::Deny,
+                    "tests denied by fixture",
+                )]),
+                ExecutionPolicyDecisionKind::Deny,
+                ExecutionGovernanceOutcomeKind::Denied,
+            ),
+            (
+                "on_failure",
+                ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+                    "retry-cargo-test",
+                    ExecutionPolicyMatcher::command_prefix(["cargo", "test"]),
+                    ExecutionPolicyDecisionKind::OnFailure,
+                    "tests may retry once after failure",
+                )]),
+                ExecutionPolicyDecisionKind::OnFailure,
+                ExecutionGovernanceOutcomeKind::Allowed,
+            ),
+        ];
+
+        for (label, policy, expected_policy_kind, expected_governance_kind) in cases {
+            let decision = evaluate_policy_decision(
+                policy,
+                ExecutionPolicyEvaluationInput::command_for_tool("shell", ["cargo", "test"]),
+            );
+
+            assert_eq!(decision.outcome.kind, expected_governance_kind);
+            assert_eq!(
+                decision
+                    .outcome
+                    .policy_decision
+                    .as_ref()
+                    .map(|policy| policy.kind),
+                Some(expected_policy_kind)
+            );
+            assert!(
+                decision
+                    .detail()
+                    .contains(&format!("policy_decision={label}")),
+                "governance event detail should expose policy decision `{label}`"
+            );
+        }
     }
 }

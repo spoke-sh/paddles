@@ -1,3 +1,4 @@
+use super::execution_policy::ExecutionPolicyDecision;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -184,6 +185,8 @@ pub struct ExecutionGovernanceOutcome {
     pub requirement: ExecutionPermissionRequirement,
     pub granted_permissions: Vec<ExecutionPermission>,
     pub escalation_request: Option<ExecutionEscalationRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_decision: Option<ExecutionPolicyDecision>,
 }
 
 impl ExecutionGovernanceOutcome {
@@ -198,6 +201,7 @@ impl ExecutionGovernanceOutcome {
             requirement,
             granted_permissions: canonicalize_permissions(granted_permissions),
             escalation_request: None,
+            policy_decision: None,
         }
     }
 
@@ -208,6 +212,7 @@ impl ExecutionGovernanceOutcome {
             requirement,
             granted_permissions: Vec::new(),
             escalation_request: None,
+            policy_decision: None,
         }
     }
 
@@ -222,6 +227,7 @@ impl ExecutionGovernanceOutcome {
             requirement,
             granted_permissions: Vec::new(),
             escalation_request: Some(escalation_request),
+            policy_decision: None,
         }
     }
 
@@ -235,7 +241,13 @@ impl ExecutionGovernanceOutcome {
             requirement,
             granted_permissions: Vec::new(),
             escalation_request: None,
+            policy_decision: None,
         }
+    }
+
+    pub fn with_policy_decision(mut self, decision: ExecutionPolicyDecision) -> Self {
+        self.policy_decision = Some(decision);
+        self
     }
 }
 
@@ -611,6 +623,12 @@ impl ExecutionGovernanceDecision {
                     " | escalation_prefix={}",
                     command_prefix.join(" ")
                 ));
+            }
+        }
+        if let Some(policy) = self.outcome.policy_decision.as_ref() {
+            detail.push_str(&format!(" | policy_decision={}", policy.kind.label()));
+            if let Some(rule_id) = policy.rule_id.as_ref() {
+                detail.push_str(&format!(" | policy_rule={rule_id}"));
             }
         }
 

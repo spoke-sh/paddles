@@ -394,7 +394,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Implement Governed External Capability Broker](epics/VHkfpJJc4/voyages/VHkgG2aro/) | done |
-| [Install Codex-Grade Execution Policy](epics/VHkfpJJc4/voyages/VHkgKreip/) | in-progress |
+| [Install Codex-Grade Execution Policy](epics/VHkfpJJc4/voyages/VHkgKreip/) | done |
 | [Harden Workspace Editing And LSP Hands](epics/VHkfpJJc4/voyages/VHkgLtij9/) | in-progress |
 | [Activate Recursive Delegation Runtime](epics/VHkfpJJc4/voyages/VHkgMxksP/) | in-progress |
 | [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | in-progress |

@@ -1,5 +1,7 @@
 use crate::domain::model::{
-    ExecutionPolicy, ExecutionPolicyDecision, ExecutionPolicyEvaluationInput,
+    ExecutionPolicy, ExecutionPolicyDecision, ExecutionPolicyDecisionKind,
+    ExecutionPolicyEvaluationInput, ExecutionPolicyMatcher, ExecutionPolicyRule,
+    default_local_execution_policy,
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -32,9 +34,79 @@ impl ExecutionPolicyEvaluator {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutionPolicyDecisionFixture {
+    pub name: String,
+    pub policy: ExecutionPolicy,
+    pub input: ExecutionPolicyEvaluationInput,
+    pub expected_decision: ExecutionPolicyDecisionKind,
+    pub expected_rule_id: Option<String>,
+}
+
+impl ExecutionPolicyDecisionFixture {
+    fn new(
+        name: impl Into<String>,
+        policy: ExecutionPolicy,
+        input: ExecutionPolicyEvaluationInput,
+        expected_decision: ExecutionPolicyDecisionKind,
+        expected_rule_id: Option<&str>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            policy,
+            input,
+            expected_decision,
+            expected_rule_id: expected_rule_id.map(str::to_string),
+        }
+    }
+}
+
+pub fn representative_execution_policy_fixtures() -> Vec<ExecutionPolicyDecisionFixture> {
+    vec![
+        ExecutionPolicyDecisionFixture::new(
+            "default shell allow",
+            default_local_execution_policy(),
+            ExecutionPolicyEvaluationInput::command_for_tool("shell", ["git", "status"]),
+            ExecutionPolicyDecisionKind::Allow,
+            Some("allow-shell"),
+        ),
+        ExecutionPolicyDecisionFixture::new(
+            "dangerous command deny",
+            default_local_execution_policy(),
+            ExecutionPolicyEvaluationInput::command_for_tool("shell", ["rm", "-rf", "/"]),
+            ExecutionPolicyDecisionKind::Deny,
+            Some("deny-root-removal"),
+        ),
+        ExecutionPolicyDecisionFixture::new(
+            "publish prompt",
+            ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+                "prompt-cargo-publish",
+                ExecutionPolicyMatcher::command_prefix(["cargo", "publish"]),
+                ExecutionPolicyDecisionKind::Prompt,
+                "publishing artifacts requires explicit operator review",
+            )]),
+            ExecutionPolicyEvaluationInput::command_for_tool("shell", ["cargo", "publish"]),
+            ExecutionPolicyDecisionKind::Prompt,
+            Some("prompt-cargo-publish"),
+        ),
+        ExecutionPolicyDecisionFixture::new(
+            "test retry on failure",
+            ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+                "retry-cargo-test",
+                ExecutionPolicyMatcher::command_prefix(["cargo", "test"]),
+                ExecutionPolicyDecisionKind::OnFailure,
+                "test failures may trigger one bounded recovery attempt",
+            )]),
+            ExecutionPolicyEvaluationInput::command_for_tool("shell", ["cargo", "test"]),
+            ExecutionPolicyDecisionKind::OnFailure,
+            Some("retry-cargo-test"),
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ExecutionPolicyEvaluator;
+    use super::{ExecutionPolicyEvaluator, representative_execution_policy_fixtures};
     use crate::domain::model::{
         ExecutionPolicy, ExecutionPolicyDecisionKind, ExecutionPolicyEvaluationInput,
         ExecutionPolicyMatcher, ExecutionPolicyRule,
@@ -96,5 +168,27 @@ mod tests {
         assert_eq!(cargo_fmt.rule_id.as_deref(), Some("prompt-cargo"));
         assert_eq!(rm.kind, ExecutionPolicyDecisionKind::Deny);
         assert_eq!(external.kind, ExecutionPolicyDecisionKind::OnFailure);
+    }
+
+    #[test]
+    fn execution_policy_fixtures_document_representative_command_decisions() {
+        let fixtures = representative_execution_policy_fixtures();
+
+        assert_eq!(fixtures.len(), 4);
+        for fixture in fixtures {
+            let decision = ExecutionPolicyEvaluator::evaluate(&fixture.policy, &fixture.input);
+
+            assert_eq!(
+                decision.kind, fixture.expected_decision,
+                "fixture `{}` should keep its documented decision",
+                fixture.name
+            );
+            assert_eq!(
+                decision.rule_id.as_deref(),
+                fixture.expected_rule_id.as_deref(),
+                "fixture `{}` should keep its documented policy rule",
+                fixture.name
+            );
+        }
     }
 }
