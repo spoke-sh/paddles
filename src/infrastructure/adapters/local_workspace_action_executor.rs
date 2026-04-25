@@ -537,11 +537,15 @@ fn validate_inspect_command(command: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::LocalWorkspaceActionExecutor;
-    use crate::domain::model::NullTurnEventSink;
+    use crate::domain::model::{
+        ExecutionPolicy, ExecutionPolicyDecisionKind, ExecutionPolicyMatcher, ExecutionPolicyRule,
+        NullTurnEventSink,
+    };
     use crate::domain::ports::{
         WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
     };
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+    use std::fs;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -589,5 +593,99 @@ mod tests {
             .expect("tool observation should be cached");
 
         assert!(observed.summary.contains("observed available"));
+    }
+
+    #[test]
+    fn execution_policy_gate_blocks_shell_edit_and_patch_actions_before_execution() {
+        let workspace = tempdir().expect("tempdir");
+        fs::write(workspace.path().join("target.txt"), "old\n").expect("seed target");
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
+        registry.set_execution_policy(ExecutionPolicy::new(vec![
+            ExecutionPolicyRule::new(
+                "deny-shell",
+                ExecutionPolicyMatcher::tool("shell"),
+                ExecutionPolicyDecisionKind::Deny,
+                "shell denied by test execution policy",
+            ),
+            ExecutionPolicyRule::new(
+                "deny-write",
+                ExecutionPolicyMatcher::tool("write_file"),
+                ExecutionPolicyDecisionKind::Deny,
+                "writes denied by test execution policy",
+            ),
+            ExecutionPolicyRule::new(
+                "deny-patch",
+                ExecutionPolicyMatcher::tool("apply_patch"),
+                ExecutionPolicyDecisionKind::Deny,
+                "patches denied by test execution policy",
+            ),
+        ]));
+        let executor =
+            LocalWorkspaceActionExecutor::with_execution_hand_registry(workspace.path(), registry);
+
+        let shell = executor
+            .execute_workspace_action(
+                &WorkspaceAction::Shell {
+                    command: "touch shell-ran.txt".to_string(),
+                },
+                WorkspaceActionExecutionFrame {
+                    call_id: "test-call",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
+            .expect("shell action should be represented as a blocked result");
+        let write = executor
+            .execute_workspace_action(
+                &WorkspaceAction::WriteFile {
+                    path: "written.txt".to_string(),
+                    content: "created\n".to_string(),
+                },
+                WorkspaceActionExecutionFrame {
+                    call_id: "test-call",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
+            .expect("write action should be represented as a blocked result");
+        let patch = executor
+            .execute_workspace_action(
+                &WorkspaceAction::ApplyPatch {
+                    patch: "\
+diff --git a/target.txt b/target.txt
+--- a/target.txt
++++ b/target.txt
+@@
+-old
++new
+"
+                    .to_string(),
+                },
+                WorkspaceActionExecutionFrame {
+                    call_id: "test-call",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
+            .expect("patch action should be represented as a blocked result");
+
+        assert!(
+            shell
+                .summary
+                .contains("shell denied by test execution policy")
+        );
+        assert!(
+            write
+                .summary
+                .contains("writes denied by test execution policy")
+        );
+        assert!(
+            patch
+                .summary
+                .contains("patches denied by test execution policy")
+        );
+        assert!(!workspace.path().join("shell-ran.txt").exists());
+        assert!(!workspace.path().join("written.txt").exists());
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("target.txt")).expect("target still readable"),
+            "old\n"
+        );
     }
 }

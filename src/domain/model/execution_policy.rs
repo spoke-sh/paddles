@@ -48,7 +48,7 @@ impl ExecutionPolicyMatcher {
             Self::CommandPrefix(prefix)
                 if !prefix.is_empty() && command_starts_with(input.command_tokens(), prefix) =>
             {
-                Some((2, prefix.len()))
+                Some((3, prefix.len()))
             }
             Self::Executable(executable)
                 if input
@@ -62,7 +62,7 @@ impl ExecutionPolicyMatcher {
                     .tool_name()
                     .is_some_and(|candidate| candidate == tool_name) =>
             {
-                Some((3, 1))
+                Some((2, 1))
             }
             _ => None,
         }
@@ -123,6 +123,47 @@ impl ExecutionPolicy {
     pub fn default_decision(&self) -> ExecutionPolicyDecisionKind {
         self.default_decision
     }
+
+    pub fn validation_error(&self) -> Option<String> {
+        self.rules.iter().find_map(|rule| {
+            if rule.id.trim().is_empty() {
+                return Some("execution policy rule id must not be empty".to_string());
+            }
+            if rule.reason.trim().is_empty() {
+                return Some(format!(
+                    "execution policy rule `{}` must include a reason",
+                    rule.id
+                ));
+            }
+            match &rule.matcher {
+                ExecutionPolicyMatcher::CommandPrefix(prefix) if prefix.is_empty() => {
+                    Some(format!(
+                        "execution policy rule `{}` has an empty command prefix",
+                        rule.id
+                    ))
+                }
+                ExecutionPolicyMatcher::CommandPrefix(prefix)
+                    if prefix.iter().any(|token| token.trim().is_empty()) =>
+                {
+                    Some(format!(
+                        "execution policy rule `{}` has an empty command prefix token",
+                        rule.id
+                    ))
+                }
+                ExecutionPolicyMatcher::Executable(executable) if executable.trim().is_empty() => {
+                    Some(format!(
+                        "execution policy rule `{}` has an empty executable matcher",
+                        rule.id
+                    ))
+                }
+                ExecutionPolicyMatcher::Tool(tool) if tool.trim().is_empty() => Some(format!(
+                    "execution policy rule `{}` has an empty tool matcher",
+                    rule.id
+                )),
+                _ => None,
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,6 +177,16 @@ impl ExecutionPolicyEvaluationInput {
         Self {
             command_tokens: tokens.into_iter().map(Into::into).collect(),
             tool_name: None,
+        }
+    }
+
+    pub fn command_for_tool(
+        tool_name: impl Into<String>,
+        tokens: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            command_tokens: tokens.into_iter().map(Into::into).collect(),
+            tool_name: Some(tool_name.into()),
         }
     }
 
@@ -190,6 +241,59 @@ fn command_starts_with(command: &[String], prefix: &[String]) -> bool {
             .iter()
             .zip(prefix.iter())
             .all(|(command, prefix)| command == prefix)
+}
+
+pub fn default_local_execution_policy() -> ExecutionPolicy {
+    ExecutionPolicy::new(vec![
+        ExecutionPolicyRule::new(
+            "deny-root-removal",
+            ExecutionPolicyMatcher::command_prefix(["rm", "-rf", "/"]),
+            ExecutionPolicyDecisionKind::Deny,
+            "root removal is never a valid local harness operation",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-inspect",
+            ExecutionPolicyMatcher::tool("inspect"),
+            ExecutionPolicyDecisionKind::Allow,
+            "single-step read-only inspection remains governed by the active sandbox",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-shell",
+            ExecutionPolicyMatcher::tool("shell"),
+            ExecutionPolicyDecisionKind::Allow,
+            "workspace shell execution remains governed by the active sandbox",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-diff",
+            ExecutionPolicyMatcher::tool("diff"),
+            ExecutionPolicyDecisionKind::Allow,
+            "workspace diff is a read-only local operation",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-write-file",
+            ExecutionPolicyMatcher::tool("write_file"),
+            ExecutionPolicyDecisionKind::Allow,
+            "workspace writes remain governed by the active sandbox",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-replace-in-file",
+            ExecutionPolicyMatcher::tool("replace_in_file"),
+            ExecutionPolicyDecisionKind::Allow,
+            "workspace replacements remain governed by the active sandbox",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-apply-patch",
+            ExecutionPolicyMatcher::tool("apply_patch"),
+            ExecutionPolicyDecisionKind::Allow,
+            "workspace patches remain governed by the active sandbox",
+        ),
+        ExecutionPolicyRule::new(
+            "allow-external-capability-through-governance",
+            ExecutionPolicyMatcher::tool("external_capability"),
+            ExecutionPolicyDecisionKind::Allow,
+            "external capability calls remain governed by descriptor permissions",
+        ),
+    ])
 }
 
 #[cfg(test)]

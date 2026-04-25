@@ -1,10 +1,11 @@
 use crate::domain::model::{
     ExecutionGovernanceOutcomeKind, ExecutionHandDescriptor, ExecutionHandDiagnostic,
-    ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase, TurnEvent, TurnEventSink,
+    ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase, ExecutionPolicyEvaluationInput,
+    TurnEvent, TurnEventSink,
 };
 use crate::domain::ports::ExecutionHand;
 use crate::infrastructure::execution_governance::{
-    ExecutionPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
+    ExecutionPolicyPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
     terminal_command_permission_request,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
@@ -157,9 +158,15 @@ impl BackgroundTerminalRunner {
         event_sink: &dyn TurnEventSink,
     ) -> Result<GovernedTerminalCommandResult> {
         let permission_request = terminal_command_permission_request(command, tool_name);
-        let governance_outcome = ExecutionPermissionGate::evaluate(
-            self.execution_hand_registry.governance_profile().as_ref(),
+        let governance_profile = self.execution_hand_registry.governance_profile();
+        let execution_policy = self.execution_hand_registry.execution_policy();
+        let policy_input =
+            ExecutionPolicyEvaluationInput::command_for_tool(tool_name, command.split_whitespace());
+        let governance_outcome = ExecutionPolicyPermissionGate::evaluate(
+            execution_policy.as_ref(),
+            governance_profile.as_ref(),
             &permission_request,
+            &policy_input,
         );
         if !matches!(
             governance_outcome.kind,

@@ -46,7 +46,7 @@ use crate::infrastructure::adapters::trace_recorders::default_trace_recorder_for
 use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
 use crate::infrastructure::conversation_history::ConversationHistoryStore;
 use crate::infrastructure::execution_governance::{
-    ExecutionPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
+    ExecutionPolicyPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::harness_profile::HarnessProfileSelection;
@@ -66,20 +66,21 @@ use crate::domain::model::{
     CompactionDecision, CompactionPlan, ControlOperation, ControlResult, ControlResultStatus,
     ControlSubject, ConversationReplayView, ConversationThreadRef, ExecutionGovernanceDecision,
     ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionHandDiagnostic,
-    ExecutionPermissionRequest, ExternalCapabilityDescriptor, ExternalCapabilityInvocation,
-    ExternalCapabilityResult, ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord,
-    ForensicArtifactCapture, ForensicTraceSink, InstructionFrame, InstructionIntent,
-    MultiplexEventSink, NativeTransportDiagnostic, ResponseMode, SteeringGateKind,
-    SteeringGatePhase, StrainFactor, StrainLevel, StructuredClarificationKind,
-    StructuredClarificationOption, StructuredClarificationRequest, TaskTraceId, ThreadCandidate,
-    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
-    TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution, TraceSignalKind,
-    TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnControlOperation,
-    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    ExecutionPermissionRequest, ExecutionPolicy, ExecutionPolicyEvaluationInput,
+    ExternalCapabilityDescriptor, ExternalCapabilityInvocation, ExternalCapabilityResult,
+    ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord, ForensicArtifactCapture,
+    ForensicTraceSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
+    NativeTransportDiagnostic, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
+    StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnControlOperation, TurnEvent, TurnEventSink,
+    TurnIntent, TurnTraceId,
 };
 #[cfg(test)]
 use crate::domain::model::{
@@ -3854,6 +3855,7 @@ impl MechSuitService {
                                     .prepared
                                     .harness_profile()
                                     .active_execution_governance(),
+                                self.execution_hand_registry().execution_policy().as_ref(),
                                 invocation,
                                 ExternalCapabilityExecutionFrame {
                                     rationale: decision.rationale.as_str(),
@@ -7533,6 +7535,7 @@ struct ExternalCapabilityExecutionFrame<'a> {
 fn execute_external_capability_action(
     broker: Arc<dyn ExternalCapabilityBroker>,
     governance_profile: &crate::domain::model::ExecutionGovernanceProfile,
+    execution_policy: Option<&ExecutionPolicy>,
     invocation: &ExternalCapabilityInvocation,
     frame: ExternalCapabilityExecutionFrame<'_>,
 ) -> String {
@@ -7573,8 +7576,13 @@ fn execute_external_capability_action(
             descriptor.id, invocation.purpose
         )),
     );
-    let governance_outcome =
-        ExecutionPermissionGate::evaluate(Some(governance_profile), &governance_request);
+    let policy_input = ExecutionPolicyEvaluationInput::tool("external_capability");
+    let governance_outcome = ExecutionPolicyPermissionGate::evaluate(
+        execution_policy,
+        Some(governance_profile),
+        &governance_request,
+        &policy_input,
+    );
     emit_execution_governance_decision(
         frame.event_sink,
         Some(frame.call_id),
@@ -8195,6 +8203,7 @@ mod tests {
         ExecutionGovernanceDecision, ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind,
         ExecutionGovernanceSnapshot, ExecutionHandAuthority, ExecutionHandKind, ExecutionHandPhase,
         ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
+        ExecutionPolicy, ExecutionPolicyDecisionKind, ExecutionPolicyMatcher, ExecutionPolicyRule,
         ExecutionSandboxMode, ExternalCapabilityAuthPosture, ExternalCapabilityAvailability,
         ExternalCapabilityDescriptor, ExternalCapabilityDescriptorMetadata,
         ExternalCapabilityEvidenceKind, ExternalCapabilityEvidenceShape,
@@ -9912,6 +9921,83 @@ mod tests {
         let bundle = bundles.last().expect("gathered evidence bundle");
         assert!(bundle.items.iter().any(|item| {
             item.source.contains("web.search") && item.snippet.contains("requires approval")
+        }));
+    }
+
+    #[test]
+    fn execution_policy_gate_blocks_external_capability_before_broker_invocation() {
+        let invocation = ExternalCapabilityInvocation::new(
+            "web.search",
+            "look up release notes",
+            json!({ "query": "paddles release notes" }),
+        );
+        let descriptor = ExternalCapabilityDescriptor::new(
+            "web.search",
+            crate::domain::model::ExternalCapabilityKind::WebSearch,
+            "Web Search",
+            "Search the public web for current documentation and return citations.",
+            ExternalCapabilityDescriptorMetadata::new(
+                ExternalCapabilityAvailability::Available,
+                ExternalCapabilityAuthPosture::NoneRequired,
+                ExternalCapabilitySideEffectPosture::ReadOnly,
+                ExecutionHandKind::TransportMediator,
+                Vec::new(),
+                ExternalCapabilityEvidenceShape::new(
+                    "network-backed search should yield citations when allowed",
+                    vec![ExternalCapabilityEvidenceKind::Citation],
+                ),
+            ),
+        );
+        let broker = Arc::new(RecordingExternalCapabilityBroker::new(
+            vec![descriptor.clone()],
+            vec![ExternalCapabilityResult {
+                descriptor,
+                invocation: invocation.clone(),
+                status: ExternalCapabilityResultStatus::Succeeded,
+                summary: "unexpected".to_string(),
+                detail: "broker should not run when policy denies the capability".to_string(),
+                sources: Vec::new(),
+            }],
+        ));
+        let policy = ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+            "deny-external",
+            ExecutionPolicyMatcher::tool("external_capability"),
+            ExecutionPolicyDecisionKind::Deny,
+            "external denied by test execution policy",
+        )]);
+        let sink = RecordingTurnEventSink::default();
+        let mut evidence_items = Vec::new();
+
+        let summary = super::execute_external_capability_action(
+            broker.clone(),
+            &crate::domain::model::default_local_execution_governance_profile(),
+            Some(&policy),
+            &invocation,
+            super::ExternalCapabilityExecutionFrame {
+                rationale: "exercise the policy gate",
+                evidence_limit: 4,
+                evidence_items: &mut evidence_items,
+                call_id: "policy-call",
+                event_sink: &sink,
+            },
+        );
+
+        assert!(
+            broker.recorded_invocations().is_empty(),
+            "policy-denied external capabilities must not invoke the broker"
+        );
+        assert!(summary.contains("external denied by test execution policy"));
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::ExecutionGovernanceDecisionRecorded { decision }
+                if decision.tool_name.as_deref() == Some("external_capability")
+                    && decision.outcome.kind == ExecutionGovernanceOutcomeKind::Denied
+        )));
+        assert!(evidence_items.iter().any(|item| {
+            item.source.contains("web.search")
+                && item
+                    .snippet
+                    .contains("external denied by test execution policy")
         }));
     }
 

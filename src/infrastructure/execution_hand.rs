@@ -1,7 +1,8 @@
 use crate::domain::model::{
     ExecutionGovernanceProfile, ExecutionHandDescriptor, ExecutionHandDiagnostic,
-    ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
+    ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase, ExecutionPolicy,
     default_local_execution_governance_profile, default_local_execution_hand_descriptors,
+    default_local_execution_policy,
 };
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -10,6 +11,7 @@ use std::sync::Mutex;
 pub struct ExecutionHandRegistry {
     diagnostics: Mutex<BTreeMap<ExecutionHandKind, ExecutionHandDiagnostic>>,
     governance_profile: Mutex<Option<ExecutionGovernanceProfile>>,
+    execution_policy: Mutex<Option<ExecutionPolicy>>,
 }
 
 impl Default for ExecutionHandRegistry {
@@ -32,6 +34,7 @@ impl ExecutionHandRegistry {
         Self {
             diagnostics: Mutex::new(diagnostics),
             governance_profile: Mutex::new(None),
+            execution_policy: Mutex::new(Some(default_local_execution_policy())),
         }
     }
 
@@ -77,6 +80,27 @@ impl ExecutionHandRegistry {
             .governance_profile
             .lock()
             .expect("execution hand governance lock") = None;
+    }
+
+    pub fn execution_policy(&self) -> Option<ExecutionPolicy> {
+        self.execution_policy
+            .lock()
+            .expect("execution hand policy lock")
+            .clone()
+    }
+
+    pub fn set_execution_policy(&self, policy: ExecutionPolicy) {
+        *self
+            .execution_policy
+            .lock()
+            .expect("execution hand policy lock") = Some(policy);
+    }
+
+    pub fn clear_execution_policy(&self) {
+        *self
+            .execution_policy
+            .lock()
+            .expect("execution hand policy lock") = None;
     }
 
     pub fn record_phase(
@@ -234,5 +258,18 @@ mod tests {
 
         registry.clear_governance_profile();
         assert_eq!(registry.governance_profile(), None);
+    }
+
+    #[test]
+    fn registry_bootstraps_and_can_clear_the_active_execution_policy() {
+        let registry = ExecutionHandRegistry::default();
+        let policy = registry
+            .execution_policy()
+            .expect("default execution policy should be recorded");
+
+        assert!(policy.rules().iter().any(|rule| rule.id == "allow-shell"));
+
+        registry.clear_execution_policy();
+        assert_eq!(registry.execution_policy(), None);
     }
 }

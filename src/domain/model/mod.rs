@@ -64,6 +64,7 @@ pub use execution_hand::{
 pub use execution_policy::{
     ExecutionPolicy, ExecutionPolicyDecision, ExecutionPolicyDecisionKind,
     ExecutionPolicyEvaluationInput, ExecutionPolicyMatcher, ExecutionPolicyRule,
+    default_local_execution_policy,
 };
 pub use external_capability::{
     ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityCatalog,

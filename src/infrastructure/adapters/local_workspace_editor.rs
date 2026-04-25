@@ -2,11 +2,11 @@ use crate::domain::model::{
     AppliedEdit, ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind,
     ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
     ExecutionHandPhase, ExecutionPermission, ExecutionPermissionRequest,
-    ExecutionPermissionRequirement,
+    ExecutionPermissionRequirement, ExecutionPolicyEvaluationInput,
 };
 use crate::domain::ports::{ExecutionHand, WorkspaceActionResult, WorkspaceEditor};
 use crate::infrastructure::execution_governance::{
-    ExecutionPermissionGate, summarize_governance_outcome,
+    ExecutionPolicyPermissionGate, summarize_governance_outcome,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::transport_mediator::TransportToolMediator;
@@ -99,10 +99,18 @@ impl LocalWorkspaceEditor {
             .protect_command_env(command, purpose);
     }
 
-    fn evaluate_request(&self, request: &ExecutionPermissionRequest) -> ExecutionGovernanceOutcome {
-        ExecutionPermissionGate::evaluate(
-            self.execution_hand_registry.governance_profile().as_ref(),
+    fn evaluate_request(
+        &self,
+        request: &ExecutionPermissionRequest,
+        policy_input: &ExecutionPolicyEvaluationInput,
+    ) -> ExecutionGovernanceOutcome {
+        let governance_profile = self.execution_hand_registry.governance_profile();
+        let execution_policy = self.execution_hand_registry.execution_policy();
+        ExecutionPolicyPermissionGate::evaluate(
+            execution_policy.as_ref(),
+            governance_profile.as_ref(),
             request,
+            policy_input,
         )
     }
 
@@ -153,7 +161,8 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 vec![ExecutionPermission::ReadWorkspace],
             ),
         );
-        let governance = self.evaluate_request(&request);
+        let policy_input = ExecutionPolicyEvaluationInput::tool("diff");
+        let governance = self.evaluate_request(&request, &policy_input);
         if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
             return Ok(self.blocked_result(
                 "diff",
@@ -238,7 +247,8 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             crate::domain::model::ExecutionPermissionReuseScope::Turn,
             Vec::new(),
         );
-        let governance = self.evaluate_request(&request);
+        let policy_input = ExecutionPolicyEvaluationInput::tool("write_file");
+        let governance = self.evaluate_request(&request, &policy_input);
         if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
             return Ok(self.blocked_result(
                 "write_file",
@@ -312,7 +322,8 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             crate::domain::model::ExecutionPermissionReuseScope::Turn,
             Vec::new(),
         );
-        let governance = self.evaluate_request(&request);
+        let policy_input = ExecutionPolicyEvaluationInput::tool("replace_in_file");
+        let governance = self.evaluate_request(&request, &policy_input);
         if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
             return Ok(self.blocked_result(
                 "replace_in_file",
@@ -379,7 +390,8 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             crate::domain::model::ExecutionPermissionReuseScope::Turn,
             Vec::new(),
         );
-        let governance = self.evaluate_request(&request);
+        let policy_input = ExecutionPolicyEvaluationInput::tool("apply_patch");
+        let governance = self.evaluate_request(&request, &policy_input);
         if !matches!(governance.kind, ExecutionGovernanceOutcomeKind::Allowed) {
             return Ok(self.blocked_result(
                 "apply_patch",

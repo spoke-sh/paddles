@@ -1,7 +1,9 @@
+use crate::application::ExecutionPolicyEvaluator;
 use crate::domain::model::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceOutcome,
     ExecutionGovernanceProfile, ExecutionPermission, ExecutionPermissionRequest,
-    ExecutionPermissionReuseScope,
+    ExecutionPermissionReuseScope, ExecutionPolicy, ExecutionPolicyDecision,
+    ExecutionPolicyDecisionKind, ExecutionPolicyEvaluationInput,
 };
 use std::process::Output;
 
@@ -102,6 +104,120 @@ impl ExecutionPermissionGate {
     }
 }
 
+pub struct ExecutionPolicyPermissionGate;
+
+impl ExecutionPolicyPermissionGate {
+    pub fn evaluate(
+        policy: Option<&ExecutionPolicy>,
+        profile: Option<&ExecutionGovernanceProfile>,
+        request: &ExecutionPermissionRequest,
+        input: &ExecutionPolicyEvaluationInput,
+    ) -> ExecutionGovernanceOutcome {
+        let Some(policy) = policy else {
+            return ExecutionGovernanceOutcome::policy_unavailable(
+                "active execution policy is unavailable; failing closed",
+                request.requirement.clone(),
+            );
+        };
+
+        if let Some(error) = policy.validation_error() {
+            return ExecutionGovernanceOutcome::policy_unavailable(
+                format!("active execution policy is invalid: {error}; failing closed"),
+                request.requirement.clone(),
+            );
+        }
+
+        let decision = ExecutionPolicyEvaluator::evaluate(policy, input);
+        match decision.kind {
+            ExecutionPolicyDecisionKind::Allow | ExecutionPolicyDecisionKind::OnFailure => {
+                let mut outcome = ExecutionPermissionGate::evaluate(profile, request);
+                if matches!(
+                    outcome.kind,
+                    crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed
+                ) {
+                    outcome.reason = format!(
+                        "{}; {}",
+                        summarize_policy_decision(&decision),
+                        outcome.reason
+                    );
+                }
+                outcome
+            }
+            ExecutionPolicyDecisionKind::Deny => ExecutionGovernanceOutcome::denied(
+                summarize_policy_decision(&decision),
+                request.requirement.clone(),
+            ),
+            ExecutionPolicyDecisionKind::Prompt => {
+                prompt_required_outcome(profile, request, &decision)
+            }
+        }
+    }
+}
+
+fn summarize_policy_decision(decision: &ExecutionPolicyDecision) -> String {
+    match decision.rule_id.as_deref() {
+        Some(rule_id) => format!(
+            "execution policy {} via `{}`: {}",
+            decision.kind.label(),
+            rule_id,
+            decision.reason
+        ),
+        None => format!(
+            "execution policy {} by default: {}",
+            decision.kind.label(),
+            decision.reason
+        ),
+    }
+}
+
+fn prompt_required_outcome(
+    profile: Option<&ExecutionGovernanceProfile>,
+    request: &ExecutionPermissionRequest,
+    decision: &ExecutionPolicyDecision,
+) -> ExecutionGovernanceOutcome {
+    match profile.map(|profile| profile.approval_policy) {
+        Some(ExecutionApprovalPolicy::OnRequest) => {
+            let resolved_reuse_scope = request.requested_reuse_scope.filter(|scope| {
+                profile.is_some_and(|profile| profile.supports_reuse_scope(*scope))
+            });
+            let resolved_command_prefix =
+                if resolved_reuse_scope == Some(ExecutionPermissionReuseScope::CommandPrefix) {
+                    request.requested_command_prefix.clone()
+                } else {
+                    None
+                };
+            ExecutionGovernanceOutcome::escalation_required(
+                summarize_policy_decision(decision),
+                request.requirement.clone(),
+                ExecutionEscalationRequest::new(
+                    summarize_policy_decision(decision),
+                    request.requirement.permissions.clone(),
+                    resolved_reuse_scope,
+                    resolved_command_prefix,
+                ),
+            )
+        }
+        Some(ExecutionApprovalPolicy::Never) => ExecutionGovernanceOutcome::denied(
+            format!(
+                "{}; active approval policy is `never`",
+                summarize_policy_decision(decision)
+            ),
+            request.requirement.clone(),
+        ),
+        Some(ExecutionApprovalPolicy::OnFailure) => ExecutionGovernanceOutcome::denied(
+            format!(
+                "{}; `on_failure` cannot widen authority before execution",
+                summarize_policy_decision(decision)
+            ),
+            request.requirement.clone(),
+        ),
+        None => ExecutionGovernanceOutcome::policy_unavailable(
+            "active execution-governance profile is unavailable; execution policy prompt cannot be resolved; failing closed",
+            request.requirement.clone(),
+        ),
+    }
+}
+
 pub fn summarize_governance_outcome(outcome: &ExecutionGovernanceOutcome) -> String {
     let mut summary = format!(
         "Execution governance {}: {}",
@@ -160,11 +276,13 @@ pub fn terminal_command_permission_request(
 
 #[cfg(test)]
 mod tests {
-    use super::ExecutionPermissionGate;
+    use super::{ExecutionPermissionGate, ExecutionPolicyPermissionGate};
     use crate::domain::model::{
         ExecutionApprovalPolicy, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,
         ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequest,
-        ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionSandboxMode,
+        ExecutionPermissionRequirement, ExecutionPermissionReuseScope, ExecutionPolicy,
+        ExecutionPolicyDecisionKind, ExecutionPolicyEvaluationInput, ExecutionPolicyMatcher,
+        ExecutionPolicyRule, ExecutionSandboxMode, default_local_execution_governance_profile,
     };
 
     #[test]
@@ -232,5 +350,40 @@ mod tests {
                 .reason
                 .contains("active execution-governance profile")
         );
+    }
+
+    #[test]
+    fn execution_policy_defaults_fail_closed_when_policy_is_unavailable_or_invalid() {
+        let profile = default_local_execution_governance_profile();
+        let request = super::terminal_command_permission_request("true", "shell");
+        let input = ExecutionPolicyEvaluationInput::command_for_tool("shell", ["true"]);
+
+        let unavailable =
+            ExecutionPolicyPermissionGate::evaluate(None, Some(&profile), &request, &input);
+
+        assert_eq!(
+            unavailable.kind,
+            ExecutionGovernanceOutcomeKind::PolicyUnavailable
+        );
+        assert!(unavailable.reason.contains("execution policy"));
+
+        let invalid_policy = ExecutionPolicy::new(vec![ExecutionPolicyRule::new(
+            "",
+            ExecutionPolicyMatcher::tool("shell"),
+            ExecutionPolicyDecisionKind::Allow,
+            "rule ids must be present",
+        )]);
+        let invalid = ExecutionPolicyPermissionGate::evaluate(
+            Some(&invalid_policy),
+            Some(&profile),
+            &request,
+            &input,
+        );
+
+        assert_eq!(
+            invalid.kind,
+            ExecutionGovernanceOutcomeKind::PolicyUnavailable
+        );
+        assert!(invalid.reason.contains("invalid"));
     }
 }
