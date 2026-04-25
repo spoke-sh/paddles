@@ -6,6 +6,7 @@ mod external_capabilities;
 mod operator_memory;
 mod planning;
 mod semantic_workspace;
+mod session_store;
 mod specialist_brains;
 mod synthesis;
 mod trace_recording;
@@ -44,6 +45,11 @@ pub use planning::{
 pub use semantic_workspace::{
     SemanticWorkspaceOperation, SemanticWorkspacePort, SemanticWorkspaceQuery,
     SemanticWorkspaceResult, SemanticWorkspaceStatus,
+};
+pub use session_store::{
+    SESSION_STORE_SCHEMA, SESSION_STORE_SCHEMA_VERSION, SessionEvidenceRecord,
+    SessionGovernanceRecord, SessionPlannerDecisionRecord, SessionStorePort, SessionStoreRecord,
+    SessionStoreRecordKind, SessionStoreSnapshot, SessionTurnRecord, VersionedSessionStoreRecord,
 };
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,
