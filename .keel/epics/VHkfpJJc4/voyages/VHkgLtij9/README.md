@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:05:16
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Preserve File Format And Lock Workspace Edits](../../../../stories/VHkhoGo0Y/README.md) | feat | done |
-| [Add Safe Replacement And Edit Diagnostics](../../../../stories/VHkhpORAN/README.md) | feat | icebox |
+| [Add Safe Replacement And Edit Diagnostics](../../../../stories/VHkhpORAN/README.md) | feat | done |
 | [Add LSP Semantic Workspace Actions](../../../../stories/VHkhqcwVv/README.md) | feat | icebox |
 <!-- END GENERATED -->

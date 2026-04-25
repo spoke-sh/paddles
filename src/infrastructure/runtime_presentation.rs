@@ -586,7 +586,7 @@ fn format_applied_edit_detail(edit: &AppliedEdit) -> String {
     } else {
         edit.files.join(", ")
     };
-    if edit.diff.trim().is_empty() {
+    let mut detail = if edit.diff.trim().is_empty() {
         format!(
             "Files: {files}\nChange: +{} -{}",
             edit.insertions, edit.deletions
@@ -596,7 +596,19 @@ fn format_applied_edit_detail(edit: &AppliedEdit) -> String {
             "Files: {files}\nChange: +{} -{}\n\n{}",
             edit.insertions, edit.deletions, edit.diff
         )
+    };
+    if !edit.evidence.is_empty() {
+        detail.push_str("\n\nEvidence:");
+        for evidence in &edit.evidence {
+            detail.push_str(&format!(
+                "\n- {}: {} - {}",
+                evidence.kind.label(),
+                evidence.status.label(),
+                evidence.summary
+            ));
+        }
     }
+    detail
 }
 
 fn format_collaboration_mode_detail(result: &CollaborationModeResult) -> String {
@@ -867,6 +879,7 @@ mod tests {
                 diff: "--- a/src/app.rs\n+++ b/src/app.rs\n@@ -1 +1 @@\n-old\n+new".to_string(),
                 insertions: 1,
                 deletions: 1,
+                evidence: Vec::new(),
             },
         });
 

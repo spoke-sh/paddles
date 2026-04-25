@@ -1,15 +1,17 @@
 ---
 # system-managed
 id: VHkhpORAN
-status: icebox
+status: done
 created_at: 2026-04-24T16:01:58
-updated_at: 2026-04-24T16:06:16
+updated_at: 2026-04-24T18:23:11
 # authored
 title: Add Safe Replacement And Edit Diagnostics
 type: feat
 operator-signal:
 scope: VHkfpJJc4/VHkgLtij9
 index: 2
+started_at: 2026-04-24T18:18:53
+completed_at: 2026-04-24T18:23:11
 ---
 
 # Add Safe Replacement And Edit Diagnostics
@@ -20,5 +22,5 @@ Add deterministic replacement fallbacks plus formatter and diagnostic evidence f
 
 ## Acceptance Criteria
 
-- [ ] Ambiguous replacement attempts return candidate context instead of applying an unsafe edit. [SRS-02/AC-01] <!-- verify: cargo test workspace_replace_ambiguous -- --nocapture, SRS-02:start:end -->
-- [ ] Formatter and diagnostic outcomes attach to edit evidence when configured and degrade gracefully when unavailable. [SRS-03/AC-01] <!-- verify: cargo test workspace_edit_diagnostics -- --nocapture, SRS-03:start:end -->
+- [x] Ambiguous replacement attempts return candidate context instead of applying an unsafe edit. [SRS-02/AC-01] <!-- verify: cargo test workspace_replace_ambiguous -- --nocapture, SRS-02:start:end, proof: ac-1.log-->
+- [x] Formatter and diagnostic outcomes attach to edit evidence when configured and degrade gracefully when unavailable. [SRS-03/AC-01] <!-- verify: cargo test workspace_edit_diagnostics -- --nocapture, SRS-03:start:end, proof: ac-2.log-->

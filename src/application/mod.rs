@@ -8925,6 +8925,7 @@ mod tests {
                     .lines()
                     .filter(|line| line.starts_with('-') && !line.starts_with("---"))
                     .count(),
+                evidence: Vec::new(),
             }),
             _ => None,
         }
@@ -8947,6 +8948,7 @@ mod tests {
             diff: diff.join("\n"),
             insertions: after.lines().count(),
             deletions: before.lines().count(),
+            evidence: Vec::new(),
         }
     }
 

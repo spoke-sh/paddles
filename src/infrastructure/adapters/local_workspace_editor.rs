@@ -1,8 +1,9 @@
 use crate::domain::model::{
-    AppliedEdit, ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind,
-    ExecutionHandDescriptor, ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation,
-    ExecutionHandPhase, ExecutionPermission, ExecutionPermissionRequest,
-    ExecutionPermissionRequirement, ExecutionPolicyEvaluationInput,
+    AppliedEdit, AppliedEditEvidence, AppliedEditEvidenceKind, AppliedEditEvidenceStatus,
+    ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind, ExecutionHandDescriptor,
+    ExecutionHandDiagnostic, ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
+    ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
+    ExecutionPolicyEvaluationInput,
 };
 use crate::domain::ports::{ExecutionHand, WorkspaceActionResult, WorkspaceEditor};
 use crate::infrastructure::execution_governance::{
@@ -14,7 +15,7 @@ use crate::infrastructure::workspace_paths::WorkspacePathPolicy;
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -137,11 +138,60 @@ fn normalize_line_endings_to_lf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct WorkspaceEditEvidenceHooks {
+    pub formatter: Option<WorkspaceEditHookCommand>,
+    pub diagnostics: Option<WorkspaceEditHookCommand>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceEditHookCommand {
+    kind: AppliedEditEvidenceKind,
+    program: String,
+    args: Vec<String>,
+}
+
+impl WorkspaceEditHookCommand {
+    #[allow(dead_code)]
+    pub fn new(
+        kind: AppliedEditEvidenceKind,
+        program: impl Into<String>,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            kind,
+            program: program.into(),
+            args: args.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    fn rendered_args(&self, paths: &[String]) -> Vec<String> {
+        let first_path = paths.first().map(String::as_str).unwrap_or_default();
+        let joined_paths = paths.join(" ");
+        self.args
+            .iter()
+            .map(|arg| {
+                arg.replace("{path}", first_path)
+                    .replace("{paths}", &joined_paths)
+            })
+            .collect()
+    }
+
+    fn display_command(&self, args: &[String]) -> String {
+        if args.is_empty() {
+            self.program.clone()
+        } else {
+            format!("{} {}", self.program, args.join(" "))
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LocalWorkspaceEditor {
     workspace_root: PathBuf,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
+    edit_evidence_hooks: WorkspaceEditEvidenceHooks,
 }
 
 impl LocalWorkspaceEditor {
@@ -172,7 +222,14 @@ impl LocalWorkspaceEditor {
             workspace_root: workspace_root.into(),
             execution_hand_registry,
             transport_mediator,
+            edit_evidence_hooks: WorkspaceEditEvidenceHooks::default(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_edit_evidence_hooks(mut self, hooks: WorkspaceEditEvidenceHooks) -> Self {
+        self.edit_evidence_hooks = hooks;
+        self
     }
 
     fn descriptor() -> ExecutionHandDescriptor {
@@ -252,6 +309,27 @@ impl LocalWorkspaceEditor {
             governance_request: Some(request),
             governance_outcome: Some(outcome),
         }
+    }
+
+    fn collect_edit_evidence(&self, paths: &[String]) -> Vec<AppliedEditEvidence> {
+        let mut evidence = Vec::new();
+        if let Some(formatter) = &self.edit_evidence_hooks.formatter {
+            evidence.push(run_edit_evidence_hook(
+                formatter,
+                paths,
+                &self.workspace_root,
+                &self.transport_mediator,
+            ));
+        }
+        if let Some(diagnostics) = &self.edit_evidence_hooks.diagnostics {
+            evidence.push(run_edit_evidence_hook(
+                diagnostics,
+                paths,
+                &self.workspace_root,
+                &self.transport_mediator,
+            ));
+        }
+        evidence
     }
 }
 
@@ -404,7 +482,15 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             fs::write(&resolved, bytes)
                 .with_context(|| format!("failed to write {}", resolved.display()))?;
             let rel = relative_path(&self.workspace_root, &resolved);
-            let applied_edit = build_applied_edit(&rel, &before, &after, &self.transport_mediator)?;
+            let evidence = self.collect_edit_evidence(std::slice::from_ref(&rel));
+            let after = if resolved.exists() {
+                read_workspace_file_text(&resolved)?.text
+            } else {
+                after
+            };
+            let mut applied_edit =
+                build_applied_edit(&rel, &before, &after, &self.transport_mediator)?;
+            applied_edit.evidence = evidence;
             Ok(WorkspaceActionResult {
                 name: "write_file".to_string(),
                 summary: summarize_applied_edit("write_file", &applied_edit),
@@ -468,8 +554,21 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             let original = read_workspace_file_text(&resolved)?;
             let old = normalize_line_endings_for_format(old, original.format.line_ending);
             let new = normalize_line_endings_for_format(new, original.format.line_ending);
-            if !original.text.contains(&old) {
+            if old.is_empty() {
+                bail!(
+                    "replacement pattern cannot be empty for {}",
+                    resolved.display()
+                );
+            }
+            let candidates = replacement_candidates(&original.text, &old);
+            if candidates.is_empty() {
                 bail!("pattern not found in {}", resolved.display());
+            }
+            if !replace_all && candidates.len() > 1 {
+                bail!(
+                    "{}",
+                    format_ambiguous_replacement_error(&resolved, &candidates)
+                );
             }
             let updated = if replace_all {
                 original.text.replace(&old, &new)
@@ -482,8 +581,15 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
             )
             .with_context(|| format!("failed to write {}", resolved.display()))?;
             let rel = relative_path(&self.workspace_root, &resolved);
-            let applied_edit =
+            let evidence = self.collect_edit_evidence(std::slice::from_ref(&rel));
+            let updated = if resolved.exists() {
+                read_workspace_file_text(&resolved)?.text
+            } else {
+                updated
+            };
+            let mut applied_edit =
                 build_applied_edit(&rel, &original.text, &updated, &self.transport_mediator)?;
+            applied_edit.evidence = evidence;
             Ok(WorkspaceActionResult {
                 name: "replace_in_file".to_string(),
                 summary: summarize_applied_edit("replace_in_file", &applied_edit),
@@ -591,7 +697,9 @@ impl WorkspaceEditor for LocalWorkspaceEditor {
                 fs::write(&path, encode_workspace_file_text(&patched.text, format))
                     .with_context(|| format!("failed to preserve format for {}", path.display()))?;
             }
-            let applied_edit = build_patch_applied_edit(patch);
+            let evidence = self.collect_edit_evidence(&patch_paths);
+            let mut applied_edit = build_patch_applied_edit(patch);
+            applied_edit.evidence = evidence;
             Ok(WorkspaceActionResult {
                 name: "apply_patch".to_string(),
                 summary: summarize_applied_edit("apply_patch", &applied_edit),
@@ -624,6 +732,92 @@ fn summarize_apply_patch_result(patch: &str, command: &str, output: &Output) -> 
     summary.push('\n');
     summary.push_str(&format_command_summary("git apply", command, output));
     trim_for_summary(&summary, MAX_EDITOR_OUTPUT_CHARS)
+}
+
+fn run_edit_evidence_hook(
+    hook: &WorkspaceEditHookCommand,
+    paths: &[String],
+    workspace_root: &Path,
+    transport_mediator: &TransportToolMediator,
+) -> AppliedEditEvidence {
+    let args = hook.rendered_args(paths);
+    let display_command = hook.display_command(&args);
+    let mut command = Command::new(&hook.program);
+    command
+        .args(&args)
+        .current_dir(workspace_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    transport_mediator.protect_command_env(&mut command, "workspace edit evidence hook");
+
+    match command.output() {
+        Ok(output) if output.status.success() => applied_edit_evidence(
+            hook.kind,
+            AppliedEditEvidenceStatus::Passed,
+            summarize_edit_evidence_output(
+                hook.kind,
+                AppliedEditEvidenceStatus::Passed,
+                &display_command,
+                &output,
+            ),
+        ),
+        Ok(output) => applied_edit_evidence(
+            hook.kind,
+            AppliedEditEvidenceStatus::Warning,
+            summarize_edit_evidence_output(
+                hook.kind,
+                AppliedEditEvidenceStatus::Warning,
+                &display_command,
+                &output,
+            ),
+        ),
+        Err(error) if error.kind() == ErrorKind::NotFound => applied_edit_evidence(
+            hook.kind,
+            AppliedEditEvidenceStatus::Unavailable,
+            format!(
+                "{}: unavailable ({display_command}): {error}",
+                hook.kind.label()
+            ),
+        ),
+        Err(error) => applied_edit_evidence(
+            hook.kind,
+            AppliedEditEvidenceStatus::Warning,
+            format!(
+                "{}: warning ({display_command}): {error}",
+                hook.kind.label()
+            ),
+        ),
+    }
+}
+
+fn applied_edit_evidence(
+    kind: AppliedEditEvidenceKind,
+    status: AppliedEditEvidenceStatus,
+    summary: String,
+) -> AppliedEditEvidence {
+    AppliedEditEvidence {
+        kind,
+        status,
+        summary: trim_for_summary(&summary, MAX_EDITOR_OUTPUT_CHARS / 3),
+    }
+}
+
+fn summarize_edit_evidence_output(
+    kind: AppliedEditEvidenceKind,
+    status: AppliedEditEvidenceStatus,
+    command: &str,
+    output: &Output,
+) -> String {
+    let mut summary = format!("{}: {} ({command})", kind.label(), status.label());
+    if !output.stdout.is_empty() {
+        summary.push_str("\nstdout:\n");
+        summary.push_str(&String::from_utf8_lossy(&output.stdout));
+    }
+    if !output.stderr.is_empty() {
+        summary.push_str("\nstderr:\n");
+        summary.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    trim_for_summary(&summary, MAX_EDITOR_OUTPUT_CHARS / 3)
 }
 
 fn format_command_summary(header: &str, command: &str, output: &Output) -> String {
@@ -665,6 +859,7 @@ fn build_applied_edit(
         diff,
         insertions,
         deletions,
+        evidence: Vec::new(),
     })
 }
 
@@ -676,6 +871,7 @@ fn build_patch_applied_edit(patch: &str) -> AppliedEdit {
         diff,
         insertions,
         deletions,
+        evidence: Vec::new(),
     }
 }
 
@@ -692,6 +888,13 @@ fn summarize_applied_edit(tool_name: &str, edit: &AppliedEdit) -> String {
     if !edit.diff.trim().is_empty() {
         summary.push_str("\n\n");
         summary.push_str(&edit.diff);
+    }
+    if !edit.evidence.is_empty() {
+        summary.push_str("\n\nEvidence:");
+        for evidence in &edit.evidence {
+            summary.push_str("\n- ");
+            summary.push_str(&evidence.summary);
+        }
     }
     trim_for_summary(&summary, MAX_EDITOR_OUTPUT_CHARS)
 }
@@ -761,6 +964,68 @@ fn diff_change_counts(diff: &str) -> (usize, usize) {
         }
     }
     (insertions, deletions)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReplacementCandidateContext {
+    line: usize,
+    excerpt: String,
+}
+
+fn replacement_candidates(text: &str, pattern: &str) -> Vec<ReplacementCandidateContext> {
+    if pattern.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+    let mut search_start = 0;
+    while let Some(offset) = text[search_start..].find(pattern) {
+        let index = search_start + offset;
+        candidates.push(ReplacementCandidateContext {
+            line: line_number_at(text, index),
+            excerpt: line_excerpt_at(text, index),
+        });
+        search_start = index + pattern.len();
+    }
+    candidates
+}
+
+fn line_number_at(text: &str, index: usize) -> usize {
+    text[..index].bytes().filter(|byte| *byte == b'\n').count() + 1
+}
+
+fn line_excerpt_at(text: &str, index: usize) -> String {
+    let line_start = text[..index]
+        .rfind('\n')
+        .map(|start| start + 1)
+        .unwrap_or(0);
+    let line_end = text[index..]
+        .find('\n')
+        .map(|offset| index + offset)
+        .unwrap_or(text.len());
+    trim_for_summary(text[line_start..line_end].trim_end_matches('\r'), 160)
+}
+
+fn format_ambiguous_replacement_error(
+    path: &Path,
+    candidates: &[ReplacementCandidateContext],
+) -> String {
+    let context = candidates
+        .iter()
+        .take(5)
+        .map(|candidate| format!("line {}: {}", candidate.line, candidate.excerpt))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let suffix = if candidates.len() > 5 {
+        format!("; {} more matches omitted", candidates.len() - 5)
+    } else {
+        String::new()
+    };
+    format!(
+        "ambiguous replacement in {}: pattern matched {} locations. Candidate context: {context}{suffix}",
+        path.display(),
+        candidates.len()
+    )
 }
 
 fn extract_diff_paths(diff: &str) -> Vec<String> {
@@ -876,7 +1141,8 @@ pub(crate) fn relative_path(workspace_root: &Path, path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::LocalWorkspaceEditor;
+    use super::{LocalWorkspaceEditor, WorkspaceEditEvidenceHooks, WorkspaceEditHookCommand};
+    use crate::domain::model::{AppliedEditEvidenceKind, AppliedEditEvidenceStatus};
     use crate::domain::model::{
         ExecutionApprovalPolicy, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,
         ExecutionHandKind, ExecutionHandOperation, ExecutionHandPhase,
@@ -1136,5 +1402,66 @@ mod tests {
             fs::read_to_string(workspace.path().join("locked.txt")).expect("read locked file"),
             "old\n"
         );
+    }
+
+    #[test]
+    fn workspace_replace_ambiguous_returns_candidate_context_without_editing() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("ambiguous.txt"),
+            "alpha\nmiddle\nalpha\n",
+        )
+        .expect("seed ambiguous file");
+        let editor = LocalWorkspaceEditor::new(workspace.path());
+
+        let error = editor
+            .replace_in_file("ambiguous.txt", "alpha", "beta", false)
+            .expect_err("ambiguous replacement should be rejected");
+
+        let message = error.to_string();
+        assert!(message.contains("ambiguous replacement"));
+        assert!(message.contains("line 1"));
+        assert!(message.contains("line 3"));
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("ambiguous.txt")).expect("read file"),
+            "alpha\nmiddle\nalpha\n"
+        );
+    }
+
+    #[test]
+    fn workspace_edit_diagnostics_attach_formatter_and_diagnostic_outcomes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let editor = LocalWorkspaceEditor::new(workspace.path()).with_edit_evidence_hooks(
+            WorkspaceEditEvidenceHooks {
+                formatter: Some(WorkspaceEditHookCommand::new(
+                    AppliedEditEvidenceKind::Formatter,
+                    "rustc",
+                    vec!["--version"],
+                )),
+                diagnostics: Some(WorkspaceEditHookCommand::new(
+                    AppliedEditEvidenceKind::Diagnostics,
+                    "paddles-missing-diagnostic-command",
+                    Vec::<&str>::new(),
+                )),
+            },
+        );
+
+        let result = editor
+            .write_file("diagnostics.txt", "hello\n")
+            .expect("write file");
+        let applied_edit = result.applied_edit.expect("applied edit");
+
+        assert!(applied_edit.evidence.iter().any(|evidence| {
+            evidence.kind == AppliedEditEvidenceKind::Formatter
+                && evidence.status == AppliedEditEvidenceStatus::Passed
+                && evidence.summary.contains("rustc --version")
+        }));
+        assert!(applied_edit.evidence.iter().any(|evidence| {
+            evidence.kind == AppliedEditEvidenceKind::Diagnostics
+                && evidence.status == AppliedEditEvidenceStatus::Unavailable
+                && evidence.summary.contains("unavailable")
+        }));
+        assert!(result.summary.contains("formatter: passed"));
+        assert!(result.summary.contains("diagnostics: unavailable"));
     }
 }

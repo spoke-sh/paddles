@@ -124,7 +124,8 @@ pub use traces::{
     TraceTurnStarted, TraceWorkerArtifact, TraceWorkerIntegration, TraceWorkerLifecycle,
 };
 pub use turns::{
-    AppliedEdit, ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink,
+    AppliedEdit, AppliedEditEvidence, AppliedEditEvidenceKind, AppliedEditEvidenceStatus,
+    ForensicArtifactCapture, ForensicTraceSink, MultiplexEventSink, NullTurnEventSink,
     PlanChecklistItem, PlanChecklistItemStatus, TurnEvent, TurnEventSink, TurnIntent,
 };
 

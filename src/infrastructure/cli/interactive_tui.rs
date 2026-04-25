@@ -5140,6 +5140,7 @@ mod tests {
                 diff: "--- a/note.txt\n+++ b/note.txt\n@@ -0,0 +1 @@\n+hello".to_string(),
                 insertions: 1,
                 deletions: 0,
+                evidence: Vec::new(),
             },
         };
         let row = format_turn_event_row(event.clone(), 0);

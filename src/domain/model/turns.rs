@@ -55,6 +55,49 @@ pub struct AppliedEdit {
     pub diff: String,
     pub insertions: usize,
     pub deletions: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<AppliedEditEvidence>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppliedEditEvidenceKind {
+    Formatter,
+    Diagnostics,
+}
+
+impl AppliedEditEvidenceKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Formatter => "formatter",
+            Self::Diagnostics => "diagnostics",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppliedEditEvidenceStatus {
+    Passed,
+    Warning,
+    Unavailable,
+}
+
+impl AppliedEditEvidenceStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Warning => "warning",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct AppliedEditEvidence {
+    pub kind: AppliedEditEvidenceKind,
+    pub status: AppliedEditEvidenceStatus,
+    pub summary: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

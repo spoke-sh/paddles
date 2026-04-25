@@ -453,6 +453,7 @@ mod tests {
             diff: "@@".to_string(),
             insertions: 4,
             deletions: 2,
+            evidence: Vec::new(),
         };
         assert_eq!(
             edit.runtime_items(),
