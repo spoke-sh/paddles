@@ -8,6 +8,7 @@ pub mod delegation;
 pub mod deliberation;
 pub mod evaluation;
 pub mod execution_hand;
+pub mod execution_policy;
 pub mod external_capability;
 pub mod generative;
 pub mod harness;
@@ -59,6 +60,10 @@ pub use execution_hand::{
     ExecutionPermissionReuseScope, ExecutionSandboxMode,
     default_local_execution_governance_profile, default_local_execution_hand_descriptors,
     summarize_execution_permissions, summarize_execution_reuse_scopes,
+};
+pub use execution_policy::{
+    ExecutionPolicy, ExecutionPolicyDecision, ExecutionPolicyDecisionKind,
+    ExecutionPolicyEvaluationInput, ExecutionPolicyMatcher, ExecutionPolicyRule,
 };
 pub use external_capability::{
     ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityCatalog,

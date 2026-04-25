@@ -2,6 +2,7 @@ mod conversation_read_model;
 mod deliberation;
 mod evals;
 mod execution_contract;
+mod execution_policy;
 mod external_capability;
 mod interpretation_chamber;
 mod planner_loop;
@@ -20,6 +21,7 @@ use self::execution_contract::{
     ExecutionContractContext, ExecutionContractService, format_external_capability_catalog_entry,
     format_gatherer_capability, gatherer_readiness_label,
 };
+pub use self::execution_policy::ExecutionPolicyEvaluator;
 pub use self::external_capability::ExternalCapabilityBrokerRegistry;
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};

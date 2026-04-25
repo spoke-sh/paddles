@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:05:08
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Add Execution Policy Model And Evaluator](../../../../stories/VHkhlj8OS/README.md) | feat | backlog |
+| [Add Execution Policy Model And Evaluator](../../../../stories/VHkhlj8OS/README.md) | feat | done |
 | [Integrate Policy Gate With Local Hands](../../../../stories/VHkhmMMtW/README.md) | feat | icebox |
 | [Project Policy Decisions And Fixtures](../../../../stories/VHkhnO64T/README.md) | feat | icebox |
 <!-- END GENERATED -->
