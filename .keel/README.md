@@ -399,7 +399,7 @@
 | [Activate Recursive Delegation Runtime](epics/VHkfpJJc4/voyages/VHkgMxksP/) | in-progress |
 | [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | in-progress |
 | [Create Recursive Harness Eval Suite](epics/VHkfpJJc4/voyages/VHkgOF9KK/) | done |
-| [Split Application Into Hexagonal Boundaries](epics/VHkfpJJc4/voyages/VHkgP8L7k/) | in-progress |
+| [Split Application Into Hexagonal Boundaries](epics/VHkfpJJc4/voyages/VHkgP8L7k/) | done |
 | [Expose Operator Surfaces And Provider Registry](epics/VHkfpJJc4/voyages/VHkgPmlyS/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)

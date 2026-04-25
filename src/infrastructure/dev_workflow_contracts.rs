@@ -127,6 +127,16 @@ fn architecture_boundary_domain_layer_has_no_outer_layer_dependencies() {
 }
 
 #[test]
+fn architecture_boundary_execution_contract_service_has_no_infrastructure_dependency() {
+    let source = read_repo_file("src/application/execution_contract.rs");
+
+    assert!(
+        !source.contains("crate::infrastructure"),
+        "execution contract application service must depend on domain ports/models, not infrastructure adapters",
+    );
+}
+
+#[test]
 fn just_quality_runs_frontend_workspace_lint_checks() {
     let justfile = read_repo_file("justfile");
     let frontend_install_section = justfile

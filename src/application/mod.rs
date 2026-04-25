@@ -1,6 +1,7 @@
 mod conversation_read_model;
 mod deliberation;
 mod evals;
+mod execution_contract;
 mod interpretation_chamber;
 mod planner_loop;
 pub mod read_model;
@@ -14,6 +15,10 @@ pub use self::deliberation::{
     extract_deliberation_signals,
 };
 pub use self::evals::{EvalRunner, recursive_harness_eval_corpus};
+use self::execution_contract::{
+    ExecutionContractContext, ExecutionContractService, format_external_capability_catalog_entry,
+    format_gatherer_capability, gatherer_readiness_label,
+};
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 use self::recursive_control::RecursiveControlChamber;
@@ -91,8 +96,8 @@ use crate::domain::ports::{
     RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
     RetrieverOption, SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine,
     ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery,
-    WorkspaceAction, WorkspaceActionCapability, WorkspaceActionExecutionFrame,
-    WorkspaceActionExecutor, WorkspaceCapabilitySurface, WorkspaceToolCapability,
+    WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+    WorkspaceCapabilitySurface,
 };
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
@@ -2405,16 +2410,17 @@ impl MechSuitService {
         let execution_hands = execution_hand_registry.diagnostics();
         let governance_profile = execution_hand_registry.governance_profile();
         let external_capabilities = self.external_capability_descriptors();
-        build_planner_execution_contract(PlannerExecutionContractContext {
-            workspace_capability_surface: &workspace_capability_surface,
-            execution_hands: &execution_hands,
-            governance_profile: governance_profile.as_ref(),
-            external_capabilities: &external_capabilities,
-            gatherer,
-            collaboration,
-            instruction_frame,
-            grounding,
-        })
+        self.execution_contract_service()
+            .build(ExecutionContractContext {
+                workspace_capability_surface: &workspace_capability_surface,
+                execution_hands: &execution_hands,
+                governance_profile: governance_profile.as_ref(),
+                external_capabilities: &external_capabilities,
+                gatherer: gatherer.map(|gatherer| gatherer.as_ref()),
+                collaboration,
+                instruction_frame,
+                grounding,
+            })
     }
 
     pub fn set_native_transport_registry(&self, registry: Arc<NativeTransportRegistry>) {
@@ -2497,6 +2503,10 @@ impl MechSuitService {
 
     fn planner_loop_service(&self) -> PlannerLoopService {
         PlannerLoopService::new()
+    }
+
+    fn execution_contract_service(&self) -> ExecutionContractService {
+        ExecutionContractService::new()
     }
 
     fn synthesis_chamber(&self) -> SynthesisChamber<'_> {
@@ -3431,6 +3441,7 @@ impl MechSuitService {
         let base_budget =
             planner_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
         let planner_loop_service = self.planner_loop_service();
+        let execution_contract_service = self.execution_contract_service();
         let mut budget = planner_loop_service.budget_for_replan_attempt(&base_budget, 0);
         let harness_profile = context.prepared.harness_profile();
         let mut loop_state = PlannerLoopState {
@@ -3504,13 +3515,13 @@ impl MechSuitService {
                     &context.specialist_runtime_notes,
                     &context.collaboration,
                 ))
-                .with_execution_contract(build_planner_execution_contract(
-                    PlannerExecutionContractContext {
+                .with_execution_contract(execution_contract_service.build(
+                    ExecutionContractContext {
                         workspace_capability_surface: &context.workspace_capability_surface,
                         execution_hands: &context.execution_hands,
                         governance_profile: context.governance_profile.as_ref(),
                         external_capabilities: &context.external_capabilities,
-                        gatherer: context.gatherer.as_ref(),
+                        gatherer: context.gatherer.as_deref(),
                         collaboration: &context.collaboration,
                         instruction_frame: instruction_frame.as_ref(),
                         grounding: context.grounding.as_ref(),
@@ -5291,26 +5302,6 @@ fn render_structured_clarification_request(
     lines.join("\n")
 }
 
-fn format_gatherer_capability(capability: &GathererCapability) -> String {
-    match capability {
-        GathererCapability::Available => "available".to_string(),
-        GathererCapability::Warming { reason } => format!("warming: {reason}"),
-        GathererCapability::Unsupported { reason } => format!("unsupported: {reason}"),
-        GathererCapability::HarnessRequired { reason } => {
-            format!("harness-required: {reason}")
-        }
-    }
-}
-
-fn gatherer_readiness_label(capability: &GathererCapability) -> &'static str {
-    match capability {
-        GathererCapability::Available => "available",
-        GathererCapability::Warming { .. } => "warming",
-        GathererCapability::Unsupported { .. } => "unsupported",
-        GathererCapability::HarnessRequired { .. } => "harness-required",
-    }
-}
-
 fn planner_runtime_notes(
     gatherer: Option<&Arc<dyn ContextGatherer>>,
     specialist_notes: &[String],
@@ -5361,222 +5352,6 @@ fn planner_runtime_notes(
         guidance
     ));
     notes
-}
-
-struct PlannerExecutionContractContext<'a> {
-    workspace_capability_surface: &'a WorkspaceCapabilitySurface,
-    execution_hands: &'a [ExecutionHandDiagnostic],
-    governance_profile: Option<&'a ExecutionGovernanceProfile>,
-    external_capabilities: &'a [ExternalCapabilityDescriptor],
-    gatherer: Option<&'a Arc<dyn ContextGatherer>>,
-    collaboration: &'a CollaborationModeResult,
-    instruction_frame: Option<&'a InstructionFrame>,
-    grounding: Option<&'a GroundingRequirement>,
-}
-
-fn build_planner_execution_contract(
-    context: PlannerExecutionContractContext<'_>,
-) -> PlannerExecutionContract {
-    let PlannerExecutionContractContext {
-        workspace_capability_surface,
-        execution_hands,
-        governance_profile,
-        external_capabilities,
-        gatherer,
-        collaboration,
-        instruction_frame,
-        grounding,
-    } = context;
-    let mut capability_manifest = workspace_capability_surface
-        .actions
-        .iter()
-        .map(|capability| format_workspace_action_capability(capability, collaboration))
-        .collect::<Vec<_>>();
-    capability_manifest.extend(
-        workspace_capability_surface
-            .tools
-            .iter()
-            .map(format_workspace_tool_capability),
-    );
-    capability_manifest.extend(
-        workspace_capability_surface
-            .notes
-            .iter()
-            .map(|note| format!("workspace note: {note}")),
-    );
-    capability_manifest.extend(
-        execution_hands
-            .iter()
-            .map(format_execution_hand_capability_line),
-    );
-    capability_manifest.extend(retrieval_capability_lines(gatherer));
-    capability_manifest.extend(external_capabilities.iter().map(|descriptor| {
-        format!(
-            "external capability {}: {}",
-            descriptor.id,
-            format_external_capability_catalog_entry(descriptor)
-        )
-    }));
-    capability_manifest.push(match governance_profile {
-        Some(profile) => {
-            format!(
-                "execution governance: {} {}",
-                profile.summary(),
-                profile.detail()
-            )
-        }
-        None => "execution governance: unavailable; mutating or networked actions may fail closed"
-            .to_string(),
-    });
-
-    let mut completion_contract = vec![
-        "Choose only actions supported by the capability manifest. If a capability is blocked or unavailable, choose a different bounded action."
-            .to_string(),
-        "When a task depends on a local program that is not already observed in the capability manifest, choose a bounded single-step probe such as `inspect` `command -v <tool>` before depending on it."
-            .to_string(),
-        "`inspect` is only for single read-only probes. Do not chain commands or use redirection; use `shell` for broader governed workspace command execution."
-            .to_string(),
-    ];
-
-    match collaboration.active.mode {
-        CollaborationMode::Planning => completion_contract.push(
-            "Planning mode is read-only. Do not choose mutating workspace actions or shell commands that could change the repository."
-                .to_string(),
-        ),
-        CollaborationMode::Review => completion_contract.push(
-            "Review mode is read-only. Inspect local evidence and stop at findings; do not choose mutating workspace actions."
-                .to_string(),
-        ),
-        CollaborationMode::Execution => completion_contract.push(
-            "Execution mode allows mutating workspace actions, but they still run through execution governance and may be denied or downgraded."
-                .to_string(),
-        ),
-    }
-
-    if let Some(frame) = instruction_frame {
-        if frame.requires_applied_edit() {
-            let mut line =
-                "The turn is not complete until an applied workspace edit succeeds.".to_string();
-            if let Some(candidates) = frame.candidate_summary() {
-                line.push_str(&format!(" Current candidate files: {candidates}."));
-            }
-            completion_contract.push(line);
-        }
-        if frame.requires_applied_commit() {
-            completion_contract.push(
-                "The turn is not complete until the requested git commit has been recorded in the workspace."
-                    .to_string(),
-            );
-        }
-    }
-
-    if let Some(grounding) = grounding {
-        let mut line = format!(
-            "Do not stop with a final answer until {} evidence has been assembled.",
-            grounding_domain_label(grounding.domain)
-        );
-        if let Some(reason) = grounding
-            .reason
-            .as_deref()
-            .filter(|reason| !reason.trim().is_empty())
-        {
-            line.push_str(&format!(" Reason: {}.", reason.trim()));
-        }
-        completion_contract.push(line);
-    }
-
-    PlannerExecutionContract {
-        capability_manifest,
-        completion_contract,
-    }
-}
-
-fn format_workspace_action_capability(
-    capability: &WorkspaceActionCapability,
-    collaboration: &CollaborationModeResult,
-) -> String {
-    if capability.mutating && !collaboration.active.mutation_posture.allows_mutation() {
-        return format!(
-            "workspace action {}: blocked by {} mode read-only boundary — {}",
-            capability.action,
-            collaboration.active.mode.label(),
-            capability.summary
-        );
-    }
-
-    let posture = if capability.mutating {
-        "mutating"
-    } else {
-        "read-only"
-    };
-    format!(
-        "workspace action {}: available ({posture}) — {}",
-        capability.action, capability.summary
-    )
-}
-
-fn format_workspace_tool_capability(tool: &WorkspaceToolCapability) -> String {
-    match tool.suggested_probe.as_ref() {
-        Some(action) => format!(
-            "workspace tool observation {}: {} — re-probe via {}",
-            tool.tool,
-            tool.summary,
-            action.summary()
-        ),
-        None => format!("workspace tool observation {}: {}", tool.tool, tool.summary),
-    }
-}
-
-fn format_execution_hand_capability_line(diagnostic: &ExecutionHandDiagnostic) -> String {
-    let operations = diagnostic
-        .supported_operations
-        .iter()
-        .map(|operation| operation.label())
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        "execution hand {}: {}, authority={}, operations=[{}] — {}",
-        diagnostic.hand.label(),
-        diagnostic.phase.label(),
-        diagnostic.authority.label(),
-        operations,
-        diagnostic.summary
-    )
-}
-
-fn retrieval_capability_lines(gatherer: Option<&Arc<dyn ContextGatherer>>) -> Vec<String> {
-    let Some(gatherer) = gatherer else {
-        return vec![
-            "search/refine via bm25: unavailable — no gatherer is configured".to_string(),
-            "search/refine via vector: unavailable — no gatherer is configured".to_string(),
-        ];
-    };
-
-    let lexical = gatherer.capability_for_planning(
-        &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Lexical),
-    );
-    let vector = gatherer.capability_for_planning(
-        &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Vector),
-    );
-
-    vec![
-        format!(
-            "search/refine via bm25: {}",
-            format_gatherer_capability(&lexical)
-        ),
-        format!(
-            "search/refine via vector: {}",
-            format_gatherer_capability(&vector)
-        ),
-    ]
-}
-
-fn grounding_domain_label(domain: GroundingDomain) -> &'static str {
-    match domain {
-        GroundingDomain::Repository => "repository",
-        GroundingDomain::External => "external",
-        GroundingDomain::Mixed => "mixed repository and external",
-    }
 }
 
 fn format_planner_capability(capability: &PlannerCapability) -> String {
@@ -6195,18 +5970,18 @@ async fn review_decision_under_signals(
         &context.specialist_runtime_notes,
         &context.collaboration,
     ))
-    .with_execution_contract(build_planner_execution_contract(
-        PlannerExecutionContractContext {
+    .with_execution_contract(
+        ExecutionContractService::new().build(ExecutionContractContext {
             workspace_capability_surface: &context.workspace_capability_surface,
             execution_hands: &context.execution_hands,
             governance_profile: context.governance_profile.as_ref(),
             external_capabilities: &context.external_capabilities,
-            gatherer: context.gatherer.as_ref(),
+            gatherer: context.gatherer.as_deref(),
             collaboration: &context.collaboration,
             instruction_frame: context.instruction_frame.as_ref(),
             grounding: context.grounding.as_ref(),
-        },
-    ))
+        }),
+    )
     .with_loop_state(review_loop_state)
     .with_resolver(context.resolver.clone())
     .with_entity_resolver(context.entity_resolver.clone());
@@ -8134,23 +7909,6 @@ fn format_external_capability_invocation(
     lines.join("\n")
 }
 
-fn format_external_capability_catalog_entry(descriptor: &ExternalCapabilityDescriptor) -> String {
-    let evidence = descriptor
-        .evidence_shape
-        .kinds
-        .iter()
-        .map(|kind| kind.label())
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "fabric={} availability={} auth={} effects={} evidence={evidence}",
-        descriptor.id,
-        descriptor.availability.label(),
-        descriptor.auth_posture.label(),
-        descriptor.side_effect_posture.label(),
-    )
-}
-
 fn format_external_capability_outcome(
     descriptor: Option<&ExternalCapabilityDescriptor>,
     invocation: &ExternalCapabilityInvocation,
@@ -9838,49 +9596,6 @@ mod tests {
                 .procedures
                 .iter()
                 .any(|procedure| { procedure.label == "Diagnose CI Or Actions" })
-        );
-    }
-
-    #[test]
-    fn planner_execution_contract_describes_inspect_as_single_step() {
-        let contract =
-            super::build_planner_execution_contract(super::PlannerExecutionContractContext {
-                workspace_capability_surface: &WorkspaceCapabilitySurface {
-                    actions: vec![
-                        WorkspaceActionCapability::new(
-                            "inspect",
-                            "run a single read-only shell probe through the terminal hand",
-                            false,
-                        ),
-                        WorkspaceActionCapability::new(
-                            "shell",
-                            "run a governed workspace command when a command should execute now",
-                            true,
-                        ),
-                    ],
-                    tools: Vec::new(),
-                    notes: Vec::new(),
-                },
-                execution_hands: &[],
-                governance_profile: None,
-                external_capabilities: &[],
-                gatherer: None,
-                collaboration: &CollaborationModeResult::default(),
-                instruction_frame: None,
-                grounding: None,
-            });
-
-        assert!(contract.capability_manifest.iter().any(|line| line.contains(
-            "workspace action inspect: available (read-only) — run a single read-only shell probe through the terminal hand"
-        )));
-        assert!(contract.completion_contract.iter().any(|line| {
-            line.contains("bounded single-step probe such as `inspect` `command -v <tool>`")
-        }));
-        assert!(
-            contract
-                .completion_contract
-                .iter()
-                .any(|line| line.contains("`inspect` is only for single read-only probes"))
         );
     }
 
