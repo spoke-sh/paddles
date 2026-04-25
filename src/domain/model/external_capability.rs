@@ -1,6 +1,7 @@
 use super::{ExecutionHandKind, ExecutionPermission, ExecutionPermissionRequirement};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -196,6 +197,82 @@ impl ExternalCapabilityDescriptor {
         purpose: impl Into<String>,
     ) -> ExecutionPermissionRequirement {
         ExecutionPermissionRequirement::new(purpose, self.required_permissions.clone())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ExternalCapabilityCatalogConfig {
+    enabled_capabilities: BTreeSet<String>,
+}
+
+impl ExternalCapabilityCatalogConfig {
+    pub fn enable(mut self, capability_id: impl Into<String>) -> Self {
+        self.enabled_capabilities.insert(capability_id.into());
+        self
+    }
+
+    pub fn is_enabled(&self, capability_id: &str) -> bool {
+        self.enabled_capabilities.contains(capability_id)
+    }
+
+    pub fn enabled_capability_ids(&self) -> impl Iterator<Item = &str> {
+        self.enabled_capabilities.iter().map(String::as_str)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalCapabilityCatalog {
+    descriptors: Vec<ExternalCapabilityDescriptor>,
+}
+
+impl Default for ExternalCapabilityCatalog {
+    fn default() -> Self {
+        Self::default_unavailable()
+    }
+}
+
+impl ExternalCapabilityCatalog {
+    pub fn new(descriptors: Vec<ExternalCapabilityDescriptor>) -> Self {
+        Self { descriptors }
+    }
+
+    pub fn default_unavailable() -> Self {
+        Self::new(default_external_capability_descriptors())
+    }
+
+    pub fn from_local_configuration(config: &ExternalCapabilityCatalogConfig) -> Self {
+        let mut catalog = Self::default_unavailable();
+        for capability_id in config.enabled_capability_ids() {
+            catalog =
+                catalog.with_availability(capability_id, ExternalCapabilityAvailability::Available);
+        }
+        catalog
+    }
+
+    pub fn descriptors(&self) -> Vec<ExternalCapabilityDescriptor> {
+        self.descriptors.clone()
+    }
+
+    pub fn descriptor(&self, capability_id: &str) -> Option<ExternalCapabilityDescriptor> {
+        self.descriptors
+            .iter()
+            .find(|descriptor| descriptor.id == capability_id)
+            .cloned()
+    }
+
+    pub fn with_availability(
+        mut self,
+        capability_id: &str,
+        availability: ExternalCapabilityAvailability,
+    ) -> Self {
+        if let Some(descriptor) = self
+            .descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.id == capability_id)
+        {
+            descriptor.availability = availability;
+        }
+        self
     }
 }
 

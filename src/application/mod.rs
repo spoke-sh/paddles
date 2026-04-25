@@ -2,6 +2,7 @@ mod conversation_read_model;
 mod deliberation;
 mod evals;
 mod execution_contract;
+mod external_capability;
 mod interpretation_chamber;
 mod planner_loop;
 pub mod read_model;
@@ -19,6 +20,7 @@ use self::execution_contract::{
     ExecutionContractContext, ExecutionContractService, format_external_capability_catalog_entry,
     format_gatherer_capability, gatherer_readiness_label,
 };
+pub use self::external_capability::ExternalCapabilityBrokerRegistry;
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 use self::recursive_control::RecursiveControlChamber;
@@ -45,7 +47,6 @@ use crate::infrastructure::execution_governance::{
     ExecutionPermissionGate, GovernedTerminalCommandResult, summarize_governance_outcome,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
-use crate::infrastructure::external_capability::NoopExternalCapabilityBroker;
 use crate::infrastructure::harness_profile::HarnessProfileSelection;
 use crate::infrastructure::native_transport::NativeTransportRegistry;
 use crate::infrastructure::providers::ModelProvider;
@@ -2316,7 +2317,7 @@ impl MechSuitService {
             execution_hand_registry: Mutex::new(execution_hand_registry),
             workspace_action_executor: Mutex::new(workspace_action_executor),
             external_capability_broker: Mutex::new(Arc::new(
-                NoopExternalCapabilityBroker::default(),
+                ExternalCapabilityBrokerRegistry::default(),
             )),
             native_transport_registry: Mutex::new(Arc::new(NativeTransportRegistry::default())),
             specialist_brain_registry: Mutex::new(Arc::new(SpecialistBrainRegistry::new())),

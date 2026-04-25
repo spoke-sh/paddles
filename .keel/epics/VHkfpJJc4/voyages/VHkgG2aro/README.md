@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:05:03
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define External Capability Broker Port And Catalog](../../../../stories/VHkhj5rdT/README.md) | feat | backlog |
+| [Define External Capability Broker Port And Catalog](../../../../stories/VHkhj5rdT/README.md) | feat | done |
 | [Govern External Capability Invocation Results](../../../../stories/VHkhk8Xmt/README.md) | feat | backlog |
 | [Feed External Results Into Recursive Evidence](../../../../stories/VHkhkxETY/README.md) | feat | backlog |
 <!-- END GENERATED -->

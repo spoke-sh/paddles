@@ -61,7 +61,8 @@ pub use execution_hand::{
     summarize_execution_permissions, summarize_execution_reuse_scopes,
 };
 pub use external_capability::{
-    ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityDescriptor,
+    ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityCatalog,
+    ExternalCapabilityCatalogConfig, ExternalCapabilityDescriptor,
     ExternalCapabilityDescriptorMetadata, ExternalCapabilityEvidenceKind,
     ExternalCapabilityEvidenceShape, ExternalCapabilityInvocation, ExternalCapabilityKind,
     ExternalCapabilityResult, ExternalCapabilityResultStatus, ExternalCapabilitySideEffectPosture,
