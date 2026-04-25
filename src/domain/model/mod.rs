@@ -5,6 +5,7 @@ pub mod compaction;
 pub mod context_quality;
 pub mod control;
 pub mod delegation;
+pub mod deliberation;
 pub mod evaluation;
 pub mod execution_hand;
 pub mod external_capability;
@@ -14,21 +15,11 @@ pub mod harness_projector;
 pub mod instructions;
 pub mod interpretation;
 pub mod native_transport;
+pub mod read_model;
 pub mod render;
 pub mod threading;
 pub mod traces;
 pub mod turns;
-pub use crate::application::read_model::{
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
-    ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
-    ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
-    ConversationTraceGraphEdge, ConversationTraceGraphNode, ConversationTranscript,
-    ConversationTranscriptEntry, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
-    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
-    ManifoldConduitState, ManifoldFrame, ManifoldGateState, ManifoldPrimitiveBasis,
-    ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
-    NullForensicUpdateSink, NullTranscriptUpdateSink, TranscriptUpdateSink,
-};
 pub use collaboration::{
     CollaborationClarificationPolicy, CollaborationMode, CollaborationModeRequest,
     CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
@@ -55,6 +46,7 @@ pub use delegation::{
     WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
     WorkerRole,
 };
+pub use deliberation::DeliberationState;
 pub use evaluation::{
     EvalHarnessContract, EvalOutcome, EvalReport, EvalRunConfig, EvalScenario, EvalStatus,
 };
@@ -101,6 +93,17 @@ pub use paddles_conversation::{
     ThreadCandidateId, ThreadDecision, ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
     TurnTraceId,
+};
+pub use read_model::{
+    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
+    ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
+    ConversationTraceGraphEdge, ConversationTraceGraphNode, ConversationTranscript,
+    ConversationTranscriptEntry, ConversationTranscriptSpeaker, ConversationTranscriptUpdate,
+    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
+    ManifoldConduitState, ManifoldFrame, ManifoldGateState, ManifoldPrimitiveBasis,
+    ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
+    NullForensicUpdateSink, NullTranscriptUpdateSink, TranscriptUpdateSink,
 };
 pub use render::{RenderBlock, RenderDocument, SUPPORTED_RENDER_TYPES};
 pub use threading::ConversationReplayView;

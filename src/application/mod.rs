@@ -14,7 +14,10 @@ pub use self::deliberation::{
 };
 pub use self::evals::{EvalRunner, recursive_harness_eval_corpus};
 use self::interpretation_chamber::InterpretationChamber;
-pub use self::read_model::{
+use self::recursive_control::RecursiveControlChamber;
+use self::synthesis_chamber::SynthesisChamber;
+use self::turn_orchestration::TurnOrchestrationChamber;
+pub use crate::domain::model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
     ConversationProjectionReducer, ConversationProjectionSnapshot, ConversationProjectionUpdate,
     ConversationProjectionUpdateKind, ConversationTraceGraph, ConversationTraceGraphBranch,
@@ -25,9 +28,6 @@ pub use self::read_model::{
     ManifoldPrimitiveKind, ManifoldPrimitiveState, ManifoldSignalState, ManifoldTurnProjection,
     NullForensicUpdateSink, NullTranscriptUpdateSink, TranscriptUpdateSink,
 };
-use self::recursive_control::RecursiveControlChamber;
-use self::synthesis_chamber::SynthesisChamber;
-use self::turn_orchestration::TurnOrchestrationChamber;
 
 use crate::infrastructure::adapters::TransitContextResolver;
 use crate::infrastructure::adapters::local_workspace_action_executor::LocalWorkspaceActionExecutor;
@@ -8555,6 +8555,7 @@ mod tests {
         PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
         StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
     };
+    use crate::domain::model::DeliberationState;
     use crate::domain::model::{
         AuthoredResponse, CollaborationMode, CollaborationModeRequest,
         CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
@@ -8598,7 +8599,7 @@ mod tests {
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
-    use crate::infrastructure::providers::{DeliberationState, ModelProvider};
+    use crate::infrastructure::providers::ModelProvider;
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use paddles_conversation::ConversationSession;
@@ -9333,7 +9334,7 @@ mod tests {
 
     fn moonshot_continuation_state() -> DeliberationState {
         DeliberationState::new(
-            ModelProvider::Moonshot,
+            ModelProvider::Moonshot.name(),
             "kimi-k2.6",
             json!({
                 "kind": "moonshot_openai_chat_completion",

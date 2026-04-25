@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-24T17:29:00.026226373-07:00
+mode: manual
+---
+ARCHITECTURE.md now documents the boundary check entrypoint and states the expected dependency direction: domain has value types, policies, ports, and read-model contracts; domain must not import application or infrastructure; application depends inward on domain and receives implementations through ports; infrastructure binds concrete providers, filesystem, transports, terminal execution, web routes, and persistence.

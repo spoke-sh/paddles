@@ -1,6 +1,5 @@
 use crate::infrastructure::rendering::RenderCapability;
 use clap::ValueEnum;
-use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
 pub enum ModelProvider {
@@ -99,39 +98,6 @@ impl DeliberationStateContract {
 pub struct DeliberationCapabilitySurface {
     pub support: DeliberationSupport,
     pub state_contract: DeliberationStateContract,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DeliberationState {
-    provider: ModelProvider,
-    runtime_model_id: String,
-    payload: Value,
-}
-
-impl DeliberationState {
-    pub fn new(
-        provider: ModelProvider,
-        runtime_model_id: impl Into<String>,
-        payload: Value,
-    ) -> Self {
-        Self {
-            provider,
-            runtime_model_id: runtime_model_id.into(),
-            payload,
-        }
-    }
-
-    pub fn provider(&self) -> ModelProvider {
-        self.provider
-    }
-
-    pub fn runtime_model_id(&self) -> &str {
-        &self.runtime_model_id
-    }
-
-    pub fn payload(&self) -> &Value {
-        &self.payload
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

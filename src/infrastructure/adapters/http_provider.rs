@@ -1,9 +1,8 @@
-use crate::domain::model::ForensicArtifactCapture;
 use crate::domain::model::{
-    CompactionDecision, CompactionPlan, CompactionRequest, ExternalCapabilityInvocation,
-    ThreadDecision, ThreadDecisionId, ThreadDecisionKind, TraceArtifactId,
-    TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent,
-    TurnEventSink, TurnIntent,
+    CompactionDecision, CompactionPlan, CompactionRequest, DeliberationState,
+    ExternalCapabilityInvocation, ForensicArtifactCapture, ThreadDecision, ThreadDecisionId,
+    ThreadDecisionKind, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
+    TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
 };
 use crate::domain::ports::{
     EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
@@ -13,9 +12,8 @@ use crate::domain::ports::{
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
-    ApiFormat, DeliberationCapabilitySurface, DeliberationState, DeliberationStateContract,
-    DeliberationSupport, ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability,
-    ProviderTransportSupport,
+    ApiFormat, DeliberationCapabilitySurface, DeliberationStateContract, DeliberationSupport,
+    ModelCapabilitySurface, ModelProvider, PlannerToolCallCapability, ProviderTransportSupport,
 };
 use crate::infrastructure::rendering::{
     ANTHROPIC_RENDER_TOOL_NAME, RenderCapability, assistant_response_json_schema,
@@ -471,7 +469,7 @@ impl HttpProviderAdapter {
         let Some(deliberation_state) = deliberation_state else {
             return Ok(());
         };
-        if deliberation_state.provider() != ModelProvider::Moonshot {
+        if deliberation_state.provider_name() != ModelProvider::Moonshot.name() {
             return Ok(());
         }
         if self.provider_name != ModelProvider::Moonshot.name() {
@@ -506,7 +504,7 @@ impl HttpProviderAdapter {
         let tool_calls = message.tool_calls.as_ref()?;
         let reasoning_content = message.reasoning_content.as_ref()?;
         Some(DeliberationState::new(
-            ModelProvider::Moonshot,
+            ModelProvider::Moonshot.name(),
             self.model_id.clone(),
             json!({
                 "kind": "moonshot_openai_chat_completion",
@@ -578,7 +576,7 @@ impl HttpProviderAdapter {
             return None;
         }
         Some(DeliberationState::new(
-            ModelProvider::Anthropic,
+            ModelProvider::Anthropic.name(),
             self.model_id.clone(),
             json!({
                 "kind": "anthropic_messages",
@@ -636,7 +634,7 @@ impl HttpProviderAdapter {
             return None;
         }
         Some(DeliberationState::new(
-            ModelProvider::Google,
+            ModelProvider::Google.name(),
             self.model_id.clone(),
             json!({
                 "kind": "gemini_generate_content",
@@ -653,7 +651,7 @@ impl HttpProviderAdapter {
     ) -> Option<TraceArtifactId> {
         let capture = capture?;
         let deliberation_state = deliberation_state?;
-        if deliberation_state.provider() != ModelProvider::Moonshot {
+        if deliberation_state.provider_name() != ModelProvider::Moonshot.name() {
             return None;
         }
         let assistant = deliberation_state.payload().get("assistant")?;
@@ -708,7 +706,7 @@ impl HttpProviderAdapter {
                 ),
                 content: json!({
                     "kind": "provider_deliberation",
-                    "provider": deliberation_state.provider().name(),
+                    "provider": deliberation_state.provider_name(),
                     "runtime_model_id": deliberation_state.runtime_model_id(),
                     "reasoning_excerpt": truncate(
                         reasoning_content,
@@ -1018,7 +1016,7 @@ impl HttpProviderAdapter {
         }
         let deliberation_state = has_function_call.then(|| {
             DeliberationState::new(
-                ModelProvider::Openai,
+                ModelProvider::Openai.name(),
                 self.model_id.clone(),
                 json!({
                     "kind": "openai_responses",
@@ -3809,6 +3807,7 @@ fn unverified_external_url_fallback(prompt: &str) -> String {
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
     use crate::application::{MechSuitService, RuntimeLaneConfig};
+    use crate::domain::model::DeliberationState;
     use crate::domain::model::{
         ExternalCapabilityInvocation, ForensicArtifactCapture, ForensicTraceSink,
         NullTurnEventSink, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
@@ -3824,7 +3823,7 @@ mod tests {
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
-    use crate::infrastructure::providers::{DeliberationState, ModelProvider};
+    use crate::infrastructure::providers::ModelProvider;
     use crate::infrastructure::rendering::{ANTHROPIC_RENDER_TOOL_NAME, RenderCapability};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
@@ -3916,7 +3915,7 @@ mod tests {
     #[test]
     fn provider_turn_request_and_response_keep_deliberation_state_separate_from_content() {
         let state = DeliberationState::new(
-            ModelProvider::Moonshot,
+            ModelProvider::Moonshot.name(),
             "kimi-k2.6".to_string(),
             json!({ "reasoning_content": "opaque" }),
         );
@@ -5886,7 +5885,7 @@ mod tests {
         assert_eq!(
             first_response.deliberation_state.as_ref(),
             Some(&DeliberationState::new(
-                ModelProvider::Openai,
+                ModelProvider::Openai.name(),
                 "gpt-5.4-pro",
                 json!({
                     "kind": "openai_responses",
@@ -6192,7 +6191,7 @@ mod tests {
         assert_eq!(
             response.deliberation_state.as_ref(),
             Some(&DeliberationState::new(
-                ModelProvider::Moonshot,
+                ModelProvider::Moonshot.name(),
                 "kimi-k2.6",
                 json!({
                     "kind": "moonshot_openai_chat_completion",

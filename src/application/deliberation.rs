@@ -1,4 +1,4 @@
-use crate::infrastructure::providers::DeliberationState;
+use crate::domain::model::DeliberationState;
 use serde_json::Value;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -158,7 +158,8 @@ mod tests {
         DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
         extract_deliberation_signals,
     };
-    use crate::infrastructure::providers::{DeliberationState, ModelProvider};
+    use crate::domain::model::DeliberationState;
+    use crate::infrastructure::providers::ModelProvider;
     use serde_json::json;
 
     #[test]
@@ -172,7 +173,7 @@ mod tests {
     #[test]
     fn openai_responses_state_extracts_only_continuation_hints() {
         let state = DeliberationState::new(
-            ModelProvider::Openai,
+            ModelProvider::Openai.name(),
             "gpt-5.4-pro",
             json!({
                 "kind": "openai_responses",
@@ -198,7 +199,7 @@ mod tests {
     #[test]
     fn moonshot_opaque_reasoning_maps_secondary_hints_to_unknown() {
         let state = DeliberationState::new(
-            ModelProvider::Moonshot,
+            ModelProvider::Moonshot.name(),
             "kimi-k2.6",
             json!({
                 "kind": "moonshot_openai_chat_completion",
@@ -237,7 +238,7 @@ mod tests {
     #[test]
     fn gemini_state_extracts_continuation_without_inventing_other_hints() {
         let state = DeliberationState::new(
-            ModelProvider::Google,
+            ModelProvider::Google.name(),
             "gemini-2.5-flash",
             json!({
                 "kind": "gemini_generate_content",
@@ -276,7 +277,7 @@ mod tests {
     #[test]
     fn anthropic_thinking_blocks_keep_secondary_hints_unknown_until_normalized() {
         let state = DeliberationState::new(
-            ModelProvider::Anthropic,
+            ModelProvider::Anthropic.name(),
             "claude-sonnet-4-20250514",
             json!({
                 "kind": "anthropic_messages",

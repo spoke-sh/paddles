@@ -331,6 +331,20 @@ ports under `src/domain/model` and `src/domain/ports`, orchestration services
 under `src/application`, and concrete adapters under `src/infrastructure` or
 surface-specific app packages.
 
+The boundary check entrypoint is:
+
+```bash
+cargo test architecture_boundary -- --nocapture
+```
+
+That check treats `src/domain` as the inward dependency root. Domain code may
+define value types, policies, ports, and read-model contracts, but it may not
+import `crate::application` or `crate::infrastructure`. Application code depends
+inward on domain contracts and receives concrete implementations through ports.
+Infrastructure code depends inward on application/domain contracts and is the
+only layer that should bind provider clients, filesystem adapters, transports,
+terminal execution, web routes, and persistence engines.
+
 ### Recursive Contract Preservation
 
 The boundary split must preserve the recursive planner/synthesizer contract:

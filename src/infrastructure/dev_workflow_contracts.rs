@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const PRE_COMMIT_HOOK_CONTRACT_PATH: &str = "support/hooks/pre-commit";
 
@@ -21,6 +21,109 @@ fn try_read_repo_file(path: &str) -> Option<String> {
 
 fn normalize_line_endings(contents: &str) -> String {
     contents.replace("\r\n", "\n")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ArchitectureBoundaryViolation {
+    path: String,
+    dependency: &'static str,
+}
+
+const DOMAIN_FORBIDDEN_DEPENDENCIES: &[&str] = &["crate::application", "crate::infrastructure"];
+
+fn architecture_boundary_domain_violations_for_source(
+    path: impl Into<String>,
+    source: &str,
+) -> Vec<ArchitectureBoundaryViolation> {
+    let path = path.into();
+    DOMAIN_FORBIDDEN_DEPENDENCIES
+        .iter()
+        .filter(|dependency| source.contains(**dependency))
+        .map(|dependency| ArchitectureBoundaryViolation {
+            path: path.clone(),
+            dependency,
+        })
+        .collect()
+}
+
+fn collect_rust_sources(root: &Path, sources: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(root).unwrap_or_else(|error| {
+        panic!(
+            "failed to read source directory `{}`: {error}",
+            root.display()
+        );
+    }) {
+        let path = entry
+            .unwrap_or_else(|error| panic!("failed to read source entry: {error}"))
+            .path();
+        if path.is_dir() {
+            collect_rust_sources(&path, sources);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            sources.push(path);
+        }
+    }
+}
+
+fn architecture_boundary_domain_violations_in_repo() -> Vec<ArchitectureBoundaryViolation> {
+    let domain_root = repo_file("src/domain");
+    let mut sources = Vec::new();
+    collect_rust_sources(&domain_root, &mut sources);
+    sources.sort();
+
+    sources
+        .into_iter()
+        .flat_map(|path| {
+            let relative = path
+                .strip_prefix(repo_file(""))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "failed to strip repo prefix from `{}`: {error}",
+                        path.display()
+                    );
+                })
+                .display()
+                .to_string();
+            let source = fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("failed to read source file `{}`: {error}", path.display());
+            });
+            architecture_boundary_domain_violations_for_source(relative, &source)
+        })
+        .collect()
+}
+
+#[test]
+fn architecture_boundary_detects_infrastructure_dependency_leaks_in_domain_source() {
+    let source = r#"
+use crate::application::ConversationProjectionSnapshot;
+use crate::infrastructure::providers::ModelProvider;
+"#;
+
+    let violations =
+        architecture_boundary_domain_violations_for_source("src/domain/model/leak.rs", source);
+
+    assert_eq!(
+        violations,
+        vec![
+            ArchitectureBoundaryViolation {
+                path: "src/domain/model/leak.rs".to_string(),
+                dependency: "crate::application",
+            },
+            ArchitectureBoundaryViolation {
+                path: "src/domain/model/leak.rs".to_string(),
+                dependency: "crate::infrastructure",
+            },
+        ],
+    );
+}
+
+#[test]
+fn architecture_boundary_domain_layer_has_no_outer_layer_dependencies() {
+    let violations = architecture_boundary_domain_violations_in_repo();
+
+    assert!(
+        violations.is_empty(),
+        "domain layer must not depend on application or infrastructure modules: {violations:#?}",
+    );
 }
 
 #[test]

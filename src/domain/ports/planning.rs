@@ -10,12 +10,11 @@ pub use crate::domain::model::{
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate,
     ThreadDecision, TraceBranch, TraceBranchId, WorkspaceAction,
 };
-use crate::infrastructure::providers::DeliberationState;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::domain::model::TurnEventSink;
+use crate::domain::model::{DeliberationState, TurnEventSink};
 use std::sync::Arc;
 
 #[async_trait]
