@@ -27,11 +27,11 @@ started_at: 2026-04-24T16:05:31
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Add Local Session Store Contracts](../../../../stories/VHkhv6S1q/README.md) | feat | done |
-| [Record Snapshots And Rollback Anchors](../../../../stories/VHkhvmjg7/README.md) | feat | icebox |
+| [Record Snapshots And Rollback Anchors](../../../../stories/VHkhvmjg7/README.md) | feat | done |
 | [Replay Fork And Compact Session Context](../../../../stories/VHkhwT5OD/README.md) | feat | icebox |
 <!-- END GENERATED -->

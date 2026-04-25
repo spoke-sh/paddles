@@ -48,8 +48,10 @@ pub use semantic_workspace::{
 };
 pub use session_store::{
     SESSION_STORE_SCHEMA, SESSION_STORE_SCHEMA_VERSION, SessionEvidenceRecord,
-    SessionGovernanceRecord, SessionPlannerDecisionRecord, SessionStorePort, SessionStoreRecord,
-    SessionStoreRecordKind, SessionStoreSnapshot, SessionTurnRecord, VersionedSessionStoreRecord,
+    SessionGovernanceRecord, SessionPlannerDecisionRecord, SessionRollbackAnchor,
+    SessionSnapshotRecord, SessionSnapshotReplayValidation, SessionSnapshotStatus,
+    SessionStorePort, SessionStoreRecord, SessionStoreRecordKind, SessionStoreSnapshot,
+    SessionTurnRecord, VersionedSessionStoreRecord,
 };
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,
