@@ -55,7 +55,9 @@ pub use delegation::{
     WorkerLifecycleOperation, WorkerLifecycleResult, WorkerLifecycleResultStatus, WorkerOwnership,
     WorkerRole,
 };
-pub use evaluation::{EvalOutcome, EvalReport, EvalRunConfig, EvalScenario, EvalStatus};
+pub use evaluation::{
+    EvalHarnessContract, EvalOutcome, EvalReport, EvalRunConfig, EvalScenario, EvalStatus,
+};
 pub use execution_hand::{
     ExecutionApprovalPolicy, ExecutionEscalationRequest, ExecutionGovernanceDecision,
     ExecutionGovernanceOutcome, ExecutionGovernanceOutcomeKind, ExecutionGovernanceProfile,

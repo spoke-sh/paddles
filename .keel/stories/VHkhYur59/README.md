@@ -1,15 +1,17 @@
 ---
 # system-managed
 id: VHkhYur59
-status: backlog
+status: done
 created_at: 2026-04-24T16:00:55
-updated_at: 2026-04-24T16:04:40
+updated_at: 2026-04-24T17:22:37
 # authored
 title: Seed Recursive Harness Eval Corpus
 type: feat
 operator-signal:
 scope: VHkfpJJc4/VHkgOF9KK
 index: 2
+started_at: 2026-04-24T17:19:34
+completed_at: 2026-04-24T17:22:37
 ---
 
 # Seed Recursive Harness Eval Corpus
@@ -20,5 +22,5 @@ Seed the eval suite with the first recursive harness scenarios covering evidence
 
 ## Acceptance Criteria
 
-- [ ] The eval corpus includes initial scenarios for recursive evidence, tool recovery, edit obligations, delegation, context pressure, and replay. [SRS-02/AC-01] <!-- verify: cargo test eval_corpus -- --nocapture, SRS-02:start:end -->
-- [ ] Eval failures identify the violated harness contract instead of only returning a generic failure. [SRS-NFR-02/AC-01] <!-- verify: cargo test eval_failure_reporting -- --nocapture, SRS-NFR-02:start:end -->
+- [x] The eval corpus includes initial scenarios for recursive evidence, tool recovery, edit obligations, delegation, context pressure, and replay. [SRS-02/AC-01] <!-- verify: cargo test eval_corpus -- --nocapture, SRS-02:start:end, proof: ac-1.log-->
+- [x] Eval failures identify the violated harness contract instead of only returning a generic failure. [SRS-NFR-02/AC-01] <!-- verify: cargo test eval_failure_reporting -- --nocapture, SRS-NFR-02:start:end, proof: ac-2.log-->

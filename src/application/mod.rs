@@ -12,7 +12,7 @@ pub use self::deliberation::{
     DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
     extract_deliberation_signals,
 };
-pub use self::evals::EvalRunner;
+pub use self::evals::{EvalRunner, recursive_harness_eval_corpus};
 use self::interpretation_chamber::InterpretationChamber;
 pub use self::read_model::{
     ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
