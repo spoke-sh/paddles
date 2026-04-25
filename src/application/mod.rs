@@ -65,19 +65,19 @@ use crate::domain::model::{
     ControlSubject, ConversationReplayView, ConversationThreadRef, ExecutionGovernanceDecision,
     ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionHandDiagnostic,
     ExecutionPermissionRequest, ExternalCapabilityDescriptor, ExternalCapabilityInvocation,
-    ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord, ForensicArtifactCapture,
-    ForensicTraceSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
-    NativeTransportDiagnostic, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
-    StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
-    StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
-    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
-    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
-    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
-    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
-    TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
-    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
-    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnControlOperation, TurnEvent, TurnEventSink,
-    TurnIntent, TurnTraceId,
+    ExternalCapabilityResult, ExternalCapabilityResultStatus, ExternalCapabilitySourceRecord,
+    ForensicArtifactCapture, ForensicTraceSink, InstructionFrame, InstructionIntent,
+    MultiplexEventSink, NativeTransportDiagnostic, ResponseMode, SteeringGateKind,
+    SteeringGatePhase, StrainFactor, StrainLevel, StructuredClarificationKind,
+    StructuredClarificationOption, StructuredClarificationRequest, TaskTraceId, ThreadCandidate,
+    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
+    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
+    TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge,
+    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
+    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
+    TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution, TraceSignalKind,
+    TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnControlOperation,
+    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
 };
 #[cfg(test)]
 use crate::domain::model::{
@@ -7582,29 +7582,20 @@ fn execute_external_capability_action(
     );
 
     if governance_outcome.kind != crate::domain::model::ExecutionGovernanceOutcomeKind::Allowed {
-        let summary = format_external_capability_outcome(
-            Some(&descriptor),
-            invocation,
-            ExternalCapabilityResultStatus::Denied,
-            "External capability denied".to_string(),
+        let result = ExternalCapabilityResult::denied(
+            descriptor,
+            invocation.clone(),
             summarize_governance_outcome(&governance_outcome),
-            &[],
         );
+        let summary = summarize_external_capability_result(&result);
         frame.event_sink.emit(TurnEvent::ToolFinished {
             call_id: frame.call_id.to_string(),
             tool_name: "external_capability".to_string(),
             summary: summary.clone(),
         });
-        append_evidence_item(
-            frame.evidence_items,
-            EvidenceItem {
-                source: format!("external_capability:{}", descriptor.id),
-                snippet: trim_for_planner(&summary, 1_200),
-                rationale: frame.rationale.to_string(),
-                rank: 0,
-            },
-            frame.evidence_limit,
-        );
+        for item in external_capability_result_evidence_items(&result, frame.rationale) {
+            append_evidence_item(frame.evidence_items, item, frame.evidence_limit);
+        }
         return summary;
     }
 
@@ -7622,29 +7613,17 @@ fn execute_external_capability_action(
             summary
         }
         Err(err) => {
-            let summary = format_external_capability_outcome(
-                Some(&descriptor),
-                invocation,
-                ExternalCapabilityResultStatus::Failed,
-                format!("{} failed", descriptor.label),
-                format!("External capability `{}` failed: {err:#}", descriptor.id),
-                &[],
-            );
+            let detail = format!("External capability `{}` failed: {err:#}", descriptor.id);
+            let result = ExternalCapabilityResult::failed(descriptor, invocation.clone(), detail);
+            let summary = summarize_external_capability_result(&result);
             frame.event_sink.emit(TurnEvent::ToolFinished {
                 call_id: frame.call_id.to_string(),
                 tool_name: "external_capability".to_string(),
                 summary: summary.clone(),
             });
-            append_evidence_item(
-                frame.evidence_items,
-                EvidenceItem {
-                    source: format!("external_capability:{}", descriptor.id),
-                    snippet: trim_for_planner(&summary, 1_200),
-                    rationale: frame.rationale.to_string(),
-                    rank: 0,
-                },
-                frame.evidence_limit,
-            );
+            for item in external_capability_result_evidence_items(&result, frame.rationale) {
+                append_evidence_item(frame.evidence_items, item, frame.evidence_limit);
+            }
             summary
         }
     }
@@ -9818,7 +9797,7 @@ mod tests {
     }
 
     #[test]
-    fn external_capability_actions_fail_closed_when_governance_blocks_network_access() {
+    fn external_capability_governance_blocks_network_access_before_broker_invocation() {
         let workspace = tempfile::tempdir().expect("workspace");
 
         let prepared = PreparedRuntimeLanes {

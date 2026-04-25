@@ -341,24 +341,78 @@ pub struct ExternalCapabilityResult {
 }
 
 impl ExternalCapabilityResult {
+    fn new_with_status(
+        descriptor: ExternalCapabilityDescriptor,
+        invocation: ExternalCapabilityInvocation,
+        detail: impl Into<String>,
+        sources: Vec<ExternalCapabilitySourceRecord>,
+        status: ExternalCapabilityResultStatus,
+    ) -> Self {
+        Self {
+            summary: format!("{} {}", descriptor.label, status.label()),
+            descriptor,
+            invocation,
+            status,
+            detail: detail.into(),
+            sources,
+        }
+    }
+
     pub fn unavailable(
         descriptor: ExternalCapabilityDescriptor,
         invocation: ExternalCapabilityInvocation,
         detail: impl Into<String>,
     ) -> Self {
-        let detail = detail.into();
-        Self {
-            summary: format!(
-                "{} {}",
-                descriptor.label,
-                ExternalCapabilityResultStatus::Unavailable.label()
-            ),
+        Self::new_with_status(
             descriptor,
             invocation,
-            status: ExternalCapabilityResultStatus::Unavailable,
             detail,
-            sources: Vec::new(),
-        }
+            Vec::new(),
+            ExternalCapabilityResultStatus::Unavailable,
+        )
+    }
+
+    pub fn denied(
+        descriptor: ExternalCapabilityDescriptor,
+        invocation: ExternalCapabilityInvocation,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::new_with_status(
+            descriptor,
+            invocation,
+            detail,
+            Vec::new(),
+            ExternalCapabilityResultStatus::Denied,
+        )
+    }
+
+    pub fn degraded(
+        descriptor: ExternalCapabilityDescriptor,
+        invocation: ExternalCapabilityInvocation,
+        detail: impl Into<String>,
+        sources: Vec<ExternalCapabilitySourceRecord>,
+    ) -> Self {
+        Self::new_with_status(
+            descriptor,
+            invocation,
+            detail,
+            sources,
+            ExternalCapabilityResultStatus::Degraded,
+        )
+    }
+
+    pub fn failed(
+        descriptor: ExternalCapabilityDescriptor,
+        invocation: ExternalCapabilityInvocation,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::new_with_status(
+            descriptor,
+            invocation,
+            detail,
+            Vec::new(),
+            ExternalCapabilityResultStatus::Failed,
+        )
     }
 }
 
@@ -439,10 +493,13 @@ pub fn default_external_capability_descriptors() -> Vec<ExternalCapabilityDescri
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalCapabilityAuthPosture, ExternalCapabilityAvailability, ExternalCapabilityKind,
-        ExternalCapabilitySideEffectPosture, default_external_capability_descriptors,
+        ExternalCapabilityAuthPosture, ExternalCapabilityAvailability,
+        ExternalCapabilityInvocation, ExternalCapabilityKind, ExternalCapabilityResult,
+        ExternalCapabilityResultStatus, ExternalCapabilitySideEffectPosture,
+        ExternalCapabilitySourceRecord, default_external_capability_descriptors,
     };
     use crate::domain::model::{ExecutionHandKind, ExecutionPermission};
+    use serde_json::json;
 
     #[test]
     fn default_descriptors_cover_web_mcp_and_connector_fabrics() {
@@ -499,5 +556,46 @@ mod tests {
                 .contains(&ExecutionPermission::AccessCredentials)
         );
         assert!(!connector.evidence_shape.kinds.is_empty());
+    }
+
+    #[test]
+    fn external_capability_result_states_construct_typed_denied_degraded_and_failed_evidence() {
+        let descriptor = default_external_capability_descriptors()
+            .into_iter()
+            .next()
+            .expect("web descriptor");
+        let invocation = ExternalCapabilityInvocation::new(
+            "web.search",
+            "check current docs",
+            json!({ "query": "paddles" }),
+        );
+
+        let denied = ExternalCapabilityResult::denied(
+            descriptor.clone(),
+            invocation.clone(),
+            "network access requires approval",
+        );
+        let degraded = ExternalCapabilityResult::degraded(
+            descriptor.clone(),
+            invocation.clone(),
+            "provider timed out after partial source discovery",
+            vec![ExternalCapabilitySourceRecord {
+                label: "Partial source".to_string(),
+                locator: "https://example.com/partial".to_string(),
+                snippet: "partial result".to_string(),
+            }],
+        );
+        let failed = ExternalCapabilityResult::failed(
+            descriptor,
+            invocation,
+            "provider returned malformed payload",
+        );
+
+        assert_eq!(denied.status, ExternalCapabilityResultStatus::Denied);
+        assert!(denied.detail.contains("requires approval"));
+        assert_eq!(degraded.status, ExternalCapabilityResultStatus::Degraded);
+        assert_eq!(degraded.sources.len(), 1);
+        assert_eq!(failed.status, ExternalCapabilityResultStatus::Failed);
+        assert!(failed.detail.contains("malformed payload"));
     }
 }
