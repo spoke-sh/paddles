@@ -5,6 +5,7 @@ mod execution_hands;
 mod external_capabilities;
 mod operator_memory;
 mod planning;
+mod semantic_workspace;
 mod specialist_brains;
 mod synthesis;
 mod trace_recording;
@@ -39,6 +40,10 @@ pub use planning::{
     PlannerExecutionContract, PlannerLoopState, PlannerRequest, PlannerStepRecord,
     RecursivePlanner, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
     ThreadDecisionRequest, WorkspaceAction,
+};
+pub use semantic_workspace::{
+    SemanticWorkspaceOperation, SemanticWorkspacePort, SemanticWorkspaceQuery,
+    SemanticWorkspaceResult, SemanticWorkspaceStatus,
 };
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,

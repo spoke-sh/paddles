@@ -1,8 +1,8 @@
 use super::local_workspace_editor::{LocalWorkspaceEditor, relative_path, resolve_workspace_path};
 use crate::domain::ports::{
-    WorkspaceAction, WorkspaceActionCapability, WorkspaceActionExecutionFrame,
-    WorkspaceActionExecutor, WorkspaceActionResult, WorkspaceCapabilitySurface, WorkspaceEditor,
-    WorkspaceToolCapability,
+    SemanticWorkspacePort, SemanticWorkspaceQuery, SemanticWorkspaceResult, WorkspaceAction,
+    WorkspaceActionCapability, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+    WorkspaceActionResult, WorkspaceCapabilitySurface, WorkspaceEditor, WorkspaceToolCapability,
 };
 use crate::infrastructure::execution_governance::{
     GovernedTerminalCommandResult, summarize_governance_outcome,
@@ -27,6 +27,7 @@ pub struct LocalWorkspaceActionExecutor {
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
     observed_tools: Arc<Mutex<BTreeMap<String, WorkspaceToolCapability>>>,
+    semantic_workspace: Arc<dyn SemanticWorkspacePort>,
 }
 
 impl LocalWorkspaceActionExecutor {
@@ -50,7 +51,17 @@ impl LocalWorkspaceActionExecutor {
             execution_hand_registry,
             transport_mediator,
             observed_tools: Arc::new(Mutex::new(BTreeMap::new())),
+            semantic_workspace: Arc::new(UnavailableSemanticWorkspace),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_semantic_workspace(
+        mut self,
+        semantic_workspace: Arc<dyn SemanticWorkspacePort>,
+    ) -> Self {
+        self.semantic_workspace = semantic_workspace;
+        self
     }
 
     fn workspace_editor(&self) -> LocalWorkspaceEditor {
@@ -165,6 +176,11 @@ impl LocalWorkspaceActionExecutor {
                 .workspace_editor()
                 .replace_in_file(path, old, new, *replace_all),
             WorkspaceAction::ApplyPatch { patch } => self.workspace_editor().apply_patch(patch),
+            WorkspaceAction::SemanticDefinitions { .. }
+            | WorkspaceAction::SemanticReferences { .. }
+            | WorkspaceAction::SemanticSymbols { .. }
+            | WorkspaceAction::SemanticHover { .. }
+            | WorkspaceAction::SemanticDiagnostics { .. } => self.execute_semantic_action(action),
             WorkspaceAction::Shell { command } => {
                 let output = run_background_terminal_command_with_runtime_mediator(
                     &self.workspace_root,
@@ -219,6 +235,19 @@ impl LocalWorkspaceActionExecutor {
         }
     }
 
+    fn execute_semantic_action(&self, action: &WorkspaceAction) -> Result<WorkspaceActionResult> {
+        let query = SemanticWorkspaceQuery::from_action(action)
+            .ok_or_else(|| anyhow!("workspace action `{}` is not semantic", action.label()))?;
+        let result = self.semantic_workspace.execute(query);
+        Ok(WorkspaceActionResult {
+            name: action.label().to_string(),
+            summary: summarize_semantic_workspace_result(&result),
+            applied_edit: None,
+            governance_request: None,
+            governance_outcome: None,
+        })
+    }
+
     fn record_tool_observations(
         &self,
         command: &str,
@@ -237,49 +266,79 @@ impl LocalWorkspaceActionExecutor {
 
 impl WorkspaceActionExecutor for LocalWorkspaceActionExecutor {
     fn capability_surface(&self) -> WorkspaceCapabilitySurface {
+        let mut actions = vec![
+            WorkspaceActionCapability::new(
+                "list_files",
+                "enumerate workspace files within the repository boundary",
+                false,
+            ),
+            WorkspaceActionCapability::new(
+                "read",
+                "open a specific workspace file or artifact",
+                false,
+            ),
+            WorkspaceActionCapability::new(
+                "inspect",
+                "run a single read-only shell probe through the terminal hand",
+                false,
+            ),
+            WorkspaceActionCapability::new(
+                "diff",
+                "inspect current workspace diffs without mutating files",
+                false,
+            ),
+            WorkspaceActionCapability::new(
+                "shell",
+                "run a governed workspace command when a command should execute now",
+                true,
+            ),
+            WorkspaceActionCapability::new(
+                "write_file",
+                "replace an entire workspace file with authored contents",
+                true,
+            ),
+            WorkspaceActionCapability::new(
+                "replace_in_file",
+                "apply an exact in-file text replacement",
+                true,
+            ),
+            WorkspaceActionCapability::new(
+                "apply_patch",
+                "apply a bounded patch directly to the workspace",
+                true,
+            ),
+        ];
+        if self.semantic_workspace.is_available() {
+            actions.extend([
+                WorkspaceActionCapability::new(
+                    "semantic_definitions",
+                    "ask the configured semantic workspace for definitions",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "semantic_references",
+                    "ask the configured semantic workspace for references",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "semantic_symbols",
+                    "ask the configured semantic workspace for document symbols",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "semantic_hover",
+                    "ask the configured semantic workspace for hover information",
+                    false,
+                ),
+                WorkspaceActionCapability::new(
+                    "semantic_diagnostics",
+                    "ask the configured semantic workspace for diagnostics",
+                    false,
+                ),
+            ]);
+        }
         WorkspaceCapabilitySurface {
-            actions: vec![
-                WorkspaceActionCapability::new(
-                    "list_files",
-                    "enumerate workspace files within the repository boundary",
-                    false,
-                ),
-                WorkspaceActionCapability::new(
-                    "read",
-                    "open a specific workspace file or artifact",
-                    false,
-                ),
-                WorkspaceActionCapability::new(
-                    "inspect",
-                    "run a single read-only shell probe through the terminal hand",
-                    false,
-                ),
-                WorkspaceActionCapability::new(
-                    "diff",
-                    "inspect current workspace diffs without mutating files",
-                    false,
-                ),
-                WorkspaceActionCapability::new(
-                    "shell",
-                    "run a governed workspace command when a command should execute now",
-                    true,
-                ),
-                WorkspaceActionCapability::new(
-                    "write_file",
-                    "replace an entire workspace file with authored contents",
-                    true,
-                ),
-                WorkspaceActionCapability::new(
-                    "replace_in_file",
-                    "apply an exact in-file text replacement",
-                    true,
-                ),
-                WorkspaceActionCapability::new(
-                    "apply_patch",
-                    "apply a bounded patch directly to the workspace",
-                    true,
-                ),
-            ],
+            actions,
             tools: self
                 .observed_tools
                 .lock()
@@ -303,6 +362,35 @@ impl WorkspaceActionExecutor for LocalWorkspaceActionExecutor {
     ) -> Result<WorkspaceActionResult> {
         self.execute_local_action(action, frame)
     }
+}
+
+#[derive(Debug)]
+struct UnavailableSemanticWorkspace;
+
+impl SemanticWorkspacePort for UnavailableSemanticWorkspace {
+    fn is_available(&self) -> bool {
+        false
+    }
+
+    fn execute(&self, query: SemanticWorkspaceQuery) -> SemanticWorkspaceResult {
+        SemanticWorkspaceResult::unavailable(&query)
+    }
+}
+
+fn summarize_semantic_workspace_result(result: &SemanticWorkspaceResult) -> String {
+    let mut summary = format!(
+        "semantic workspace {}: {}",
+        result.status.label(),
+        result.summary
+    );
+    if !result.fallback_actions.is_empty() {
+        summary.push_str("\nFallback actions:");
+        for action in &result.fallback_actions {
+            summary.push_str("\n- ");
+            summary.push_str(&action.summary());
+        }
+    }
+    trim_for_context(&summary, MAX_TOOL_OUTPUT_CHARS)
 }
 
 fn tool_observations_from_command(
@@ -539,10 +627,12 @@ mod tests {
     use super::LocalWorkspaceActionExecutor;
     use crate::domain::model::{
         ExecutionPolicy, ExecutionPolicyDecisionKind, ExecutionPolicyMatcher, ExecutionPolicyRule,
-        NullTurnEventSink,
+        NullTurnEventSink, WorkspaceTextPosition,
     };
     use crate::domain::ports::{
-        WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
+        SemanticWorkspacePort, SemanticWorkspaceQuery, SemanticWorkspaceResult,
+        SemanticWorkspaceStatus, WorkspaceAction, WorkspaceActionExecutionFrame,
+        WorkspaceActionExecutor,
     };
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
     use std::fs;
@@ -687,5 +777,112 @@ diff --git a/target.txt b/target.txt
             fs::read_to_string(workspace.path().join("target.txt")).expect("target still readable"),
             "old\n"
         );
+    }
+
+    #[derive(Debug)]
+    struct StubSemanticWorkspace;
+
+    impl SemanticWorkspacePort for StubSemanticWorkspace {
+        fn is_available(&self) -> bool {
+            true
+        }
+
+        fn execute(&self, query: SemanticWorkspaceQuery) -> SemanticWorkspaceResult {
+            SemanticWorkspaceResult {
+                status: SemanticWorkspaceStatus::Available,
+                summary: format!(
+                    "lsp-ok {} {}",
+                    query.operation.label(),
+                    query.path.unwrap_or_else(|| "<workspace>".to_string())
+                ),
+                fallback_actions: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn semantic_workspace_actions_advertise_and_execute_when_lsp_is_available() {
+        let workspace = tempdir().expect("tempdir");
+        let executor = LocalWorkspaceActionExecutor::with_execution_hand_registry(
+            workspace.path(),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
+        )
+        .with_semantic_workspace(Arc::new(StubSemanticWorkspace));
+
+        let surface = executor.capability_surface();
+        for action in [
+            "semantic_definitions",
+            "semantic_references",
+            "semantic_symbols",
+            "semantic_hover",
+            "semantic_diagnostics",
+        ] {
+            let capability = surface
+                .actions
+                .iter()
+                .find(|capability| capability.action == action)
+                .unwrap_or_else(|| panic!("{action} should be advertised"));
+            assert!(!capability.mutating);
+        }
+
+        let result = executor
+            .execute_workspace_action(
+                &WorkspaceAction::SemanticDefinitions {
+                    path: "src/lib.rs".to_string(),
+                    position: WorkspaceTextPosition {
+                        line: 10,
+                        character: 4,
+                    },
+                },
+                WorkspaceActionExecutionFrame {
+                    call_id: "test-call",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
+            .expect("semantic action should execute");
+
+        assert_eq!(result.name, "semantic_definitions");
+        assert!(result.summary.contains("lsp-ok definitions src/lib.rs"));
+        assert!(result.applied_edit.is_none());
+    }
+
+    #[test]
+    fn semantic_workspace_unavailable_returns_fallback_actions() {
+        let workspace = tempdir().expect("tempdir");
+        let executor = LocalWorkspaceActionExecutor::with_execution_hand_registry(
+            workspace.path(),
+            Arc::new(ExecutionHandRegistry::with_default_local_governance()),
+        );
+
+        let surface = executor.capability_surface();
+        assert!(surface.actions.iter().any(|action| action.action == "read"));
+        assert!(
+            surface
+                .actions
+                .iter()
+                .all(|action| !action.action.starts_with("semantic_"))
+        );
+
+        let result = executor
+            .execute_workspace_action(
+                &WorkspaceAction::SemanticHover {
+                    path: "src/lib.rs".to_string(),
+                    position: WorkspaceTextPosition {
+                        line: 10,
+                        character: 4,
+                    },
+                },
+                WorkspaceActionExecutionFrame {
+                    call_id: "test-call",
+                    event_sink: &NullTurnEventSink,
+                },
+            )
+            .expect("unavailable semantic action should return structured result");
+
+        assert_eq!(result.name, "semantic_hover");
+        assert!(result.summary.contains("semantic workspace unavailable"));
+        assert!(result.summary.contains("read `src/lib.rs`"));
+        assert!(result.summary.contains("search"));
+        assert!(result.applied_edit.is_none());
     }
 }

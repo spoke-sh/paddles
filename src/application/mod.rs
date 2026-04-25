@@ -3876,7 +3876,12 @@ impl MechSuitService {
                         | WorkspaceAction::Diff { .. }
                         | WorkspaceAction::WriteFile { .. }
                         | WorkspaceAction::ReplaceInFile { .. }
-                        | WorkspaceAction::ApplyPatch { .. } => {
+                        | WorkspaceAction::ApplyPatch { .. }
+                        | WorkspaceAction::SemanticDefinitions { .. }
+                        | WorkspaceAction::SemanticReferences { .. }
+                        | WorkspaceAction::SemanticSymbols { .. }
+                        | WorkspaceAction::SemanticHover { .. }
+                        | WorkspaceAction::SemanticDiagnostics { .. } => {
                             let previous_resolution = loop_state.target_resolution.clone();
                             maybe_promote_missing_resolution_for_mutation(
                                 &self.workspace_root,
@@ -6569,9 +6574,15 @@ fn workspace_action_path(action: &WorkspaceAction) -> Option<&str> {
         WorkspaceAction::Read { path }
         | WorkspaceAction::Diff { path: Some(path) }
         | WorkspaceAction::WriteFile { path, .. }
-        | WorkspaceAction::ReplaceInFile { path, .. } => Some(path.as_str()),
+        | WorkspaceAction::ReplaceInFile { path, .. }
+        | WorkspaceAction::SemanticDefinitions { path, .. }
+        | WorkspaceAction::SemanticReferences { path, .. }
+        | WorkspaceAction::SemanticSymbols { path }
+        | WorkspaceAction::SemanticHover { path, .. }
+        | WorkspaceAction::SemanticDiagnostics { path: Some(path) } => Some(path.as_str()),
         WorkspaceAction::ListFiles { .. }
         | WorkspaceAction::Diff { path: None }
+        | WorkspaceAction::SemanticDiagnostics { path: None }
         | WorkspaceAction::ApplyPatch { .. }
         | WorkspaceAction::Search { .. }
         | WorkspaceAction::Inspect { .. }
@@ -8071,6 +8082,13 @@ fn planner_action_query(action: &PlannerAction) -> Option<String> {
             WorkspaceAction::ApplyPatch { .. } => {
                 Some("git apply --whitespace=nowarn -".to_string())
             }
+            WorkspaceAction::SemanticDefinitions { path, .. }
+            | WorkspaceAction::SemanticReferences { path, .. }
+            | WorkspaceAction::SemanticSymbols { path }
+            | WorkspaceAction::SemanticHover { path, .. } => Some(path.clone()),
+            WorkspaceAction::SemanticDiagnostics { path } => path
+                .clone()
+                .or_else(|| Some("workspace diagnostics".to_string())),
             WorkspaceAction::ExternalCapability { invocation } => Some(invocation.summary()),
         },
         PlannerAction::Refine { query, .. } => Some(query.clone()),
@@ -8096,6 +8114,18 @@ fn workspace_action_evidence_source(action: &WorkspaceAction) -> String {
         WorkspaceAction::WriteFile { path, .. } => path.clone(),
         WorkspaceAction::ReplaceInFile { path, .. } => path.clone(),
         WorkspaceAction::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+        WorkspaceAction::SemanticDefinitions { path, .. } => {
+            format!("semantic_definitions: {path}")
+        }
+        WorkspaceAction::SemanticReferences { path, .. } => {
+            format!("semantic_references: {path}")
+        }
+        WorkspaceAction::SemanticSymbols { path } => format!("semantic_symbols: {path}"),
+        WorkspaceAction::SemanticHover { path, .. } => format!("semantic_hover: {path}"),
+        WorkspaceAction::SemanticDiagnostics { path } => match path {
+            Some(path) => format!("semantic_diagnostics: {path}"),
+            None => "semantic_diagnostics".to_string(),
+        },
         WorkspaceAction::ExternalCapability { invocation } => {
             format!("external_capability:{}", invocation.capability_id)
         }

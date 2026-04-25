@@ -87,6 +87,7 @@ pub use interpretation::{
     GuidanceCategory, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, WorkspaceAction,
+    WorkspaceTextPosition,
 };
 pub use native_transport::{
     NativeTransportAuth, NativeTransportAuthMode, NativeTransportCapability,

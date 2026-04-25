@@ -1,0 +1,27 @@
+---
+recorded_at: 2026-04-24T18:28:22.841437406-07:00
+command: cargo test semantic_workspace_actions -- --nocapture
+---
+
+running 1 test
+test infrastructure::adapters::local_workspace_action_executor::tests::semantic_workspace_actions_advertise_and_execute_when_lsp_is_available ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 748 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+--- stderr ---
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.74s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-376074c8c385b41a)
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-ae8ea02f3e4e2a7f)
+     Running tests/runtime_presentation_boundary.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/runtime_presentation_boundary-ff05e5b1dbf3d864)

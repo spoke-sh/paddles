@@ -169,6 +169,12 @@ pub struct InterpretationProcedureStep {
     pub note: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceTextPosition {
+    pub line: usize,
+    pub character: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum WorkspaceAction {
@@ -212,6 +218,25 @@ pub enum WorkspaceAction {
     ApplyPatch {
         patch: String,
     },
+    SemanticDefinitions {
+        path: String,
+        position: WorkspaceTextPosition,
+    },
+    SemanticReferences {
+        path: String,
+        position: WorkspaceTextPosition,
+    },
+    SemanticSymbols {
+        path: String,
+    },
+    SemanticHover {
+        path: String,
+        position: WorkspaceTextPosition,
+    },
+    SemanticDiagnostics {
+        #[serde(default)]
+        path: Option<String>,
+    },
     ExternalCapability {
         invocation: ExternalCapabilityInvocation,
     },
@@ -229,6 +254,11 @@ impl WorkspaceAction {
             Self::WriteFile { .. } => "write_file",
             Self::ReplaceInFile { .. } => "replace_in_file",
             Self::ApplyPatch { .. } => "apply_patch",
+            Self::SemanticDefinitions { .. } => "semantic_definitions",
+            Self::SemanticReferences { .. } => "semantic_references",
+            Self::SemanticSymbols { .. } => "semantic_symbols",
+            Self::SemanticHover { .. } => "semantic_hover",
+            Self::SemanticDiagnostics { .. } => "semantic_diagnostics",
             Self::ExternalCapability { .. } => "external_capability",
         }
     }
@@ -263,6 +293,31 @@ impl WorkspaceAction {
             Self::WriteFile { path, .. } => format!("write `{path}`"),
             Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
             Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+            Self::SemanticDefinitions { path, position } => {
+                format!(
+                    "semantic definitions for `{path}` at {}:{}",
+                    position.line, position.character
+                )
+            }
+            Self::SemanticReferences { path, position } => {
+                format!(
+                    "semantic references for `{path}` at {}:{}",
+                    position.line, position.character
+                )
+            }
+            Self::SemanticSymbols { path } => format!("semantic symbols for `{path}`"),
+            Self::SemanticHover { path, position } => {
+                format!(
+                    "semantic hover for `{path}` at {}:{}",
+                    position.line, position.character
+                )
+            }
+            Self::SemanticDiagnostics { path } => match path {
+                Some(path) if !path.trim().is_empty() => {
+                    format!("semantic diagnostics for `{path}`")
+                }
+                _ => "semantic diagnostics for workspace".to_string(),
+            },
             Self::ExternalCapability { invocation } => format!(
                 "invoke external capability `{}` ({})",
                 invocation.capability_id, invocation.purpose
@@ -295,6 +350,33 @@ impl WorkspaceAction {
             Self::WriteFile { path, .. } => format!("write `{path}`"),
             Self::ReplaceInFile { path, .. } => format!("replace text in `{path}`"),
             Self::ApplyPatch { .. } => "git apply --whitespace=nowarn -".to_string(),
+            Self::SemanticDefinitions { path, position } => {
+                format!(
+                    "ask semantic workspace for definitions in `{path}` at {}:{}",
+                    position.line, position.character
+                )
+            }
+            Self::SemanticReferences { path, position } => {
+                format!(
+                    "ask semantic workspace for references in `{path}` at {}:{}",
+                    position.line, position.character
+                )
+            }
+            Self::SemanticSymbols { path } => {
+                format!("ask semantic workspace for document symbols in `{path}`")
+            }
+            Self::SemanticHover { path, position } => {
+                format!(
+                    "ask semantic workspace for hover in `{path}` at {}:{}",
+                    position.line, position.character
+                )
+            }
+            Self::SemanticDiagnostics { path } => match path {
+                Some(path) if !path.trim().is_empty() => {
+                    format!("ask semantic workspace for diagnostics in `{path}`")
+                }
+                _ => "ask semantic workspace for diagnostics".to_string(),
+            },
             Self::ExternalCapability { invocation } => format!(
                 "invoke external capability `{}` for {} with payload {}",
                 invocation.capability_id, invocation.purpose, invocation.payload

@@ -395,7 +395,7 @@
 |--------|--------|
 | [Implement Governed External Capability Broker](epics/VHkfpJJc4/voyages/VHkgG2aro/) | done |
 | [Install Codex-Grade Execution Policy](epics/VHkfpJJc4/voyages/VHkgKreip/) | done |
-| [Harden Workspace Editing And LSP Hands](epics/VHkfpJJc4/voyages/VHkgLtij9/) | in-progress |
+| [Harden Workspace Editing And LSP Hands](epics/VHkfpJJc4/voyages/VHkgLtij9/) | done |
 | [Activate Recursive Delegation Runtime](epics/VHkfpJJc4/voyages/VHkgMxksP/) | in-progress |
 | [Persist Replayable Sessions And Context](epics/VHkfpJJc4/voyages/VHkgNakSc/) | in-progress |
 | [Create Recursive Harness Eval Suite](epics/VHkfpJJc4/voyages/VHkgOF9KK/) | done |

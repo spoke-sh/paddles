@@ -518,6 +518,11 @@ impl PlannerAction {
                 WorkspaceAction::WriteFile { path, .. } => Some(path.clone()),
                 WorkspaceAction::ReplaceInFile { path, .. } => Some(path.clone()),
                 WorkspaceAction::ApplyPatch { .. } => None,
+                WorkspaceAction::SemanticDefinitions { path, .. }
+                | WorkspaceAction::SemanticReferences { path, .. }
+                | WorkspaceAction::SemanticSymbols { path }
+                | WorkspaceAction::SemanticHover { path, .. } => Some(path.clone()),
+                WorkspaceAction::SemanticDiagnostics { path } => path.clone(),
                 WorkspaceAction::ExternalCapability { invocation } => Some(invocation.summary()),
             },
             Self::Refine { query, .. } => Some(query.clone()),
