@@ -1,0 +1,186 @@
+---
+recorded_at: 2026-04-26T11:51:09.610412222-07:00
+command: npm run lint && npm run test && npm run build && npm run e2e
+---
+
+> paddles-frontend-workspace@0.0.0 lint
+> turbo run lint
+
+• Packages in scope: @paddles/docs, @paddles/web
+• Running lint in 2 packages
+• Remote caching disabled
+@paddles/web:lint: cache miss, executing 7a09ebdf0ae9212e
+@paddles/docs:lint: cache miss, executing c63ce0d32db176ec
+@paddles/web:lint:
+@paddles/web:lint: > @paddles/web@0.0.0 lint
+@paddles/web:lint: > npm run typecheck
+@paddles/web:lint:
+@paddles/docs:lint:
+@paddles/docs:lint: > @paddles/docs@0.0.0 lint
+@paddles/docs:lint: > npm run typecheck
+@paddles/docs:lint:
+@paddles/docs:lint:
+@paddles/docs:lint: > @paddles/docs@0.0.0 typecheck
+@paddles/docs:lint: > tsc --noEmit
+@paddles/docs:lint:
+@paddles/web:lint:
+@paddles/web:lint: > @paddles/web@0.0.0 typecheck
+@paddles/web:lint: > tsc --noEmit
+@paddles/web:lint:
+
+ Tasks:    2 successful, 2 total
+Cached:    0 cached, 2 total
+  Time:    4.182s
+
+
+> paddles-frontend-workspace@0.0.0 test
+> turbo run test
+
+• Packages in scope: @paddles/docs, @paddles/web
+• Running test in 2 packages
+• Remote caching disabled
+@paddles/web:test: cache hit, replaying logs cf105dc919bddfa4
+@paddles/web:test:
+@paddles/web:test: > @paddles/web@0.0.0 test
+@paddles/web:test: > vitest run
+@paddles/web:test:
+@paddles/web:test:
+@paddles/web:test: [1m[46m RUN [49m[22m [36mv4.1.3 [39m[90m/home/alex/workspace/spoke-sh/paddles/apps/web[39m
+@paddles/web:test:
+@paddles/web:test:  [32m✓[39m src/trace-machine/machine-model.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/runtime-style-contract.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/runtime-helpers.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/store/event-log.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/store/projection-state.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/trace-machine/machine-contract.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/trace-machine/machine-projection.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/transit/transit-route.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 170[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/inspector/inspector-route.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[33m 316[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/manifold/manifold-route.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 655[2mms[22m[39m
+@paddles/web:test:  [32m✓[39m src/chat/runtime-shell.test.tsx [2m([22m[2m17 tests[22m[2m)[22m[33m 753[2mms[22m[39m
+@paddles/web:test:
+@paddles/web:test: [2m Test Files [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+@paddles/web:test: [2m      Tests [22m [1m[32m59 passed[39m[22m[90m (59)[39m
+@paddles/web:test: [2m   Start at [22m 11:50:27
+@paddles/web:test: [2m   Duration [22m 2.04s[2m (transform 2.06s, setup 713ms, import 3.46s, tests 1.94s, environment 6.90s)[22m
+@paddles/web:test:
+@paddles/docs:test: cache hit, replaying logs dd13762932479f76
+@paddles/docs:test:
+@paddles/docs:test: > @paddles/docs@0.0.0 test
+@paddles/docs:test: > npm run build
+@paddles/docs:test:
+@paddles/docs:test:
+@paddles/docs:test: > @paddles/docs@0.0.0 build
+@paddles/docs:test: > docusaurus build
+@paddles/docs:test:
+@paddles/docs:test: [INFO] [en] Creating an optimized production build...
+@paddles/docs:test: [SUCCESS] Generated static files in "build".
+@paddles/docs:test: [INFO] Use `npm run serve` command to test your build locally.
+
+ Tasks:    2 successful, 2 total
+Cached:    2 cached, 2 total
+  Time:    55ms >>> FULL TURBO
+
+
+> paddles-frontend-workspace@0.0.0 build
+> turbo run build
+
+• Packages in scope: @paddles/docs, @paddles/web
+• Running build in 2 packages
+• Remote caching disabled
+@paddles/web:build: cache hit, replaying logs fafe28086951a1f2
+@paddles/web:build:
+@paddles/web:build: > @paddles/web@0.0.0 build
+@paddles/web:build: > vite build
+@paddles/web:build:
+@paddles/web:build: vite v6.4.2 building for production...
+@paddles/web:build: transforming...
+@paddles/web:build: ✓ 148 modules transformed.
+@paddles/web:build: rendering chunks...
+@paddles/web:build: computing gzip size...
+@paddles/web:build: dist/index.html                   0.40 kB │ gzip:   0.27 kB
+@paddles/web:build: dist/assets/index-C7we3MMA.css   55.08 kB │ gzip:  10.75 kB
+@paddles/web:build: dist/assets/index-Bz6QC6zM.js   352.76 kB │ gzip: 108.73 kB
+@paddles/web:build: ✓ built in 1.52s
+@paddles/docs:build: cache hit, replaying logs 1c446d1f155e30ff
+@paddles/docs:build:
+@paddles/docs:build: > @paddles/docs@0.0.0 build
+@paddles/docs:build: > docusaurus build
+@paddles/docs:build:
+@paddles/docs:build: [INFO] [en] Creating an optimized production build...
+@paddles/docs:build: [SUCCESS] Generated static files in "build".
+@paddles/docs:build: [INFO] Use `npm run serve` command to test your build locally.
+
+ Tasks:    2 successful, 2 total
+Cached:    2 cached, 2 total
+  Time:    65ms >>> FULL TURBO
+
+
+> paddles-frontend-workspace@0.0.0 e2e
+> turbo run e2e
+
+• Packages in scope: @paddles/docs, @paddles/web
+• Running e2e in 2 packages
+• Remote caching disabled
+@paddles/web:build: cache hit, replaying logs fafe28086951a1f2
+@paddles/web:build:
+@paddles/web:build: > @paddles/web@0.0.0 build
+@paddles/web:build: > vite build
+@paddles/web:build:
+@paddles/web:build: vite v6.4.2 building for production...
+@paddles/web:build: transforming...
+@paddles/web:build: ✓ 148 modules transformed.
+@paddles/web:build: rendering chunks...
+@paddles/web:build: computing gzip size...
+@paddles/web:build: dist/index.html                   0.40 kB │ gzip:   0.27 kB
+@paddles/web:build: dist/assets/index-C7we3MMA.css   55.08 kB │ gzip:  10.75 kB
+@paddles/web:build: dist/assets/index-Bz6QC6zM.js   352.76 kB │ gzip: 108.73 kB
+@paddles/web:build: ✓ built in 1.52s
+@paddles/web:e2e: cache hit, replaying logs c02d9e359d88114d
+@paddles/web:e2e:
+@paddles/web:e2e: > @paddles/web@0.0.0 e2e
+@paddles/web:e2e: > playwright test -c playwright.config.mjs
+@paddles/web:e2e:
+@paddles/web:e2e: [2m[WebServer] [22mthis path will be fetched (0.10 MiB download, 0.10 MiB unpacked):
+@paddles/web:e2e: [2m[WebServer] [22m  /nix/store/5vmwpgmif2wa2hw5ip3ab6q40wvyfw2w-bash-interactive-5.3p9-man
+@paddles/web:e2e: [2m[WebServer] [22mcopying path '/nix/store/5vmwpgmif2wa2hw5ip3ab6q40wvyfw2w-bash-interactive-5.3p9-man' from 'https://cache.nixos.org'...
+@paddles/web:e2e:
+@paddles/web:e2e: Running 2 tests using 1 worker
+@paddles/web:e2e:
+@paddles/web:e2e:   ✓  1 e2e/product/runtime.spec.mjs:3:1 › product routes serve the runtime directly without iframe proxies (373ms)
+@paddles/web:e2e:   ✓  2 e2e/product/runtime.spec.mjs:11:1 › externally injected turns flow live through chat, transit, manifold, and survive reload (2.8s)
+@paddles/web:e2e:
+@paddles/web:e2e:   2 passed (10.9s)
+@paddles/docs:build: cache hit, replaying logs 1c446d1f155e30ff
+@paddles/docs:build:
+@paddles/docs:build: > @paddles/docs@0.0.0 build
+@paddles/docs:build: > docusaurus build
+@paddles/docs:build:
+@paddles/docs:build: [INFO] [en] Creating an optimized production build...
+@paddles/docs:build: [SUCCESS] Generated static files in "build".
+@paddles/docs:build: [INFO] Use `npm run serve` command to test your build locally.
+@paddles/docs:e2e: cache hit, replaying logs 0fba7b2a5cf2c422
+@paddles/docs:e2e:
+@paddles/docs:e2e: > @paddles/docs@0.0.0 e2e
+@paddles/docs:e2e: > playwright test --config=playwright.config.mjs
+@paddles/docs:e2e:
+@paddles/docs:e2e:
+@paddles/docs:e2e: Running 1 test using 1 worker
+@paddles/docs:e2e:
+@paddles/docs:e2e:   ✓  1 e2e/docs.spec.mjs:3:1 › docs app serves the Keel-style landing page and intro route (1.0s)
+@paddles/docs:e2e:
+@paddles/docs:e2e:   1 passed (4.4s)
+
+ Tasks:    4 successful, 4 total
+Cached:    4 cached, 4 total
+  Time:    61ms >>> FULL TURBO
+
+
+--- stderr ---
+turbo 2.5.0
+
+turbo 2.5.0
+
+turbo 2.5.0
+
+turbo 2.5.0

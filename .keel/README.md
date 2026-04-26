@@ -402,6 +402,12 @@
 | [Split Application Into Hexagonal Boundaries](epics/VHkfpJJc4/voyages/VHkgP8L7k/) | done |
 | [Expose Operator Surfaces And Provider Registry](epics/VHkfpJJc4/voyages/VHkgPmlyS/) | done |
 
+### [Node Dependency Security Refresh](epics/VHvKkR50r/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Remove Npm Audit Vulnerabilities](epics/VHvKkR50r/voyages/VHvKoiGUZ/) | done |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |

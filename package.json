@@ -6,6 +6,11 @@
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "follow-redirects": "1.16.0",
+    "serialize-javascript": "7.0.5",
+    "uuid": "14.0.0"
+  },
   "scripts": {
     "build": "turbo run build",
     "lint": "turbo run lint",
