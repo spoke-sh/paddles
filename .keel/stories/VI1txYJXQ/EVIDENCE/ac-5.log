@@ -1,0 +1,147 @@
+---
+recorded_at: 2026-04-27T14:42:11.103801610-07:00
+command: cargo test -q && keel doctor
+---
+
+running 768 tests
+....................................................................................... 87/768
+....................................................................................... 174/768
+....................................................................................... 261/768
+....................................................................................... 348/768
+....................................................................................... 435/768
+....................................................................................... 522/768
+....................................................................................... 609/768
+....................................................................................... 696/768
+........................................................................
+test result: ok. 768 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.72s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[4m[1mDoctor's Laboratory Report[0m[0m
+
+[36m[1m[ SYSTEMS PATHOLOGY ][0m[39m
+  ┌─ CORE      [[1m[32mNOMINAL[39m[0m] (Vital, Pacemaker)
+  │
+  ├─ STRATEGY  [[1m[32mNOMINAL[39m[0m] (Strategic, Sensory, Skeletal)
+  │
+  ├─ EXECUTION [[1m[32mNOMINAL[39m[0m] (Motor, Neural, Autonomic)
+  │
+  └─ FLOW      [[1m[32mNOMINAL[39m[0m] (Circulatory, Kinetic)
+
+[2m[1m[ ITEMIZED PATHOLOGY ][0m[0m
+
+[36m[1mVital Subsystem (Missions)[0m[39m:
+  [32m✓[39m ID uniqueness (52 checks)
+  [32m✓[39m Goal achievement (52 checks)
+  [32m✓[39m Mission definition readiness (52 checks)
+  [32m✓[39m Active mission work coherence (52 checks)
+  [32m✓[39m Orphaned mission lineage (71 checks)
+  [32m✓[39m Mission date consistency (52 checks)
+  [32m✓[39m Mission completion evidence (52 checks)
+  [32m✓[39m Watch constraints (52 checks)
+
+[36m[1mPacemaker (Heartbeat)[0m[39m:
+  [33m![39m Pacemaker stability (1 checks)
+    [33mWarn: [39m Pacemaker has uncommitted energy. Commit worktree changes to stabilize the board.
+      Path: [2m/home/alex/workspace/spoke-sh/paddles/.keel/stories/VI1txYJXQ/README.md[0m
+
+[36m[1mStrategic Subsystem (Epics)[0m[39m:
+  [32m✓[39m Epic structure (66 checks)
+  [32m✓[39m ID uniqueness (66 checks)
+  [32m✓[39m ID consistency (66 checks)
+  [32m✓[39m Title convention (66 checks)
+  [32m✓[39m Epic status drift (66 checks)
+  [32m✓[39m Epic completion gates (66 checks)
+  [32m✓[39m Goal lineage coherence (66 checks)
+  [32m✓[39m Press release coherence (optional) (66 checks)
+  [32m✓[39m Epic date consistency (66 checks)
+
+[36m[1mSensory Subsystem (Bearings)[0m[39m:
+  [32m✓[39m Bearing structure (2 checks)
+  [32m✓[39m ID consistency (2 checks)
+  [32m✓[39m ID format (2 checks)
+  [32m✓[39m ID uniqueness (2 checks)
+  [32m✓[39m Title convention (2 checks)
+  [32m✓[39m Bearing coherence (2 checks)
+  [32m✓[39m Bearing content completion (2 checks)
+  [32m✓[39m Bearing-Epic coherence (2 checks)
+  [32m✓[39m Bearing date consistency (2 checks)
+  [32m✓[39m Bearing decision readiness (2 checks)
+  [32m✓[39m Bearing dependency integrity (2 checks)
+  [32m✓[39m Bearing lineage epic (2 checks)
+  [32m✓[39m Bearing lineage goals (2 checks)
+
+[36m[1mSkeletal Subsystem (ADRs)[0m[39m:
+  [32m✓[39m ADR structure (3 checks)
+  [32m✓[39m ID uniqueness (3 checks)
+  [32m✓[39m ID consistency (3 checks)
+  [32m✓[39m Title convention (3 checks)
+  [32m✓[39m Proposed ADR usage (3 checks)
+  [32m✓[39m ADR content completion (3 checks)
+  [32m✓[39m ADR date consistency (3 checks)
+
+[36m[1mMotor Subsystem (Voyages)[0m[39m:
+  [32m✓[39m Voyage structure (90 checks)
+  [32m✓[39m ID uniqueness (90 checks)
+  [32m✓[39m ID consistency (90 checks)
+  [32m✓[39m Title convention (90 checks)
+  [32m✓[39m Voyage status drift (90 checks)
+  [32m✓[39m Scope authored content (90 checks)
+  [32m✓[39m SRS authored requirements (90 checks)
+  [32m✓[39m SDD authored content (90 checks)
+  [32m✓[39m PRD lineage coherence (90 checks)
+  [32m✓[39m Scope lineage coherence (90 checks)
+  [32m✓[39m Legacy scope headings (90 checks)
+  [32m✓[39m Voyage artifact contract (90 checks)
+  [32m✓[39m Evidence chains (90 checks)
+  [32m✓[39m Voyage date consistency (90 checks)
+
+[36m[1mNeural Subsystem (Stories)[0m[39m:
+  [32m✓[39m ID uniqueness (275 checks)
+  [32m✓[39m ID consistency (275 checks)
+  [32m✓[39m Title convention (275 checks)
+  [32m✓[39m Acceptance criteria completion (275 checks)
+  [32m✓[39m Verification annotations (275 checks)
+  [32m✓[39m SRS traceability (275 checks)
+  [32m✓[39m Implementation dependency cycles (275 checks)
+  [32m✓[39m Parallel conflict coherence (275 checks)
+  [32m✓[39m Scoped evidence coverage (275 checks)
+  [32m✓[39m Story frontmatter drift (275 checks)
+  [32m✓[39m Reflection coherence (275 checks)
+  [32m✓[39m Active story coherence (275 checks)
+  [32m✓[39m Terminal artifact coherence (275 checks)
+  [32m✓[39m Knowledge catalog integrity (275 checks)
+  [32m✓[39m Verification manifest integrity (275 checks)
+  [32m✓[39m Story date consistency (275 checks)
+
+[36m[1mAutonomic Subsystem (Routines)[0m[39m:
+  [32m✓[39m Routine cadence (0 checks)
+  [32m✓[39m ID consistency (0 checks)
+  [32m✓[39m Scope coherence (0 checks)
+
+[36m[1mCirculatory Subsystem (Workflow)[0m[39m:
+  [32m✓[39m Graph integrity (489 checks)
+  [32m✓[39m Workflow topology (1 checks)
+  [32m✓[39m Mission Stack protocol (1 checks)
+  [32m✓[39m Mission Stack closeout (1 checks)
+  [32m✓[39m Circuit Overload (Max Battery Packs) (0 checks)
+
+[36m[1mKinetic Subsystem (Delivery)[0m[39m:
+  [33m![39m Backlog liquidity (0 checks)
+    [33mWarn: [39m Zero delivery liquidity. No ready stories in the backlog to sustain the 7-7 window.
+      Path: [2m/home/alex/workspace/spoke-sh/paddles/.keel/stories[0m
+  [32m✓[39m Active blockages (1 checks)
+

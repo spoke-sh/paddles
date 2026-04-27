@@ -414,6 +414,12 @@
 |--------|--------|
 | [Expose Current OpenAI Pro Models](epics/VHx5jpzIB/voyages/VHx6M7kqq/) | done |
 
+### [Runtime Module Modularity](epics/VI1tX27QW/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Extract Runtime Components](epics/VI1tX27QW/voyages/VI1tfFRCo/) | done |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |

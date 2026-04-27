@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-27T14:40:39.562591229-07:00
+mode: manual
+---
+The slice is a local Rust module extraction only. Cargo.toml and runtime configuration remain unchanged; no external services, network dependencies, planner behavior, executor behavior, or provider routing were added or modified.

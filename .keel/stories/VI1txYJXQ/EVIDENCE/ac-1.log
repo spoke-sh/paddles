@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-27T14:40:25.913848626-07:00
+mode: manual
+---
+Extracted runtime presentation helpers into smaller reusable modules: src/infrastructure/runtime_presentation/external_capability.rs owns external capability headline/status classing, and src/infrastructure/runtime_presentation/detail_formatting.rs owns detail/text formatting helpers. The parent runtime_presentation.rs now composes those modules through explicit paths.
