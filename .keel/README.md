@@ -408,6 +408,12 @@
 |--------|--------|
 | [Remove Npm Audit Vulnerabilities](epics/VHvKkR50r/voyages/VHvKoiGUZ/) | done |
 
+### [OpenAI GPT-5.5 Catalog Support](epics/VHx5jpzIB/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Expose Current OpenAI Pro Models](epics/VHx5jpzIB/voyages/VHx6M7kqq/) | done |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |

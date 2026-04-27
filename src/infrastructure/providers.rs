@@ -143,12 +143,16 @@ const OPENAI_MODELS: &[&str] = &[
     "gpt-4.1",
     "gpt-4o",
     "gpt-4o-mini",
+    "gpt-5.5",
+    "gpt-5.5-pro",
     "gpt-5.4",
+    "gpt-5.4-pro",
     "gpt-5.4-mini",
     "gpt-5.4-nano",
     "gpt-5.3-chat-latest",
     "gpt-5.3-codex",
     "gpt-5.2",
+    "gpt-5.2-pro",
     "gpt-5.2-chat-latest",
     "gpt-5.2-codex",
     "gpt-5.1",
@@ -157,12 +161,22 @@ const OPENAI_MODELS: &[&str] = &[
     "gpt-5.1-codex-max",
     "gpt-5.1-codex-mini",
     "gpt-5",
+    "gpt-5-pro",
     "gpt-5-mini",
     "gpt-5-nano",
     "gpt-5-chat-latest",
     "gpt-5-codex",
+    "o3-pro",
+    "o1-pro",
 ];
-const OPENAI_RESPONSES_ONLY_MODELS: &[&str] = &["gpt-5.4-pro", "gpt-5-pro", "gpt-5.2-pro"];
+const OPENAI_RESPONSES_ONLY_MODELS: &[&str] = &[
+    "gpt-5.5-pro",
+    "gpt-5.4-pro",
+    "gpt-5.2-pro",
+    "gpt-5-pro",
+    "o3-pro",
+    "o1-pro",
+];
 const INCEPTION_MODELS: &[&str] = &["mercury-2"];
 const ANTHROPIC_MODELS: &[&str] = &["claude-sonnet-4-20250514"];
 const GOOGLE_MODELS: &[&str] = &["gemini-2.5-flash"];
@@ -543,19 +557,23 @@ fn ollama_supports_thinking(model: &str) -> bool {
 }
 
 fn openai_thinking_modes(model: &str) -> &'static [ModelThinkingMode] {
+    if model == "gpt-5.5-pro" {
+        return NONE_ONLY_THINKING_MODES;
+    }
+    if matches!(model, "o3-pro" | "o1-pro") {
+        return NONE_ONLY_THINKING_MODES;
+    }
     if model == "gpt-5-pro" {
         return OPENAI_HIGH_ONLY_THINKING_MODES;
     }
-    if model == "gpt-5.2-pro" {
+    if matches!(model, "gpt-5.4-pro" | "gpt-5.2-pro") {
         return OPENAI_MEDIUM_HIGH_XHIGH_THINKING_MODES;
-    }
-    if model == "gpt-5.4-pro" {
-        return OPENAI_NONE_LOW_MEDIUM_HIGH_XHIGH_THINKING_MODES;
     }
     if model == "gpt-5.1-codex-max" {
         return OPENAI_NONE_MEDIUM_HIGH_XHIGH_THINKING_MODES;
     }
-    if model.starts_with("gpt-5.4") || model.starts_with("gpt-5.2") {
+    if model.starts_with("gpt-5.5") || model.starts_with("gpt-5.4") || model.starts_with("gpt-5.2")
+    {
         return OPENAI_NONE_LOW_MEDIUM_HIGH_XHIGH_THINKING_MODES;
     }
     if model.starts_with("gpt-5.1") {
@@ -968,12 +986,12 @@ const DOCUMENTED_PROVIDER_CAPABILITY_PATHS: &[(ModelProvider, &str, &str)] = &[
     ),
     (
         ModelProvider::Openai,
-        "gpt-5.4",
-        "Chat Completions by default; thinking-enabled GPT-5 turns switch planner/schema requests to Responses.",
+        "gpt-5.5",
+        "Chat Completions by default; thinking-enabled GPT-5.5 turns switch planner/schema requests to Responses.",
     ),
     (
         ModelProvider::Openai,
-        "gpt-5.4-pro",
+        "gpt-5.5-pro",
         "Responses path with reusable previous_response_id continuity.",
     ),
     (
@@ -1180,9 +1198,9 @@ mod tests {
     }
 
     #[test]
-    fn openai_gpt_5_4_models_expose_parameterized_thinking_modes() {
+    fn openai_gpt_5_5_models_expose_parameterized_thinking_modes() {
         assert_eq!(
-            ModelProvider::Openai.thinking_modes("gpt-5.4"),
+            ModelProvider::Openai.thinking_modes("gpt-5.5"),
             [
                 ModelThinkingMode {
                     key: "none",
@@ -1223,20 +1241,44 @@ mod tests {
         );
         assert_eq!(
             ModelProvider::Openai.thinking_mode_index_for_runtime_model(
-                "gpt-5.4",
-                "gpt-5.4",
-                Some("high")
+                "gpt-5.5",
+                "gpt-5.5",
+                Some("xhigh")
             ),
-            Some(3)
+            Some(4)
         );
         assert_eq!(
-            ModelProvider::Openai.prepare_runtime_model_id("gpt-5.4", Some("high")),
-            "gpt-5.4@@thinking=high"
+            ModelProvider::Openai.prepare_runtime_model_id("gpt-5.5", Some("xhigh")),
+            "gpt-5.5@@thinking=xhigh"
         );
         assert_eq!(
-            ModelProvider::Openai.qualified_model_label("gpt-5.4@@thinking=high"),
-            "openai:gpt-5.4 (High)"
+            ModelProvider::Openai.qualified_model_label("gpt-5.5@@thinking=xhigh"),
+            "openai:gpt-5.5 (XHigh)"
         );
+    }
+
+    #[test]
+    fn openai_pro_models_expose_only_documented_thinking_controls() {
+        let thinking_mode_keys = |model: &str| {
+            ModelProvider::Openai
+                .thinking_modes(model)
+                .iter()
+                .map(|mode| mode.key)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(thinking_mode_keys("gpt-5.5-pro"), ["none"]);
+        assert_eq!(
+            thinking_mode_keys("gpt-5.4-pro"),
+            ["medium", "high", "xhigh"]
+        );
+        assert_eq!(
+            thinking_mode_keys("gpt-5.2-pro"),
+            ["medium", "high", "xhigh"]
+        );
+        assert_eq!(thinking_mode_keys("gpt-5-pro"), ["high"]);
+        assert_eq!(thinking_mode_keys("o3-pro"), ["none"]);
+        assert_eq!(thinking_mode_keys("o1-pro"), ["none"]);
     }
 
     #[test]
@@ -1367,12 +1409,16 @@ mod tests {
                 "gpt-4.1",
                 "gpt-4o",
                 "gpt-4o-mini",
+                "gpt-5.5",
+                "gpt-5.5-pro",
                 "gpt-5.4",
+                "gpt-5.4-pro",
                 "gpt-5.4-mini",
                 "gpt-5.4-nano",
                 "gpt-5.3-chat-latest",
                 "gpt-5.3-codex",
                 "gpt-5.2",
+                "gpt-5.2-pro",
                 "gpt-5.2-chat-latest",
                 "gpt-5.2-codex",
                 "gpt-5.1",
@@ -1381,21 +1427,59 @@ mod tests {
                 "gpt-5.1-codex-max",
                 "gpt-5.1-codex-mini",
                 "gpt-5",
+                "gpt-5-pro",
                 "gpt-5-mini",
                 "gpt-5-nano",
                 "gpt-5-chat-latest",
                 "gpt-5-codex",
+                "o3-pro",
+                "o1-pro",
             ]
         );
     }
 
     #[test]
     fn openai_transport_supports_responses_only_pro_models() {
+        assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5.5-pro"));
         assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5.4-pro"));
         assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5-pro"));
         assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5.2-pro"));
+        assert!(ModelProvider::Openai.supports_paddles_http_transport("o3-pro"));
+        assert!(ModelProvider::Openai.supports_paddles_http_transport("o1-pro"));
+        assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5.5"));
         assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-5.4"));
         assert!(ModelProvider::Openai.supports_paddles_http_transport("gpt-4o"));
+
+        for model in [
+            "gpt-5.5-pro",
+            "gpt-5.4-pro",
+            "gpt-5.2-pro",
+            "gpt-5-pro",
+            "o3-pro",
+            "o1-pro",
+        ] {
+            let surface = ModelProvider::Openai.capability_surface(model);
+            assert_eq!(
+                surface.render_capability,
+                RenderCapability::PromptEnvelope,
+                "{model} render path"
+            );
+            assert_eq!(
+                surface.planner_tool_call,
+                PlannerToolCallCapability::PromptEnvelope,
+                "{model} planner path"
+            );
+            assert_eq!(
+                surface.deliberation.support,
+                DeliberationSupport::NativeContinuation,
+                "{model} deliberation support"
+            );
+            assert_eq!(
+                surface.deliberation.state_contract,
+                DeliberationStateContract::OpaqueRoundTrip,
+                "{model} state contract"
+            );
+        }
     }
 
     #[test]
@@ -1409,7 +1493,7 @@ mod tests {
 
     #[test]
     fn capability_surface_negotiates_shared_http_render_and_tool_call_behavior() {
-        let openai = ModelProvider::Openai.capability_surface("gpt-5.4");
+        let openai = ModelProvider::Openai.capability_surface("gpt-5.5");
         assert_eq!(openai.http_format, Some(ApiFormat::OpenAi));
         assert_eq!(openai.render_capability, RenderCapability::OpenAiJsonSchema);
         assert_eq!(
@@ -1421,7 +1505,7 @@ mod tests {
             ProviderTransportSupport::Supported
         ));
 
-        let openai_responses = ModelProvider::Openai.capability_surface("gpt-5.4-pro");
+        let openai_responses = ModelProvider::Openai.capability_surface("gpt-5.5-pro");
         assert_eq!(openai_responses.http_format, Some(ApiFormat::OpenAi));
         assert_eq!(
             openai_responses.render_capability,
@@ -1473,14 +1557,14 @@ mod tests {
             DeliberationStateContract::None
         );
 
-        let openai = ModelProvider::Openai.capability_surface("gpt-5.4");
+        let openai = ModelProvider::Openai.capability_surface("gpt-5.5");
         assert_eq!(openai.deliberation.support, DeliberationSupport::ToggleOnly);
         assert_eq!(
             openai.deliberation.state_contract,
             DeliberationStateContract::None
         );
 
-        let openai_reasoning = ModelProvider::Openai.capability_surface("gpt-5.4@@thinking=high");
+        let openai_reasoning = ModelProvider::Openai.capability_surface("gpt-5.5@@thinking=xhigh");
         assert_eq!(
             openai_reasoning.deliberation.support,
             DeliberationSupport::NativeContinuation
@@ -1490,7 +1574,7 @@ mod tests {
             DeliberationStateContract::OpaqueRoundTrip
         );
 
-        let openai_responses = ModelProvider::Openai.capability_surface("gpt-5.4-pro");
+        let openai_responses = ModelProvider::Openai.capability_surface("gpt-5.5-pro");
         assert_eq!(
             openai_responses.deliberation.support,
             DeliberationSupport::NativeContinuation
@@ -1615,7 +1699,7 @@ mod tests {
                 ),
                 (
                     ModelProvider::Openai,
-                    "gpt-5.4",
+                    "gpt-5.5",
                     Some(ApiFormat::OpenAi),
                     RenderCapability::OpenAiJsonSchema,
                     PlannerToolCallCapability::NativeFunctionTool,
@@ -1625,7 +1709,7 @@ mod tests {
                 ),
                 (
                     ModelProvider::Openai,
-                    "gpt-5.4-pro",
+                    "gpt-5.5-pro",
                     Some(ApiFormat::OpenAi),
                     RenderCapability::PromptEnvelope,
                     PlannerToolCallCapability::PromptEnvelope,

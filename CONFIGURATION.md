@@ -459,11 +459,11 @@ even when a project-local `./paddles.toml` also sets shared/planner/synthesizer
 models. When the selected shared model exposes provider-specific thinking
 controls, the same machine-managed file also stores `thinking_mode = "..."`
 next to the shared provider/model pair so `/model` restores that third-stage
-selection on restart. When older runtime lane state still points at OpenAI Responses-only
-`*-pro` variants such as `gpt-5.4-pro`, Paddles rewrites that machine-managed
-state onto the corresponding chat-completions model during startup, and any
-older machine-managed planner split is dropped so `/model` remains a single
-shared-lane override. Other settings such as `port`, verbosity, gatherer
+selection on restart. When runtime lane state points at OpenAI pro variants
+such as `gpt-5.5-pro`, `gpt-5.4-pro`, or `o3-pro`, Paddles preserves that
+shared model selection, and any older machine-managed planner split is dropped
+so `/model` remains a single shared-lane override. Other settings such as
+`port`, verbosity, gatherer
 configuration, and CLI flags keep their normal precedence. If no authored config layer explicitly
 sets `port` and you do not pass `--port`, Paddles asks the OS for an ephemeral
 HTTP port at startup and reports the resolved HTTP bind address in the intro
@@ -500,12 +500,13 @@ through the planner tool, and Paddles executes that action locally in the
 workspace harness.
 
 For OpenAI specifically, non-reasoning turns on chat-completions models such as
-`gpt-5.4`, `gpt-5.4-mini`, and `gpt-4o` stay on Chat Completions with
+`gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-4o` stay on Chat Completions with
 structured JSON/tool calls. When a GPT-5 lane enables thinking, Paddles now
 routes planner tool calls and structured-answer requests through
 `/v1/responses` so reasoning-aware turns stay compatible with OpenAI's
-Responses-only tool/schema contract. Responses-only models such as
-`gpt-5.4-pro`, `gpt-5-pro`, and `gpt-5.2-pro` continue to use
+Responses-only tool/schema contract. OpenAI pro models that Paddles routes
+through Responses, such as `gpt-5.5-pro`, `gpt-5.4-pro`, `gpt-5.2-pro`,
+`gpt-5-pro`, `o3-pro`, and `o1-pro`, continue to use
 `/v1/responses` with reusable `previous_response_id` continuity.
 
 For Moonshot, Paddles currently recognizes the Kimi API model ids
@@ -556,8 +557,8 @@ family exposes more than one contract:
 | Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Thinking modes | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | `sift` | `qwen-1.5b` | `local` | `supported` | `prompt-envelope` | `prompt-envelope` | `unsupported` | `none` | `none` | Local native runtime; no provider-native reasoning substrate. |
-| `openai` | `gpt-5.4` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `low`, `medium`, `high`, `xhigh` | Chat Completions by default; thinking-enabled GPT-5 turns switch planner/schema requests to Responses. |
-| `openai` | `gpt-5.4-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high`, `xhigh` | Responses path with reusable previous_response_id continuity. |
+| `openai` | `gpt-5.5` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `low`, `medium`, `high`, `xhigh` | Chat Completions by default; thinking-enabled GPT-5.5 turns switch planner/schema requests to Responses. |
+| `openai` | `gpt-5.5-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none` | Responses path with reusable previous_response_id continuity. |
 | `inception` | `mercury-2` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `summary_only` | `none` | `instant`, `low`, `medium`, `high` | OpenAI-compatible chat with reasoning summaries but no reusable state. |
 | `anthropic` | `claude-sonnet-4-20250514` | `anthropic` | `supported` | `anthropic-tool-use` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | Messages API with thinking blocks and interleaved-thinking support. |
 | `google` | `gemini-2.5-flash` | `gemini` | `supported` | `gemini-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | generateContent path with thought-signature continuity. |
