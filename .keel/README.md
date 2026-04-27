@@ -420,6 +420,12 @@
 |--------|--------|
 | [Extract Runtime Components](epics/VI1tX27QW/voyages/VI1tfFRCo/) | done |
 
+### [Runtime Boundary Separation](epics/VI1zeXMOr/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Extract Planner Executor Boundaries](epics/VI1zeXMOr/voyages/VI1zga7t4/) | done |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
