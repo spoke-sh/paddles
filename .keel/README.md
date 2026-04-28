@@ -426,6 +426,36 @@
 |--------|--------|
 | [Extract Planner Executor Boundaries](epics/VI1zeXMOr/voyages/VI1zga7t4/) | done |
 
+### [Trust Planner Rationale Verbatim](epics/VI2sGaOrg/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Preserve Planner Rationale Through Trace Pipeline](epics/VI2sGaOrg/voyages/VI2sdFRI7/) | planned |
+
+### [Stream Uncut Tool Output](epics/VI2sHovAf/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Stream Tool Output And Drop The 1.2k Cap](epics/VI2sHovAf/voyages/VI2seFPac/) | planned |
+
+### [Tier-1 Idiomatic Vocabulary Renames](epics/VI2sJZcV9/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Rename MechSuitService And Chambers To Idiomatic Modules](epics/VI2sJZcV9/voyages/VI2sfbhqT/) | planned |
+
+### [Plan Mode And Slash Command Parity](epics/VI2sKP2cz/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Promote Plan Mode And Add Slash Command Surface](epics/VI2sKP2cz/voyages/VI2sgLj5t/) | planned |
+
+### [Doc Truthfulness Pass](epics/VI2sLV0uw/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Rewrite Docs To Renamed Vocabulary And Drop Aspirational Sections](epics/VI2sLV0uw/voyages/VI2shGAE7/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
