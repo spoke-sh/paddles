@@ -170,6 +170,13 @@ pub struct PlannerRequest {
     pub user_prompt: String,
     pub workspace_root: PathBuf,
     pub interpretation: InterpretationContext,
+    /// Full operator-memory documents (raw AGENTS.md text from system, user,
+    /// and workspace scopes). Carried alongside the summarized
+    /// `interpretation` so the action-selection step has the operator's own
+    /// instructions as a primary source of truth — not just whatever excerpt
+    /// the interpretation pass surfaced. Populated at PlannerRequest
+    /// construction time from the OperatorMemory port.
+    pub operator_memory: Vec<OperatorMemoryDocument>,
     pub collaboration: CollaborationModeResult,
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
@@ -198,6 +205,7 @@ impl PlannerRequest {
             user_prompt: user_prompt.into(),
             workspace_root: workspace_root.into(),
             interpretation,
+            operator_memory: Vec::new(),
             collaboration: CollaborationModeResult::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
@@ -208,6 +216,11 @@ impl PlannerRequest {
             resolver: None,
             entity_resolver: None,
         }
+    }
+
+    pub fn with_operator_memory(mut self, operator_memory: Vec<OperatorMemoryDocument>) -> Self {
+        self.operator_memory = operator_memory;
+        self
     }
 
     pub fn with_resolver(mut self, resolver: Arc<dyn ContextResolver>) -> Self {

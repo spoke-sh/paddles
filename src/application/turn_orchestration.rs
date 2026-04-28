@@ -139,6 +139,11 @@ impl<'a> TurnOrchestrationChamber<'a> {
                 interpretation.clone(),
                 PlannerBudget::default(),
             )
+            .with_operator_memory(
+                self.service
+                    .operator_memory
+                    .operator_memory_documents(&self.service.workspace_root),
+            )
             .with_collaboration(collaboration.clone())
             .with_recent_turns(recent_turns.clone())
             .with_recent_thread_summary(recent_thread_summary.clone())
@@ -338,6 +343,10 @@ impl<'a> TurnOrchestrationChamber<'a> {
                                     .service
                                     .external_capability_descriptors(),
                                 interpretation: interpretation.clone(),
+                                operator_memory: self
+                                    .service
+                                    .operator_memory
+                                    .operator_memory_documents(&self.service.workspace_root),
                                 recent_turns,
                                 recent_thread_summary: recent_thread_summary.clone(),
                                 collaboration: collaboration.clone(),

@@ -114,9 +114,9 @@ use crate::domain::ports::{
     GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
     InitialEditInstruction, InterpretationContext, InterpretationProcedure,
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
-    ModelRegistry, NormalizedEntityHint, OperatorMemory, PlannerAction, PlannerBudget,
-    PlannerCapability, PlannerConfig, PlannerExecutionContract, PlannerLoopState, PlannerRequest,
-    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    ModelRegistry, NormalizedEntityHint, OperatorMemory, OperatorMemoryDocument, PlannerAction,
+    PlannerBudget, PlannerCapability, PlannerConfig, PlannerExecutionContract, PlannerLoopState,
+    PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
     RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
     RetrieverOption, SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine,
     ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery,
@@ -384,6 +384,10 @@ struct PlannerLoopContext {
     governance_profile: Option<ExecutionGovernanceProfile>,
     external_capabilities: Vec<ExternalCapabilityDescriptor>,
     interpretation: InterpretationContext,
+    /// Raw operator-memory documents loaded for this turn. Carried through the
+    /// loop so every PlannerRequest can re-attach them as a primary source of
+    /// truth alongside the summarized `interpretation`.
+    operator_memory: Vec<OperatorMemoryDocument>,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
     collaboration: CollaborationModeResult,
@@ -4760,8 +4764,8 @@ fn enrich_interpretation_with_workspace_capability_surface(
         &mut context,
         InterpretationProcedure {
             source: source.to_string(),
-            label: "Probe Required Local Tools".to_string(),
-            purpose: "Decide which local program the task actually needs, probe that exact tool through the harness, and then reuse cached observations instead of relying on a prebaked whitelist.".to_string(),
+            label: "Validate And Cache Documented Local Tools".to_string(),
+            purpose: "Operator memory and the interpretation context are the primary source of truth for which local programs the task should use. This procedure validates that those documented programs are actually available in the environment and caches the observation so subsequent steps reuse it. It does not decide which tool the task needs — operator memory does that — and it must not be used to override an operator-documented CLI with a generic file probe.".to_string(),
             steps: dynamic_tool_probe_procedure_steps(surface),
         },
     );
@@ -4900,17 +4904,17 @@ fn dynamic_tool_probe_procedure_steps(
         steps.push(InterpretationProcedureStep {
             index: steps.len(),
             action: WorkspaceAction::Inspect {
-                command: "command -v <tool>".to_string(),
+                command: "command -v <tool-named-by-operator-memory>".to_string(),
             },
-            note: "Probe the exact tool you think the task needs and let the harness cache the result."
+            note: "After operator memory or the interpretation context names a CLI, validate it is present and let the harness cache the result. Do not invent a tool to probe."
                 .to_string(),
         });
         steps.push(InterpretationProcedureStep {
             index: steps.len(),
             action: WorkspaceAction::Inspect {
-                command: "<tool> --version".to_string(),
+                command: "<tool-named-by-operator-memory> --version".to_string(),
             },
-            note: "Use a narrow read-only probe to confirm syntax or version before depending on the tool."
+            note: "Use a narrow read-only probe to confirm version of an operator-documented tool before depending on it."
                 .to_string(),
         });
     }
@@ -5167,6 +5171,7 @@ async fn review_decision_under_signals(
         context.interpretation.clone(),
         budget.clone(),
     )
+    .with_operator_memory(context.operator_memory.clone())
     .with_collaboration(context.collaboration.clone())
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
@@ -7824,6 +7829,7 @@ mod tests {
             governance_profile: None,
             external_capabilities: Vec::new(),
             interpretation: InterpretationContext::default(),
+            operator_memory: Vec::new(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
             collaboration: CollaborationModeResult::default(),
@@ -8286,21 +8292,31 @@ mod tests {
                 WorkspaceAction::Inspect { ref command } if command == "command -v <tool>"
             ) && hint.note.contains("probe that exact tool first")
         }));
+        // The procedure has been reframed as a validating cache layer over
+        // operator memory; it must no longer prescribe generic file probes.
+        let probe_procedure = context
+            .decision_framework
+            .procedures
+            .iter()
+            .find(|procedure| procedure.label == "Validate And Cache Documented Local Tools")
+            .expect("validate-and-cache procedure should exist");
         assert!(
-            context
+            probe_procedure
+                .purpose
+                .contains("validates that those documented programs are actually available"),
+            "probe procedure must frame itself as validation of operator-documented tools, not generic discovery"
+        );
+        assert!(probe_procedure.steps.iter().any(|step| matches!(
+            step.action,
+            WorkspaceAction::Inspect { ref command } if command.contains("operator-memory")
+        )));
+        assert!(
+            !context
                 .decision_framework
                 .procedures
                 .iter()
-                .any(|procedure| {
-                    procedure.label == "Probe Required Local Tools"
-                && procedure
-                    .steps
-                    .iter()
-                    .any(|step| matches!(
-                        step.action,
-                        WorkspaceAction::Inspect { ref command } if command == "command -v <tool>"
-                    ))
-                })
+                .any(|procedure| procedure.label == "Probe Required Local Tools"),
+            "the old prescriptive 'Probe Required Local Tools' label must not coexist with the new validating cache procedure"
         );
     }
 
@@ -9154,7 +9170,7 @@ mod tests {
                 .decision_framework
                 .procedures
                 .iter()
-                .any(|procedure| procedure.label == "Probe Required Local Tools")
+                .any(|procedure| procedure.label == "Validate And Cache Documented Local Tools")
         );
 
         let events = sink.recorded();
@@ -17622,6 +17638,135 @@ mod tests {
                 rationale != controller.as_deref().unwrap_or("")
             }),
             "controller summary must live on a separate field, not overwrite rationale"
+        );
+    }
+
+    #[test]
+    fn planner_request_carries_full_operator_memory_alongside_summarized_interpretation() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        // Operator memory documents the workflow the planner is meant to use.
+        let agents_md = "# AGENTS.md\n\n\
+            Use the raw `keel` CLI directly. Run `keel mission show <id>` to inspect a mission.\n";
+        fs::write(workspace.path().join("AGENTS.md"), agents_md).expect("write AGENTS.md");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            Vec::new(),
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Continue executing the mission VI2q5DKHe", sink.clone())
+                .await
+                .expect("process prompt");
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        assert!(!requests.is_empty(), "planner should have been called");
+        let request = requests
+            .first()
+            .expect("at least one PlannerRequest captured");
+
+        // The full AGENTS.md text reaches the action-selection PlannerRequest,
+        // not just the summarized interpretation excerpt.
+        assert!(
+            !request.operator_memory.is_empty(),
+            "PlannerRequest must carry operator memory documents"
+        );
+        let memory_blob = request
+            .operator_memory
+            .iter()
+            .map(|document| document.contents.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            memory_blob.contains("Use the raw `keel` CLI directly"),
+            "operator memory must reach the planner verbatim, not via 5-line excerpt"
+        );
+        assert!(
+            memory_blob.contains("keel mission show <id>"),
+            "operator memory must include the operator's documented CLI invocations"
+        );
+    }
+
+    #[test]
+    fn validate_and_cache_procedure_does_not_prescribe_generic_file_probes() {
+        // Reframed procedure must validate operator-documented tools rather
+        // than override operator memory with a generic `command -v <tool>`
+        // discovery sweep.
+        let context = super::enrich_interpretation_with_workspace_capability_surface(
+            InterpretationContext::default(),
+            &WorkspaceCapabilitySurface {
+                actions: vec![WorkspaceActionCapability::new(
+                    "inspect",
+                    "run a single read-only probe",
+                    false,
+                )],
+                tools: Vec::new(),
+                notes: Vec::new(),
+            },
+        );
+
+        let probe = context
+            .decision_framework
+            .procedures
+            .iter()
+            .find(|procedure| procedure.label == "Validate And Cache Documented Local Tools")
+            .expect("validate-and-cache procedure should exist");
+        assert!(
+            probe
+                .purpose
+                .contains("validates that those documented programs are actually available"),
+            "purpose must phrase the procedure as validation, not discovery"
+        );
+        assert!(
+            probe.purpose.contains("primary source of truth"),
+            "purpose must explicitly defer to operator memory"
+        );
+        assert!(
+            !probe
+                .purpose
+                .contains("Decide which local program the task actually needs"),
+            "the old prescriptive purpose language must not survive the rename"
+        );
+        assert!(
+            probe.steps.iter().all(|step| match &step.action {
+                WorkspaceAction::Inspect { command } | WorkspaceAction::Shell { command } => {
+                    command.contains("operator-memory") || command.contains("<tool")
+                }
+                _ => true,
+            }),
+            "probe steps must point at operator-documented tools, not invent generic <tool> placeholders"
         );
     }
 

@@ -1761,7 +1761,15 @@ impl HttpProviderAdapter {
         .await
     }
 
-    fn build_system_prompt(&self, interpretation: &InterpretationContext) -> String {
+    /// Build the base system prompt with the precedence order baked in:
+    /// (1) full operator memory, (2) summarized interpretation context.
+    /// Tool hints / decision framework are appended later by the planner-
+    /// specific prompt builder as a validating cache layer.
+    fn build_system_prompt(
+        &self,
+        interpretation: &InterpretationContext,
+        operator_memory: &[crate::domain::ports::OperatorMemoryDocument],
+    ) -> String {
         let mut system = String::from(
             "You are Paddles, a recursive in-context planning harness. \
              You provide concise, accurate technical assistance.\n\n",
@@ -1771,16 +1779,36 @@ impl HttpProviderAdapter {
              When local evidence and allowed actions support a bounded workspace change, take the \
              change instead of stopping at diagnosis or prose.\n\n",
         );
+        system.push_str(
+            "Source-of-truth precedence (highest first): (1) Operator Memory below — what the \
+             human wrote in AGENTS.md is the primary instruction set; if it names a CLI or \
+             workflow for the active task, prefer that over generic file probes. \
+             (2) Interpretation Context — a model-derived summary of operator memory; trust it \
+             only insofar as it agrees with operator memory. (3) Tool Hints / Decision Framework — \
+             a validating cache that confirms or augments (1) and (2); they never override them.\n\n",
+        );
+        if !operator_memory.is_empty() {
+            system.push_str("## Operator Memory (full text — primary source of truth)\n");
+            for document in operator_memory {
+                system.push_str(&format!("--- {} ---\n", document.source));
+                system.push_str(&document.contents);
+                system.push_str("\n\n");
+            }
+        }
         if !interpretation.is_empty() {
-            system.push_str("## Interpretation Context\n");
+            system.push_str("## Interpretation Context (model-derived summary)\n");
             system.push_str(&interpretation.render());
             system.push('\n');
         }
         system
     }
 
-    fn build_planner_system_prompt(&self, interpretation: &InterpretationContext) -> String {
-        let mut system = self.build_system_prompt(interpretation);
+    fn build_planner_system_prompt(
+        &self,
+        interpretation: &InterpretationContext,
+        operator_memory: &[crate::domain::ports::OperatorMemoryDocument],
+    ) -> String {
+        let mut system = self.build_system_prompt(interpretation, operator_memory);
         let transport_rule = match self.capabilities.planner_tool_call {
             PlannerToolCallCapability::NativeFunctionTool => {
                 "The transport exposes a native tool named `select_planner_action`; call it exactly once and put the complete action envelope in the tool arguments."
@@ -2347,7 +2375,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
     ) -> Result<InitialActionDecision> {
         let system = self
             .engine
-            .build_planner_system_prompt(&request.interpretation);
+            .build_planner_system_prompt(&request.interpretation, &request.operator_memory);
         let mut user = build_http_initial_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
@@ -2445,7 +2473,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
     ) -> Result<RecursivePlannerDecision> {
         let system = self
             .engine
-            .build_planner_system_prompt(&request.interpretation);
+            .build_planner_system_prompt(&request.interpretation, &request.operator_memory);
         let mut user = build_http_planner_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
@@ -5598,8 +5626,10 @@ mod tests {
             RenderCapability::OpenAiJsonSchema,
         );
 
-        let prompt = adapter
-            .build_planner_system_prompt(&crate::domain::ports::InterpretationContext::default());
+        let prompt = adapter.build_planner_system_prompt(
+            &crate::domain::ports::InterpretationContext::default(),
+            &[],
+        );
 
         assert!(prompt.contains("Return exactly one complete JSON object"));
         assert!(prompt.contains("The first key must be `action`"));

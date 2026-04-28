@@ -89,6 +89,7 @@ impl<'a> RecursiveControlChamber<'a> {
                     context.interpretation.clone(),
                     budget.clone(),
                 )
+                .with_operator_memory(context.operator_memory.clone())
                 .with_collaboration(context.collaboration.clone())
                 .with_recent_turns(context.recent_turns.clone())
                 .with_recent_thread_summary(context.recent_thread_summary.clone())

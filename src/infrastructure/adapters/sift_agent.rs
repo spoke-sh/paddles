@@ -2665,13 +2665,16 @@ For `search.query` and `refine.query`, return concise retrieval terms, not an in
 - Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
 {}\n\
 \n\
-Interpretation context:\n\
+Operator memory (primary source of truth — full text from AGENTS.md hierarchy):\n\
 {}\n\
 \n\
-Interpretation tool hints:\n\
+Interpretation context (model-derived summary of operator memory):\n\
 {}\n\
 \n\
-Derived decision framework:\n\
+Interpretation tool hints (validating cache layer over operator memory and the interpretation context — they confirm or augment what operator memory and the interpretation already prescribe; they do not override):\n\
+{}\n\
+\n\
+Derived decision framework (validating cache layer; same precedence as tool hints):\n\
 {}\n\
 \n\
 Recent turns:\n\
@@ -2688,6 +2691,7 @@ Runtime notes:\n\
 Current user request:\n\
 {}\n",
         planner_grounding_rules(),
+        format_operator_memory_documents(&request.operator_memory),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
@@ -2832,13 +2836,16 @@ Rules:\n\
 Workspace root:\n\
 {}\n\
 \n\
-Interpretation context:\n\
+Operator memory (primary source of truth — full text from AGENTS.md hierarchy):\n\
 {}\n\
 \n\
-Interpretation tool hints:\n\
+Interpretation context (model-derived summary of operator memory):\n\
 {}\n\
 \n\
-Derived decision framework:\n\
+Interpretation tool hints (validating cache layer over operator memory and the interpretation context — they confirm or augment what operator memory and the interpretation already prescribe; they do not override):\n\
+{}\n\
+\n\
+Derived decision framework (validating cache layer; same precedence as tool hints):\n\
 {}\n\
 \n\
 Recent turns:\n\
@@ -2859,6 +2866,7 @@ Current user request:\n\
 {}\n",
         planner_grounding_rules(),
         prompt.workspace_root.display(),
+        format_operator_memory_documents(&prompt.request.operator_memory),
         format_interpretation_context_digest(prompt.interpretation),
         format_interpretation_tool_hints(prompt.interpretation),
         format_decision_framework(prompt.interpretation),
