@@ -3549,11 +3549,18 @@ fn edit_instruction_from_http_envelope(
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() > n {
-        format!("{}...[truncated]", &s[..n])
-    } else {
-        s.to_string()
+    if s.len() <= n {
+        return s.to_string();
     }
+    // Snap down to the nearest UTF-8 char boundary so we never slice a
+    // multi-byte character in half. Box-drawing chars in `keel health` and
+    // friends are 3-byte UTF-8 sequences; without this snap the planner-bound
+    // summary panicked when the byte cap landed mid-character.
+    let mut end = n;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...[truncated]", &s[..end])
 }
 
 fn citation_sources(evidence: &EvidenceBundle) -> Vec<String> {
@@ -3833,7 +3840,7 @@ fn unverified_external_url_fallback(prompt: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
+    use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter, truncate};
     use crate::application::{AgentRuntime, RuntimeLaneConfig};
     use crate::domain::model::DeliberationState;
     use crate::domain::model::{
@@ -3938,6 +3945,45 @@ mod tests {
             captures.push(capture);
             Some(artifact_id)
         }
+    }
+
+    #[test]
+    fn truncate_snaps_to_char_boundary_when_byte_cap_lands_inside_a_multibyte_char() {
+        // Reproduces the planner-bound shell summary panic: `keel health
+        // --scene` emits box-drawing characters (U+2500 LIGHT HORIZONTAL,
+        // 3 bytes each), and the previous truncate sliced the buffer at a
+        // raw byte index that landed inside one of those characters.
+        let mut input = String::from("Shell command: keel health --scene\nExit status: 0\n");
+        input.push_str(&"─".repeat(200));
+        input.push_str("\ntail content");
+
+        let cap = 180;
+        // Recreate the panicking byte boundary and confirm we no longer
+        // straddle a character.
+        assert!(
+            !input.is_char_boundary(cap),
+            "test setup: byte index {cap} must land inside a multi-byte char to be a real regression check"
+        );
+
+        let result = truncate(&input, cap);
+        assert!(result.ends_with("...[truncated]"));
+        // The kept prefix must end on a real char boundary — i.e. the head
+        // does not contain a partial multi-byte sequence.
+        let kept = result.trim_end_matches("...[truncated]");
+        assert!(
+            kept.is_char_boundary(kept.len()),
+            "truncated prefix must end on a UTF-8 char boundary"
+        );
+        // Nothing about the original head should be lost beyond what the
+        // boundary snap requires (at most a couple of bytes).
+        assert!(kept.len() <= cap);
+        assert!(cap - kept.len() < 4);
+    }
+
+    #[test]
+    fn truncate_returns_full_string_when_under_cap() {
+        let result = truncate("short", 100);
+        assert_eq!(result, "short");
     }
 
     #[test]

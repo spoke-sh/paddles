@@ -281,11 +281,17 @@ impl ConversationProjectionUpdate {
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() > n {
-        format!("{}...", &s[..n])
-    } else {
-        s.to_string()
+    if s.len() <= n {
+        return s.to_string();
     }
+    // Snap down to the nearest UTF-8 char boundary so multi-byte characters
+    // (e.g., box-drawing in tool output) don't cause a panic when the byte cap
+    // lands mid-character.
+    let mut end = n;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &s[..end])
 }
 
 fn trace_tool_graph_label(tool: &crate::domain::model::TraceToolCall, completed: bool) -> String {

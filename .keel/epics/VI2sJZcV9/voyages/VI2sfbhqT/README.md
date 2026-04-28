@@ -27,7 +27,7 @@ started_at: 2026-04-27T19:47:54
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -35,4 +35,5 @@ started_at: 2026-04-27T19:47:54
 | [Rename Chamber Wrappers To Plain Modules](../../../../stories/VI3BWyxR3/README.md) | refactor | icebox |
 | [Rename Recursive Control Module To Agent Loop](../../../../stories/VI3BX17Sw/README.md) | refactor | icebox |
 | [Trust Operator Memory Over Probe Procedure](../../../../stories/VI3fgYucO/README.md) | refactor | done |
+| [Fix UTF-8 Boundary Panic In Truncate Helpers](../../../../stories/VI3kNOiYB/README.md) | fix | done |
 <!-- END GENERATED -->
