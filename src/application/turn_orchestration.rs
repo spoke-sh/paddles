@@ -321,7 +321,7 @@ impl<'a> TurnOrchestrationChamber<'a> {
                     ));
 
                     self.service
-                        .recursive_control()
+                        .agent_loop()
                         .execute_recursive_planner_loop(
                             &current_prompt,
                             PlannerLoopContext {
@@ -369,7 +369,7 @@ impl<'a> TurnOrchestrationChamber<'a> {
                 },
             };
 
-            self.service.recursive_control().expire_turn_control_requests(
+            self.service.agent_loop().expire_turn_control_requests(
                 &trace,
                 "The turn closed before the requested control could reach another safe checkpoint.",
             );

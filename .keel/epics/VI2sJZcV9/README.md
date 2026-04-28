@@ -22,8 +22,8 @@ mission: VI2q5DKHe
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/5 stories done
+**Progress:** 0/1 voyages complete, 4/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Rename MechSuitService And Chambers To Idiomatic Modules](voyages/VI2sfbhqT/) | in-progress | 3/5 |
+| [Rename MechSuitService And Chambers To Idiomatic Modules](voyages/VI2sfbhqT/) | in-progress | 4/5 |
 <!-- END GENERATED -->

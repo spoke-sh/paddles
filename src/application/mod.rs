@@ -1,3 +1,4 @@
+mod agent_loop;
 mod conversation_read_model;
 mod deliberation;
 mod evals;
@@ -10,12 +11,12 @@ mod interpretation_chamber;
 mod planner_action_execution;
 mod planner_loop;
 pub mod read_model;
-mod recursive_control;
 mod runtime_posture_projection;
 mod synthesis_chamber;
 mod turn_orchestration;
 mod worker_runtime;
 
+use self::agent_loop::RecursiveControlChamber;
 use self::conversation_read_model::ConversationReadModelChamber;
 pub use self::deliberation::{
     DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
@@ -39,7 +40,6 @@ pub use self::harness_capability_posture::{
 };
 use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
-use self::recursive_control::RecursiveControlChamber;
 pub use self::runtime_posture_projection::{
     RuntimeCapabilityPostureEvent, RuntimeDiagnosticPostureEvent, RuntimeEvalOutcomePostureEvent,
     RuntimeEvalPostureEvent, RuntimeGovernancePostureEvent, RuntimePostureProjectionInput,
@@ -2534,7 +2534,7 @@ impl AgentRuntime {
         InterpretationChamber::new(self)
     }
 
-    fn recursive_control(&self) -> RecursiveControlChamber<'_> {
+    fn agent_loop(&self) -> RecursiveControlChamber<'_> {
         RecursiveControlChamber::new(self)
     }
 
@@ -12911,7 +12911,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
             service
-                .recursive_control()
+                .agent_loop()
                 .execute_recursive_planner_loop(
                     "Update the planner stream text",
                     context,

@@ -27,13 +27,13 @@ started_at: 2026-04-27T19:47:54
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/5 stories complete
+**Progress:** 4/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Rename MechSuitService to AgentRuntime](../../../../stories/VI2slwMGg/README.md) | refactor | done |
 | [Rename Chamber Wrappers To Plain Modules](../../../../stories/VI3BWyxR3/README.md) | refactor | icebox |
-| [Rename Recursive Control Module To Agent Loop](../../../../stories/VI3BX17Sw/README.md) | refactor | icebox |
+| [Rename Recursive Control Module To Agent Loop](../../../../stories/VI3BX17Sw/README.md) | refactor | done |
 | [Trust Operator Memory Over Probe Procedure](../../../../stories/VI3fgYucO/README.md) | refactor | done |
 | [Fix UTF-8 Boundary Panic In Truncate Helpers](../../../../stories/VI3kNOiYB/README.md) | fix | done |
 <!-- END GENERATED -->
