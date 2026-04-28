@@ -22,8 +22,8 @@ mission: VI2q5DKHe
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Stream Tool Output And Drop The 1.2k Cap](voyages/VI2seFPac/) | planned | 0/1 |
+| [Stream Tool Output And Drop The 1.2k Cap](voyages/VI2seFPac/) | done | 1/1 |
 <!-- END GENERATED -->

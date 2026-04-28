@@ -432,11 +432,11 @@
 |--------|--------|
 | [Preserve Planner Rationale Through Trace Pipeline](epics/VI2sGaOrg/voyages/VI2sdFRI7/) | done |
 
-### [Stream Uncut Tool Output](epics/VI2sHovAf/) (active)
+### [Stream Uncut Tool Output](epics/VI2sHovAf/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Stream Tool Output And Drop The 1.2k Cap](epics/VI2sHovAf/voyages/VI2seFPac/) | planned |
+| [Stream Tool Output And Drop The 1.2k Cap](epics/VI2sHovAf/voyages/VI2seFPac/) | done |
 
 ### [Tier-1 Idiomatic Vocabulary Renames](epics/VI2sJZcV9/) (active)
 

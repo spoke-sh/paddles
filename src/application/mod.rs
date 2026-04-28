@@ -6663,6 +6663,32 @@ pub(super) fn trim_for_planner(input: &str, limit: usize) -> String {
     format!("{}...[truncated]", kept.trim_end())
 }
 
+/// Head+tail truncation for planner-bound tool output summaries. Keeps the
+/// first half and last half of the buffer (each up to `limit / 2` characters)
+/// with an explicit `…[truncated N chars]…` marker in the middle, so the model
+/// sees both the start of a build/test run and the failure tail at the end
+/// instead of only the head. Used for shell and inspect summaries where
+/// truncating with `trim_for_planner`'s head-only strategy hides compiler
+/// errors and panics that show up after the first few hundred lines.
+pub(super) fn trim_for_planner_head_tail(input: &str, limit: usize) -> String {
+    let trimmed = input.trim();
+    let total = trimmed.chars().count();
+    if total <= limit {
+        return trimmed.to_string();
+    }
+
+    let half = limit / 2;
+    let head: String = trimmed.chars().take(half).collect();
+    let tail_skip = total - half;
+    let tail: String = trimmed.chars().skip(tail_skip).collect();
+    let omitted = total - (half * 2);
+    format!(
+        "{}\n…[truncated {omitted} chars]…\n{}",
+        head.trim_end(),
+        tail.trim_start()
+    )
+}
+
 fn next_task_sequence_from_trace_recorder(trace_recorder: &dyn TraceRecorder) -> u64 {
     trace_recorder
         .task_ids()

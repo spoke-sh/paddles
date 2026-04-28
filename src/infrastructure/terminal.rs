@@ -18,9 +18,24 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 const TERMINAL_READ_BUFFER_BYTES: usize = 1024;
-const MAX_TERMINAL_EVENT_CHARS: usize = 400;
-const MAX_TERMINAL_EVENTS: usize = 24;
-const MAX_CAPTURE_CHARS_PER_STREAM: usize = 24_000;
+/// Maximum characters carried in a single `TurnEvent::ToolOutput` chunk before
+/// the chunk is clipped with a trailing ellipsis. Generous so operators see
+/// real output (compiler errors, test failures, log lines) instead of a
+/// teaser; long single chunks are rare because the underlying reader only
+/// pulls 1 KiB at a time anyway.
+const MAX_TERMINAL_EVENT_CHARS: usize = 8_192;
+/// Maximum number of `TurnEvent::ToolOutput` chunks emitted before further
+/// output is collapsed into a single "additional terminal output suppressed"
+/// notice. Sized so a typical build/test run streams completely; the planner-
+/// bound summary is independently bounded by `PLANNER_TOOL_SUMMARY_CHAR_BUDGET`
+/// in `application::planner_action_execution`.
+const MAX_TERMINAL_EVENTS: usize = 1024;
+/// Maximum characters captured per stdout/stderr stream into the buffer that
+/// becomes the planner-bound `Output`. Generous so the head+tail planner
+/// summary has enough underlying bytes to reflect both the start and the end
+/// of long tool output. Hard ceiling exists to bound memory for runaway
+/// commands.
+const MAX_CAPTURE_CHARS_PER_STREAM: usize = 256_000;
 
 struct TerminalChunk {
     stream: &'static str,

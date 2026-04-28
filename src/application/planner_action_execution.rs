@@ -1,4 +1,11 @@
-use super::trim_for_planner;
+use super::trim_for_planner_head_tail;
+
+/// Maximum characters the planner-bound shell/inspect summary may carry.
+/// Generous on purpose: at 32k chars a typical `cargo build` failure or
+/// `pytest` traceback fits without losing the head or the tail. The
+/// operator-visible TUI stream is already streamed live and capped
+/// independently in `infrastructure::terminal`.
+const PLANNER_TOOL_SUMMARY_CHAR_BUDGET: usize = 32_000;
 use crate::domain::model::{ExecutionGovernanceOutcome, ExecutionPermissionRequest, TurnEventSink};
 use crate::domain::ports::{PlannerAction, WorkspaceAction};
 use crate::infrastructure::execution_governance::{
@@ -48,7 +55,7 @@ pub(super) fn run_planner_inspect_command(
             };
 
             Ok(GovernedPlannerCommandSummary {
-                summary: trim_for_planner(&rendered, 1_200),
+                summary: trim_for_planner_head_tail(&rendered, PLANNER_TOOL_SUMMARY_CHAR_BUDGET),
                 command_succeeded: output.status.success(),
                 governance_request,
                 governance_outcome,
@@ -219,11 +226,185 @@ fn format_command_output_summary(command: &str, output: &std::process::Output) -
         .map(|code| code.to_string())
         .unwrap_or_else(|| output.status.to_string());
 
-    trim_for_planner(
+    trim_for_planner_head_tail(
         &format!(
             "Shell command: {command}\nExit status: {status}\n{}",
             rendered.trim()
         ),
-        1_200,
+        PLANNER_TOOL_SUMMARY_CHAR_BUDGET,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        PLANNER_TOOL_SUMMARY_CHAR_BUDGET, run_planner_inspect_command, run_planner_shell_command,
+    };
+    use crate::domain::model::{TurnEvent, TurnEventSink};
+    use crate::infrastructure::execution_governance::GovernedTerminalCommandResult;
+    use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct RecordingTurnEventSink {
+        events: Mutex<Vec<TurnEvent>>,
+    }
+
+    impl RecordingTurnEventSink {
+        fn recorded(&self) -> Vec<TurnEvent> {
+            self.events.lock().expect("turn events lock").clone()
+        }
+    }
+
+    impl TurnEventSink for RecordingTurnEventSink {
+        fn emit(&self, event: TurnEvent) {
+            self.events.lock().expect("turn events lock").push(event);
+        }
+    }
+
+    #[test]
+    fn planner_shell_summary_preserves_output_well_beyond_old_1200_char_cap() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
+        let sink = RecordingTurnEventSink::default();
+
+        // Generate ~16 KiB of output — comfortably above the old 1,200-char
+        // cap that used to silently slice cargo build / pytest tracebacks.
+        let summary = run_planner_shell_command(
+            workspace.path(),
+            Arc::clone(&registry),
+            "for i in $(seq 1 800); do printf 'log line %04d -- some context here\\n' \"$i\"; done",
+            "call-shell-large",
+            &sink,
+        )
+        .expect("shell command should run");
+
+        assert!(summary.command_succeeded);
+        let body = &summary.summary;
+        // Both the head and the tail of the run must be visible to the planner.
+        assert!(
+            body.contains("log line 0001"),
+            "head of output should survive in planner-bound summary"
+        );
+        assert!(
+            body.contains("log line 0800"),
+            "tail of output should survive in planner-bound summary"
+        );
+        // Far above the old 1,200-char ceiling.
+        assert!(
+            body.chars().count() > 4_000,
+            "summary should carry well over 1,200 chars (got {})",
+            body.chars().count()
+        );
+        // Operator-visible streaming chunks reach the trace as the command
+        // runs, not just as a single end-of-command payload.
+        let chunk_count = sink
+            .recorded()
+            .iter()
+            .filter(|event| matches!(event, TurnEvent::ToolOutput { .. }))
+            .count();
+        assert!(
+            chunk_count > 1,
+            "shell output should stream as multiple ToolOutput chunks (got {chunk_count})"
+        );
+    }
+
+    #[test]
+    fn planner_shell_summary_uses_head_tail_truncation_above_budget() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
+        let sink = RecordingTurnEventSink::default();
+
+        // Generate output that comfortably exceeds the planner-bound budget so
+        // we exercise the head+tail truncation path.
+        let line_count = (PLANNER_TOOL_SUMMARY_CHAR_BUDGET / 32) + 2_000;
+        let command = format!(
+            "for i in $(seq 1 {line_count}); do printf 'verbose log line %06d xxxxxxxxxxxxxxxx\\n' \"$i\"; done"
+        );
+
+        let summary = run_planner_shell_command(
+            workspace.path(),
+            Arc::clone(&registry),
+            &command,
+            "call-shell-overflow",
+            &sink,
+        )
+        .expect("shell command should run");
+
+        let body = &summary.summary;
+        assert!(
+            body.contains("…[truncated"),
+            "head+tail truncation marker should appear in the summary"
+        );
+        assert!(
+            body.contains("verbose log line 000001"),
+            "head should survive head+tail truncation"
+        );
+        assert!(
+            body.contains(&format!("verbose log line {line_count:06}")),
+            "tail should survive head+tail truncation"
+        );
+    }
+
+    #[test]
+    fn planner_inspect_summary_preserves_output_well_beyond_old_1200_char_cap() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(ExecutionHandRegistry::with_default_local_governance());
+        let sink = RecordingTurnEventSink::default();
+
+        let summary = run_planner_inspect_command(
+            workspace.path(),
+            Arc::clone(&registry),
+            "seq 1 600",
+            "call-inspect-large",
+            &sink,
+        )
+        .expect("inspect command should run");
+
+        assert!(summary.command_succeeded);
+        let body = &summary.summary;
+        assert!(
+            body.starts_with("1\n2\n3\n"),
+            "head should survive: {body:?}"
+        );
+        assert!(body.ends_with("600"), "tail should survive: {body:?}");
+        assert!(
+            body.chars().count() > 1_500,
+            "summary should carry well over 1,200 chars (got {})",
+            body.chars().count()
+        );
+    }
+
+    #[test]
+    fn planner_blocked_command_does_not_emit_streaming_chunks() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        // No governance profile installed -> command is denied before exec.
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        let sink = RecordingTurnEventSink::default();
+
+        let summary = run_planner_shell_command(
+            workspace.path(),
+            Arc::clone(&registry),
+            "echo blocked",
+            "call-shell-blocked",
+            &sink,
+        )
+        .expect("shell command result");
+
+        assert!(!summary.command_succeeded);
+        assert!(matches!(
+            summary.governance_outcome.kind,
+            crate::domain::model::ExecutionGovernanceOutcomeKind::PolicyUnavailable
+        ));
+        let _ = GovernedTerminalCommandResult::Blocked {
+            governance_request: summary.governance_request.clone(),
+            governance_outcome: summary.governance_outcome.clone(),
+        };
+        assert!(
+            sink.recorded()
+                .iter()
+                .all(|event| !matches!(event, TurnEvent::ToolOutput { .. })),
+            "blocked command should not stream tool output"
+        );
+    }
 }
