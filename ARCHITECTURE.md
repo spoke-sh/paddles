@@ -51,29 +51,29 @@ the work; the difference is that mode selection and clarification pauses are
 now observable through the same event and trace spine as every other turn
 transition.
 
-### The Engine, Its Chambers, And The Governor
+### The Agent Runtime And Its Phases
 
-At this point, "engine" is the right architectural word, not just a metaphor.
-
-Paddles runs one turn-processing engine composed of typed chambers:
+The `AgentRuntime` runs one turn-processing loop composed of typed phases:
 
 - **Interpretation**: assemble operator memory, guidance, and prior context
 - **Routing**: commit to planner-directed turn flow
 - **Planning**: choose and review bounded next actions
-- **Gathering**: search or retrieve evidence
-- **Tooling**: execute concrete workspace actions
+- **Retrieval**: search or retrieve evidence (today: `gatherer` adapters)
+- **Tool use**: execute concrete workspace actions
 - **Threading**: manage queued prompts, branches, and merge-back state
 - **Rendering**: finalize the authored response for transcript projection
-- **Governor**: supervise pace, stalls, and interventions across the whole engine
+- **Governor**: supervise pace, stalls, and interventions across the whole loop
 
 The important architectural change is that these are now first-class runtime states, not just labels inferred in the UI after the fact. The runtime emits typed `harness_state` events derived from ordinary turn events, carrying:
 
-- the active chamber
+- the active phase
 - governor status
 - a supervisory watch phase for long-running work
 - optional intervention/detail text
 
-That gives TUI, web, and future API clients one shared harness manifold instead of separate ad hoc interpretations of planner/gatherer/tool progress. UI projection should treat that watch phase as a pacing signal rather than proof that execution has terminated; a gathering row can legitimately report `watch=overtime` while the turn remains actively hunting and the projected total continues to move.
+That gives TUI, web, and future API clients one shared runtime view instead of separate ad hoc interpretations of planner/retrieval/tool progress. UI projection should treat that watch phase as a pacing signal rather than proof that execution has terminated; a retrieval row can legitimately report `watch=overtime` while the turn remains actively hunting and the projected total continues to move.
+
+> **Naming note.** Earlier drafts of this document referred to these phases as "chambers" wrapped by `*Chamber` types and to the runtime as `MechSuitService`. Mission VI2q5DKHe is migrating that vocabulary toward industry-standard agent terminology — `AgentRuntime` has landed; chamber wrappers and the `recursive_control` → `agent_loop` rename are planned. Treat any remaining "chamber" prose in this document as historical until that rename ships.
 
 ### Act 3: Synthesis
 
@@ -812,6 +812,20 @@ Current routing now uses explicit planner/synth roles:
 ## Context-1 Fit
 
 `context-1` belongs on the planner side of the architecture — a candidate specialized planner/gatherer lane. The recursive loop is fundamentally about iterative retrieval, pruning, and refinement, which aligns with context-1's strengths. Final answers continue to come from the separate synthesizer contract.
+
+## Roadmap / Not Yet Shipped
+
+This document occasionally references capability that is described as a design goal rather than a shipped feature. Treat the following as **not yet wired** until the corresponding mission lands:
+
+- **Real subagents** with their own context windows. The runtime profile carries a registry slot; only `session-continuity-v1` is active today and it contributes runtime *notes* rather than autonomous decisions.
+- **MCP server discovery and invocation.** The external-capability catalog declares an `mcp.tool` descriptor that reports `unavailable`; an MCP transport adapter is future work.
+- **Plan-mode review/approve UX.** `/plan` is a registered slash command; the proposed-action review panel and approve/decline gating are scaffolded.
+- **Automatic tier promotion / demotion** of context locators. Content moves between tiers through explicit locators today; automatic policies are future work.
+- **True concurrent sibling generation.** Threading is checkpoint-bounded and sequential today.
+- **Operator-triggered context compaction** (`/compact`). The runtime profile already governs compaction policy; an operator-triggered control is pending.
+- **Deterministic entity resolution** in the strict sense. Today's resolver is a path-ranking heuristic that returns `resolved` / `ambiguous` / `missing` outcomes — the heuristic is honest about its uncertainty but not formally deterministic.
+
+The vocabulary used to describe shipped phases is also being migrated toward industry-standard agent terminology (`AgentRuntime`, `agent_loop`, `Tool`, `subagents`, `runtime_profile`, `retriever`, `trace`/`inspector`, `controller_signals`, `reasoning_signals`, `evidence_check`, `compaction_trigger`) under mission VI2q5DKHe. Older names — `MechSuitService`, `*Chamber`, `ExecutionHand`, `WorkspaceAction`, `specialist_brains`, `harness_profile`, `gatherer`, `forensics`, `compaction_cue`, `premise_challenge`, `deliberation_signals`, `steering_signals` — may still appear in this document and in code; they are being retired one rename at a time.
 
 ## Documentation Contract
 

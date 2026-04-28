@@ -3,7 +3,7 @@
 [![Keel Board](https://img.shields.io/badge/Keel-Board-blue)](.keel/README.md)
 [![CI](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml)
 
-> `paddles` is the mech suit around a local-first coding agent. Its backbone architecture is a recursive in-context planning harness: operator memory shapes turn interpretation, a planner model recursively gathers and refines evidence through bounded resource use, and a separate synthesizer model produces the final answer from that trace.
+> `paddles` is an agent runtime for a local-first coding agent. Its backbone architecture is a recursive in-context planning harness: operator memory shapes turn interpretation, a planner model recursively gathers and refines evidence through bounded resource use, and a separate synthesizer model produces the final answer from that trace.
 
 ## Backbone Architecture
 
@@ -517,15 +517,26 @@ Later files are more specific. That memory now participates in turn interpretati
 
 ## Why This Architecture
 
-The mech suit raises the effective performance of smaller local models through recursive resource use. A small model with bounded tools and iterative evidence gathering consistently outperforms the same model answering in one shot.
+The agent runtime raises the effective performance of smaller local models through recursive resource use. A small model with bounded tools and iterative evidence gathering consistently outperforms the same model answering in one shot.
 
-That is the mech suit:
+That is the contract:
 
 - **Human-authored guidance** shapes every turn through operator memory and derived procedures
 - **Bounded recursive planning** lets the model investigate iteratively within safe guardrails
 - **Explicit evidence accumulation** grounds answers in real workspace artifacts
 - **Separate final synthesis** optimizes each phase independently
 - **Visible execution** makes every decision transparent and auditable
+
+## Roadmap / Not Yet Shipped
+
+The sections above describe the shipped runtime today. The following capabilities are referenced in design notes elsewhere in the repository but are **not yet wired**; treat any prose claims about them as aspirations until the corresponding mission lands:
+
+- **Real subagents** with their own context windows. A `subagents` registry slot exists in the runtime profile, but only `session-continuity-v1` is active today and it contributes runtime *notes* rather than autonomous decisions.
+- **MCP server discovery and invocation.** The external-capability catalog declares an `mcp.tool` descriptor that reports `unavailable` until an MCP transport adapter ships.
+- **Plan-mode review/approve UX.** `/plan` is registered as a discoverable slash command; the proposed-action review panel and approve/decline gating are scaffolded for a follow-up slice.
+- **Automatic tier promotion / demotion** of context locators. Content moves between tiers through explicit locators today; automatic policies are future work.
+- **True concurrent sibling generation.** Threading is checkpoint-bounded and sequential today.
+- **Operator-triggered context compaction** (`/compact`). The runtime profile already governs compaction policy; an explicit operator-triggered control is pending.
 
 ## License
 

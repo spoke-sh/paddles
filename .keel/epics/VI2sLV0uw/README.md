@@ -22,8 +22,8 @@ mission: VI2q5DKHe
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Rewrite Docs To Renamed Vocabulary And Drop Aspirational Sections](voyages/VI2shGAE7/) | planned | 0/1 |
+| [Rewrite Docs To Renamed Vocabulary And Drop Aspirational Sections](voyages/VI2shGAE7/) | done | 1/1 |
 <!-- END GENERATED -->

@@ -450,11 +450,11 @@
 |--------|--------|
 | [Promote Plan Mode And Add Slash Command Surface](epics/VI2sKP2cz/voyages/VI2sgLj5t/) | done |
 
-### [Doc Truthfulness Pass](epics/VI2sLV0uw/) (active)
+### [Doc Truthfulness Pass](epics/VI2sLV0uw/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Rewrite Docs To Renamed Vocabulary And Drop Aspirational Sections](epics/VI2sLV0uw/voyages/VI2shGAE7/) | planned |
+| [Rewrite Docs To Renamed Vocabulary And Drop Aspirational Sections](epics/VI2sLV0uw/voyages/VI2shGAE7/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
