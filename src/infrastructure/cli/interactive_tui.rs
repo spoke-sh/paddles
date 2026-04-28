@@ -172,6 +172,11 @@ enum ComposerPart {
 
 const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
+        insert_text: "/help",
+        usage: "/help",
+        description: "list available slash commands",
+    },
+    SlashCommandSpec {
         insert_text: "/login ",
         usage: "/login <provider>",
         description: "store or replace a provider API key",
@@ -185,6 +190,31 @@ const SLASH_COMMANDS: &[SlashCommandSpec] = &[
         insert_text: "/resume",
         usage: "/resume",
         description: "list or restore persisted conversations",
+    },
+    SlashCommandSpec {
+        insert_text: "/plan",
+        usage: "/plan",
+        description: "review the planner's proposed action before any tool runs",
+    },
+    SlashCommandSpec {
+        insert_text: "/compact",
+        usage: "/compact",
+        description: "compact conversation context (not yet wired)",
+    },
+    SlashCommandSpec {
+        insert_text: "/cost",
+        usage: "/cost",
+        description: "show session cost from the trace recorder (not yet wired)",
+    },
+    SlashCommandSpec {
+        insert_text: "/agents",
+        usage: "/agents",
+        description: "list available subagents (not yet wired)",
+    },
+    SlashCommandSpec {
+        insert_text: "/mcp",
+        usage: "/mcp",
+        description: "list MCP servers (not yet wired)",
     },
 ];
 
@@ -2253,6 +2283,11 @@ impl InteractiveApp {
         }
 
         // Handle slash commands.
+        if raw.starts_with("/help") {
+            self.handle_help_command();
+            return;
+        }
+
         if raw.starts_with("/login") {
             self.handle_login_command(&raw);
             return;
@@ -2265,6 +2300,31 @@ impl InteractiveApp {
 
         if raw.starts_with("/resume") {
             self.handle_resume_command(&raw);
+            return;
+        }
+
+        if raw.starts_with("/plan") {
+            self.handle_plan_command();
+            return;
+        }
+
+        if raw.starts_with("/compact") {
+            self.handle_compact_command();
+            return;
+        }
+
+        if raw.starts_with("/cost") {
+            self.handle_cost_command();
+            return;
+        }
+
+        if raw.starts_with("/agents") {
+            self.handle_agents_command();
+            return;
+        }
+
+        if raw.starts_with("/mcp") {
+            self.handle_mcp_command();
             return;
         }
 
@@ -2505,6 +2565,70 @@ impl InteractiveApp {
             format!("• {}", header.into()),
             content,
         ));
+    }
+
+    fn handle_help_command(&mut self) {
+        let mut lines = Vec::with_capacity(SLASH_COMMANDS.len());
+        for command in SLASH_COMMANDS {
+            lines.push(format!("  {} — {}", command.usage, command.description));
+        }
+        self.push_event("Slash commands", lines.join("\n"));
+    }
+
+    fn handle_plan_command(&mut self) {
+        // Plan mode is scoped to story VI2snU9cs. Full UX (proposed-action
+        // review panel + approve/decline gating) is wired in subsequent
+        // slices. The slash command itself lands here so the surface is
+        // discoverable via `/help` from day one and the keybinding/UX work
+        // can land without further command-registration churn.
+        self.push_event(
+            "Plan mode",
+            "Plan mode entry-point recognized. Full proposed-action review and \
+             approve/decline UX is scaffolded but not yet wired — for now the \
+             planner runs as before. See mission VI2q5DKHe (epic VI2sKP2cz) \
+             for follow-up slices.",
+        );
+    }
+
+    fn handle_compact_command(&mut self) {
+        self.push_event(
+            "Compact",
+            "Conversation context compaction is not yet wired through the \
+             slash command. The planner profile already governs compaction \
+             policy automatically; an explicit operator-triggered compaction \
+             control is tracked under epic VI2sKP2cz.",
+        );
+    }
+
+    fn handle_cost_command(&mut self) {
+        self.push_event(
+            "Cost",
+            "Per-session cost reporting from the trace recorder is not yet \
+             wired. Tokens and tool invocations are recorded; the operator-\
+             facing cost rollup ships with a follow-up slice under epic \
+             VI2sKP2cz.",
+        );
+    }
+
+    fn handle_agents_command(&mut self) {
+        self.push_event(
+            "Subagents",
+            "Subagent execution is not yet wired. The runtime profile carries \
+             a subagent registry slot, but only `session-continuity-v1` is \
+             active today and it contributes runtime notes rather than \
+             autonomous decisions. A real subagent surface lands in a separate \
+             mission.",
+        );
+    }
+
+    fn handle_mcp_command(&mut self) {
+        self.push_event(
+            "MCP servers",
+            "MCP server discovery is not yet wired. The external-capability \
+             catalog declares an `mcp.tool` descriptor that reports \
+             `unavailable` until an MCP transport adapter ships in a separate \
+             mission.",
+        );
     }
 
     fn push_error(&mut self, header: impl Into<String>, content: impl Into<String>) {
@@ -8190,6 +8314,111 @@ mod tests {
             app.dispatch_next_prompt(),
             Some(QueuedPrompt::Prompt("hello".to_string()))
         );
+    }
+
+    fn submit_slash_command(app: &mut InteractiveApp, command: &str) {
+        app.input = command.to_string();
+        app.submit_prompt();
+    }
+
+    #[test]
+    fn slash_help_lists_every_registered_slash_command() {
+        use super::SLASH_COMMANDS;
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        submit_slash_command(&mut app, "/help");
+
+        let last_row = app.rows.last().expect("help row exists");
+        assert_eq!(last_row.kind, TranscriptRowKind::CommandNotice);
+        assert_eq!(last_row.header, "• Slash commands");
+        for command in SLASH_COMMANDS {
+            assert!(
+                last_row.content.contains(command.usage),
+                "/help output should mention `{}`",
+                command.usage
+            );
+            assert!(
+                last_row.content.contains(command.description),
+                "/help output should describe `{}`",
+                command.usage
+            );
+        }
+    }
+
+    #[test]
+    fn slash_plan_records_a_command_notice_instead_of_dispatching_a_prompt() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        submit_slash_command(&mut app, "/plan");
+
+        let last_row = app.rows.last().expect("plan row exists");
+        assert_eq!(last_row.kind, TranscriptRowKind::CommandNotice);
+        assert!(last_row.header.contains("Plan mode"));
+        assert!(last_row.content.contains("not yet wired"));
+        assert!(
+            app.dispatch_next_prompt().is_none(),
+            "/plan must not dispatch a planner prompt"
+        );
+    }
+
+    #[test]
+    fn unwired_slash_commands_emit_honest_not_yet_wired_notices() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        for (command, expected_header) in [
+            ("/compact", "Compact"),
+            ("/cost", "Cost"),
+            ("/agents", "Subagents"),
+            ("/mcp", "MCP servers"),
+        ] {
+            submit_slash_command(&mut app, command);
+            let last_row = app.rows.last().expect("notice row exists");
+            assert_eq!(
+                last_row.kind,
+                TranscriptRowKind::CommandNotice,
+                "command {command} should emit a CommandNotice"
+            );
+            assert!(
+                last_row.header.contains(expected_header),
+                "command {command} should report header containing `{expected_header}`, got `{}`",
+                last_row.header
+            );
+            assert!(
+                last_row.content.contains("not yet wired"),
+                "command {command} should be honest about being a stub"
+            );
+            assert!(
+                app.dispatch_next_prompt().is_none(),
+                "stub command {command} must not dispatch a planner prompt"
+            );
+        }
     }
 
     #[test]

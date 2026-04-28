@@ -22,8 +22,8 @@ mission: VI2q5DKHe
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Promote Plan Mode And Add Slash Command Surface](voyages/VI2sgLj5t/) | planned | 0/1 |
+| [Promote Plan Mode And Add Slash Command Surface](voyages/VI2sgLj5t/) | done | 1/1 |
 <!-- END GENERATED -->

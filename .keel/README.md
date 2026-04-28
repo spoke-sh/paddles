@@ -444,11 +444,11 @@
 |--------|--------|
 | [Rename MechSuitService And Chambers To Idiomatic Modules](epics/VI2sJZcV9/voyages/VI2sfbhqT/) | in-progress |
 
-### [Plan Mode And Slash Command Parity](epics/VI2sKP2cz/) (active)
+### [Plan Mode And Slash Command Parity](epics/VI2sKP2cz/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Promote Plan Mode And Add Slash Command Surface](epics/VI2sKP2cz/voyages/VI2sgLj5t/) | planned |
+| [Promote Plan Mode And Add Slash Command Surface](epics/VI2sKP2cz/voyages/VI2sgLj5t/) | done |
 
 ### [Doc Truthfulness Pass](epics/VI2sLV0uw/) (active)
 
