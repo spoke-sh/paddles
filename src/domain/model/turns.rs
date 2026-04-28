@@ -151,9 +151,17 @@ pub enum TurnEvent {
     PlannerActionSelected {
         sequence: usize,
         action: String,
+        /// The planner model's own rationale, preserved verbatim. The controller
+        /// must never overwrite this field; controller-derived narratives live
+        /// on `controller_summary` instead.
         rationale: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signal_summary: Option<String>,
+        /// Controller-authored summary (e.g. compiled rationale narrative)
+        /// emitted alongside the model's rationale so traces can show both
+        /// without rewriting model output.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        controller_summary: Option<String>,
     },
     PlanUpdated {
         items: Vec<PlanChecklistItem>,

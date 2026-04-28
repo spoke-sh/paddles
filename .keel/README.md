@@ -426,11 +426,11 @@
 |--------|--------|
 | [Extract Planner Executor Boundaries](epics/VI1zeXMOr/voyages/VI1zga7t4/) | done |
 
-### [Trust Planner Rationale Verbatim](epics/VI2sGaOrg/) (active)
+### [Trust Planner Rationale Verbatim](epics/VI2sGaOrg/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Preserve Planner Rationale Through Trace Pipeline](epics/VI2sGaOrg/voyages/VI2sdFRI7/) | planned |
+| [Preserve Planner Rationale Through Trace Pipeline](epics/VI2sGaOrg/voyages/VI2sdFRI7/) | done |
 
 ### [Stream Uncut Tool Output](epics/VI2sHovAf/) (active)
 

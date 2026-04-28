@@ -623,6 +623,7 @@ impl StructuredTurnTrace {
         action: &str,
         rationale: &str,
         signal_summary: Option<&str>,
+        controller_summary: Option<&str>,
         branch_id: Option<TraceBranchId>,
     ) {
         let branch_id = branch_id.or_else(|| self.default_branch_id());
@@ -632,6 +633,7 @@ impl StructuredTurnTrace {
                 action: action.to_string(),
                 rationale: rationale.to_string(),
                 signal_summary: signal_summary.map(str::to_string),
+                controller_summary: controller_summary.map(str::to_string),
             },
         );
         self.record_lineage_edge(
@@ -1963,6 +1965,7 @@ fn render_turn_event(event: &TurnEvent) -> String {
             action,
             rationale,
             signal_summary,
+            controller_summary,
         } => {
             let mut lines = vec![
                 format!(
@@ -1975,6 +1978,12 @@ fn render_turn_event(event: &TurnEvent) -> String {
                 lines.push(format!(
                     "    Signals: {}",
                     trim_event_detail(signal_summary, 2)
+                ));
+            }
+            if let Some(controller_summary) = controller_summary {
+                lines.push(format!(
+                    "    Controller: {}",
+                    trim_event_detail(controller_summary, 2)
                 ));
             }
             lines.join("\n")
@@ -9222,14 +9231,20 @@ mod tests {
                     action,
                     rationale,
                     signal_summary,
-                } => Some((action, rationale, signal_summary)),
+                    controller_summary,
+                } => Some((action, rationale, signal_summary, controller_summary)),
                 _ => None,
             })
             .expect("planner action record");
         assert_eq!(planner_action.0, "answer directly");
-        assert_ne!(planner_action.1, "answer directly");
-        assert!(planner_action.1.contains("answer directly"));
+        // The model's verbatim rationale is preserved; the controller no
+        // longer overwrites it with its own narrative.
+        assert_eq!(planner_action.1, "answer directly");
         assert_eq!(planner_action.2, &None);
+        assert!(matches!(
+            planner_action.3.as_deref(),
+            Some(controller_text) if controller_text.contains("Paddles chose")
+        ));
         assert!(
             replay
                 .records
@@ -9326,6 +9341,7 @@ mod tests {
             signal_summary: Some(
                 "continuation=tool_follow_up; uncertainty=opaque".to_string(),
             ),
+            controller_summary: None,
         });
 
         assert!(rendered.contains("Planner step 3: inspect `ls`"));
@@ -9370,6 +9386,7 @@ mod tests {
         trace.record_planner_action(
             "read src/lib.rs",
             "act on the likeliest file first",
+            None,
             None,
             None,
         );
@@ -17305,16 +17322,17 @@ mod tests {
                     action,
                     rationale,
                     signal_summary,
-                } if *sequence == 3 => Some((action, rationale, signal_summary)),
+                    controller_summary,
+                } if *sequence == 3 => {
+                    Some((action, rationale, signal_summary, controller_summary))
+                }
                 _ => None,
             })
             .expect("signal-aware follow-up planner action event");
         assert_eq!(follow_up_event.0, "inspect `ls`");
-        assert!(follow_up_event.1.contains("Paddles chose `inspect `ls``"));
-        assert!(
-            !follow_up_event
-                .1
-                .contains("inspect the current tool path before stopping")
+        assert_eq!(
+            follow_up_event.1,
+            "continue the active path before answering"
         );
         assert!(matches!(
             follow_up_event.2.as_deref(),
@@ -17322,6 +17340,12 @@ mod tests {
                 if summary.contains("continuation=tool_follow_up")
                     && summary.contains("uncertainty=opaque")
                     && !summary.contains("inspect the current tool path before stopping")
+        ));
+        assert!(matches!(
+            follow_up_event.3.as_deref(),
+            Some(controller_text)
+                if controller_text.contains("Paddles chose `inspect `ls``")
+                    && !controller_text.contains("inspect the current tool path before stopping")
         ));
         assert!(events.iter().any(|event| matches!(
             event,
@@ -17421,18 +17445,158 @@ mod tests {
                     action,
                     rationale,
                     signal_summary,
-                } if *sequence == 3 => Some((action, rationale, signal_summary)),
+                    controller_summary,
+                } if *sequence == 3 => {
+                    Some((action, rationale, signal_summary, controller_summary))
+                }
                 _ => None,
             })
             .expect("terminal planner action event");
         assert_eq!(terminal_event.0, "stop (model selected answer)");
-        assert!(terminal_event.1.contains("stop (model selected answer)"));
+        assert_eq!(terminal_event.1, "the current path is sufficient");
         assert_eq!(terminal_event.2, &None);
+        assert!(matches!(
+            terminal_event.3.as_deref(),
+            Some(controller_text) if controller_text.contains("stop (model selected answer)")
+        ));
         assert!(!events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
                 if *step_number == 3 && action.contains("inspect `ls`")
         )));
+    }
+
+    #[test]
+    fn planner_rationale_flows_verbatim_with_controller_summary_on_sibling_field() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+        let model_initial_rationale =
+            "Model: I want to inspect the workspace before answering.".to_string();
+        let model_terminal_rationale = "Model: I have enough context to answer now.".to_string();
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: WorkspaceAction::Inspect {
+                        command: "pwd".to_string(),
+                    },
+                },
+                model_initial_rationale.as_str(),
+            ),
+            vec![RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "model done".to_string(),
+                },
+                rationale: model_terminal_rationale.clone(),
+                answer: Some("All done.".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let recorder = Arc::new(InMemoryTraceRecorder::default());
+        let service = test_service_with_recorder(workspace.path(), recorder.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                planner_engine: planner,
+                synthesizer_engine: synthesizer,
+                gatherer: None,
+            });
+            service
+                .process_prompt_with_sink("Inspect then stop.", sink.clone())
+                .await
+                .expect("process prompt");
+        });
+
+        // Every PlannerActionSelected event must carry the model's rationale
+        // verbatim and the controller's narrative on the sibling field.
+        let events = sink.recorded();
+        let planner_events: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                TurnEvent::PlannerActionSelected {
+                    sequence,
+                    rationale,
+                    controller_summary,
+                    ..
+                } => Some((*sequence, rationale.clone(), controller_summary.clone())),
+                _ => None,
+            })
+            .collect();
+        assert!(planner_events.len() >= 2);
+        let (_, initial_rationale, initial_controller) = planner_events
+            .iter()
+            .find(|(seq, _, _)| *seq == 1)
+            .expect("initial planner action event");
+        assert_eq!(initial_rationale, &model_initial_rationale);
+        assert!(matches!(
+            initial_controller.as_deref(),
+            Some(text) if text.contains("Paddles chose")
+        ));
+        let (_, terminal_rationale, terminal_controller) = planner_events
+            .iter()
+            .find(|(seq, _, _)| *seq == 2)
+            .expect("terminal planner action event");
+        assert_eq!(terminal_rationale, &model_terminal_rationale);
+        assert!(matches!(
+            terminal_controller.as_deref(),
+            Some(text) if text.contains("Paddles chose")
+        ));
+
+        // Same contract on the persisted trace records consumed by forensics.
+        let task_ids = recorder.task_ids();
+        let replay = recorder.replay(&task_ids[0]).expect("replay");
+        let action_records: Vec<_> = replay
+            .records
+            .iter()
+            .filter_map(|record| match &record.kind {
+                TraceRecordKind::PlannerAction {
+                    rationale,
+                    controller_summary,
+                    ..
+                } => Some((rationale.clone(), controller_summary.clone())),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            action_records
+                .iter()
+                .any(|(rationale, _)| rationale == &model_initial_rationale),
+            "model's initial rationale should appear verbatim in trace records"
+        );
+        assert!(
+            action_records
+                .iter()
+                .any(|(rationale, _)| rationale == &model_terminal_rationale),
+            "model's terminal rationale should appear verbatim in trace records"
+        );
+        assert!(
+            action_records.iter().all(|(rationale, controller)| {
+                rationale != controller.as_deref().unwrap_or("")
+            }),
+            "controller summary must live on a separate field, not overwrite rationale"
+        );
     }
 
     fn sample_model_paths(prefix: &str) -> ModelPaths {

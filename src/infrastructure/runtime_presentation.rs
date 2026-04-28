@@ -90,18 +90,23 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             action,
             rationale,
             signal_summary,
-        } => RuntimeEventPresentation {
-            badge: "planner".to_string(),
-            badge_class: "planner".to_string(),
-            title: format!("• Planner step {sequence}: {action}"),
-            detail: match signal_summary {
-                Some(signal_summary) => {
-                    format!("Rationale: {rationale}\nSignals: {signal_summary}")
-                }
-                None => format!("Rationale: {rationale}"),
-            },
-            text: format!("Step {sequence}: {action}"),
-        },
+            controller_summary,
+        } => {
+            let mut detail = format!("Rationale: {rationale}");
+            if let Some(signal_summary) = signal_summary {
+                detail.push_str(&format!("\nSignals: {signal_summary}"));
+            }
+            if let Some(controller_summary) = controller_summary {
+                detail.push_str(&format!("\nController: {controller_summary}"));
+            }
+            RuntimeEventPresentation {
+                badge: "planner".to_string(),
+                badge_class: "planner".to_string(),
+                title: format!("• Planner step {sequence}: {action}"),
+                detail,
+                text: format!("Step {sequence}: {action}"),
+            }
+        }
         TurnEvent::PlanUpdated { items } => RuntimeEventPresentation {
             badge: "plan".to_string(),
             badge_class: "planner".to_string(),
@@ -919,6 +924,7 @@ mod tests {
             signal_summary: Some(
                 "continuation=tool_follow_up; uncertainty=opaque".to_string(),
             ),
+            controller_summary: None,
         });
 
         assert_eq!(presentation.badge, "planner");

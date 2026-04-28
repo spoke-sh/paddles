@@ -560,6 +560,7 @@ mod tests {
                         action: "read `README.md`".to_string(),
                         rationale: "Gather context".to_string(),
                         signal_summary: None,
+                        controller_summary: None,
                     },
                 },
                 TraceRecord {

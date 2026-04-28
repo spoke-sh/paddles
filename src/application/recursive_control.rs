@@ -144,22 +144,23 @@ impl<'a> RecursiveControlChamber<'a> {
                 loop_state.target_resolution = Some(resolution);
             }
             if planner_selected_this_step {
-                let (compiled_rationale, signal_summary) = compile_recursive_paddles_rationale(
+                let (controller_summary, signal_summary) = compile_recursive_paddles_rationale(
                     &decision.action,
                     &loop_state.evidence_items,
                     &pending_deliberation_signals,
                 );
-                decision.rationale = compiled_rationale;
                 trace.emit(TurnEvent::PlannerActionSelected {
                     sequence,
                     action: decision.action.summary(),
                     rationale: decision.rationale.clone(),
                     signal_summary: signal_summary.clone(),
+                    controller_summary: Some(controller_summary.clone()),
                 });
                 trace.record_planner_action(
                     &decision.action.summary(),
                     &decision.rationale,
                     signal_summary.as_deref(),
+                    Some(controller_summary.as_str()),
                     None,
                 );
             }

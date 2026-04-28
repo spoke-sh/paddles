@@ -379,6 +379,7 @@ mod tests {
                         action: "inspect `git status --short`".to_string(),
                         rationale: "inspect first".to_string(),
                         signal_summary: None,
+                        controller_summary: None,
                     },
                 },
                 TraceRecord {

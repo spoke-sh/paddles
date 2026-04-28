@@ -457,9 +457,14 @@ pub enum TraceRecordKind {
     ExecutionGovernanceDecisionRecorded(ExecutionGovernanceDecision),
     PlannerAction {
         action: String,
+        /// The planner model's own rationale, preserved verbatim. The controller
+        /// must never overwrite this field; controller-derived narratives live
+        /// on `controller_summary` instead.
         rationale: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signal_summary: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        controller_summary: Option<String>,
     },
     PlannerBranchDeclared(TraceBranch),
     SelectionArtifact(TraceSelectionArtifact),
@@ -704,6 +709,7 @@ mod tests {
             action: "inspect `pwd`".to_string(),
             rationale: "Paddles chose `inspect `pwd`` as the next bounded step.".to_string(),
             signal_summary: Some("continuation=tool_follow_up; uncertainty=opaque".to_string()),
+            controller_summary: None,
         };
 
         let value = serde_json::to_value(&kind).expect("serialize planner action");
