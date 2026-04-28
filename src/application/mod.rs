@@ -1,4 +1,5 @@
 mod agent_loop;
+mod context_assembly;
 mod conversation_read_model;
 mod deliberation;
 mod evals;
@@ -7,17 +8,14 @@ mod execution_policy;
 mod external_capability;
 mod external_capability_execution;
 mod harness_capability_posture;
-mod interpretation_chamber;
 mod planner_action_execution;
 mod planner_loop;
 pub mod read_model;
 mod runtime_posture_projection;
-mod synthesis_chamber;
-mod turn_orchestration;
+mod synthesis;
+mod turn;
 mod worker_runtime;
 
-use self::agent_loop::RecursiveControlChamber;
-use self::conversation_read_model::ConversationReadModelChamber;
 pub use self::deliberation::{
     DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
     extract_deliberation_signals,
@@ -38,7 +36,6 @@ pub use self::harness_capability_posture::{
     HarnessExternalCapabilityRuntimeStatus, HarnessProviderModelRuntimeStatus,
     HarnessProviderRegistryRuntimeStatus, RuntimeHarnessCapabilityPostureService,
 };
-use self::interpretation_chamber::InterpretationChamber;
 use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 pub use self::runtime_posture_projection::{
     RuntimeCapabilityPostureEvent, RuntimeDiagnosticPostureEvent, RuntimeEvalOutcomePostureEvent,
@@ -46,8 +43,6 @@ pub use self::runtime_posture_projection::{
     RuntimePostureProjectionService, RuntimePostureProjectionSnapshot,
     RuntimeProvenancePostureEvent, RuntimeWorkerPostureEvent,
 };
-use self::synthesis_chamber::SynthesisChamber;
-use self::turn_orchestration::TurnOrchestrationChamber;
 pub use self::worker_runtime::{
     BoundedWorkerRuntime, WorkerEvidenceIntegrationOutcome, WorkerEvidenceIntegrationRequest,
     WorkerEvidenceIntegrationStatus, WorkerEvidenceIntegrator, WorkerRuntimeAuthorityDecision,
@@ -2526,18 +2521,6 @@ impl AgentRuntime {
             .push(observer);
     }
 
-    fn turn_orchestration(&self) -> TurnOrchestrationChamber<'_> {
-        TurnOrchestrationChamber::new(self)
-    }
-
-    fn interpretation_chamber(&self) -> InterpretationChamber<'_> {
-        InterpretationChamber::new(self)
-    }
-
-    fn agent_loop(&self) -> RecursiveControlChamber<'_> {
-        RecursiveControlChamber::new(self)
-    }
-
     fn planner_loop_service(&self) -> PlannerLoopService {
         PlannerLoopService::new()
     }
@@ -2546,29 +2529,19 @@ impl AgentRuntime {
         ExecutionContractService::new()
     }
 
-    fn synthesis_chamber(&self) -> SynthesisChamber<'_> {
-        SynthesisChamber::new(self)
-    }
-
-    fn conversation_read_model(&self) -> ConversationReadModelChamber<'_> {
-        ConversationReadModelChamber::new(self)
-    }
-
     #[cfg(test)]
     fn replay_for_known_session(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<Option<crate::domain::model::TraceReplay>> {
-        self.conversation_read_model()
-            .replay_for_known_session(task_id)
+        conversation_read_model::replay_for_known_session(self, task_id)
     }
 
     pub fn replay_conversation_forensics(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationForensicProjection> {
-        self.conversation_read_model()
-            .replay_conversation_forensics(task_id)
+        conversation_read_model::replay_conversation_forensics(self, task_id)
     }
 
     pub fn replay_turn_forensics(
@@ -2576,16 +2549,14 @@ impl AgentRuntime {
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
     ) -> Result<Option<ForensicTurnProjection>> {
-        self.conversation_read_model()
-            .replay_turn_forensics(task_id, turn_id)
+        conversation_read_model::replay_turn_forensics(self, task_id, turn_id)
     }
 
     pub fn replay_conversation_manifold(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationManifoldProjection> {
-        self.conversation_read_model()
-            .replay_conversation_manifold(task_id)
+        conversation_read_model::replay_conversation_manifold(self, task_id)
     }
 
     pub fn replay_turn_manifold(
@@ -2593,8 +2564,7 @@ impl AgentRuntime {
         task_id: &TaskTraceId,
         turn_id: &TurnTraceId,
     ) -> Result<Option<ManifoldTurnProjection>> {
-        self.conversation_read_model()
-            .replay_turn_manifold(task_id, turn_id)
+        conversation_read_model::replay_turn_manifold(self, task_id, turn_id)
     }
 
     pub fn replay_all_traces(&self) -> Result<Vec<crate::domain::model::TraceReplay>> {
@@ -2648,8 +2618,7 @@ impl AgentRuntime {
         session: &ConversationSession,
         synthesizer_engine: &dyn SynthesizerEngine,
     ) -> Result<Vec<String>> {
-        self.synthesis_chamber()
-            .recent_turn_summaries(session, synthesizer_engine)
+        synthesis::recent_turn_summaries(self, session, synthesizer_engine)
     }
 
     fn persist_prompt_history(&self, prompt: &str) {
@@ -2681,13 +2650,7 @@ impl AgentRuntime {
         prompt: &str,
         response: &AuthoredResponse,
     ) -> String {
-        self.synthesis_chamber().finalize_turn_response(
-            trace,
-            session,
-            active_thread,
-            prompt,
-            response,
-        )
+        synthesis::finalize_turn_response(self, trace, session, active_thread, prompt, response)
     }
 
     async fn execute_planner_gather_step(
@@ -2938,48 +2901,42 @@ impl AgentRuntime {
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationTranscript> {
-        self.conversation_read_model()
-            .replay_conversation_transcript(task_id)
+        conversation_read_model::replay_conversation_transcript(self, task_id)
     }
 
     pub fn replay_conversation_trace_graph(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationTraceGraph> {
-        self.conversation_read_model()
-            .replay_conversation_trace_graph(task_id)
+        conversation_read_model::replay_conversation_trace_graph(self, task_id)
     }
 
     pub fn replay_conversation_delegation(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<crate::domain::model::ConversationDelegationProjection> {
-        self.conversation_read_model()
-            .replay_conversation_delegation(task_id)
+        conversation_read_model::replay_conversation_delegation(self, task_id)
     }
 
     pub fn replay_conversation_projection(
         &self,
         task_id: &TaskTraceId,
     ) -> Result<ConversationProjectionSnapshot> {
-        self.conversation_read_model()
-            .replay_conversation_projection(task_id)
+        conversation_read_model::replay_conversation_projection(self, task_id)
     }
 
     pub fn projection_update_for_transcript(
         &self,
         update: &ConversationTranscriptUpdate,
     ) -> Result<ConversationProjectionUpdate> {
-        self.conversation_read_model()
-            .projection_update_for_transcript(update)
+        conversation_read_model::projection_update_for_transcript(self, update)
     }
 
     pub fn projection_update_for_forensic(
         &self,
         update: &ConversationForensicUpdate,
     ) -> Result<ConversationProjectionUpdate> {
-        self.conversation_read_model()
-            .projection_update_for_forensic(update)
+        conversation_read_model::projection_update_for_forensic(self, update)
     }
 
     /// Execute the boot sequence.
@@ -3103,7 +3060,7 @@ impl AgentRuntime {
 
     /// Process a single prompt using the prepared synthesizer lane.
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
-        self.turn_orchestration().process_prompt(prompt).await
+        turn::process_prompt(self, prompt).await
     }
 
     pub async fn process_prompt_with_sink(
@@ -3111,9 +3068,7 @@ impl AgentRuntime {
         prompt: &str,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.turn_orchestration()
-            .process_prompt_with_sink(prompt, event_sink)
-            .await
+        turn::process_prompt_with_sink(self, prompt, event_sink).await
     }
 
     pub async fn process_prompt_in_session_with_sink(
@@ -3122,9 +3077,7 @@ impl AgentRuntime {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.turn_orchestration()
-            .process_prompt_in_session_with_sink(prompt, session, event_sink)
-            .await
+        turn::process_prompt_in_session_with_sink(self, prompt, session, event_sink).await
     }
 
     pub async fn process_prompt_in_session_with_mode_request_and_sink(
@@ -3134,14 +3087,14 @@ impl AgentRuntime {
         mode_request: Option<CollaborationModeRequest>,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.turn_orchestration()
-            .process_prompt_in_session_with_mode_request_and_sink(
-                prompt,
-                session,
-                mode_request,
-                event_sink,
-            )
-            .await
+        turn::process_prompt_in_session_with_mode_request_and_sink(
+            self,
+            prompt,
+            session,
+            mode_request,
+            event_sink,
+        )
+        .await
     }
 
     async fn bootstrap_known_edit_initial_action(
@@ -3425,8 +3378,7 @@ impl AgentRuntime {
         session: ConversationSession,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
-        self.turn_orchestration()
-            .process_thread_candidate_in_session_with_sink(candidate, session, event_sink)
+        turn::process_thread_candidate_in_session_with_sink(self, candidate, session, event_sink)
             .await
     }
 
@@ -10048,22 +10000,20 @@ mod tests {
                 synthesizer_engine: synthesizer,
                 gatherer: None,
             });
-            service
-                .turn_orchestration()
-                .process_prompt_in_session_with_mode_request_and_sink(
-                    "Execute through chamber seams",
-                    session.clone(),
-                    None,
-                    Arc::new(RecordingTurnEventSink::default()),
-                )
-                .await
-                .expect("process prompt")
+            super::turn::process_prompt_in_session_with_mode_request_and_sink(
+                &service,
+                "Execute through plain phase modules",
+                session.clone(),
+                None,
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process prompt")
         });
 
         assert_eq!(reply, "Chamber response.");
 
         let projection = service
-            .conversation_read_model()
             .replay_conversation_projection(&session.task_id())
             .expect("projection replay");
 
@@ -12910,31 +12860,30 @@ mod tests {
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
-            service
-                .agent_loop()
-                .execute_recursive_planner_loop(
-                    "Update the planner stream text",
-                    context,
-                    Some(RecursivePlannerDecision {
-                        action: PlannerAction::Workspace {
-                            action: WorkspaceAction::ReplaceInFile {
-                                path: "src/application/mod.rs".to_string(),
-                                old: "before".to_string(),
-                                new: "after".to_string(),
-                                replace_all: false,
-                            },
+            super::agent_loop::execute_recursive_planner_loop(
+                &service,
+                "Update the planner stream text",
+                context,
+                Some(RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::ReplaceInFile {
+                            path: "src/application/mod.rs".to_string(),
+                            old: "before".to_string(),
+                            new: "after".to_string(),
+                            replace_all: false,
                         },
-                        rationale: "edit immediately".to_string(),
-                        answer: None,
-                        edit: InitialEditInstruction::default(),
-                        grounding: None,
+                    },
+                    rationale: "edit immediately".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
 
-                        deliberation_state: None,
-                    }),
-                    trace,
-                )
-                .await
-                .expect("planner loop should succeed");
+                    deliberation_state: None,
+                }),
+                trace,
+            )
+            .await
+            .expect("planner loop should succeed");
         });
 
         assert!(

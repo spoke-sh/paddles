@@ -1,15 +1,17 @@
 ---
 # system-managed
 id: VI3BWyxR3
-status: icebox
+status: done
 created_at: 2026-04-27T19:52:51
-updated_at: 2026-04-27T19:52:51
+updated_at: 2026-04-27T22:43:40
 # authored
 title: Rename Chamber Wrappers To Plain Modules
 type: refactor
 operator-signal:
 scope: VI2sJZcV9/VI2sfbhqT
 index: 2
+started_at: 2026-04-27T22:28:06
+completed_at: 2026-04-27T22:43:40
 ---
 
 # Rename Chamber Wrappers To Plain Modules
@@ -20,6 +22,6 @@ Delete the stateless `*Chamber` wrappers in `src/application/` (`RecursiveContro
 
 ## Acceptance Criteria
 
-- [ ] Every `*Chamber` wrapper struct in `src/application/` is deleted; its methods become free functions in a module named for the phase. [SRS-01/AC-01] <!-- verify: cargo test --lib, SRS-01:start:end -->
-- [ ] All call sites that did `self.foo_chamber().bar()` are updated to call the module-level functions directly. [SRS-01/AC-02] <!-- verify: cargo test --lib, SRS-01:start:end -->
-- [ ] `cargo check`, `cargo test --lib`, and `cargo clippy --all-targets -- -D warnings` pass with the rename in place and no behavior change. [SRS-01/AC-03] <!-- verify: cargo test --lib, SRS-01:start:end -->
+- [x] Every `*Chamber` wrapper struct in `src/application/` is deleted (`InterpretationChamber`, `SynthesisChamber`, `ConversationReadModelChamber`, `RecursiveControlChamber`, `TurnOrchestrationChamber`); its methods are now free functions in modules named for the phase (`context_assembly`, `synthesis`, `conversation_read_model`, `agent_loop`, `turn`). `git grep -E '\\bChamber\\b' src/application/` returns only string-literal hits in test fixtures. [SRS-01/AC-01] <!-- verify: cargo test --lib, SRS-01:start:end -->
+- [x] All call sites that did `self.service.foo_chamber().bar()` (or `self.foo_chamber().bar()` on `AgentRuntime`) are updated to call the module-level functions directly with `service` as the first argument; the corresponding `AgentRuntime::*_chamber()` accessors are removed. [SRS-01/AC-02] <!-- verify: cargo test --lib, SRS-01:start:end -->
+- [x] `cargo check`, `cargo test --lib` (782 passing), and `cargo clippy --all-targets -- -D warnings` pass with the migration in place and no behavior change. [SRS-01/AC-03] <!-- verify: cargo test --lib, SRS-01:start:end -->

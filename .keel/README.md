@@ -438,11 +438,11 @@
 |--------|--------|
 | [Stream Tool Output And Drop The 1.2k Cap](epics/VI2sHovAf/voyages/VI2seFPac/) | done |
 
-### [Tier-1 Idiomatic Vocabulary Renames](epics/VI2sJZcV9/) (active)
+### [Tier-1 Idiomatic Vocabulary Renames](epics/VI2sJZcV9/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Rename MechSuitService And Chambers To Idiomatic Modules](epics/VI2sJZcV9/voyages/VI2sfbhqT/) | in-progress |
+| [Rename MechSuitService And Chambers To Idiomatic Modules](epics/VI2sJZcV9/voyages/VI2sfbhqT/) | done |
 
 ### [Plan Mode And Slash Command Parity](epics/VI2sKP2cz/) (done)
 
