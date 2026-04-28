@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VI2sfbhqT
-status: planned
+status: in-progress
 epic: VI2sJZcV9
 created_at: 2026-04-27T18:37:56
 # authored
 title: Rename MechSuitService And Chambers To Idiomatic Modules
 index: 1
 updated_at: 2026-04-27T18:46:11
+started_at: 2026-04-27T19:47:54
 ---
 
 # Rename MechSuitService And Chambers To Idiomatic Modules
@@ -26,9 +27,11 @@ updated_at: 2026-04-27T18:46:11
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Rename MechSuitService to AgentRuntime](../../../../stories/VI2slwMGg/README.md) | refactor | backlog |
+| [Rename MechSuitService to AgentRuntime](../../../../stories/VI2slwMGg/README.md) | refactor | done |
+| [Rename Chamber Wrappers To Plain Modules](../../../../stories/VI3BWyxR3/README.md) | refactor | icebox |
+| [Rename Recursive Control Module To Agent Loop](../../../../stories/VI3BX17Sw/README.md) | refactor | icebox |
 <!-- END GENERATED -->

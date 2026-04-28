@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
 use paddles::application::{
-    ExternalCapabilityBrokerRegistry, GathererProvider, HarnessCapabilityRuntimeStatus,
-    MechSuitService, PreparedGathererLane, PreparedModelLane,
+    AgentRuntime, ExternalCapabilityBrokerRegistry, GathererProvider,
+    HarnessCapabilityRuntimeStatus, PreparedGathererLane, PreparedModelLane,
     RuntimeHarnessCapabilityPostureService, RuntimeLaneConfig,
 };
 use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
@@ -632,7 +632,7 @@ async fn main() -> Result<()> {
         },
     );
     let trace_recorder = build_trace_recorder_from_config(&root_path, &trace_authority_selection)?;
-    let service = Arc::new(MechSuitService::with_trace_recorder(
+    let service = Arc::new(AgentRuntime::with_trace_recorder(
         root_path,
         registry,
         operator_memory,
@@ -904,7 +904,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_plain_interactive_loop(service: Arc<MechSuitService>) -> Result<()> {
+async fn run_plain_interactive_loop(service: Arc<AgentRuntime>) -> Result<()> {
     println!("--- Interactive Mode (type 'exit' or use Ctrl+C to quit) ---");
     let mut stdin_reader = BufReader::new(tokio_io::stdin()).lines();
     let session = service.shared_conversation_session();

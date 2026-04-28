@@ -442,7 +442,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Rename MechSuitService And Chambers To Idiomatic Modules](epics/VI2sJZcV9/voyages/VI2sfbhqT/) | planned |
+| [Rename MechSuitService And Chambers To Idiomatic Modules](epics/VI2sJZcV9/voyages/VI2sfbhqT/) | in-progress |
 
 ### [Plan Mode And Slash Command Parity](epics/VI2sKP2cz/) (active)
 

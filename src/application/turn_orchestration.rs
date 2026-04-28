@@ -1,11 +1,11 @@
 use super::*;
 
 pub(super) struct TurnOrchestrationChamber<'a> {
-    service: &'a MechSuitService,
+    service: &'a AgentRuntime,
 }
 
 impl<'a> TurnOrchestrationChamber<'a> {
-    pub(super) const fn new(service: &'a MechSuitService) -> Self {
+    pub(super) const fn new(service: &'a AgentRuntime) -> Self {
         Self { service }
     }
 

@@ -1,9 +1,9 @@
 use crate::application::{
-    ConversationForensicProjection, ConversationForensicUpdate, ConversationManifoldProjection,
-    ConversationProjectionSnapshot, ConversationProjectionUpdate, ConversationTraceGraph,
-    ConversationTranscript, ConversationTranscriptUpdate, ForensicLifecycle,
-    ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink, ManifoldFrame,
-    ManifoldTurnProjection, MechSuitService, ResumableConversation, TranscriptUpdateSink,
+    AgentRuntime, ConversationForensicProjection, ConversationForensicUpdate,
+    ConversationManifoldProjection, ConversationProjectionSnapshot, ConversationProjectionUpdate,
+    ConversationTraceGraph, ConversationTranscript, ConversationTranscriptUpdate,
+    ForensicLifecycle, ForensicRecordProjection, ForensicTurnProjection, ForensicUpdateSink,
+    ManifoldFrame, ManifoldTurnProjection, ResumableConversation, TranscriptUpdateSink,
 };
 use crate::domain::model::{
     ExecutionHandDiagnostic, NativeTransportConfigurations, NativeTransportDiagnostic,
@@ -41,7 +41,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
 
 struct AppState {
-    service: Arc<MechSuitService>,
+    service: Arc<AgentRuntime>,
     trace_recorder: Arc<dyn TraceRecorder>,
     native_transport_configurations: NativeTransportConfigurations,
     transport_mediator: Arc<TransportToolMediator>,
@@ -201,7 +201,7 @@ impl TurnEventSink for BroadcastEventSink {
 }
 
 struct BroadcastProjectionTranscriptSink {
-    service: Arc<MechSuitService>,
+    service: Arc<AgentRuntime>,
     tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
 
@@ -216,7 +216,7 @@ impl TranscriptUpdateSink for BroadcastProjectionTranscriptSink {
 }
 
 struct BroadcastProjectionForensicSink {
-    service: Arc<MechSuitService>,
+    service: Arc<AgentRuntime>,
     tx: broadcast::Sender<ConversationProjectionStreamEvent>,
 }
 
@@ -232,9 +232,9 @@ impl ForensicUpdateSink for BroadcastProjectionForensicSink {
 
 /// Create the web router and return it along with a TurnEventSink that
 /// broadcasts events to all connected SSE clients. Register this sink
-/// as an event observer on MechSuitService so CLI turns are visible too.
+/// as an event observer on AgentRuntime so CLI turns are visible too.
 pub fn router(
-    service: Arc<MechSuitService>,
+    service: Arc<AgentRuntime>,
     trace_recorder: Arc<dyn TraceRecorder>,
     native_transport_configurations: NativeTransportConfigurations,
     transport_mediator: Arc<TransportToolMediator>,
@@ -343,7 +343,7 @@ pub fn web_server_url(addr: SocketAddr) -> String {
 }
 
 /// Broadcasts all events to the SSE channel regardless of session.
-/// Used as a global observer on MechSuitService so CLI turns are visible.
+/// Used as a global observer on AgentRuntime so CLI turns are visible.
 struct GlobalBroadcastSink {
     session_id: String,
     task_id: TaskTraceId,
@@ -1238,7 +1238,7 @@ mod tests {
         ForensicTurnProjectionResponse, HealthResponse, conversation_forensics, parse_task_id,
         turn_forensics,
     };
-    use crate::application::{MechSuitService, RuntimeLaneConfig};
+    use crate::application::{AgentRuntime, RuntimeLaneConfig};
     use crate::domain::model::NullTurnEventSink;
     use crate::domain::model::{
         ArtifactKind, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
@@ -1300,9 +1300,9 @@ mod tests {
     fn test_service_with_recorder(
         workspace: &FsPath,
         recorder: Arc<dyn TraceRecorder>,
-    ) -> Arc<MechSuitService> {
+    ) -> Arc<AgentRuntime> {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
-        Arc::new(MechSuitService::with_trace_recorder(
+        Arc::new(AgentRuntime::with_trace_recorder(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
@@ -1314,7 +1314,7 @@ mod tests {
     }
 
     fn test_app_state(
-        service: Arc<MechSuitService>,
+        service: Arc<AgentRuntime>,
         trace_recorder: Arc<dyn TraceRecorder>,
     ) -> Arc<AppState> {
         let (event_tx, _) = broadcast::channel(8);
@@ -1605,7 +1605,7 @@ mod tests {
         workspace: &FsPath,
         base_url: String,
         recorder: Arc<dyn TraceRecorder>,
-    ) -> Arc<MechSuitService> {
+    ) -> Arc<AgentRuntime> {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
 
         let synth_base_url = base_url.clone();
@@ -1639,7 +1639,7 @@ mod tests {
             },
         );
 
-        Arc::new(MechSuitService::with_trace_recorder(
+        Arc::new(AgentRuntime::with_trace_recorder(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,

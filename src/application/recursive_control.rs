@@ -1,11 +1,11 @@
 use super::*;
 
 pub(super) struct RecursiveControlChamber<'a> {
-    service: &'a MechSuitService,
+    service: &'a AgentRuntime,
 }
 
 impl<'a> RecursiveControlChamber<'a> {
-    pub(super) const fn new(service: &'a MechSuitService) -> Self {
+    pub(super) const fn new(service: &'a AgentRuntime) -> Self {
         Self { service }
     }
 
@@ -708,7 +708,7 @@ impl<'a> RecursiveControlChamber<'a> {
                     loop_state.refinement_count += 1;
                     loop_state.last_refinement_step = Some(sequence);
                     let refinement_signature =
-                        MechSuitService::mid_loop_refinement_signature(&updated_context);
+                        AgentRuntime::mid_loop_refinement_signature(&updated_context);
                     if !self.service.mid_loop_refinement_signature_is_stable(
                         &loop_state.refinement_policy,
                         &loop_state.refinement_signatures,

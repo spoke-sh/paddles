@@ -1,7 +1,6 @@
 use crate::application::{
-    ConversationSession, ConversationTranscript, ConversationTranscriptSpeaker,
-    ConversationTranscriptUpdate, MechSuitService, ResumableConversation, RuntimeLaneConfig,
-    TranscriptUpdateSink,
+    AgentRuntime, ConversationSession, ConversationTranscript, ConversationTranscriptSpeaker,
+    ConversationTranscriptUpdate, ResumableConversation, RuntimeLaneConfig, TranscriptUpdateSink,
 };
 use crate::domain::model::render::uses_compact_block_separator;
 use crate::domain::model::{
@@ -207,7 +206,7 @@ pub fn select_interactive_frontend(
     }
 }
 
-pub async fn run_interactive_tui(service: Arc<MechSuitService>, tui_ctx: TuiContext) -> Result<()> {
+pub async fn run_interactive_tui(service: Arc<AgentRuntime>, tui_ctx: TuiContext) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::with_options(
@@ -714,7 +713,7 @@ struct RuntimeUpdateCompletion {
 
 fn dispatch_prompt(
     prompt: QueuedPrompt,
-    service: Arc<MechSuitService>,
+    service: Arc<AgentRuntime>,
     session: ConversationSession,
     tx: UnboundedSender<UiMessage>,
     work_id: u64,
@@ -743,7 +742,7 @@ fn dispatch_prompt(
 
 fn dispatch_runtime_update(
     update: PendingRuntimeUpdate,
-    service: Arc<MechSuitService>,
+    service: Arc<AgentRuntime>,
     credential_store: Arc<CredentialStore>,
     runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
     tx: UnboundedSender<UiMessage>,

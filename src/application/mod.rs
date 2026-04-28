@@ -156,7 +156,7 @@ pub type GathererFactory = dyn Fn(
     + Sync;
 
 /// Application service for managing the mech suit lifecycle.
-pub struct MechSuitService {
+pub struct AgentRuntime {
     workspace_root: PathBuf,
     registry: Arc<dyn ModelRegistry>,
     operator_memory: Arc<dyn OperatorMemory>,
@@ -2289,7 +2289,7 @@ fn trim_event_detail(input: &str, max_lines: usize) -> String {
     rendered
 }
 
-impl MechSuitService {
+impl AgentRuntime {
     pub fn new(
         workspace_root: impl Into<PathBuf>,
         registry: Arc<dyn ModelRegistry>,
@@ -6983,8 +6983,8 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 #[cfg(test)]
 mod tests {
     use crate::application::{
-        ActiveRuntimeState, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
-        GathererProvider, MechSuitService, POLICY_VIOLATION_DIRECT_REPLY, PreparedGathererLane,
+        ActiveRuntimeState, AgentRuntime, DeliberationContinuation, DeliberationSignal,
+        DeliberationSignals, GathererProvider, POLICY_VIOLATION_DIRECT_REPLY, PreparedGathererLane,
         PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
         StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
     };
@@ -7045,9 +7045,9 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
 
-    fn test_service(workspace: &Path) -> MechSuitService {
+    fn test_service(workspace: &Path) -> AgentRuntime {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
-        MechSuitService::new(
+        AgentRuntime::new(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
@@ -7060,9 +7060,9 @@ mod tests {
     fn test_service_with_recorder(
         workspace: &Path,
         recorder: Arc<dyn TraceRecorder>,
-    ) -> MechSuitService {
+    ) -> AgentRuntime {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
-        MechSuitService::with_trace_recorder(
+        AgentRuntime::with_trace_recorder(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
@@ -7073,14 +7073,14 @@ mod tests {
         )
     }
 
-    fn bind_workspace_action_executor<T>(service: &MechSuitService, executor: Arc<T>)
+    fn bind_workspace_action_executor<T>(service: &AgentRuntime, executor: Arc<T>)
     where
         T: WorkspaceActionExecutor + 'static,
     {
         service.set_workspace_action_executor(executor);
     }
 
-    async fn install_direct_answer_runtime(service: &MechSuitService) {
+    async fn install_direct_answer_runtime(service: &AgentRuntime) {
         *service.runtime.write().await = Some(ActiveRuntimeState {
             prepared: PreparedRuntimeLanes {
                 planner: PreparedModelLane {
@@ -7855,7 +7855,7 @@ mod tests {
         let planner_capture = Arc::clone(&captured_planner_lane);
         let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
-        let service = MechSuitService::new(
+        let service = AgentRuntime::new(
             workspace.path(),
             registry.clone(),
             operator_memory,
@@ -7923,7 +7923,7 @@ mod tests {
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
         let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
         let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
-        let service = MechSuitService::new(
+        let service = AgentRuntime::new(
             workspace.path(),
             registry.clone(),
             operator_memory,
@@ -7976,7 +7976,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let service = MechSuitService::new(
+        let service = AgentRuntime::new(
             workspace.path(),
             registry,
             operator_memory,
@@ -8013,7 +8013,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let service = MechSuitService::new(
+        let service = AgentRuntime::new(
             workspace.path(),
             registry,
             operator_memory,
@@ -8050,13 +8050,13 @@ mod tests {
 
     #[test]
     fn prepared_runtime_lanes_keep_synthesizer_as_default_response_lane() {
-        let planner = MechSuitService::build_lane(
+        let planner = AgentRuntime::build_lane(
             RuntimeLaneRole::Planner,
             ModelProvider::Sift,
             "qwen-1.5b",
             Some(sample_model_paths("planner")),
         );
-        let synthesizer = MechSuitService::build_lane(
+        let synthesizer = AgentRuntime::build_lane(
             RuntimeLaneRole::Synthesizer,
             ModelProvider::Sift,
             "qwen-1.5b",
@@ -9298,13 +9298,13 @@ mod tests {
         let active_thread = session.active_thread().thread_ref;
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let prepared = PreparedRuntimeLanes {
-            planner: MechSuitService::build_lane(
+            planner: AgentRuntime::build_lane(
                 RuntimeLaneRole::Planner,
                 ModelProvider::Anthropic,
                 "claude-sonnet-4-20250514",
                 None,
             ),
-            synthesizer: MechSuitService::build_lane(
+            synthesizer: AgentRuntime::build_lane(
                 RuntimeLaneRole::Synthesizer,
                 ModelProvider::Anthropic,
                 "claude-sonnet-4-20250514",

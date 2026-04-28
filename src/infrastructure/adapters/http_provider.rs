@@ -3806,7 +3806,7 @@ fn unverified_external_url_fallback(prompt: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter};
-    use crate::application::{MechSuitService, RuntimeLaneConfig};
+    use crate::application::{AgentRuntime, RuntimeLaneConfig};
     use crate::domain::model::DeliberationState;
     use crate::domain::model::{
         ExternalCapabilityInvocation, ForensicArtifactCapture, ForensicTraceSink,
@@ -4287,7 +4287,7 @@ mod tests {
         api_key: String,
         provider: crate::infrastructure::providers::ModelProvider,
         format: ApiFormat,
-    ) -> MechSuitService {
+    ) -> AgentRuntime {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
 
         let synth_base_url = base_url.clone();
@@ -4328,7 +4328,7 @@ mod tests {
         let gatherer_factory: Box<crate::application::GathererFactory> =
             Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
 
-        MechSuitService::new(
+        AgentRuntime::new(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
@@ -4345,7 +4345,7 @@ mod tests {
         provider: crate::infrastructure::providers::ModelProvider,
         format: ApiFormat,
         recorder: Arc<dyn crate::domain::ports::TraceRecorder>,
-    ) -> MechSuitService {
+    ) -> AgentRuntime {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
 
         let synth_base_url = base_url.clone();
@@ -4386,7 +4386,7 @@ mod tests {
         let gatherer_factory: Box<crate::application::GathererFactory> =
             Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
 
-        MechSuitService::with_trace_recorder(
+        AgentRuntime::with_trace_recorder(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
