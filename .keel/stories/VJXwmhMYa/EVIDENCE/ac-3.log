@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-05-13T16:53:13.476215185-07:00
+command: cargo test agent_action_schema_prompt_parity --lib
+---
+
+running 1 test
+test infrastructure::adapters::http_provider::tests::agent_action_schema_prompt_parity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 800 filtered out; finished in 0.02s
+
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.62s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-376074c8c385b41a)

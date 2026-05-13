@@ -22,10 +22,10 @@ mission: VJXwXCrCZ
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 1/6 stories done
+**Progress:** 1/3 voyages complete, 2/6 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Unified Agent Action Contract](voyages/VJXwlCA0P/) | in-progress | 1/2 |
+| [Unified Agent Action Contract](voyages/VJXwlCA0P/) | done | 2/2 |
 | [Recursive Loop Migration](voyages/VJXwlE718/) | planned | 0/2 |
 | [Agent Vocabulary Cleanup](voyages/VJXwlG70U/) | planned | 0/2 |
 <!-- END GENERATED -->

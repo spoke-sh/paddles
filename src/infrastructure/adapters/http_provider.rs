@@ -4170,6 +4170,52 @@ mod tests {
     }
 
     #[test]
+    fn agent_action_schema_prompt_parity() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let request = schema_parity_request();
+
+        for (variant_label, variant, sift_prompt) in [
+            (
+                "initial",
+                PlannerActionSchemaVariant::Initial,
+                crate::infrastructure::adapters::sift_agent::build_initial_action_prompt_for_schema_test(
+                    &request,
+                ),
+            ),
+            (
+                "recursive",
+                PlannerActionSchemaVariant::Recursive,
+                crate::infrastructure::adapters::sift_agent::build_planner_action_prompt_for_schema_test(
+                    &request,
+                ),
+            ),
+        ] {
+            let http_prompt = adapter.build_planner_system_prompt_for_variant(
+                &request.interpretation,
+                &request.operator_memory,
+                variant,
+            );
+            let sift_block =
+                assert_planner_schema_block("sift", variant_label, &sift_prompt, variant);
+            let http_block =
+                assert_planner_schema_block("http", variant_label, &http_prompt, variant);
+            assert_eq!(
+                sift_block, http_block,
+                "sift and http {variant_label} agent action schema blocks drifted"
+            );
+        }
+    }
+
+    #[test]
     fn schema_block_assertions_name_drifting_lane_and_prompt_variant() {
         let panic = std::panic::catch_unwind(|| {
             let _ = assert_planner_schema_block(
