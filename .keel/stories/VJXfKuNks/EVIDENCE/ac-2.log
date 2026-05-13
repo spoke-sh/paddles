@@ -1,0 +1,20 @@
+---
+recorded_at: 2026-05-13T15:59:08.218555765-07:00
+command: cargo test mocked_recursive_planner_lanes_receive_same_canonical_schema_block --lib
+---
+
+running 1 test
+test infrastructure::adapters::http_provider::tests::mocked_recursive_planner_lanes_receive_same_canonical_schema_block ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 794 filtered out; finished in 0.02s
+
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on shared package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-376074c8c385b41a)

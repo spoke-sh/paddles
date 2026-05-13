@@ -1806,10 +1806,11 @@ impl HttpProviderAdapter {
         system
     }
 
-    fn build_planner_system_prompt(
+    fn build_planner_system_prompt_for_variant(
         &self,
         interpretation: &InterpretationContext,
         operator_memory: &[crate::domain::ports::OperatorMemoryDocument],
+        schema_variant: PlannerActionSchemaVariant,
     ) -> String {
         let mut system = self.build_system_prompt(interpretation, operator_memory);
         let transport_rule = match self.capabilities.planner_tool_call {
@@ -1823,7 +1824,7 @@ impl HttpProviderAdapter {
                 "Your response is parsed directly, so the action envelope must be valid JSON on the first try."
             }
         };
-        let action_schema = render_planner_action_schema(PlannerActionSchemaVariant::Initial);
+        let action_schema = render_planner_action_schema(schema_variant);
         system.push_str(&format!(
             r#"
 ## Harness Reality
@@ -2398,9 +2399,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         request: &PlannerRequest,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InitialActionDecision> {
-        let system = self
-            .engine
-            .build_planner_system_prompt(&request.interpretation, &request.operator_memory);
+        let system = self.engine.build_planner_system_prompt_for_variant(
+            &request.interpretation,
+            &request.operator_memory,
+            PlannerActionSchemaVariant::Initial,
+        );
         let mut user = build_http_initial_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
@@ -2496,9 +2499,11 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         request: &PlannerRequest,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<RecursivePlannerDecision> {
-        let system = self
-            .engine
-            .build_planner_system_prompt(&request.interpretation, &request.operator_memory);
+        let system = self.engine.build_planner_system_prompt_for_variant(
+            &request.interpretation,
+            &request.operator_memory,
+            PlannerActionSchemaVariant::Recursive,
+        );
         let mut user = build_http_planner_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
@@ -3893,7 +3898,8 @@ fn unverified_external_url_fallback(prompt: &str) -> String {
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter, truncate};
     use crate::application::planner_action_schema::{
-        PlannerActionSchemaVariant, render_planner_action_schema,
+        PLANNER_ACTION_SCHEMA_BEGIN, PLANNER_ACTION_SCHEMA_END, PlannerActionSchemaVariant,
+        render_planner_action_schema,
     };
     use crate::application::{AgentRuntime, RuntimeLaneConfig};
     use crate::domain::model::DeliberationState;
@@ -4038,6 +4044,152 @@ mod tests {
     fn truncate_returns_full_string_when_under_cap() {
         let result = truncate("short", 100);
         assert_eq!(result, "short");
+    }
+
+    fn schema_parity_request() -> PlannerRequest {
+        PlannerRequest::new(
+            "Inspect the planner schema parity.",
+            "/workspace",
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        )
+    }
+
+    fn extract_planner_schema_block(prompt: &str, lane: &str, variant: &str) -> String {
+        let start = prompt.find(PLANNER_ACTION_SCHEMA_BEGIN).unwrap_or_else(|| {
+            panic!("{lane} {variant} planner prompt is missing the schema start marker")
+        });
+        let end_start = prompt.find(PLANNER_ACTION_SCHEMA_END).unwrap_or_else(|| {
+            panic!("{lane} {variant} planner prompt is missing the schema end marker")
+        });
+        let end = end_start + PLANNER_ACTION_SCHEMA_END.len();
+        prompt[start..end].to_string()
+    }
+
+    fn assert_planner_schema_block(
+        lane: &str,
+        variant_label: &str,
+        prompt: &str,
+        expected_variant: PlannerActionSchemaVariant,
+    ) -> String {
+        let actual = extract_planner_schema_block(prompt, lane, variant_label);
+        let expected = extract_planner_schema_block(
+            &render_planner_action_schema(expected_variant),
+            "shared renderer",
+            variant_label,
+        );
+        assert_eq!(
+            actual, expected,
+            "{lane} {variant_label} planner prompt schema block drifted"
+        );
+        actual
+    }
+
+    #[test]
+    fn mocked_initial_planner_lanes_receive_same_canonical_schema_block() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let request = schema_parity_request();
+
+        let sift_prompt =
+            crate::infrastructure::adapters::sift_agent::build_initial_action_prompt_for_schema_test(
+                &request,
+            );
+        let http_prompt = adapter.build_planner_system_prompt_for_variant(
+            &request.interpretation,
+            &request.operator_memory,
+            PlannerActionSchemaVariant::Initial,
+        );
+
+        let sift_block = assert_planner_schema_block(
+            "sift",
+            "initial",
+            &sift_prompt,
+            PlannerActionSchemaVariant::Initial,
+        );
+        let http_block = assert_planner_schema_block(
+            "http",
+            "initial",
+            &http_prompt,
+            PlannerActionSchemaVariant::Initial,
+        );
+        assert_eq!(
+            sift_block, http_block,
+            "sift and http initial planner schema blocks drifted"
+        );
+    }
+
+    #[test]
+    fn mocked_recursive_planner_lanes_receive_same_canonical_schema_block() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = super::HttpProviderAdapter::new(
+            workspace.path(),
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        );
+        let request = schema_parity_request();
+
+        let sift_prompt =
+            crate::infrastructure::adapters::sift_agent::build_planner_action_prompt_for_schema_test(
+                &request,
+            );
+        let http_prompt = adapter.build_planner_system_prompt_for_variant(
+            &request.interpretation,
+            &request.operator_memory,
+            PlannerActionSchemaVariant::Recursive,
+        );
+
+        let sift_block = assert_planner_schema_block(
+            "sift",
+            "recursive",
+            &sift_prompt,
+            PlannerActionSchemaVariant::Recursive,
+        );
+        let http_block = assert_planner_schema_block(
+            "http",
+            "recursive",
+            &http_prompt,
+            PlannerActionSchemaVariant::Recursive,
+        );
+        assert_eq!(
+            sift_block, http_block,
+            "sift and http recursive planner schema blocks drifted"
+        );
+    }
+
+    #[test]
+    fn schema_block_assertions_name_drifting_lane_and_prompt_variant() {
+        let panic = std::panic::catch_unwind(|| {
+            let _ = assert_planner_schema_block(
+                "http",
+                "recursive",
+                "missing schema",
+                PlannerActionSchemaVariant::Recursive,
+            );
+        })
+        .expect_err("schema assertion should panic when markers are missing");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .expect("panic message");
+
+        assert!(
+            message.contains("http recursive planner prompt is missing the schema start marker"),
+            "unexpected panic message: {message}"
+        );
     }
 
     #[test]
@@ -5726,9 +5878,10 @@ mod tests {
             RenderCapability::OpenAiJsonSchema,
         );
 
-        let prompt = adapter.build_planner_system_prompt(
+        let prompt = adapter.build_planner_system_prompt_for_variant(
             &crate::domain::ports::InterpretationContext::default(),
             &[],
+            PlannerActionSchemaVariant::Initial,
         );
 
         assert!(prompt.contains("Return exactly one complete JSON object"));

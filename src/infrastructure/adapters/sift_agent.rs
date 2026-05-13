@@ -2884,6 +2884,26 @@ Current user request:\n\
     )
 }
 
+#[cfg(test)]
+pub(crate) fn build_initial_action_prompt_for_schema_test(request: &PlannerRequest) -> String {
+    build_initial_action_prompt(&PlannerPrompt {
+        workspace_root: request.workspace_root.as_path(),
+        user_prompt: &request.user_prompt,
+        interpretation: &request.interpretation,
+        request,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn build_planner_action_prompt_for_schema_test(request: &PlannerRequest) -> String {
+    build_planner_action_prompt(&PlannerPrompt {
+        workspace_root: request.workspace_root.as_path(),
+        user_prompt: &request.user_prompt,
+        interpretation: &request.interpretation,
+        request,
+    })
+}
+
 fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
     format!(
         "Your last planner reply was empty or invalid.\n\
