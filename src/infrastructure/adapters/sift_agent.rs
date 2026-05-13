@@ -1,10 +1,13 @@
 use super::agent_memory::{AgentMemory, load_guidance_document};
+use crate::application::planner_action_schema::{
+    PlannerActionSchemaVariant, render_planner_action_schema,
+};
 use crate::domain::model::{
     CompactionDecision, ConversationThreadRef, ExternalCapabilityInvocation,
     ForensicArtifactCapture, NullTurnEventSink, StrainFactor, StrainTracker, ThreadDecision,
     ThreadDecisionId, ThreadDecisionKind, ThreadMergeMode, TraceArtifactId,
     TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase, TurnEvent,
-    TurnEventSink, TurnIntent,
+    TurnEventSink, TurnIntent, WorkspaceTextPosition,
 };
 use crate::domain::ports::{
     CompactionPlan, CompactionRequest, EvidenceBundle, GroundingDomain, GroundingRequirement,
@@ -147,6 +150,30 @@ enum PlannerActionEnvelope {
         patch: String,
         rationale: String,
     },
+    SemanticDefinitions {
+        path: String,
+        position: WorkspaceTextPosition,
+        rationale: String,
+    },
+    SemanticReferences {
+        path: String,
+        position: WorkspaceTextPosition,
+        rationale: String,
+    },
+    SemanticSymbols {
+        path: String,
+        rationale: String,
+    },
+    SemanticHover {
+        path: String,
+        position: WorkspaceTextPosition,
+        rationale: String,
+    },
+    SemanticDiagnostics {
+        #[serde(default)]
+        path: Option<String>,
+        rationale: String,
+    },
     ExternalCapability {
         capability_id: String,
         purpose: String,
@@ -255,6 +282,30 @@ enum InitialActionVariantEnvelope {
     },
     ApplyPatch {
         patch: String,
+        rationale: String,
+    },
+    SemanticDefinitions {
+        path: String,
+        position: WorkspaceTextPosition,
+        rationale: String,
+    },
+    SemanticReferences {
+        path: String,
+        position: WorkspaceTextPosition,
+        rationale: String,
+    },
+    SemanticSymbols {
+        path: String,
+        rationale: String,
+    },
+    SemanticHover {
+        path: String,
+        position: WorkspaceTextPosition,
+        rationale: String,
+    },
+    SemanticDiagnostics {
+        #[serde(default)]
+        path: Option<String>,
         rationale: String,
     },
     ExternalCapability {
@@ -2544,21 +2595,7 @@ Reply with ONLY one JSON object and no prose or markdown.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
-Allowed actions:\n\
-- {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+{}\n\
 \n\
 Rules:\n\
 - Read the interpretation context before choosing.\n\
@@ -2610,6 +2647,7 @@ Runtime notes:\n\
 \n\
 Current user request:\n\
 {}\n",
+        render_planner_action_schema(PlannerActionSchemaVariant::Initial),
         planner_grounding_rules(),
         prompt.workspace_root.display(),
         format_interpretation_context_digest(prompt.interpretation),
@@ -2634,21 +2672,7 @@ Return ONLY one valid JSON initial action.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
-Allowed actions:\n\
-- {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+{}\n\
 \n\
 Do not answer the user directly.\n\
 For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
@@ -2690,6 +2714,7 @@ Runtime notes:\n\
 \n\
 Current user request:\n\
 {}\n",
+        render_planner_action_schema(PlannerActionSchemaVariant::Initial),
         planner_grounding_rules(),
         format_operator_memory_documents(&request.operator_memory),
         format_interpretation_context_digest(&request.interpretation),
@@ -2715,20 +2740,7 @@ Return ONLY one valid JSON object.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
-Allowed actions:\n\
-- {{\"action\":\"answer\",\"answer\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"edit\":\"yes\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"edit\":\"yes|no\",\"candidate_files\":[\"path1\",\"path2\",\"path3\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"edit\":\"no\",\"candidate_files\":[],\"rationale\":\"...\"}}\n\
+{}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
@@ -2769,6 +2781,7 @@ Runtime notes:\n\
 \n\
 Current user request:\n\
 {}\n",
+        render_planner_action_schema(PlannerActionSchemaVariant::Initial),
         trim_for_context(invalid_reply, 800),
         planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
@@ -2792,20 +2805,7 @@ Choose the NEXT bounded workspace resource action for this turn.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
-Allowed actions:\n\
-	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
+{}\n\
 \n\
 Rules:\n\
 - Search when you need workspace retrieval.\n\
@@ -2864,6 +2864,7 @@ Current loop state:\n\
 \n\
 Current user request:\n\
 {}\n",
+        render_planner_action_schema(PlannerActionSchemaVariant::Recursive),
         planner_grounding_rules(),
         prompt.workspace_root.display(),
         format_operator_memory_documents(&prompt.request.operator_memory),
@@ -2888,20 +2889,7 @@ fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
         "Your last planner reply was empty or invalid.\n\
 Return ONLY one valid JSON planner action.\n\
 \n\
-Allowed actions:\n\
-	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
+{}\n\
 \n\
 Do not answer the user directly.\n\
 If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
@@ -2940,6 +2928,7 @@ Current loop state:\n\
 \n\
 Current user request:\n\
 {}\n",
+        render_planner_action_schema(PlannerActionSchemaVariant::Recursive),
         planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
@@ -2962,20 +2951,7 @@ Make one final constrained next-action decision.\n\
 If the loop state already contains enough evidence, return stop.\n\
 Return ONLY one valid JSON planner action.\n\
 \n\
-Allowed actions:\n\
-	- {{\"action\":\"search\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"intent\":\"optional\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"list_files\",\"pattern\":\"optional substring\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"read\",\"path\":\"relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"inspect\",\"command\":\"read-only shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"shell\",\"command\":\"workspace shell command\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"diff\",\"path\":\"optional relative/path\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"write_file\",\"path\":\"relative/path\",\"content\":\"full file contents\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"replace_in_file\",\"path\":\"relative/path\",\"old\":\"exact old text\",\"new\":\"replacement text\",\"replace_all\":false,\"rationale\":\"...\"}}\n\
-- {{\"action\":\"apply_patch\",\"patch\":\"unified diff text\",\"rationale\":\"...\"}}\n\
-- {{\"action\":\"external_capability\",\"capability_id\":\"web.search|mcp.tool|connector.app_action\",\"purpose\":\"why this external fabric is needed\",\"payload\":null,\"rationale\":\"...\"}}\n\
-	- {{\"action\":\"refine\",\"query\":\"...\",\"mode\":\"linear|graph\",\"strategy\":\"bm25|vector\",\"retrievers\":[\"path-fuzzy\",\"segment-fuzzy\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"branch\",\"branches\":[\"...\",\"...\"],\"rationale\":\"...\"}}\n\
-- {{\"action\":\"stop\",\"reason\":\"...\",\"answer\":\"optional direct reply when ending immediately\",\"rationale\":\"...\"}}\n\
+{}\n\
 \n\
 Invalid reply to correct:\n\
 {}\n\
@@ -3013,6 +2989,7 @@ Current loop state:\n\
 \n\
 Current user request:\n\
 {}\n",
+        render_planner_action_schema(PlannerActionSchemaVariant::Recursive),
         trim_for_context(invalid_reply, 800),
         planner_grounding_rules(),
         format_interpretation_context_digest(&request.interpretation),
@@ -4046,6 +4023,83 @@ fn initial_action_from_envelope(envelope: InitialActionEnvelope) -> Result<Initi
             edit,
             grounding: grounding.clone(),
         },
+        InitialActionVariantEnvelope::SemanticDefinitions {
+            path,
+            position,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::SemanticDefinitions {
+                    path: required_planner_field("path", path)?,
+                    position,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit,
+            grounding: grounding.clone(),
+        },
+        InitialActionVariantEnvelope::SemanticReferences {
+            path,
+            position,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::SemanticReferences {
+                    path: required_planner_field("path", path)?,
+                    position,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit,
+            grounding: grounding.clone(),
+        },
+        InitialActionVariantEnvelope::SemanticSymbols { path, rationale } => {
+            InitialActionDecision {
+                action: InitialAction::Workspace {
+                    action: WorkspaceAction::SemanticSymbols {
+                        path: required_planner_field("path", path)?,
+                    },
+                },
+                rationale: required_planner_field("rationale", rationale)?,
+                answer: None,
+                edit,
+                grounding: grounding.clone(),
+            }
+        }
+        InitialActionVariantEnvelope::SemanticHover {
+            path,
+            position,
+            rationale,
+        } => InitialActionDecision {
+            action: InitialAction::Workspace {
+                action: WorkspaceAction::SemanticHover {
+                    path: required_planner_field("path", path)?,
+                    position,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit,
+            grounding: grounding.clone(),
+        },
+        InitialActionVariantEnvelope::SemanticDiagnostics { path, rationale } => {
+            InitialActionDecision {
+                action: InitialAction::Workspace {
+                    action: WorkspaceAction::SemanticDiagnostics {
+                        path: path.and_then(|value| {
+                            let trimmed = value.trim();
+                            (!trimmed.is_empty()).then(|| trimmed.to_string())
+                        }),
+                    },
+                },
+                rationale: required_planner_field("rationale", rationale)?,
+                answer: None,
+                edit,
+                grounding: grounding.clone(),
+            }
+        }
         InitialActionVariantEnvelope::ExternalCapability {
             capability_id,
             purpose,
@@ -4344,6 +4398,91 @@ fn planner_action_from_envelope(
 
             deliberation_state: None,
         },
+        PlannerActionEnvelope::SemanticDefinitions {
+            path,
+            position,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticDefinitions {
+                    path: required_planner_field("path", path)?,
+                    position,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
+
+            deliberation_state: None,
+        },
+        PlannerActionEnvelope::SemanticReferences {
+            path,
+            position,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticReferences {
+                    path: required_planner_field("path", path)?,
+                    position,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
+
+            deliberation_state: None,
+        },
+        PlannerActionEnvelope::SemanticSymbols { path, rationale } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticSymbols {
+                    path: required_planner_field("path", path)?,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
+
+            deliberation_state: None,
+        },
+        PlannerActionEnvelope::SemanticHover {
+            path,
+            position,
+            rationale,
+        } => RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticHover {
+                    path: required_planner_field("path", path)?,
+                    position,
+                },
+            },
+            rationale: required_planner_field("rationale", rationale)?,
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: grounding.clone(),
+
+            deliberation_state: None,
+        },
+        PlannerActionEnvelope::SemanticDiagnostics { path, rationale } => {
+            RecursivePlannerDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::SemanticDiagnostics {
+                        path: path.and_then(|value| {
+                            let trimmed = value.trim();
+                            (!trimmed.is_empty()).then(|| trimmed.to_string())
+                        }),
+                    },
+                },
+                rationale: required_planner_field("rationale", rationale)?,
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: grounding.clone(),
+
+                deliberation_state: None,
+            }
+        }
         PlannerActionEnvelope::ExternalCapability {
             capability_id,
             purpose,
@@ -4709,9 +4848,15 @@ impl ConversationFactory for StaticConversationFactory {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalContextSource, QwenGenerationConfig, SiftAgentAdapter, extract_json_payload,
+        LocalContextSource, PlannerPrompt, QwenGenerationConfig, SiftAgentAdapter,
+        build_initial_action_prompt, build_initial_action_redecision_prompt,
+        build_initial_action_retry_prompt, build_planner_action_prompt,
+        build_planner_redecision_prompt, build_planner_retry_prompt, extract_json_payload,
         format_qwen_prompt, generation_sampling, grounded_answer_fallback, normalize_relative_path,
         preferred_qwen_weight_dtype, should_retry_qwen_on_cpu_message, trim_for_context,
+    };
+    use crate::application::planner_action_schema::{
+        PlannerActionSchemaVariant, render_planner_action_schema,
     };
     use crate::domain::model::{
         ForensicArtifactCapture, ForensicTraceSink, NullTurnEventSink, TraceArtifactId,
@@ -4841,6 +4986,44 @@ mod tests {
 
         fn history(&self) -> &[String] {
             &[]
+        }
+    }
+
+    fn schema_prompt_test_request() -> PlannerRequest {
+        PlannerRequest::new(
+            "Inspect the planner action schema.",
+            "/workspace",
+            InterpretationContext::default(),
+            crate::domain::ports::PlannerBudget::default(),
+        )
+    }
+
+    #[test]
+    fn sift_planner_prompts_use_shared_action_schema_renderer() {
+        let request = schema_prompt_test_request();
+        let planner_prompt = PlannerPrompt {
+            workspace_root: request.workspace_root.as_path(),
+            user_prompt: &request.user_prompt,
+            interpretation: &request.interpretation,
+            request: &request,
+        };
+        let initial_schema = render_planner_action_schema(PlannerActionSchemaVariant::Initial);
+        let recursive_schema = render_planner_action_schema(PlannerActionSchemaVariant::Recursive);
+
+        for prompt in [
+            build_initial_action_prompt(&planner_prompt),
+            build_initial_action_retry_prompt(&request),
+            build_initial_action_redecision_prompt(&request, "not json"),
+        ] {
+            assert!(prompt.contains(&initial_schema));
+        }
+
+        for prompt in [
+            build_planner_action_prompt(&planner_prompt),
+            build_planner_retry_prompt(&request),
+            build_planner_redecision_prompt(&request, "not json"),
+        ] {
+            assert!(prompt.contains(&recursive_schema));
         }
     }
 

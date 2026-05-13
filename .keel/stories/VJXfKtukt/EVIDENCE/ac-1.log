@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-05-13T15:51:43.348918216-07:00
+command: cargo test sift_planner_prompts_use_shared_action_schema_renderer --lib
+---
+
+running 1 test
+test infrastructure::adapters::sift_agent::tests::sift_planner_prompts_use_shared_action_schema_renderer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 791 filtered out; finished in 0.00s
+
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling paddles v0.1.0 (/home/alex/workspace/spoke-sh/paddles)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.80s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-376074c8c385b41a)

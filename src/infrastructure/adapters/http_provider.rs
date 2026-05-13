@@ -1,8 +1,11 @@
+use crate::application::planner_action_schema::{
+    PlannerActionSchemaVariant, render_planner_action_schema,
+};
 use crate::domain::model::{
     CompactionDecision, CompactionPlan, CompactionRequest, DeliberationState,
     ExternalCapabilityInvocation, ForensicArtifactCapture, ThreadDecision, ThreadDecisionId,
     ThreadDecisionKind, TraceArtifactId, TraceModelExchangeCategory, TraceModelExchangeLane,
-    TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent,
+    TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent, WorkspaceTextPosition,
 };
 use crate::domain::ports::{
     EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
@@ -1820,6 +1823,7 @@ impl HttpProviderAdapter {
                 "Your response is parsed directly, so the action envelope must be valid JSON on the first try."
             }
         };
+        let action_schema = render_planner_action_schema(PlannerActionSchemaVariant::Initial);
         system.push_str(&format!(
             r#"
 ## Harness Reality
@@ -1830,23 +1834,7 @@ impl HttpProviderAdapter {
 - As evidence accumulates, revise the premise explicitly when commands weaken or contradict it.
 - Do not ask the user for logs, file contents, or repository state that the harness can inspect locally.
 
-## Action Schema
-
-You must respond with a single JSON object selecting your next action. Available actions:
-
-{{"action":"answer","answer":"...","edit":"no","candidate_files":[],"rationale":"..."}}
-{{"action":"search","query":"...","mode":"linear|graph","strategy":"bm25|vector","retrievers":["path-fuzzy","segment-fuzzy"],"intent":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"list_files","pattern":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"read","path":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"inspect","command":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"shell","command":"...","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"diff","path":"optional","edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"write_file","path":"relative/path","content":"full file contents","edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"replace_in_file","path":"relative/path","old":"exact old text","new":"replacement text","replace_all":false,"edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"apply_patch","patch":"unified diff text","edit":"yes","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"refine","query":"...","mode":"linear|graph","strategy":"bm25|vector","retrievers":["path-fuzzy","segment-fuzzy"],"edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"branch","branches":["...","..."],"edit":"yes|no","candidate_files":["path1","path2"],"rationale":"..."}}
-{{"action":"stop","reason":"...","edit":"no","candidate_files":[],"rationale":"..."}}
+{action_schema}
 
 Rules:
 - {transport_rule}
@@ -2037,6 +2025,43 @@ Rules:
             "apply_patch" => PlannerAction::Workspace {
                 action: WorkspaceAction::ApplyPatch {
                     patch: envelope.patch.unwrap_or_default(),
+                },
+            },
+            "semantic_definitions" => PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticDefinitions {
+                    path: envelope.path.unwrap_or_default(),
+                    position: envelope.position.unwrap_or(WorkspaceTextPosition {
+                        line: 0,
+                        character: 0,
+                    }),
+                },
+            },
+            "semantic_references" => PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticReferences {
+                    path: envelope.path.unwrap_or_default(),
+                    position: envelope.position.unwrap_or(WorkspaceTextPosition {
+                        line: 0,
+                        character: 0,
+                    }),
+                },
+            },
+            "semantic_symbols" => PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticSymbols {
+                    path: envelope.path.unwrap_or_default(),
+                },
+            },
+            "semantic_hover" => PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticHover {
+                    path: envelope.path.unwrap_or_default(),
+                    position: envelope.position.unwrap_or(WorkspaceTextPosition {
+                        line: 0,
+                        character: 0,
+                    }),
+                },
+            },
+            "semantic_diagnostics" => PlannerAction::Workspace {
+                action: WorkspaceAction::SemanticDiagnostics {
+                    path: envelope.path,
                 },
             },
             "external_capability" => PlannerAction::Workspace {
@@ -2868,6 +2893,8 @@ struct PlannerEnvelope {
     #[serde(default)]
     path: Option<String>,
     #[serde(default)]
+    position: Option<WorkspaceTextPosition>,
+    #[serde(default)]
     command: Option<String>,
     #[serde(default)]
     pattern: Option<String>,
@@ -2915,6 +2942,11 @@ fn planner_action_json_schema() -> Value {
                     "write_file",
                     "replace_in_file",
                     "apply_patch",
+                    "semantic_definitions",
+                    "semantic_references",
+                    "semantic_symbols",
+                    "semantic_hover",
+                    "semantic_diagnostics",
                     "external_capability",
                     "refine",
                     "branch",
@@ -2979,6 +3011,24 @@ fn planner_action_json_schema() -> Value {
             "path": {
                 "type": "string",
                 "description": "Required when `action` targets a specific file."
+            },
+            "position": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Required by semantic actions that target a source position.",
+                "properties": {
+                    "line": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Zero-based or editor-provided line number."
+                    },
+                    "character": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Zero-based or editor-provided UTF-16 character offset."
+                    }
+                },
+                "required": ["line", "character"]
             },
             "command": {
                 "type": "string",
@@ -3053,6 +3103,7 @@ fn planner_action_json_schema() -> Value {
         "intent",
         "pattern",
         "path",
+        "position",
         "command",
         "content",
         "old",
@@ -3841,6 +3892,9 @@ fn unverified_external_url_fallback(prompt: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter, truncate};
+    use crate::application::planner_action_schema::{
+        PlannerActionSchemaVariant, render_planner_action_schema,
+    };
     use crate::application::{AgentRuntime, RuntimeLaneConfig};
     use crate::domain::model::DeliberationState;
     use crate::domain::model::{
@@ -5678,6 +5732,9 @@ mod tests {
         );
 
         assert!(prompt.contains("Return exactly one complete JSON object"));
+        assert!(prompt.contains(&render_planner_action_schema(
+            PlannerActionSchemaVariant::Initial
+        )));
         assert!(prompt.contains("The first key must be `action`"));
         assert!(prompt.contains("Do not wrap the JSON in markdown fences"));
         assert!(prompt.contains("exact-diff state space"));
@@ -6557,6 +6614,22 @@ mod tests {
                 .expect("planner action enum")
                 .iter()
                 .any(|value| value.as_str() == Some("external_capability"))
+        );
+        assert!(
+            schema["properties"]["action"]["enum"]
+                .as_array()
+                .expect("planner action enum")
+                .iter()
+                .any(|value| value.as_str() == Some("semantic_definitions"))
+        );
+        assert!(schema["properties"].get("position").is_some());
+        assert_eq!(
+            schema["properties"]["position"]["required"][0].as_str(),
+            Some("line")
+        );
+        assert_eq!(
+            schema["properties"]["position"]["required"][1].as_str(),
+            Some("character")
         );
         assert!(schema["properties"].get("capability_id").is_some());
         assert!(schema["properties"].get("purpose").is_some());
