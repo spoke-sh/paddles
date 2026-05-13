@@ -416,12 +416,208 @@ const RECURSIVE_ACTION_SCHEMA: &[PlannerActionSchemaEntry] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::model::{ExternalCapabilityInvocation, WorkspaceTextPosition};
+    use crate::domain::ports::{
+        InitialAction, PlannerAction, RetrievalMode, RetrievalStrategy, RetrieverOption,
+        WorkspaceAction,
+    };
+    use serde_json::json;
+    use std::collections::BTreeSet;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct ActionSchemaDiff {
+        missing: Vec<&'static str>,
+        extra: Vec<&'static str>,
+    }
+
+    impl ActionSchemaDiff {
+        fn is_empty(&self) -> bool {
+            self.missing.is_empty() && self.extra.is_empty()
+        }
+    }
 
     fn schema_actions(variant: PlannerActionSchemaVariant) -> Vec<&'static str> {
         planner_action_schema_entries(variant)
             .iter()
             .map(|entry| entry.action)
             .collect()
+    }
+
+    fn action_schema_diff(expected: &[&'static str], actual: &[&'static str]) -> ActionSchemaDiff {
+        let expected = expected.iter().copied().collect::<BTreeSet<_>>();
+        let actual = actual.iter().copied().collect::<BTreeSet<_>>();
+        ActionSchemaDiff {
+            missing: expected.difference(&actual).copied().collect(),
+            extra: actual.difference(&expected).copied().collect(),
+        }
+    }
+
+    fn format_action_schema_diff(surface: &str, diff: &ActionSchemaDiff) -> String {
+        let missing = if diff.missing.is_empty() {
+            "none".to_string()
+        } else {
+            diff.missing.join(", ")
+        };
+        let extra = if diff.extra.is_empty() {
+            "none".to_string()
+        } else {
+            diff.extra.join(", ")
+        };
+        format!(
+            "{surface} schema mismatch; missing schema actions: {missing}; extra schema actions: {extra}"
+        )
+    }
+
+    fn assert_schema_actions_match(
+        surface: &str,
+        expected: &[&'static str],
+        variant: PlannerActionSchemaVariant,
+    ) {
+        let actual = schema_actions(variant);
+        let diff = action_schema_diff(expected, &actual);
+        assert!(
+            diff.is_empty(),
+            "{}",
+            format_action_schema_diff(surface, &diff)
+        );
+    }
+
+    fn sample_workspace_actions() -> Vec<WorkspaceAction> {
+        vec![
+            WorkspaceAction::Search {
+                query: "query".to_string(),
+                mode: RetrievalMode::Graph,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: vec![RetrieverOption::PathFuzzy],
+                intent: Some("intent".to_string()),
+            },
+            WorkspaceAction::ListFiles {
+                pattern: Some("src".to_string()),
+            },
+            WorkspaceAction::Read {
+                path: "src/lib.rs".to_string(),
+            },
+            WorkspaceAction::Inspect {
+                command: "git status --short".to_string(),
+            },
+            WorkspaceAction::Shell {
+                command: "cargo test".to_string(),
+            },
+            WorkspaceAction::Diff {
+                path: Some("src/lib.rs".to_string()),
+            },
+            WorkspaceAction::WriteFile {
+                path: "src/lib.rs".to_string(),
+                content: "content".to_string(),
+            },
+            WorkspaceAction::ReplaceInFile {
+                path: "src/lib.rs".to_string(),
+                old: "old".to_string(),
+                new: "new".to_string(),
+                replace_all: false,
+            },
+            WorkspaceAction::ApplyPatch {
+                patch: "*** Begin Patch\n*** End Patch\n".to_string(),
+            },
+            WorkspaceAction::SemanticDefinitions {
+                path: "src/lib.rs".to_string(),
+                position: WorkspaceTextPosition {
+                    line: 1,
+                    character: 0,
+                },
+            },
+            WorkspaceAction::SemanticReferences {
+                path: "src/lib.rs".to_string(),
+                position: WorkspaceTextPosition {
+                    line: 1,
+                    character: 0,
+                },
+            },
+            WorkspaceAction::SemanticSymbols {
+                path: "src/lib.rs".to_string(),
+            },
+            WorkspaceAction::SemanticHover {
+                path: "src/lib.rs".to_string(),
+                position: WorkspaceTextPosition {
+                    line: 1,
+                    character: 0,
+                },
+            },
+            WorkspaceAction::SemanticDiagnostics {
+                path: Some("src/lib.rs".to_string()),
+            },
+            WorkspaceAction::ExternalCapability {
+                invocation: ExternalCapabilityInvocation::new(
+                    "web.search",
+                    "ground current external evidence",
+                    json!({"query":"paddles"}),
+                ),
+            },
+        ]
+    }
+
+    fn workspace_action_labels_from_rust_enum() -> Vec<&'static str> {
+        sample_workspace_actions()
+            .into_iter()
+            .map(|action| action.label())
+            .collect()
+    }
+
+    fn initial_action_labels_from_rust_enum() -> Vec<&'static str> {
+        let mut labels = vec![
+            InitialAction::Answer.label(),
+            InitialAction::Refine {
+                query: "query".to_string(),
+                mode: RetrievalMode::Graph,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: vec![RetrieverOption::PathFuzzy],
+                rationale: Some("rationale".to_string()),
+            }
+            .label(),
+            InitialAction::Branch {
+                branches: vec!["one".to_string(), "two".to_string()],
+                rationale: Some("rationale".to_string()),
+            }
+            .label(),
+            InitialAction::Stop {
+                reason: "done".to_string(),
+            }
+            .label(),
+        ];
+        labels.extend(
+            sample_workspace_actions()
+                .into_iter()
+                .map(|action| InitialAction::Workspace { action }.label()),
+        );
+        labels
+    }
+
+    fn planner_action_labels_from_rust_enum() -> Vec<&'static str> {
+        let mut labels = vec![
+            PlannerAction::Refine {
+                query: "query".to_string(),
+                mode: RetrievalMode::Graph,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: vec![RetrieverOption::PathFuzzy],
+                rationale: Some("rationale".to_string()),
+            }
+            .label(),
+            PlannerAction::Branch {
+                branches: vec!["one".to_string(), "two".to_string()],
+                rationale: Some("rationale".to_string()),
+            }
+            .label(),
+            PlannerAction::Stop {
+                reason: "done".to_string(),
+            }
+            .label(),
+        ];
+        labels.extend(
+            sample_workspace_actions()
+                .into_iter()
+                .map(|action| PlannerAction::Workspace { action }.label()),
+        );
+        labels
     }
 
     #[test]
@@ -516,5 +712,73 @@ mod tests {
         assert!(rendered.contains("capability manifest"));
         assert!(!rendered.contains("Capability Manifest:"));
         assert!(!rendered.contains("Completion Contract:"));
+    }
+
+    #[test]
+    fn schema_actions_match_initial_action_enum_labels() {
+        assert_schema_actions_match(
+            "initial planner actions",
+            &initial_action_labels_from_rust_enum(),
+            PlannerActionSchemaVariant::Initial,
+        );
+    }
+
+    #[test]
+    fn schema_actions_match_recursive_planner_action_enum_labels() {
+        assert_schema_actions_match(
+            "recursive planner actions",
+            &planner_action_labels_from_rust_enum(),
+            PlannerActionSchemaVariant::Recursive,
+        );
+    }
+
+    #[test]
+    fn schema_actions_cover_workspace_action_enum_labels() {
+        let workspace_labels = workspace_action_labels_from_rust_enum();
+
+        for variant in [
+            PlannerActionSchemaVariant::Initial,
+            PlannerActionSchemaVariant::Recursive,
+        ] {
+            let actual = schema_actions(variant);
+            let diff = action_schema_diff(&workspace_labels, &actual);
+            assert!(
+                diff.missing.is_empty(),
+                "{}",
+                format_action_schema_diff("workspace actions", &diff)
+            );
+        }
+    }
+
+    #[test]
+    fn schema_entries_do_not_encode_turn_specific_availability() {
+        for variant in [
+            PlannerActionSchemaVariant::Initial,
+            PlannerActionSchemaVariant::Recursive,
+        ] {
+            let rendered = render_planner_action_schema(variant);
+            assert!(rendered.contains("capability manifest rendered separately"));
+            assert!(!rendered.contains("capability_manifest"));
+            assert!(!rendered.contains("completion_contract"));
+
+            for entry in planner_action_schema_entries(variant) {
+                assert!(!entry.json_example.contains("availability"));
+                assert!(!entry.json_example.contains("max_steps"));
+                assert!(!entry.json_example.contains("completion_contract"));
+            }
+        }
+    }
+
+    #[test]
+    fn schema_action_diff_message_names_missing_and_extra_actions() {
+        let diff = ActionSchemaDiff {
+            missing: vec!["semantic_hover"],
+            extra: vec!["legacy_lookup"],
+        };
+        let message = format_action_schema_diff("workspace actions", &diff);
+
+        assert!(message.contains("workspace actions schema mismatch"));
+        assert!(message.contains("missing schema actions: semantic_hover"));
+        assert!(message.contains("extra schema actions: legacy_lookup"));
     }
 }

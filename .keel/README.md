@@ -460,7 +460,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Shared Planner Schema Contract](epics/VJXeteRQ5/voyages/VJXf4hYYX/) | in-progress |
+| [Shared Planner Schema Contract](epics/VJXeteRQ5/voyages/VJXf4hYYX/) | done |
 | [Planner Lane Schema Adoption](epics/VJXeteRQ5/voyages/VJXf4hlYW/) | planned |
 | [Planner Schema Documentation](epics/VJXeteRQ5/voyages/VJXf4iAYl/) | planned |
 
