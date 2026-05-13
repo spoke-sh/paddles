@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T16:04:33.046548236-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "Adapter-local planner action schema lists are forbidden" POLICY.md'
+---
+45:- **Shared Planner Action Schema Ownership**: Planner action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared planner action schema renderer. Adapter-local planner action schema lists are forbidden for Sift, HTTP, retry, redecision, or future planner lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.

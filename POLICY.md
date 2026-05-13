@@ -42,6 +42,7 @@ Model selection is an architectural decision that shapes every turn.
 ### Planning and Synthesis
 - **Recursive Planning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
 - **Planner Action Contract**: Turns flow through a constrained planner contract: answer/synthesize, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), refine, branch, and stop.
+- **Shared Planner Action Schema Ownership**: Planner action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared planner action schema renderer. Adapter-local planner action schema lists are forbidden for Sift, HTTP, retry, redecision, or future planner lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
 - **Turns Plan First**: The primary mech-suit runtime asks the planner for its first bounded action before route selection. This recursive path is the primary mode of operation.
 - **Reasoning Budget Is For Reasoning**: Recursive budget exists to let the
   model think through the harness' dynamically available capabilities and

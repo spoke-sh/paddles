@@ -64,7 +64,19 @@ action, observe the result, and repeat. The difference is that Paddles makes the
 action surface typed, capability-disclosed, budgeted, and locally executed by
 the controller.
 
-The core planner actions are:
+The shared planner action schema renderer is the JSON action contract's one
+owner. It lives in `src/application/planner_action_schema.rs` and emits the
+canonical initial and recursive variants, including action names, JSON examples,
+required fields, and common selection rules. Sift/local planner prompts and
+HTTP/remote planner prompts embed that same rendered block. Adapter prompts may
+add transport mechanics, but they do not author their own planner action lists.
+
+That schema is separate from the turn-specific capability manifest. The schema
+defines which JSON envelopes are valid; the manifest tells the planner which
+retrievers, semantic workspace services, external capability fabrics, execution
+constraints, budgets, and completion requirements are available for this turn.
+
+The canonical planner actions are:
 
 | Action | Purpose | Mutates workspace |
 | --- | --- | --- |
@@ -78,14 +90,15 @@ The core planner actions are:
 | `write_file` | Replace an entire workspace file with authored contents. | Yes |
 | `replace_in_file` | Apply an exact in-file text replacement. | Yes |
 | `apply_patch` | Apply a bounded patch directly to the workspace. | Yes |
+| `semantic_definitions`, `semantic_references`, `semantic_symbols`, `semantic_hover`, `semantic_diagnostics` | Query semantic workspace evidence when the active capability manifest discloses that service. | No |
+| `external_capability` | Invoke a manifest-disclosed external fabric such as `web.search`, `mcp.tool`, or `connector.app_action`. | No local workspace mutation |
 | `refine` | Retarget retrieval or focus while keeping the current trace. | No |
 | `branch` | Split the turn into bounded subquestions or branches. | No |
 | `stop` | End with an explicit reason, block, or insufficiency report. | No |
 
-Optional capability-disclosed actions, such as semantic workspace queries or
-external capability invocations, use the same pattern: the planner can select
-only actions the active harness profile exposes, and the controller still owns
-validation, execution, budgets, and fail-closed behavior.
+Capability-disclosed actions use the same pattern as core workspace actions:
+the planner can select only actions the active harness profile exposes, and the
+controller still owns validation, execution, budgets, and fail-closed behavior.
 
 ### Model Routing
 

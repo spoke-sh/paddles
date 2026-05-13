@@ -22,10 +22,10 @@ mission: VJXdUoYT9
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 voyages complete, 4/5 stories done
+**Progress:** 3/3 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Shared Planner Schema Contract](voyages/VJXf4hYYX/) | done | 2/2 |
 | [Planner Lane Schema Adoption](voyages/VJXf4hlYW/) | done | 2/2 |
-| [Planner Schema Documentation](voyages/VJXf4iAYl/) | planned | 0/1 |
+| [Planner Schema Documentation](voyages/VJXf4iAYl/) | done | 1/1 |
 <!-- END GENERATED -->

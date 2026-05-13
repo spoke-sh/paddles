@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-05-13T16:04:36.309582778-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "src/application/planner_action_schema.rs" ARCHITECTURE.md && rg -n "Provider adapters still own provider-specific mechanics" ARCHITECTURE.md && rg -n "turn-specific capability manifest" ARCHITECTURE.md'
+---
+30:`src/application/planner_action_schema.rs`. That application-layer boundary owns
+622:that `src/application/planner_action_schema.rs` renders into every planner
+36:Provider adapters still own provider-specific mechanics: native tool calls,
+38:wire transport. They also pass through the turn-specific capability manifest,
+634:| **semantic_definitions** / **semantic_references** / **semantic_symbols** / **semantic_hover** / **semantic_diagnostics** | Query semantic workspace evidence when the turn-specific capability manifest exposes that service |

@@ -1,13 +1,18 @@
 # Paddles Architecture: Recursive Harness Backbone
 
-How `paddles` turns a user prompt into a grounded, evidence-backed answer through recursive in-context planning.
+How `paddles` turns a user prompt into a grounded codebase outcome - code
+edits, source-backed answers, or explicit blocks - through recursive in-context
+planning.
 
 > Foundational stack position: `6/8`
 > Read this after [POLICY.md](POLICY.md) and before [PROTOCOL.md](PROTOCOL.md).
 
 ## The Story of a Turn
 
-Every turn through Paddles follows the same narrative arc: understand, investigate, and synthesize. The architecture exists to give small local models the structured support they need to produce answers that rival much larger models.
+Every turn through Paddles follows the same narrative arc: understand,
+investigate, and then act or synthesize. The architecture exists to give small
+local models the structured support they need to produce grounded code edits and
+answers that rival much larger models.
 
 ### Act 1: Interpretation
 
@@ -20,6 +25,21 @@ By the time the planner sees the prompt, it already knows the operator's priorit
 ### Act 2: Recursive Planning
 
 **`PlannerLane`** drives an iterative investigation. The planner model evaluates the assembled context and selects its next bounded action: answer directly, search the workspace, read a file, inspect state, run a shell command, refine a query, branch into subqueries, or stop.
+
+The bounded JSON action schema is rendered by
+`src/application/planner_action_schema.rs`. That application-layer boundary owns
+the initial and recursive schema variants, action names, JSON examples, required
+fields, and shared selection rules. Sift/local and HTTP/remote planner adapters
+do not author planner action schema lists; they embed the shared renderer output
+inside their prompt or transport envelope.
+
+Provider adapters still own provider-specific mechanics: native tool calls,
+structured JSON envelopes, prompt-envelope recovery, request formatting, and
+wire transport. They also pass through the turn-specific capability manifest,
+which discloses currently available retrievers, semantic workspace actions,
+external capability fabrics such as `external_capability`, execution posture,
+budgets, and completion requirements. The manifest gates what can be used on a
+particular turn; it is not a second schema source.
 
 That planner must be given real room to think. Paddles should present the
 planner with the live harness capability surface, execution posture, and
@@ -274,6 +294,8 @@ orchestration. This is where the harness coordinates a turn:
 - assemble interpretation context from ports and domain values
 - disclose the live capability surface, execution posture, and completion
   contract before planner control decisions
+- render the shared planner action schema and pair it with the turn-specific
+  capability manifest without making adapters own action lists
 - run the recursive planner loop and enforce budget, schema, and completion
   validation
 - hand gathered evidence to synthesis without leaking planner rationale into the
@@ -292,6 +314,8 @@ Infrastructure code lives under `src/infrastructure`, `apps/*`, and concrete
 adapter crates. It owns the outside world:
 
 - local model, remote provider, gatherer, and synthesizer adapters
+- planner adapters that wrap provider transport mechanics while embedding the
+  shared application-layer planner action schema
 - `AGENTS.md` loading, filesystem reads, workspace editing, and terminal
   execution
 - recorder implementations, embedded `transit-core`, native transports, web
@@ -391,7 +415,7 @@ flowchart TD
     D["4. Execute the action safely"]
     E["5. Append outputs into loop state"]
     F{"6. Sufficient evidence?"}
-    G["7. Synthesize grounded answer"]
+    G["7. Finish grounded outcome"]
 
     A --> B --> C --> D --> E --> F
     F -->|"continue"| A
@@ -594,7 +618,9 @@ bounded differences stay explicit in tests and docs.
 
 ## Planner Action Vocabulary
 
-The planner expresses its intentions through a constrained action schema:
+The planner expresses its intentions through the same constrained action schema
+that `src/application/planner_action_schema.rs` renders into every planner
+lane. This vocabulary is not copied into individual adapters.
 
 | Action | Purpose |
 |--------|---------|
@@ -603,12 +629,19 @@ The planner expresses its intentions through a constrained action schema:
 | **list_files** | Discover candidate files by pattern |
 | **read** | Read a specific file or artifact |
 | **inspect** | Examine read-only workspace state |
-| **shell** / **diff** / **edit** | Execute concrete workspace modifications |
+| **shell** / **diff** | Run governed commands or inspect workspace diffs |
+| **write_file** / **replace_in_file** / **apply_patch** | Execute concrete workspace modifications |
+| **semantic_definitions** / **semantic_references** / **semantic_symbols** / **semantic_hover** / **semantic_diagnostics** | Query semantic workspace evidence when the turn-specific capability manifest exposes that service |
+| **external_capability** | Invoke a manifest-disclosed external fabric such as web search, MCP tools, or connector app actions |
 | **refine** | Sharpen a search query based on prior results |
 | **branch** | Split an investigation into parallel subqueries |
 | **stop** | Request synthesis with current evidence |
 
-These actions are backed by Sift search, workspace tools, retained artifacts, and specialist planner-capable providers like `context-1`.
+These actions are backed by Sift search, workspace tools, retained artifacts,
+semantic workspace services, external capability brokers, and specialist
+planner-capable providers like `context-1`. The action schema defines valid
+JSON envelopes; the live capability manifest determines which backing services
+are actually available during the current turn.
 
 ## The Value of Planner/Synthesizer Separation
 

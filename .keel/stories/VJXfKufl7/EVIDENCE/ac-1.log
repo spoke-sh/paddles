@@ -1,0 +1,6 @@
+---
+recorded_at: 2026-05-13T16:04:30.308907557-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "shared planner action schema renderer" README.md && rg -n "turn-specific capability manifest" README.md'
+---
+67:The shared planner action schema renderer is the JSON action contract's one
+74:That schema is separate from the turn-specific capability manifest. The schema

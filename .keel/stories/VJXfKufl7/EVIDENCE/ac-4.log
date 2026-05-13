@@ -1,0 +1,13 @@
+---
+recorded_at: 2026-05-13T16:04:39.574175696-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "semantic_(definitions|references|symbols|hover|diagnostics)|semantic workspace actions" README.md ARCHITECTURE.md CONFIGURATION.md && rg -n "external_capability" README.md ARCHITECTURE.md CONFIGURATION.md'
+---
+CONFIGURATION.md:134:- The **planner lane** owns first bounded action selection for the primary mech-suit path. Every planner lane receives the shared planner action schema renderer output for `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic workspace actions, `external_capability`, `refine`, `branch`, and `stop`.
+ARCHITECTURE.md:39:which discloses currently available retrievers, semantic workspace actions,
+ARCHITECTURE.md:634:| **semantic_definitions** / **semantic_references** / **semantic_symbols** / **semantic_hover** / **semantic_diagnostics** | Query semantic workspace evidence when the turn-specific capability manifest exposes that service |
+README.md:93:| `semantic_definitions`, `semantic_references`, `semantic_symbols`, `semantic_hover`, `semantic_diagnostics` | Query semantic workspace evidence when the active capability manifest discloses that service. | No |
+CONFIGURATION.md:134:- The **planner lane** owns first bounded action selection for the primary mech-suit path. Every planner lane receives the shared planner action schema renderer output for `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic workspace actions, `external_capability`, `refine`, `branch`, and `stop`.
+CONFIGURATION.md:287:`external_capability` through the descriptor-governed transport boundary. The
+README.md:94:| `external_capability` | Invoke a manifest-disclosed external fabric such as `web.search`, `mcp.tool`, or `connector.app_action`. | No local workspace mutation |
+ARCHITECTURE.md:40:external capability fabrics such as `external_capability`, execution posture,
+ARCHITECTURE.md:635:| **external_capability** | Invoke a manifest-disclosed external fabric such as web search, MCP tools, or connector app actions |

@@ -131,9 +131,14 @@ lane selection rather than single-model-only routing:
 
 - The **shared lane selection** is the default provider/model pair for both planner and synthesizer lanes.
 - The **synthesizer lane** is the default response path and must always be configured.
-- The **planner lane** owns first bounded action selection for the primary mech-suit path: `answer` / concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`) / `refine` / `branch` / `stop`.
+- The **planner lane** owns first bounded action selection for the primary mech-suit path. Every planner lane receives the shared planner action schema renderer output for `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic workspace actions, `external_capability`, `refine`, `branch`, and `stop`.
 - The **gatherer backend** services planner search/refine actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the planner.
 - If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
+
+The planner action schema is lane-independent. The turn-specific capability
+manifest is the lane-time source of truth for which retrievers, semantic
+workspace services, external capability fabrics, execution constraints, and
+completion requirements are actually available on a given turn.
 
 `paddles.toml` can define those model selections explicitly:
 
