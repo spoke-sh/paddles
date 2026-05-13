@@ -468,7 +468,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Unified Agent Action Contract](epics/VJXwbmekZ/voyages/VJXwlCA0P/) | planned |
+| [Unified Agent Action Contract](epics/VJXwbmekZ/voyages/VJXwlCA0P/) | in-progress |
 | [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | planned |
 | [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | planned |
 

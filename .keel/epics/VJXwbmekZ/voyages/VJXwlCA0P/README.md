@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJXwlCA0P
-status: planned
+status: in-progress
 epic: VJXwbmekZ
 created_at: 2026-05-13T16:37:30
 # authored
 title: Unified Agent Action Contract
 index: 1
 updated_at: 2026-05-13T16:40:08
+started_at: 2026-05-13T16:43:48
 ---
 
 # Unified Agent Action Contract
@@ -26,10 +27,10 @@ updated_at: 2026-05-13T16:40:08
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Introduce Unified Agent Action Domain Contract](../../../../stories/VJXwmfNXy/README.md) | feat | backlog |
+| [Introduce Unified Agent Action Domain Contract](../../../../stories/VJXwmfNXy/README.md) | feat | done |
 | [Render One Agent Action Schema For First And Later Steps](../../../../stories/VJXwmhMYa/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -356,6 +356,194 @@ pub struct PlannerStepRecord {
     pub outcome: String,
 }
 
+/// The bounded action contract for a recursive coding-agent loop.
+///
+/// `AgentAction` is the domain vocabulary the model selects from on every
+/// agent-loop step. The legacy first-step and later-step planner action types
+/// remain below as migration adapters until all runtime call sites use this
+/// contract directly.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentAction {
+    Answer,
+    Workspace {
+        action: WorkspaceAction,
+    },
+    Refine {
+        query: String,
+        mode: RetrievalMode,
+        strategy: RetrievalStrategy,
+        retrievers: Vec<RetrieverOption>,
+        rationale: Option<String>,
+    },
+    Branch {
+        branches: Vec<String>,
+        rationale: Option<String>,
+    },
+    Stop {
+        reason: String,
+    },
+}
+
+impl AgentAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Answer => "answer",
+            Self::Workspace { action } => action.label(),
+            Self::Refine { .. } => "refine",
+            Self::Branch { .. } => "branch",
+            Self::Stop { .. } => "stop",
+        }
+    }
+
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Answer => "answer directly".to_string(),
+            Self::Workspace { action } => action.summary(),
+            Self::Refine {
+                query,
+                mode,
+                strategy,
+                retrievers,
+                ..
+            } => format!(
+                "refine toward `{query}` [{} / {}{}]",
+                mode.label(),
+                strategy.label(),
+                format_retriever_suffix(retrievers)
+            ),
+            Self::Branch { branches, .. } => format!("branch into {}", branches.join(" | ")),
+            Self::Stop { reason } => format!("stop ({reason})"),
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Answer | Self::Stop { .. })
+    }
+
+    pub fn as_planner_action(&self) -> Option<PlannerAction> {
+        match self {
+            Self::Answer => None,
+            Self::Workspace { action } => Some(PlannerAction::Workspace {
+                action: action.clone(),
+            }),
+            Self::Refine {
+                query,
+                mode,
+                strategy,
+                retrievers,
+                rationale,
+            } => Some(PlannerAction::Refine {
+                query: query.clone(),
+                mode: *mode,
+                strategy: *strategy,
+                retrievers: retrievers.clone(),
+                rationale: rationale.clone(),
+            }),
+            Self::Branch {
+                branches,
+                rationale,
+            } => Some(PlannerAction::Branch {
+                branches: branches.clone(),
+                rationale: rationale.clone(),
+            }),
+            Self::Stop { reason } => Some(PlannerAction::Stop {
+                reason: reason.clone(),
+            }),
+        }
+    }
+
+    pub fn from_legacy_initial_action(action: InitialAction) -> Self {
+        match action {
+            InitialAction::Answer => Self::Answer,
+            InitialAction::Workspace { action } => Self::Workspace { action },
+            InitialAction::Refine {
+                query,
+                mode,
+                strategy,
+                retrievers,
+                rationale,
+            } => Self::Refine {
+                query,
+                mode,
+                strategy,
+                retrievers,
+                rationale,
+            },
+            InitialAction::Branch {
+                branches,
+                rationale,
+            } => Self::Branch {
+                branches,
+                rationale,
+            },
+            InitialAction::Stop { reason } => Self::Stop { reason },
+        }
+    }
+
+    pub fn from_legacy_recursive_action(action: PlannerAction) -> Self {
+        match action {
+            PlannerAction::Workspace { action } => Self::Workspace { action },
+            PlannerAction::Refine {
+                query,
+                mode,
+                strategy,
+                retrievers,
+                rationale,
+            } => Self::Refine {
+                query,
+                mode,
+                strategy,
+                retrievers,
+                rationale,
+            },
+            PlannerAction::Branch {
+                branches,
+                rationale,
+            } => Self::Branch {
+                branches,
+                rationale,
+            },
+            PlannerAction::Stop { reason } => Self::Stop { reason },
+        }
+    }
+}
+
+/// A model-selected recursive-loop action and the metadata needed to execute
+/// or complete that step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentDecision {
+    pub action: AgentAction,
+    pub rationale: String,
+    pub answer: Option<String>,
+    pub edit: InitialEditInstruction,
+    pub grounding: Option<GroundingRequirement>,
+    pub deliberation_state: Option<DeliberationState>,
+}
+
+impl AgentDecision {
+    pub fn from_legacy_initial_decision(decision: InitialActionDecision) -> Self {
+        Self {
+            action: AgentAction::from_legacy_initial_action(decision.action),
+            rationale: decision.rationale,
+            answer: decision.answer,
+            edit: decision.edit,
+            grounding: decision.grounding,
+            deliberation_state: None,
+        }
+    }
+
+    pub fn from_legacy_recursive_decision(decision: PlannerDecision) -> Self {
+        Self {
+            action: AgentAction::from_legacy_recursive_action(decision.action),
+            rationale: decision.rationale,
+            answer: decision.answer,
+            edit: decision.edit,
+            grounding: decision.grounding,
+            deliberation_state: decision.deliberation_state,
+        }
+    }
+}
+
 /// The first bounded action the planner may choose for a turn.
 ///
 /// This contract is intentionally generic across repositories and evidence
@@ -577,16 +765,19 @@ fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        GuidanceCategory, InitialAction, InterpretationContext, InterpretationDecisionFramework,
-        InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-        InterpretationToolHint, PlannerAction, PlannerBudget, PlannerLoopState, RefinementPolicy,
-        RefinementTrigger, RefinementTriggerSource, RetrievalMode, RetrievalStrategy,
-        ThreadDecisionRequest, WorkspaceAction,
+        AgentAction, AgentDecision, GroundingDomain, GroundingRequirement, GuidanceCategory,
+        InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
+        InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+        InterpretationProcedureStep, InterpretationToolHint, PlannerAction, PlannerBudget,
+        PlannerLoopState, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
+        RetrievalMode, RetrievalStrategy, ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
-        ConversationThread, ConversationThreadRef, ConversationThreadStatus, ThreadCandidate,
-        ThreadCandidateId,
+        ConversationThread, ConversationThreadRef, ConversationThreadStatus, DeliberationState,
+        ExternalCapabilityInvocation, ThreadCandidate, ThreadCandidateId, WorkspaceTextPosition,
     };
+    use serde_json::json;
+    use std::collections::BTreeSet;
 
     #[test]
     fn interpretation_context_renders_sources() {
@@ -704,6 +895,266 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn agent_action_domain_contract() {
+        let workspace = WorkspaceAction::Inspect {
+            command: "git status --short".to_string(),
+        };
+        let actions = [
+            AgentAction::Answer,
+            AgentAction::Workspace {
+                action: workspace.clone(),
+            },
+            AgentAction::Refine {
+                query: "agent loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                rationale: Some("need more code context".to_string()),
+            },
+            AgentAction::Branch {
+                branches: vec!["domain".to_string(), "adapter".to_string()],
+                rationale: Some("compare contracts".to_string()),
+            },
+            AgentAction::Stop {
+                reason: "budget exhausted".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            actions.iter().map(AgentAction::label).collect::<Vec<_>>(),
+            vec!["answer", "inspect", "refine", "branch", "stop"]
+        );
+        assert!(actions[2].summary().contains("agent loop"));
+        assert!(actions[0].is_terminal());
+        assert!(!actions[1].is_terminal());
+        assert_eq!(
+            actions[1].as_planner_action(),
+            Some(PlannerAction::Workspace { action: workspace })
+        );
+        assert_eq!(actions[0].as_planner_action(), None);
+    }
+
+    #[test]
+    fn agent_action_contract_preserves_existing_action_labels() {
+        let agent_labels = sample_agent_actions()
+            .iter()
+            .map(AgentAction::label)
+            .collect::<BTreeSet<_>>();
+        let legacy_initial_labels = sample_initial_actions()
+            .iter()
+            .map(InitialAction::label)
+            .collect::<BTreeSet<_>>();
+        let legacy_recursive_labels = sample_planner_actions()
+            .iter()
+            .map(PlannerAction::label)
+            .collect::<BTreeSet<_>>();
+        let expected_labels = legacy_initial_labels
+            .union(&legacy_recursive_labels)
+            .copied()
+            .collect::<BTreeSet<_>>();
+
+        assert!(legacy_initial_labels.is_subset(&agent_labels));
+        assert!(legacy_recursive_labels.is_subset(&agent_labels));
+        assert_eq!(agent_labels, expected_labels);
+    }
+
+    #[test]
+    fn agent_action_compatibility_is_explicit() {
+        let edit = InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec!["src/domain/ports/planning.rs".to_string()],
+            resolution: None,
+        };
+        let grounding = GroundingRequirement {
+            domain: GroundingDomain::Repository,
+            reason: Some("contract lives in Rust domain".to_string()),
+        };
+        let initial = InitialActionDecision {
+            action: InitialAction::Answer,
+            rationale: "answer from existing context".to_string(),
+            answer: Some("Use the recursive loop.".to_string()),
+            edit: edit.clone(),
+            grounding: Some(grounding.clone()),
+        };
+        let agent_initial = AgentDecision::from_legacy_initial_decision(initial);
+
+        assert_eq!(agent_initial.action, AgentAction::Answer);
+        assert_eq!(
+            agent_initial.answer.as_deref(),
+            Some("Use the recursive loop.")
+        );
+        assert_eq!(agent_initial.edit, edit);
+        assert_eq!(agent_initial.grounding, Some(grounding));
+        assert!(agent_initial.deliberation_state.is_none());
+
+        let deliberation_state =
+            DeliberationState::new("provider", "model", json!({"continuation": "opaque"}));
+        let recursive = super::PlannerDecision {
+            action: PlannerAction::Stop {
+                reason: "done".to_string(),
+            },
+            rationale: "final loop step".to_string(),
+            answer: Some("Finished.".to_string()),
+            edit: InitialEditInstruction::default(),
+            grounding: None,
+            deliberation_state: Some(deliberation_state.clone()),
+        };
+        let agent_recursive = AgentDecision::from_legacy_recursive_decision(recursive);
+
+        assert_eq!(
+            agent_recursive.action,
+            AgentAction::Stop {
+                reason: "done".to_string()
+            }
+        );
+        assert_eq!(agent_recursive.answer.as_deref(), Some("Finished."));
+        assert_eq!(
+            agent_recursive.deliberation_state.as_ref(),
+            Some(&deliberation_state)
+        );
+    }
+
+    fn sample_agent_actions() -> Vec<AgentAction> {
+        let mut actions = vec![AgentAction::Answer];
+        actions.extend(
+            sample_workspace_actions()
+                .into_iter()
+                .map(|action| AgentAction::Workspace { action }),
+        );
+        actions.extend([
+            AgentAction::Refine {
+                query: "loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                rationale: None,
+            },
+            AgentAction::Branch {
+                branches: vec!["domain".to_string(), "adapter".to_string()],
+                rationale: None,
+            },
+            AgentAction::Stop {
+                reason: "done".to_string(),
+            },
+        ]);
+        actions
+    }
+
+    fn sample_initial_actions() -> Vec<InitialAction> {
+        let mut actions = vec![InitialAction::Answer];
+        actions.extend(
+            sample_workspace_actions()
+                .into_iter()
+                .map(|action| InitialAction::Workspace { action }),
+        );
+        actions.extend([
+            InitialAction::Refine {
+                query: "loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                rationale: None,
+            },
+            InitialAction::Branch {
+                branches: vec!["domain".to_string(), "adapter".to_string()],
+                rationale: None,
+            },
+            InitialAction::Stop {
+                reason: "done".to_string(),
+            },
+        ]);
+        actions
+    }
+
+    fn sample_planner_actions() -> Vec<PlannerAction> {
+        let mut actions = sample_workspace_actions()
+            .into_iter()
+            .map(|action| PlannerAction::Workspace { action })
+            .collect::<Vec<_>>();
+        actions.extend([
+            PlannerAction::Refine {
+                query: "loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                rationale: None,
+            },
+            PlannerAction::Branch {
+                branches: vec!["domain".to_string(), "adapter".to_string()],
+                rationale: None,
+            },
+            PlannerAction::Stop {
+                reason: "done".to_string(),
+            },
+        ]);
+        actions
+    }
+
+    fn sample_workspace_actions() -> Vec<WorkspaceAction> {
+        let position = WorkspaceTextPosition {
+            line: 12,
+            character: 4,
+        };
+
+        vec![
+            WorkspaceAction::Search {
+                query: "agent loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                intent: None,
+            },
+            WorkspaceAction::ListFiles { pattern: None },
+            WorkspaceAction::Read {
+                path: "src/application/agent_loop.rs".to_string(),
+            },
+            WorkspaceAction::Inspect {
+                command: "git status".to_string(),
+            },
+            WorkspaceAction::Shell {
+                command: "cargo test".to_string(),
+            },
+            WorkspaceAction::Diff { path: None },
+            WorkspaceAction::WriteFile {
+                path: "src/lib.rs".to_string(),
+                content: "pub mod domain;".to_string(),
+            },
+            WorkspaceAction::ReplaceInFile {
+                path: "README.md".to_string(),
+                old: "planner".to_string(),
+                new: "agent".to_string(),
+                replace_all: true,
+            },
+            WorkspaceAction::ApplyPatch {
+                patch: "*** Begin Patch".to_string(),
+            },
+            WorkspaceAction::SemanticDefinitions {
+                path: "src/lib.rs".to_string(),
+                position,
+            },
+            WorkspaceAction::SemanticReferences {
+                path: "src/lib.rs".to_string(),
+                position,
+            },
+            WorkspaceAction::SemanticSymbols {
+                path: "src/lib.rs".to_string(),
+            },
+            WorkspaceAction::SemanticHover {
+                path: "src/lib.rs".to_string(),
+                position,
+            },
+            WorkspaceAction::SemanticDiagnostics { path: None },
+            WorkspaceAction::ExternalCapability {
+                invocation: ExternalCapabilityInvocation::new(
+                    "github.search",
+                    "find issue context",
+                    json!({"query": "agent action"}),
+                ),
+            },
+        ]
     }
 
     #[test]

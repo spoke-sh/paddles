@@ -34,15 +34,15 @@ pub use model_registry::{
 };
 pub use operator_memory::OperatorMemory;
 pub use planning::{
-    CompactionPlan, CompactionRequest, GroundingDomain, GroundingRequirement, GuidanceCategory,
-    InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationConflict,
-    InterpretationContext, InterpretationCoverageConfidence, InterpretationDecisionFramework,
-    InterpretationDocument, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationRequest, InterpretationToolHint, OperatorMemoryDocument, PlannerAction,
-    PlannerBudget, PlannerCapability, PlannerDecision as RecursivePlannerDecision,
-    PlannerExecutionContract, PlannerLoopState, PlannerRequest, PlannerStepRecord,
-    RecursivePlanner, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
-    ThreadDecisionRequest, WorkspaceAction,
+    AgentAction, AgentDecision, CompactionPlan, CompactionRequest, GroundingDomain,
+    GroundingRequirement, GuidanceCategory, InitialAction, InitialActionDecision,
+    InitialEditInstruction, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerBudget,
+    PlannerCapability, PlannerDecision as RecursivePlannerDecision, PlannerExecutionContract,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, RefinementPolicy,
+    RefinementTrigger, RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use semantic_workspace::{
     SemanticWorkspaceOperation, SemanticWorkspacePort, SemanticWorkspaceQuery,
