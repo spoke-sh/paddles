@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJXf4hYYX
-status: planned
+status: in-progress
 epic: VJXeteRQ5
 created_at: 2026-05-13T15:27:15
 # authored
 title: Shared Planner Schema Contract
 index: 1
 updated_at: 2026-05-13T15:29:36
+started_at: 2026-05-13T15:33:29
 ---
 
 # Shared Planner Schema Contract
@@ -26,10 +27,10 @@ updated_at: 2026-05-13T15:29:36
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Author Shared Planner Action Schema Renderer](../../../../stories/VJXfKtEkv/README.md) | feat | backlog |
+| [Author Shared Planner Action Schema Renderer](../../../../stories/VJXfKtEkv/README.md) | feat | done |
 | [Add Planner Schema Enum Parity Tests](../../../../stories/VJXfKtWku/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -9,6 +9,7 @@ mod external_capability;
 mod external_capability_execution;
 mod harness_capability_posture;
 mod planner_action_execution;
+pub mod planner_action_schema;
 mod planner_loop;
 pub mod read_model;
 mod runtime_posture_projection;

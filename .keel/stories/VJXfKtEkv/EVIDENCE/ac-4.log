@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T15:38:04.073243389-07:00
+mode: manual
+---
+Reviewed src/application/planner_action_schema.rs: renderer emits only canonical action schema and explicitly defers live availability to the separately rendered capability manifest/completion contract; it does not render Capability Manifest or Completion Contract sections.
