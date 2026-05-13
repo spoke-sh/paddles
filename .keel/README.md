@@ -456,6 +456,14 @@
 |--------|--------|
 | [Rewrite Docs To Renamed Vocabulary And Drop Aspirational Sections](epics/VI2sLV0uw/voyages/VI2shGAE7/) | done |
 
+### [Shared Planner Action Schema Contract](epics/VJXeteRQ5/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Shared Planner Schema Contract](epics/VJXeteRQ5/voyages/VJXf4hYYX/) | planned |
+| [Planner Lane Schema Adoption](epics/VJXeteRQ5/voyages/VJXf4hlYW/) | planned |
+| [Planner Schema Documentation](epics/VJXeteRQ5/voyages/VJXf4iAYl/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
