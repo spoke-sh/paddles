@@ -464,6 +464,14 @@
 | [Planner Lane Schema Adoption](epics/VJXeteRQ5/voyages/VJXf4hlYW/) | done |
 | [Planner Schema Documentation](epics/VJXeteRQ5/voyages/VJXf4iAYl/) | done |
 
+### [Unified Recursive Agent Action Contract](epics/VJXwbmekZ/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Unified Agent Action Contract](epics/VJXwbmekZ/voyages/VJXwlCA0P/) | planned |
+| [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | planned |
+| [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | planned |
+
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
 | Voyage | Status |
