@@ -14,13 +14,12 @@ use paddles::application::{
     RuntimeHarnessCapabilityPostureService, RuntimeLaneConfig,
     ensure_supported_model_inference_provider,
 };
-use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
+use paddles::domain::ports::{ContextGatherer, ModelPaths, ModelRegistry, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
 use paddles::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
 use paddles::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
 use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
-use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::adapters::trace_recorders::HostedTransitTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::default_trace_recorder_for_workspace;
@@ -109,6 +108,18 @@ struct Cli {
     /// Hugging Face API token for gated models.
     #[arg(long, env = "HF_TOKEN", hide_env_values = true)]
     hf_token: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct UnsupportedModelRegistry;
+
+#[async_trait::async_trait]
+impl ModelRegistry for UnsupportedModelRegistry {
+    async fn get_model_paths(&self, model_id: &str) -> Result<ModelPaths> {
+        bail!(
+            "paddles no longer prepares local inference model paths for `{model_id}`; run a local HTTP model service and select `ollama:<model>` instead"
+        );
+    }
 }
 
 fn resolve_provider_from_name(configured: &str, field_name: &str) -> Result<ModelProvider> {
@@ -512,15 +523,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt().with_max_level(log_level).init();
 
-    let registry = match frontend {
-        InteractiveFrontend::Tui => Arc::new(SiftRegistryAdapter::new()),
-        InteractiveFrontend::PlainLines if verbose >= 1 => {
-            Arc::new(SiftRegistryAdapter::with_preparation_reporter(|model_id| {
-                println!("[SIFT] Preparing model: {model_id}");
-            }))
-        }
-        InteractiveFrontend::PlainLines => Arc::new(SiftRegistryAdapter::new()),
-    };
+    let registry = Arc::new(UnsupportedModelRegistry);
     let operator_memory = Arc::new(AgentMemory::load(&root_path));
 
     // Resolve API key: env var first, then credential store.
@@ -661,14 +664,22 @@ async fn main() -> Result<()> {
         println!("[BOOT] Calibration Successful.");
     }
 
-    // Registry Synchronization via Sift
     if verbose >= 3 {
-        println!("[BOOT] Syncing synthesizer lane via SIFT for: {model}...");
+        println!("[BOOT] Model clients use HTTP providers; no local model preparation is run.");
+        println!(
+            "[BOOT] Final rendering model client: {}",
+            provider.qualified_model_label(&model)
+        );
         if let Some(pm) = &planner_model {
-            println!("[BOOT] Syncing planner lane via SIFT for: {pm}...");
+            println!(
+                "[BOOT] Action selection model client: {}",
+                planner_provider
+                    .unwrap_or(provider)
+                    .qualified_model_label(pm)
+            );
         }
         if let Some(gm) = &gatherer_model {
-            println!("[BOOT] Syncing gatherer lane via SIFT for: {gm}...");
+            println!("[BOOT] Retrieval model hint: {gm}.");
         }
         match gatherer_provider {
             GathererProvider::SiftDirect => {

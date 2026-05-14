@@ -141,7 +141,8 @@ pub type PlannerFactory =
 /// Factory that constructs an optional gatherer from runtime configuration.
 ///
 /// Arguments: `(config, workspace_root, verbose, gatherer_model_paths)`.
-/// The application resolves model paths from the registry before calling.
+/// `gatherer_model_paths` is retained for adapter compatibility and is no
+/// longer populated by the turn runtime.
 pub type GathererFactory = dyn Fn(
         &RuntimeLaneConfig,
         &Path,
@@ -154,7 +155,6 @@ pub type GathererFactory = dyn Fn(
 /// Application service for managing the mech suit lifecycle.
 pub struct AgentRuntime {
     workspace_root: PathBuf,
-    registry: Arc<dyn ModelRegistry>,
     operator_memory: Arc<dyn OperatorMemory>,
     synthesizer_factory: Box<SynthesizerFactory>,
     planner_factory: Box<PlannerFactory>,
@@ -2326,7 +2326,7 @@ impl AgentRuntime {
 
     pub fn with_trace_recorder(
         workspace_root: impl Into<PathBuf>,
-        registry: Arc<dyn ModelRegistry>,
+        _registry: Arc<dyn ModelRegistry>,
         operator_memory: Arc<dyn OperatorMemory>,
         synthesizer_factory: Box<SynthesizerFactory>,
         planner_factory: Box<PlannerFactory>,
@@ -2343,7 +2343,6 @@ impl AgentRuntime {
             ));
         Self {
             workspace_root,
-            registry,
             operator_memory,
             synthesizer_factory,
             planner_factory,
@@ -3019,13 +3018,7 @@ impl AgentRuntime {
             None,
         );
 
-        let gatherer_model_paths = match config.gatherer_provider() {
-            GathererProvider::Local => match config.gatherer_model_id() {
-                Some(model_id) => Some(self.registry.get_model_paths(model_id).await?),
-                None => None,
-            },
-            _ => None,
-        };
+        let gatherer_model_paths = None;
         let (prepared_gatherer, gatherer) = match (self.gatherer_factory)(
             config,
             &self.workspace_root,
@@ -8146,7 +8139,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_resolves_local_gatherer_paths_independent_of_http_inference() {
+    async fn prepare_runtime_lanes_preserves_local_gatherer_without_model_loading() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
@@ -8202,10 +8195,7 @@ mod tests {
             .await
             .expect("prepare runtime lanes");
 
-        assert_eq!(
-            registry.requested_model_ids(),
-            vec!["retrieval-qwen".to_string()]
-        );
+        assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
         assert_eq!(
             prepared.gatherer.as_ref().map(|lane| lane.provider),
             Some(GathererProvider::Local)
@@ -8215,16 +8205,13 @@ mod tests {
                 .gatherer
                 .as_ref()
                 .and_then(|lane| lane.paths.clone()),
-            Some(sample_model_paths("retrieval-qwen"))
+            None
         );
         assert_eq!(
             *captured_gatherer_input
                 .lock()
                 .expect("captured gatherer input lock"),
-            Some((
-                GathererProvider::Local,
-                Some(sample_model_paths("retrieval-qwen"))
-            ))
+            Some((GathererProvider::Local, None))
         );
     }
 

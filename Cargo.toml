@@ -12,11 +12,7 @@ name = "paddles"
 path = "src/main.rs"
 
 [dependencies]
-hf-hub = "0.4.1"
 sift = { git = "https://github.com/rupurt/sift", rev = "003932b6e57c8fc1e81950b1066afe4feec66c0d" }
-candle-core = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
-candle-nn = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
-candle-transformers = { git = "https://github.com/rupurt/candle", branch = "feat-qwen3.5-support" }
 axum = { version = "0.8", features = ["ws"] }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1.43", features = ["full"] }
@@ -28,7 +24,6 @@ directories = "6.0.0"
 ignore = "0.4"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
-tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
 clap = { version = "4.5.28", features = ["derive", "env"] }
 toml = "0.8"
 tracing = "0.1.41"
@@ -40,7 +35,7 @@ transit-client = { git = "https://github.com/spoke-sh/transit.git", branch = "ma
 paddles-conversation = { path = "crates/paddles-conversation" }
 
 [features]
-cuda = ["sift/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+cuda = ["sift/cuda"]
 
 [replace]
 "git+https://github.com/rupurt/metamorph?rev=00ac826973d378ce7670b1057bfd467f6cf8de29#metamorph@0.1.0" = { git = "https://github.com/rupurt/metamorph", rev = "509b6718aa07333f2c763b618cdcf4a5d43d27cc" }

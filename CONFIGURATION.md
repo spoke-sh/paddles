@@ -590,7 +590,6 @@ family exposes more than one contract:
 <!-- BEGIN_PROVIDER_CAPABILITY_MATRIX -->
 | Provider | Model path | Wire | Support | Render | Planner | Deliberation | State | Thinking modes | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| `sift` | `qwen-1.5b` | `local` | `supported` | `prompt-envelope` | `prompt-envelope` | `unsupported` | `none` | `none` | Local native runtime; no provider-native reasoning substrate. |
 | `openai` | `gpt-5.5` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `low`, `medium`, `high`, `xhigh` | Chat Completions by default; thinking-enabled GPT-5.5 turns switch planner/schema requests to Responses. |
 | `openai` | `gpt-5.5-pro` | `openai` | `supported` | `prompt-envelope` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none` | Responses path with reusable previous_response_id continuity. |
 | `inception` | `mercury-2` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `summary_only` | `none` | `instant`, `low`, `medium`, `high` | OpenAI-compatible chat with reasoning summaries but no reusable state. |

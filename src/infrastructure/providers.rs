@@ -3,7 +3,7 @@ use clap::ValueEnum;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
 pub enum ModelProvider {
-    /// Local Qwen inference via sift (default)
+    /// Legacy Sift model-provider sentinel; retrieval uses dedicated gatherer providers.
     Sift,
     /// OpenAI chat completions API
     Openai,
@@ -707,7 +707,7 @@ impl ModelProvider {
 
     pub fn known_model_ids(self) -> &'static [&'static str] {
         match self {
-            Self::Sift => crate::infrastructure::adapters::sift_registry::supported_model_ids(),
+            Self::Sift => &[],
             Self::Openai => OPENAI_MODELS,
             Self::Inception => INCEPTION_MODELS,
             Self::Anthropic => ANTHROPIC_MODELS,
@@ -979,11 +979,6 @@ pub struct ProviderCapabilityMatrixRow {
 }
 
 const DOCUMENTED_PROVIDER_CAPABILITY_PATHS: &[(ModelProvider, &str, &str)] = &[
-    (
-        ModelProvider::Sift,
-        "qwen-1.5b",
-        "Local native runtime; no provider-native reasoning substrate.",
-    ),
     (
         ModelProvider::Openai,
         "gpt-5.5",
@@ -1688,16 +1683,6 @@ mod tests {
             summarized,
             vec![
                 (
-                    ModelProvider::Sift,
-                    "qwen-1.5b",
-                    None,
-                    RenderCapability::PromptEnvelope,
-                    PlannerToolCallCapability::PromptEnvelope,
-                    &ProviderTransportSupport::Supported,
-                    DeliberationSupport::Unsupported,
-                    DeliberationStateContract::None,
-                ),
-                (
                     ModelProvider::Openai,
                     "gpt-5.5",
                     Some(ApiFormat::OpenAi),
@@ -1806,14 +1791,13 @@ mod tests {
     }
 
     #[test]
-    fn known_state_space_models_include_remote_and_local_catalog_entries() {
+    fn known_state_space_models_include_remote_catalog_entries_without_legacy_sift_models() {
         let models = known_state_space_models();
-        assert!(models.iter().any(|model| {
-            model.provider == ModelProvider::Sift && model.model_id == "qwen-1.5b"
-        }));
-        assert!(models.iter().any(|model| {
-            model.provider == ModelProvider::Sift && model.model_id == "bonsai-8b"
-        }));
+        assert!(
+            !models
+                .iter()
+                .any(|model| model.provider == ModelProvider::Sift)
+        );
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Openai && model.model_id == "gpt-4o"
         }));
@@ -1832,6 +1816,11 @@ mod tests {
         assert!(models.iter().any(|model| {
             model.provider == ModelProvider::Inception && model.model_id == "mercury-2"
         }));
+        assert!(
+            documented_provider_capability_matrix()
+                .iter()
+                .any(|row| { row.provider == ModelProvider::Ollama && row.model_id == "qwen3" })
+        );
     }
 
     fn extract_marked_section<'a>(
