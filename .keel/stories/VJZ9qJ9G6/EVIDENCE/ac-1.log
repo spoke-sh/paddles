@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T21:55:23.002601298-07:00
+mode: manual
+---
+Verified ARCHITECTURE.md and CONFIGURATION.md both reference ADR VJZBM9Guy for the HTTP-only inference decision.

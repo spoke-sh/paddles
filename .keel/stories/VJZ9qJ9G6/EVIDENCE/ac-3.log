@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T21:55:31.876678238-07:00
+mode: manual
+---
+Verified README.md, CONFIGURATION.md, and ARCHITECTURE.md use 'ollama:<model>' for local HTTP inference examples; scan found no docs presenting qwen or another Ollama model as a fixed default.

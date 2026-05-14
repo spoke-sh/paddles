@@ -281,7 +281,8 @@ Three properties of this architecture compound to raise effective model performa
 - **Action selection and response authoring as distinct roles.** Each can use different models optimized for their workload.
 - **Project artifacts as context.** Keel, board state, and domain knowledge enter through memory, search, and tools — keeping the harness general-purpose.
 - **Bounded and observable recursion.** Every agent action is validated, budgeted, and visible to the operator.
-- **Local-first by default.** The core loop runs on local models; heavier lanes are opt-in and degrade gracefully.
+- **Local-first by default.** The core loop can run against local HTTP model
+  services; heavier hosted lanes are opt-in and degrade gracefully.
 
 ## Domain-Driven Hexagonal Boundary Map
 
@@ -337,7 +338,7 @@ adapter.
 Infrastructure code lives under `src/infrastructure`, `apps/*`, and concrete
 adapter crates. It owns the outside world:
 
-- local model, remote provider, gatherer, and synthesizer adapters
+- HTTP model-provider, retrieval, action-selection, and final-rendering adapters
 - action-selection adapters that wrap provider transport mechanics while embedding the
   shared application-layer agent action schema
 - `AGENTS.md` loading, filesystem reads, workspace editing, and terminal

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T21:55:27.929268778-07:00
+mode: manual
+---
+Red doc check found legacy shorthand in README.md and ARCHITECTURE.md: 'core loop runs on local models' and 'local model, remote provider'. Updated docs to state local-first inference runs through local HTTP model services and removed the stale shorthand. CONFIGURATION.md states in-process model loading is not the future-supported inference path.
