@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-05-13T21:51:08.631024687-07:00
+command: cargo nextest run provider_config_rejects_legacy_sift_model_provider planner_provider_config_rejects_legacy_sift_model_provider prepare_runtime_lanes_rejects_legacy_sift
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 8bdc1624-8fd3-4001-a581-cdba977ca0f4 with nextest profile: default
+    Starting 4 tests across 3 binaries (820 tests skipped)
+        PASS [   0.007s] (1/4) paddles::bin/paddles tests::provider_config_rejects_legacy_sift_model_provider_with_migration_hint
+        PASS [   0.009s] (2/4) paddles::bin/paddles tests::planner_provider_config_rejects_legacy_sift_model_provider_with_migration_hint
+        PASS [   0.019s] (3/4) paddles application::tests::prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction
+        PASS [   0.020s] (4/4) paddles application::tests::prepare_runtime_lanes_rejects_legacy_sift_synthesizer_before_construction
+────────────
+     Summary [   0.021s] 4 tests run: 4 passed, 820 skipped

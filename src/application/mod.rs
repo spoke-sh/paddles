@@ -185,6 +185,20 @@ pub enum RuntimeLaneRole {
     Gatherer,
 }
 
+pub const LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT: &str = "provider `sift` no longer performs model inference; run a local HTTP model service such as Ollama and select `ollama:<model>`.";
+
+pub fn ensure_supported_model_inference_provider(
+    provider: ModelProvider,
+    field_name: &str,
+) -> Result<()> {
+    if provider == ModelProvider::Sift {
+        return Err(anyhow!(
+            "{field_name} uses legacy {LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT}"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResumableConversation {
     pub task_id: TaskTraceId,
@@ -2971,6 +2985,13 @@ impl AgentRuntime {
         &self,
         config: &RuntimeLaneConfig,
     ) -> Result<PreparedRuntimeLanes> {
+        ensure_supported_model_inference_provider(
+            config.synthesizer_provider(),
+            "synthesizer.provider",
+        )?;
+        let planner_provider = config.planner_provider();
+        ensure_supported_model_inference_provider(planner_provider, "planner_provider")?;
+
         let synthesizer_prepared_model_id = config.synthesizer_provider().prepare_runtime_model_id(
             config.synthesizer_model_id(),
             config.synthesizer_thinking_mode(),
@@ -2988,7 +3009,6 @@ impl AgentRuntime {
             .planner_model_id()
             .unwrap_or(config.synthesizer_model_id())
             .to_string();
-        let planner_provider = config.planner_provider();
         let planner_thinking_mode = (planner_provider == config.synthesizer_provider()
             && planner_model_id == config.synthesizer_model_id())
         .then(|| config.synthesizer_thinking_mode())
@@ -7842,27 +7862,89 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_mix_provider_selection_and_only_resolve_sift_paths() {
+    async fn prepare_runtime_lanes_rejects_legacy_sift_synthesizer_before_construction() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let captured_planner_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
-        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
-        let planner_capture = Arc::clone(&captured_planner_lane);
-        let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
+        let synthesizer_factory_calls = Arc::new(Mutex::new(0usize));
+        let planner_factory_calls = Arc::new(Mutex::new(0usize));
+        let synthesizer_calls = Arc::clone(&synthesizer_factory_calls);
+        let planner_calls = Arc::clone(&planner_factory_calls);
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let service = AgentRuntime::new(
             workspace.path(),
             registry.clone(),
             operator_memory,
             Box::new(move |_, lane| {
-                *synthesizer_capture
+                let _ = lane;
+                *synthesizer_calls
                     .lock()
-                    .expect("captured synthesizer lane lock") = Some(lane.clone());
+                    .expect("synthesizer factory calls lock") += 1;
                 Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
             }),
             Box::new(move |_, lane| {
-                *planner_capture.lock().expect("captured planner lane lock") = Some(lane.clone());
+                let _ = lane;
+                *planner_calls.lock().expect("planner factory calls lock") += 1;
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::clone(&recorded_requests),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(|_, _, _, _| Ok(None)),
+        );
+        let config = RuntimeLaneConfig::new("qwen-1.5b".to_string(), None);
+
+        let error = match service.prepare_runtime_lanes(&config).await {
+            Ok(_) => panic!("legacy sift synthesizer provider should fail"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
+        );
+        assert!(message.contains("ollama:<model>"), "{message}");
+        assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
+        assert_eq!(
+            *synthesizer_factory_calls
+                .lock()
+                .expect("synthesizer factory calls lock"),
+            0
+        );
+        assert_eq!(
+            *planner_factory_calls
+                .lock()
+                .expect("planner factory calls lock"),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let synthesizer_factory_calls = Arc::new(Mutex::new(0usize));
+        let planner_factory_calls = Arc::new(Mutex::new(0usize));
+        let synthesizer_calls = Arc::clone(&synthesizer_factory_calls);
+        let planner_calls = Arc::clone(&planner_factory_calls);
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let service = AgentRuntime::new(
+            workspace.path(),
+            registry.clone(),
+            operator_memory,
+            Box::new(move |_, lane| {
+                let _ = lane;
+                *synthesizer_calls
+                    .lock()
+                    .expect("synthesizer factory calls lock") += 1;
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(move |_, lane| {
+                let _ = lane;
+                *planner_calls.lock().expect("planner factory calls lock") += 1;
                 Ok(Arc::new(TestPlanner::new(
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
@@ -7876,39 +7958,29 @@ mod tests {
             .with_planner_provider(Some(ModelProvider::Sift))
             .with_planner_model_id(Some("qwen-1.5b".to_string()));
 
-        let prepared = service
-            .prepare_runtime_lanes(&config)
-            .await
-            .expect("prepare runtime lanes");
+        let error = match service.prepare_runtime_lanes(&config).await {
+            Ok(_) => panic!("legacy sift planner provider should fail"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
 
-        assert_eq!(prepared.synthesizer.provider, ModelProvider::Openai);
-        assert_eq!(prepared.synthesizer.paths, None);
-        assert_eq!(prepared.planner.provider, ModelProvider::Sift);
-        assert_eq!(
-            prepared.planner.paths,
-            Some(sample_model_paths("qwen-1.5b"))
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
         );
+        assert!(message.contains("ollama:<model>"), "{message}");
+        assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
         assert_eq!(
-            registry.requested_model_ids(),
-            vec!["qwen-1.5b".to_string()]
-        );
-        assert_eq!(
-            captured_planner_lane
+            *synthesizer_factory_calls
                 .lock()
-                .expect("captured planner lane lock")
-                .clone()
-                .expect("planner lane")
-                .provider,
-            ModelProvider::Sift
+                .expect("synthesizer factory calls lock"),
+            0
         );
         assert_eq!(
-            captured_synthesizer_lane
+            *planner_factory_calls
                 .lock()
-                .expect("captured synthesizer lane lock")
-                .clone()
-                .expect("synthesizer lane")
-                .provider,
-            ModelProvider::Openai
+                .expect("planner factory calls lock"),
+            0
         );
     }
 

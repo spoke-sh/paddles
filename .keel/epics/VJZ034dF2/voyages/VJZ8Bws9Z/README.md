@@ -27,11 +27,11 @@ started_at: 2026-05-13T21:41:34
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Adopt HTTP-Only Model Inference ADR](../../../../stories/VJZ8IcONz/README.md) | chore | done |
-| [Codify Legacy Sift Provider Migration Failure](../../../../stories/VJZ8JB2ZB/README.md) | feat | backlog |
+| [Codify Legacy Sift Provider Migration Failure](../../../../stories/VJZ8JB2ZB/README.md) | feat | done |
 | [Document HTTP-Only Inference Decision](../../../../stories/VJZ9qJ9G6/README.md) | docs | backlog |
 <!-- END GENERATED -->

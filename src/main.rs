@@ -12,6 +12,7 @@ use paddles::application::{
     AgentRuntime, ExternalCapabilityBrokerRegistry, GathererProvider,
     HarnessCapabilityRuntimeStatus, PreparedGathererLane, PreparedModelLane,
     RuntimeHarnessCapabilityPostureService, RuntimeLaneConfig,
+    ensure_supported_model_inference_provider,
 };
 use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
@@ -112,14 +113,19 @@ struct Cli {
     hf_token: Option<String>,
 }
 
-fn resolve_provider_from_name(configured: &str, field_name: &str) -> ModelProvider {
-    match ModelProvider::from_name(configured) {
-        Some(provider) => provider,
-        None => {
-            eprintln!("[WARN] Unsupported {field_name} `{configured}`; using `sift` instead.");
-            ModelProvider::Sift
-        }
-    }
+fn resolve_provider_from_name(configured: &str, field_name: &str) -> Result<ModelProvider> {
+    let provider = ModelProvider::from_name(configured.trim()).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unsupported {field_name} `{configured}`. Expected one of `openai`, `inception`, `anthropic`, `google`, `moonshot`, or `ollama`."
+        )
+    })?;
+    ensure_supported_model_inference_provider(provider, field_name)?;
+    Ok(provider)
+}
+
+fn resolve_cli_model_provider(provider: ModelProvider, field_name: &str) -> Result<ModelProvider> {
+    ensure_supported_model_inference_provider(provider, field_name)?;
+    Ok(provider)
 }
 
 fn ensure_remote_provider_transport_support(provider: ModelProvider, model_id: &str) -> Result<()> {
@@ -415,17 +421,18 @@ async fn main() -> Result<()> {
 
     let run_result: Result<()> = async {
     // Merge: CLI flags override config values.
-    let shared_provider = cli
-        .provider
-        .unwrap_or_else(|| resolve_provider_from_name(&config.provider, "provider"));
+    let shared_provider = match cli.provider {
+        Some(provider) => resolve_cli_model_provider(provider, "provider")?,
+        None => resolve_provider_from_name(&config.provider, "provider")?,
+    };
     let mut shared_model = cli.model.clone().unwrap_or_else(|| config.model.clone());
-    let provider = cli.provider.unwrap_or_else(|| {
-        config
-            .synthesizer_provider
-            .as_deref()
-            .map(|provider| resolve_provider_from_name(provider, "synthesizer.provider"))
-            .unwrap_or(shared_provider)
-    });
+    let provider = match cli.provider {
+        Some(provider) => resolve_cli_model_provider(provider, "provider")?,
+        None => match config.synthesizer_provider.as_deref() {
+            Some(provider) => resolve_provider_from_name(provider, "synthesizer.provider")?,
+            None => shared_provider,
+        },
+    };
     let mut model = cli.model.clone().unwrap_or_else(|| {
         config
             .synthesizer_model
@@ -445,12 +452,14 @@ async fn main() -> Result<()> {
     let verbose = resolve_runtime_verbosity(cli.verbose, config.verbose);
     let hf_token = cli.hf_token.or(config.hf_token);
     let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
-    let explicit_planner_provider = cli.planner_provider.or_else(|| {
-        config
+    let explicit_planner_provider = match cli.planner_provider {
+        Some(provider) => Some(resolve_cli_model_provider(provider, "planner_provider")?),
+        None => config
             .planner_provider
             .as_deref()
             .map(|provider| resolve_provider_from_name(provider, "planner_provider"))
-    });
+            .transpose()?,
+    };
     let mut planner_model = cli.planner_model.or(config.planner_model);
     let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
     let provider_url = cli.provider_url.or(config.provider_url.clone());
@@ -943,8 +952,8 @@ mod tests {
     use super::{
         OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
         build_trace_recorder_from_config, ensure_remote_provider_transport_support,
-        resolve_operator_surface_bootstrap, service_runtime_failure_status,
-        service_runtime_ready_status,
+        resolve_operator_surface_bootstrap, resolve_provider_from_name,
+        service_runtime_failure_status, service_runtime_ready_status,
     };
     use paddles::application::{
         PreparedModelLane, PreparedRuntimeLanes, RuntimeHarnessCapabilityPostureService,
@@ -979,6 +988,32 @@ mod tests {
     fn remote_provider_transport_allows_supported_openai_chat_models() {
         ensure_remote_provider_transport_support(ModelProvider::Openai, "gpt-5.4")
             .expect("supported OpenAI chat model should remain allowed");
+    }
+
+    #[test]
+    fn provider_config_rejects_legacy_sift_model_provider_with_migration_hint() {
+        let error = resolve_provider_from_name("sift", "provider")
+            .expect_err("legacy sift provider config should fail");
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
+        );
+        assert!(message.contains("ollama:<model>"), "{message}");
+    }
+
+    #[test]
+    fn planner_provider_config_rejects_legacy_sift_model_provider_with_migration_hint() {
+        let error = resolve_provider_from_name("sift", "planner_provider")
+            .expect_err("legacy sift planner provider config should fail");
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
+        );
+        assert!(message.contains("ollama:<model>"), "{message}");
     }
 
     #[test]
