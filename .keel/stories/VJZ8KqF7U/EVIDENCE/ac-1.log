@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T22:07:11.245876556-07:00
+command: cargo nextest run prepare_runtime_lanes_rejects_legacy_sift_synthesizer_before_construction prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 7e595b47-819f-4635-a9ec-ed2ae05db801 with nextest profile: default
+    Starting 2 tests across 3 binaries (830 tests skipped)
+        PASS [   0.017s] (1/2) paddles application::tests::prepare_runtime_lanes_rejects_legacy_sift_synthesizer_before_construction
+        PASS [   0.020s] (2/2) paddles application::tests::prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction
+────────────
+     Summary [   0.021s] 2 tests run: 2 passed, 830 skipped

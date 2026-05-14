@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T22:07:12.775461571-07:00
+command: cargo nextest run prepare_runtime_lanes_preserves_sift_direct_retrieval_with_http_inference prepare_runtime_lanes_resolves_local_gatherer_paths_independent_of_http_inference
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID ae57ffe0-fe3d-4137-914a-e3ee4590e510 with nextest profile: default
+    Starting 2 tests across 3 binaries (830 tests skipped)
+        PASS [   0.014s] (1/2) paddles application::tests::prepare_runtime_lanes_preserves_sift_direct_retrieval_with_http_inference
+        PASS [   0.015s] (2/2) paddles application::tests::prepare_runtime_lanes_resolves_local_gatherer_paths_independent_of_http_inference
+────────────
+     Summary [   0.016s] 2 tests run: 2 passed, 830 skipped

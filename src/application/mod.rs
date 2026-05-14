@@ -8024,6 +8024,191 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_runtime_lanes_preserves_sift_direct_retrieval_with_http_inference() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let captured_planner_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let captured_gatherer_input =
+            Arc::new(Mutex::new(None::<(GathererProvider, Option<ModelPaths>)>));
+        let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
+        let planner_capture = Arc::clone(&captured_planner_lane);
+        let gatherer_capture = Arc::clone(&captured_gatherer_input);
+        let service = AgentRuntime::new(
+            workspace.path(),
+            registry.clone(),
+            operator_memory,
+            Box::new(move |_, lane| {
+                *synthesizer_capture
+                    .lock()
+                    .expect("captured synthesizer lane lock") = Some(lane.clone());
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(move |_, lane| {
+                *planner_capture.lock().expect("captured planner lane lock") = Some(lane.clone());
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::new(Mutex::new(Vec::new())),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(move |config, _, _, gatherer_model_paths| {
+                *gatherer_capture
+                    .lock()
+                    .expect("captured gatherer input lock") =
+                    Some((config.gatherer_provider(), gatherer_model_paths));
+                Ok(Some((
+                    PreparedGathererLane {
+                        provider: GathererProvider::SiftDirect,
+                        label: "sift-direct".to_string(),
+                        model_id: None,
+                        paths: None,
+                    },
+                    Arc::new(RecordingGatherer {
+                        recorded_requests: Arc::new(Mutex::new(Vec::new())),
+                        bundle: EvidenceBundle::new("no evidence", Vec::new()),
+                    }) as Arc<dyn ContextGatherer>,
+                )))
+            }),
+        );
+        let config = RuntimeLaneConfig::new("qwen3".to_string(), None)
+            .with_synthesizer_provider(ModelProvider::Ollama)
+            .with_planner_provider(Some(ModelProvider::Openai))
+            .with_planner_model_id(Some("gpt-4o".to_string()))
+            .with_gatherer_provider(GathererProvider::SiftDirect);
+
+        let prepared = service
+            .prepare_runtime_lanes(&config)
+            .await
+            .expect("prepare runtime lanes");
+
+        assert_eq!(prepared.synthesizer.provider, ModelProvider::Ollama);
+        assert_eq!(prepared.synthesizer.paths, None);
+        assert_eq!(prepared.planner.provider, ModelProvider::Openai);
+        assert_eq!(prepared.planner.paths, None);
+        assert_eq!(
+            prepared.gatherer.as_ref().map(|lane| lane.provider),
+            Some(GathererProvider::SiftDirect)
+        );
+        assert_eq!(
+            prepared
+                .gatherer
+                .as_ref()
+                .and_then(|lane| lane.paths.clone()),
+            None
+        );
+        assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
+        assert_eq!(
+            captured_synthesizer_lane
+                .lock()
+                .expect("captured synthesizer lane lock")
+                .as_ref()
+                .expect("synthesizer lane")
+                .paths,
+            None
+        );
+        assert_eq!(
+            captured_planner_lane
+                .lock()
+                .expect("captured planner lane lock")
+                .as_ref()
+                .expect("planner lane")
+                .paths,
+            None
+        );
+        assert_eq!(
+            *captured_gatherer_input
+                .lock()
+                .expect("captured gatherer input lock"),
+            Some((GathererProvider::SiftDirect, None))
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_runtime_lanes_resolves_local_gatherer_paths_independent_of_http_inference() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let registry = Arc::new(RecordingRegistry::default());
+        let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
+        let captured_gatherer_input =
+            Arc::new(Mutex::new(None::<(GathererProvider, Option<ModelPaths>)>));
+        let gatherer_capture = Arc::clone(&captured_gatherer_input);
+        let service = AgentRuntime::new(
+            workspace.path(),
+            registry.clone(),
+            operator_memory,
+            Box::new(|_, lane| {
+                assert_eq!(lane.provider, ModelProvider::Ollama);
+                assert_eq!(lane.paths, None);
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+            }),
+            Box::new(|_, lane| {
+                assert_eq!(lane.provider, ModelProvider::Anthropic);
+                assert_eq!(lane.paths, None);
+                Ok(Arc::new(TestPlanner::new(
+                    initial_action_decision(InitialAction::Answer, "not used"),
+                    Vec::new(),
+                    Arc::new(Mutex::new(Vec::new())),
+                )) as Arc<dyn RecursivePlanner>)
+            }),
+            Box::new(move |config, _, _, gatherer_model_paths| {
+                *gatherer_capture
+                    .lock()
+                    .expect("captured gatherer input lock") =
+                    Some((config.gatherer_provider(), gatherer_model_paths.clone()));
+                Ok(Some((
+                    PreparedGathererLane {
+                        provider: GathererProvider::Local,
+                        label: "retrieval-qwen".to_string(),
+                        model_id: Some("retrieval-qwen".to_string()),
+                        paths: gatherer_model_paths,
+                    },
+                    Arc::new(RecordingGatherer {
+                        recorded_requests: Arc::new(Mutex::new(Vec::new())),
+                        bundle: EvidenceBundle::new("no evidence", Vec::new()),
+                    }) as Arc<dyn ContextGatherer>,
+                )))
+            }),
+        );
+        let config =
+            RuntimeLaneConfig::new("qwen3".to_string(), Some("retrieval-qwen".to_string()))
+                .with_synthesizer_provider(ModelProvider::Ollama)
+                .with_planner_provider(Some(ModelProvider::Anthropic))
+                .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()))
+                .with_gatherer_provider(GathererProvider::Local);
+
+        let prepared = service
+            .prepare_runtime_lanes(&config)
+            .await
+            .expect("prepare runtime lanes");
+
+        assert_eq!(
+            registry.requested_model_ids(),
+            vec!["retrieval-qwen".to_string()]
+        );
+        assert_eq!(
+            prepared.gatherer.as_ref().map(|lane| lane.provider),
+            Some(GathererProvider::Local)
+        );
+        assert_eq!(
+            prepared
+                .gatherer
+                .as_ref()
+                .and_then(|lane| lane.paths.clone()),
+            Some(sample_model_paths("retrieval-qwen"))
+        );
+        assert_eq!(
+            *captured_gatherer_input
+                .lock()
+                .expect("captured gatherer input lock"),
+            Some((
+                GathererProvider::Local,
+                Some(sample_model_paths("retrieval-qwen"))
+            ))
+        );
+    }
+
+    #[tokio::test]
     async fn prepare_runtime_lanes_resolves_structured_harness_profile_without_downgrade() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());

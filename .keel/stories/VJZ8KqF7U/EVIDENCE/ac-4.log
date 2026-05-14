@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T22:07:12.862049059-07:00
+mode: manual
+---
+Reviewed the inference cleanup boundary for this slice: Sift model-provider branches remain rejected for planner/synthesizer inference, while Sift retrieval/indexing remains in the gatherer boundary. No retrieval/indexing deletion was required for the HTTP-only inference migration; deletion of inference-only Sift adapters remains a later voyage decision.
