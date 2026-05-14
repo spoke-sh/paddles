@@ -6,7 +6,7 @@ use crate::domain::model::{
     NativeTransportConfiguration, NativeTransportConfigurations, NativeTransportKind,
 };
 use crate::infrastructure::providers::ModelProvider;
-use crate::infrastructure::runtime_preferences::RuntimeLanePreferences;
+use crate::infrastructure::runtime_preferences::TurnRuntimePreferences;
 
 const CONFIG_FILE_NAME: &str = "paddles.toml";
 const USER_CONFIG_RELATIVE_PATH: &str = ".config/paddles/paddles.toml";
@@ -202,7 +202,7 @@ impl PaddlesConfig {
     /// Load layered configuration with optional machine-managed runtime lane preferences.
     pub fn load_with_runtime_preferences(
         workspace_root: &Path,
-        runtime_preferences: Option<&RuntimeLanePreferences>,
+        runtime_preferences: Option<&TurnRuntimePreferences>,
     ) -> Self {
         let user_config = user_config_path();
         let system_config = PathBuf::from(SYSTEM_CONFIG_PATH);
@@ -238,7 +238,7 @@ impl PaddlesConfig {
         workspace_config: Option<&Path>,
         user_config: Option<&Path>,
         system_config: Option<&Path>,
-        runtime_preferences: Option<&RuntimeLanePreferences>,
+        runtime_preferences: Option<&TurnRuntimePreferences>,
     ) -> Self {
         let mut config = Self::default();
 
@@ -350,7 +350,7 @@ impl PaddlesConfig {
         }
     }
 
-    fn apply_runtime_preferences(&mut self, preferences: &RuntimeLanePreferences) {
+    fn apply_runtime_preferences(&mut self, preferences: &TurnRuntimePreferences) {
         let final_rendering = preferences.final_rendering();
         if let Some(provider) = final_rendering
             .provider
@@ -679,7 +679,7 @@ fn parse_trace_authority_mode(value: String) -> Option<TraceAuthorityMode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::RuntimeLaneConfig;
+    use crate::application::TurnRuntimeConfig;
     use std::fs;
     use std::path::PathBuf;
 
@@ -890,8 +890,8 @@ port = 9090
         )
         .expect("write workspace config");
 
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(
-            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(
+            &TurnRuntimeConfig::new("mercury-2".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Inception)
                 .with_synthesizer_thinking_mode(Some("high".to_string()))
                 .with_planner_provider(Some(ModelProvider::Anthropic))
@@ -931,8 +931,8 @@ model = "gpt-4o"
         )
         .expect("write user config");
 
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(
-            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(
+            &TurnRuntimeConfig::new("mercury-2".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Inception),
         );
 
@@ -969,8 +969,8 @@ model = "claude-sonnet-4-20250514"
         )
         .expect("write workspace config");
 
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(
-            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(
+            &TurnRuntimeConfig::new("mercury-2".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Inception)
                 .with_planner_provider(Some(ModelProvider::Anthropic))
                 .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string())),

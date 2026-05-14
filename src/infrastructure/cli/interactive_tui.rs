@@ -1,6 +1,6 @@
 use crate::application::{
     AgentRuntime, ConversationSession, ConversationTranscript, ConversationTranscriptSpeaker,
-    ConversationTranscriptUpdate, ResumableConversation, RuntimeLaneConfig, TranscriptUpdateSink,
+    ConversationTranscriptUpdate, ResumableConversation, TranscriptUpdateSink, TurnRuntimeConfig,
 };
 use crate::domain::model::render::uses_compact_block_separator;
 use crate::domain::model::{
@@ -10,7 +10,7 @@ use crate::domain::model::{
 use crate::infrastructure::credentials::{CredentialStore, ProviderAvailability};
 use crate::infrastructure::providers::ModelProvider;
 use crate::infrastructure::runtime_preferences::{
-    RuntimeLanePreferenceStore, RuntimeLanePreferences,
+    TurnRuntimePreferenceStore, TurnRuntimePreferences,
 };
 use crate::infrastructure::runtime_presentation::{
     RuntimeEventPresentation, project_runtime_event_for_tui,
@@ -42,8 +42,8 @@ use tokio::task::JoinHandle;
 /// Context passed from main to the TUI for credential management.
 pub struct TuiContext {
     pub credential_store: Arc<CredentialStore>,
-    pub runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
-    pub runtime_lanes: RuntimeLaneConfig,
+    pub runtime_preference_store: Arc<TurnRuntimePreferenceStore>,
+    pub turn_runtime_config: TurnRuntimeConfig,
     pub web_server_addr: SocketAddr,
     pub verbose: u8,
 }
@@ -246,36 +246,36 @@ pub async fn run_interactive_tui(service: Arc<AgentRuntime>, tui_ctx: TuiContext
         .register_transcript_observer(Arc::new(InteractiveTranscriptUpdateSink { tx: tx.clone() }));
     let provider_availability = tui_ctx.credential_store.all_provider_availability();
     let mut app = InteractiveApp::new(
-        runtime_lane_summary(&tui_ctx.runtime_lanes),
+        turn_runtime_summary(&tui_ctx.turn_runtime_config),
         detect_palette(),
         session.clone(),
         tui_ctx
-            .runtime_lanes
+            .turn_runtime_config
             .synthesizer_provider()
             .name()
             .to_string(),
         tui_ctx
-            .runtime_lanes
+            .turn_runtime_config
             .synthesizer_provider()
             .supports_interactive_login()
             .then(|| {
                 tui_ctx
-                    .runtime_lanes
+                    .turn_runtime_config
                     .synthesizer_provider()
                     .name()
                     .to_string()
             }),
         credential_status_line(
-            tui_ctx.runtime_lanes.synthesizer_provider(),
+            tui_ctx.turn_runtime_config.synthesizer_provider(),
             availability_for_provider(
                 &provider_availability,
-                tui_ctx.runtime_lanes.synthesizer_provider(),
+                tui_ctx.turn_runtime_config.synthesizer_provider(),
             ),
         ),
         tui_ctx.verbose,
     );
     app.set_runtime_preference_path(tui_ctx.runtime_preference_store.path().to_path_buf());
-    app.set_runtime_catalog(tui_ctx.runtime_lanes.clone(), provider_availability);
+    app.set_runtime_catalog(tui_ctx.turn_runtime_config.clone(), provider_availability);
     match service.prompt_history() {
         Ok(prompt_history) => app.load_prompt_history(prompt_history),
         Err(err) => app.push_error(
@@ -357,7 +357,7 @@ pub async fn run_interactive_tui(service: Arc<AgentRuntime>, tui_ctx: TuiContext
                 .credential_store
                 .save_api_key(&login.provider, &login.api_key)
             {
-                Ok(()) => match service.prepare_runtime_lanes(&app.runtime_lanes).await {
+                Ok(()) => match service.prepare_turn_runtime(&app.turn_runtime_config).await {
                     Ok(_) => {
                         app.set_provider_availability(
                             tui_ctx.credential_store.all_provider_availability(),
@@ -762,7 +762,7 @@ struct InFlightWork {
 
 #[derive(Clone, Debug)]
 struct RuntimeUpdateCompletion {
-    runtime_lanes: RuntimeLaneConfig,
+    turn_runtime_config: TurnRuntimeConfig,
     provider_availability: Vec<ProviderAvailability>,
     summary: String,
     preference_path: PathBuf,
@@ -802,19 +802,22 @@ fn dispatch_runtime_update(
     update: PendingRuntimeUpdate,
     service: Arc<AgentRuntime>,
     credential_store: Arc<CredentialStore>,
-    runtime_preference_store: Arc<RuntimeLanePreferenceStore>,
+    runtime_preference_store: Arc<TurnRuntimePreferenceStore>,
     tx: UnboundedSender<UiMessage>,
     work_id: u64,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let result = match service.prepare_runtime_lanes(&update.runtime_lanes).await {
+        let result = match service
+            .prepare_turn_runtime(&update.turn_runtime_config)
+            .await
+        {
             Ok(_) => {
                 let preference_save_error = runtime_preference_store
                     .save(&update.persisted_preferences)
                     .err()
                     .map(|err| format!("{err:#}"));
                 Ok(RuntimeUpdateCompletion {
-                    runtime_lanes: update.runtime_lanes,
+                    turn_runtime_config: update.turn_runtime_config,
                     provider_availability: credential_store.all_provider_availability(),
                     summary: update.summary,
                     preference_path: runtime_preference_store.path().to_path_buf(),
@@ -1199,7 +1202,7 @@ struct InteractiveApp {
     model_label: String,
     palette: Palette,
     session: ConversationSession,
-    runtime_lanes: RuntimeLaneConfig,
+    turn_runtime_config: TurnRuntimeConfig,
     provider_availability: Vec<ProviderAvailability>,
     rows: Vec<TranscriptRow>,
     input: String,
@@ -1295,8 +1298,8 @@ struct PendingLogin {
 
 #[derive(Clone, Debug)]
 struct PendingRuntimeUpdate {
-    runtime_lanes: RuntimeLaneConfig,
-    persisted_preferences: RuntimeLanePreferences,
+    turn_runtime_config: TurnRuntimeConfig,
+    persisted_preferences: TurnRuntimePreferences,
     summary: String,
 }
 
@@ -1306,29 +1309,29 @@ enum PendingResumeCommand {
     Restore { task_id: String },
 }
 
-fn runtime_lane_summary(runtime_lanes: &RuntimeLaneConfig) -> String {
-    let synthesizer_label = runtime_lanes
+fn turn_runtime_summary(turn_runtime_config: &TurnRuntimeConfig) -> String {
+    let synthesizer_label = turn_runtime_config
         .synthesizer_provider()
         .qualified_model_label_with_thinking(
-            runtime_lanes.synthesizer_model_id(),
-            runtime_lanes.synthesizer_thinking_mode(),
+            turn_runtime_config.synthesizer_model_id(),
+            turn_runtime_config.synthesizer_thinking_mode(),
         );
-    let planner_thinking_mode = (runtime_lanes.planner_provider()
-        == runtime_lanes.synthesizer_provider()
-        && runtime_lanes
+    let planner_thinking_mode = (turn_runtime_config.planner_provider()
+        == turn_runtime_config.synthesizer_provider()
+        && turn_runtime_config
             .planner_model_id()
-            .unwrap_or(runtime_lanes.synthesizer_model_id())
-            == runtime_lanes.synthesizer_model_id())
-    .then(|| runtime_lanes.synthesizer_thinking_mode())
+            .unwrap_or(turn_runtime_config.synthesizer_model_id())
+            == turn_runtime_config.synthesizer_model_id())
+    .then(|| turn_runtime_config.synthesizer_thinking_mode())
     .flatten();
     format!(
         "P {} · S {}",
-        runtime_lanes
+        turn_runtime_config
             .planner_provider()
             .qualified_model_label_with_thinking(
-                runtime_lanes
+                turn_runtime_config
                     .planner_model_id()
-                    .unwrap_or(runtime_lanes.synthesizer_model_id()),
+                    .unwrap_or(turn_runtime_config.synthesizer_model_id()),
                 planner_thinking_mode,
             ),
         synthesizer_label
@@ -1407,7 +1410,7 @@ impl InteractiveApp {
             ),
         };
         let current_task_id = session.task_id().as_str().to_string();
-        let runtime_lanes = RuntimeLaneConfig::new(model_label.clone(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new(model_label.clone(), None)
             .with_synthesizer_provider(
                 ModelProvider::from_name(&provider_name).unwrap_or(ModelProvider::Sift),
             );
@@ -1415,7 +1418,7 @@ impl InteractiveApp {
             model_label,
             palette,
             session,
-            runtime_lanes,
+            turn_runtime_config,
             provider_availability: Vec::new(),
             rows: vec![TranscriptRow::new(
                 TranscriptRowKind::Event,
@@ -1471,17 +1474,26 @@ impl InteractiveApp {
 
     fn set_runtime_catalog(
         &mut self,
-        runtime_lanes: RuntimeLaneConfig,
+        turn_runtime_config: TurnRuntimeConfig,
         provider_availability: Vec<ProviderAvailability>,
     ) {
-        self.runtime_lanes = runtime_lanes;
-        self.model_label = runtime_lane_summary(&self.runtime_lanes);
-        self.provider_name = self.runtime_lanes.synthesizer_provider().name().to_string();
+        self.turn_runtime_config = turn_runtime_config;
+        self.model_label = turn_runtime_summary(&self.turn_runtime_config);
+        self.provider_name = self
+            .turn_runtime_config
+            .synthesizer_provider()
+            .name()
+            .to_string();
         self.credential_provider = self
-            .runtime_lanes
+            .turn_runtime_config
             .synthesizer_provider()
             .supports_interactive_login()
-            .then(|| self.runtime_lanes.synthesizer_provider().name().to_string());
+            .then(|| {
+                self.turn_runtime_config
+                    .synthesizer_provider()
+                    .name()
+                    .to_string()
+            });
         self.provider_availability = provider_availability;
     }
 
@@ -1524,7 +1536,7 @@ impl InteractiveApp {
     fn start_model_provider_selection(&mut self) {
         let selected_index = ModelProvider::all()
             .iter()
-            .position(|provider| *provider == self.runtime_lanes.synthesizer_provider())
+            .position(|provider| *provider == self.turn_runtime_config.synthesizer_provider())
             .unwrap_or(0);
         self.input = "/model".to_string();
         self.cursor_pos = self.input.chars().count();
@@ -1535,8 +1547,8 @@ impl InteractiveApp {
     }
 
     fn start_model_id_selection(&mut self, provider: ModelProvider) {
-        let current_model = self.runtime_lanes.synthesizer_model_id();
-        let selected_index = if self.runtime_lanes.synthesizer_provider() == provider {
+        let current_model = self.turn_runtime_config.synthesizer_model_id();
+        let selected_index = if self.turn_runtime_config.synthesizer_provider() == provider {
             provider
                 .selectable_model_ids()
                 .iter()
@@ -1556,9 +1568,9 @@ impl InteractiveApp {
     }
 
     fn start_model_thinking_mode_selection(&mut self, provider: ModelProvider, model: &str) {
-        let current_model = self.runtime_lanes.synthesizer_model_id();
-        let current_thinking_mode = self.runtime_lanes.synthesizer_thinking_mode();
-        let selected_index = if self.runtime_lanes.synthesizer_provider() == provider {
+        let current_model = self.turn_runtime_config.synthesizer_model_id();
+        let current_thinking_mode = self.turn_runtime_config.synthesizer_thinking_mode();
+        let selected_index = if self.turn_runtime_config.synthesizer_provider() == provider {
             provider
                 .thinking_mode_index_for_runtime_model(model, current_model, current_thinking_mode)
                 .unwrap_or(0)
@@ -1751,7 +1763,7 @@ impl InteractiveApp {
                         self.palette.input_text
                     };
                     let mut meta = Vec::new();
-                    if provider == self.runtime_lanes.synthesizer_provider() {
+                    if provider == self.turn_runtime_config.synthesizer_provider() {
                         meta.push("current");
                     }
                     if !self.provider_availability_for(provider).enabled {
@@ -1775,7 +1787,7 @@ impl InteractiveApp {
             }
             ModelSelectionStage::Model { provider } => {
                 let model_ids = provider.selectable_model_ids();
-                let current_model = self.runtime_lanes.synthesizer_model_id();
+                let current_model = self.turn_runtime_config.synthesizer_model_id();
                 for offset in 0..model_ids.len() {
                     let index = (selected_index + offset) % model_ids.len();
                     let model_id = model_ids[index];
@@ -1792,7 +1804,7 @@ impl InteractiveApp {
                         ),
                         Span::styled(model_id.to_string(), line_style),
                     ];
-                    if self.runtime_lanes.synthesizer_provider() == *provider
+                    if self.turn_runtime_config.synthesizer_provider() == *provider
                         && provider.selectable_model_matches_runtime_model(model_id, current_model)
                     {
                         spans.push(Span::styled(
@@ -1805,8 +1817,8 @@ impl InteractiveApp {
             }
             ModelSelectionStage::ThinkingMode { provider, model } => {
                 let thinking_modes = provider.thinking_modes(model);
-                let current_model = self.runtime_lanes.synthesizer_model_id();
-                let current_thinking_mode = self.runtime_lanes.synthesizer_thinking_mode();
+                let current_model = self.turn_runtime_config.synthesizer_model_id();
+                let current_thinking_mode = self.turn_runtime_config.synthesizer_thinking_mode();
                 for offset in 0..thinking_modes.len() {
                     let index = (selected_index + offset) % thinking_modes.len();
                     let thinking_mode = thinking_modes[index];
@@ -1823,7 +1835,7 @@ impl InteractiveApp {
                         ),
                         Span::styled(thinking_mode.label.to_string(), line_style),
                     ];
-                    if self.runtime_lanes.synthesizer_provider() == *provider
+                    if self.turn_runtime_config.synthesizer_provider() == *provider
                         && provider.thinking_mode_index_for_runtime_model(
                             model,
                             current_model,
@@ -2583,19 +2595,23 @@ impl InteractiveApp {
             return false;
         }
 
-        let runtime_lanes = RuntimeLaneConfig::new(
+        let turn_runtime_config = TurnRuntimeConfig::new(
             normalized_model.clone(),
-            self.runtime_lanes.gatherer_model_id().map(str::to_string),
+            self.turn_runtime_config
+                .gatherer_model_id()
+                .map(str::to_string),
         )
         .with_synthesizer_provider(provider)
         .with_synthesizer_thinking_mode(normalized_thinking_mode.clone())
-        .with_gatherer_provider(self.runtime_lanes.gatherer_provider())
-        .with_context1_harness_ready(self.runtime_lanes.context1_harness_ready());
+        .with_gatherer_provider(self.turn_runtime_config.gatherer_provider())
+        .with_context1_harness_ready(self.turn_runtime_config.context1_harness_ready());
         self.pending_runtime_update = Some(PendingRuntimeUpdate {
-            persisted_preferences: RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes),
-            runtime_lanes,
+            persisted_preferences: TurnRuntimePreferences::from_turn_runtime_config(
+                &turn_runtime_config,
+            ),
+            turn_runtime_config,
             summary: format!(
-                "Runtime lanes now target `{}`.",
+                "Turn runtime now targets `{}`.",
                 provider.qualified_model_label_with_thinking(
                     &normalized_model,
                     normalized_thinking_mode.as_deref(),
@@ -2905,7 +2921,7 @@ impl InteractiveApp {
         self.busy = true;
         self.busy_phase = BusyPhase::Reconfiguring;
         self.runtime_update_started_at = Some(started_at);
-        self.push_event("Activating runtime lanes", update.summary.clone());
+        self.push_event("Activating turn runtime", update.summary.clone());
         Some(update)
     }
 
@@ -3340,7 +3356,7 @@ impl InteractiveApp {
                 match result {
                     Ok(completion) => {
                         self.set_runtime_catalog(
-                            completion.runtime_lanes,
+                            completion.turn_runtime_config,
                             completion.provider_availability,
                         );
                         match completion.preference_save_error {
@@ -3367,7 +3383,7 @@ impl InteractiveApp {
                         let row = TranscriptRow::new(
                             TranscriptRowKind::Error,
                             "• Model selection failed",
-                            format!("Could not activate requested runtime lanes: {error}"),
+                            format!("Could not activate requested turn runtime: {error}"),
                         );
                         let row = if let Some(started_at) = started_at {
                             row.timed(TranscriptTiming {
@@ -4911,7 +4927,7 @@ mod tests {
         prepare_inline_terminal_rebuild, render_row_lines, select_interactive_frontend,
         web_server_ready_row,
     };
-    use crate::application::{ConversationSession, RuntimeLaneConfig};
+    use crate::application::{ConversationSession, TurnRuntimeConfig};
     use crate::domain::model::{
         ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
         ConversationTranscript, ConversationTranscriptEntry, ConversationTranscriptSpeaker,
@@ -6391,12 +6407,12 @@ mod tests {
             "Provider: `sift` (local-first). Auth: not required.".to_string(),
             2,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("gpt-4o".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Openai)
             .with_planner_provider(Some(ModelProvider::Anthropic))
             .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
         app.set_runtime_catalog(
-            runtime_lanes.clone(),
+            turn_runtime_config.clone(),
             vec![
                 provider_availability(ModelProvider::Sift, true, "auth not required"),
                 provider_availability(ModelProvider::Openai, true, "using local credential store"),
@@ -6482,7 +6498,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+            TurnRuntimeConfig::new("qwen-1.5b".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Sift),
             vec![
                 provider_availability(ModelProvider::Sift, true, "auth not required"),
@@ -6515,7 +6531,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+            TurnRuntimeConfig::new("qwen-1.5b".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Sift),
             vec![
                 provider_availability(ModelProvider::Sift, true, "auth not required"),
@@ -6550,7 +6566,7 @@ mod tests {
             .expect("runtime update");
 
         assert_eq!(
-            update.runtime_lanes.synthesizer_provider(),
+            update.turn_runtime_config.synthesizer_provider(),
             ModelProvider::Openai
         );
         assert!(app.busy);
@@ -6559,7 +6575,7 @@ mod tests {
         assert!(
             app.rows
                 .iter()
-                .any(|row| row.header == "• Activating runtime lanes"
+                .any(|row| row.header == "• Activating turn runtime"
                     && row.content.contains("openai:gpt-4o"))
         );
     }
@@ -6583,7 +6599,7 @@ mod tests {
 
         app.handle_message(UiMessage::RuntimeUpdateFinished {
             result: Ok(RuntimeUpdateCompletion {
-                runtime_lanes: RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+                turn_runtime_config: TurnRuntimeConfig::new("gpt-4o".to_string(), None)
                     .with_synthesizer_provider(ModelProvider::Openai),
                 provider_availability: vec![
                     provider_availability(ModelProvider::Sift, true, "auth not required"),
@@ -6593,7 +6609,7 @@ mod tests {
                         "using local credential store",
                     ),
                 ],
-                summary: "Runtime lanes now target `openai:gpt-4o`.".to_string(),
+                summary: "Turn runtime now targets `openai:gpt-4o`.".to_string(),
                 preference_path: PathBuf::from("/tmp/runtime-lanes.toml"),
                 preference_save_error: None,
             }),
@@ -6605,10 +6621,10 @@ mod tests {
         assert_eq!(app.busy_phase, BusyPhase::Idle);
         assert!(app.runtime_update_started_at.is_none());
         assert_eq!(
-            app.runtime_lanes.synthesizer_provider(),
+            app.turn_runtime_config.synthesizer_provider(),
             ModelProvider::Openai
         );
-        assert_eq!(app.runtime_lanes.synthesizer_model_id(), "gpt-4o");
+        assert_eq!(app.turn_runtime_config.synthesizer_model_id(), "gpt-4o");
         assert!(
             app.rows
                 .iter()
@@ -6630,7 +6646,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+            TurnRuntimeConfig::new("qwen-1.5b".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Sift),
             vec![
                 provider_availability(ModelProvider::Sift, true, "auth not required"),
@@ -6683,7 +6699,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+            TurnRuntimeConfig::new("qwen-1.5b".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Sift),
             vec![
                 provider_availability(ModelProvider::Sift, true, "auth not required"),
@@ -6840,7 +6856,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            TurnRuntimeConfig::new("mercury-2".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Inception),
             vec![provider_availability(
                 ModelProvider::Inception,
@@ -6877,7 +6893,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)
+            TurnRuntimeConfig::new("kimi-k2.5".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Moonshot),
             vec![provider_availability(
                 ModelProvider::Moonshot,
@@ -6925,7 +6941,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)
+            TurnRuntimeConfig::new("kimi-k2.5".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Moonshot),
             vec![provider_availability(
                 ModelProvider::Moonshot,
@@ -6970,10 +6986,15 @@ mod tests {
             .take_pending_runtime_update()
             .expect("pending runtime update");
         assert_eq!(
-            update.runtime_lanes.synthesizer_model_id(),
+            update.turn_runtime_config.synthesizer_model_id(),
             "kimi-k2-thinking"
         );
-        assert!(update.runtime_lanes.synthesizer_thinking_mode().is_none());
+        assert!(
+            update
+                .turn_runtime_config
+                .synthesizer_thinking_mode()
+                .is_none()
+        );
     }
 
     #[test]
@@ -6989,7 +7010,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+            TurnRuntimeConfig::new("gpt-4o".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Openai),
             vec![provider_availability(
                 ModelProvider::Openai,
@@ -7041,12 +7062,12 @@ mod tests {
             .take_pending_runtime_update()
             .expect("pending runtime update");
         assert_eq!(
-            update.runtime_lanes.synthesizer_provider(),
+            update.turn_runtime_config.synthesizer_provider(),
             ModelProvider::Openai
         );
-        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-5.4");
+        assert_eq!(update.turn_runtime_config.synthesizer_model_id(), "gpt-5.4");
         assert_eq!(
-            update.runtime_lanes.synthesizer_thinking_mode(),
+            update.turn_runtime_config.synthesizer_thinking_mode(),
             Some("high")
         );
         assert_eq!(
@@ -7072,7 +7093,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+            TurnRuntimeConfig::new("gpt-5.4".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Openai),
             vec![provider_availability(
                 ModelProvider::Openai,
@@ -7102,11 +7123,11 @@ mod tests {
             .take_pending_runtime_update()
             .expect("pending runtime update");
         assert_eq!(
-            update.runtime_lanes.synthesizer_provider(),
+            update.turn_runtime_config.synthesizer_provider(),
             ModelProvider::Openai
         );
-        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
-        assert_eq!(update.runtime_lanes.synthesizer_thinking_mode(), None);
+        assert_eq!(update.turn_runtime_config.synthesizer_model_id(), "gpt-4o");
+        assert_eq!(update.turn_runtime_config.synthesizer_thinking_mode(), None);
         assert_eq!(
             update
                 .persisted_preferences
@@ -7455,7 +7476,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("qwen-1.5b".to_string(), None)
+            TurnRuntimeConfig::new("qwen-1.5b".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Sift),
             vec![
                 provider_availability(ModelProvider::Sift, true, "auth not required"),
@@ -7516,7 +7537,7 @@ mod tests {
             2,
         );
         app.set_runtime_catalog(
-            RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            TurnRuntimeConfig::new("mercury-2".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Inception),
             vec![provider_availability(
                 ModelProvider::Inception,
@@ -7554,12 +7575,15 @@ mod tests {
             .take_pending_runtime_update()
             .expect("pending runtime update");
         assert_eq!(
-            update.runtime_lanes.synthesizer_provider(),
+            update.turn_runtime_config.synthesizer_provider(),
             ModelProvider::Inception
         );
-        assert_eq!(update.runtime_lanes.synthesizer_model_id(), "mercury-2");
         assert_eq!(
-            update.runtime_lanes.synthesizer_thinking_mode(),
+            update.turn_runtime_config.synthesizer_model_id(),
+            "mercury-2"
+        );
+        assert_eq!(
+            update.turn_runtime_config.synthesizer_thinking_mode(),
             Some("instant")
         );
         assert_eq!(

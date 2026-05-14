@@ -53,7 +53,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         let runtime_guard = service.runtime.read().await;
         let runtime = runtime_guard
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
+            .ok_or_else(|| anyhow::anyhow!("Turn runtime not initialized"))?;
         let prepared = runtime.prepared.clone();
         service.execution_hand_registry().set_governance_profile(
             prepared
@@ -452,7 +452,7 @@ pub(super) async fn process_thread_candidate_in_session_with_sink(
     let runtime_guard = service.runtime.read().await;
     let runtime = runtime_guard
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Runtime lanes not initialized"))?;
+        .ok_or_else(|| anyhow::anyhow!("Turn runtime not initialized"))?;
     let planner_engine = Arc::clone(&runtime.planner_engine);
     let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
     drop(runtime_guard);

@@ -499,5 +499,5 @@
 | [Route Runtime Inference Through HTTP Model Clients](epics/VJZ034dF2/voyages/VJZ8CYrLb/) | done |
 | [Migrate Provider Preferences To Turn Runtime Config](epics/VJZ034dF2/voyages/VJZ8DAKbC/) | done |
 | [Remove In-Process Sift Inference Code](epics/VJZ034dF2/voyages/VJZ8DqFnJ/) | done |
-| [Collapse Runtime Lane Terminology](epics/VJZ034dF2/voyages/VJZ8ERr2f/) | planned |
+| [Collapse Runtime Lane Terminology](epics/VJZ034dF2/voyages/VJZ8ERr2f/) | in-progress |
 

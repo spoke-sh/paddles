@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-05-13T22:56:45.670986607-07:00
+command: sh -lc 'cd "$(git rev-parse --show-toplevel)" && ! rg -n "runtime_lane_config|remote_http_lane|prepared_turn_runtime_keep_synthesizer|prepare runtime lanes|Runtime lanes now target|Activating runtime lanes|requested runtime lanes|runtime_lanes|prepared_lanes|runtime_lane_summary" src/application/mod.rs src/application/harness_capability_posture.rs src/infrastructure/adapters/http_provider.rs src/infrastructure/cli/interactive_tui.rs src/main.rs src/infrastructure/web/mod.rs'
+---

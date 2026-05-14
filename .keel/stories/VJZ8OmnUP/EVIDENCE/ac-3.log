@@ -1,0 +1,45 @@
+---
+recorded_at: 2026-05-13T22:56:49.546977721-07:00
+command: sh -lc 'cd "$(git rev-parse --show-toplevel)" && cargo nextest run prepare_turn_runtime --lib && cargo test --lib turn_runtime && cargo check --all-targets'
+---
+
+running 18 tests
+test application::tests::turn_runtime_config_defaults_to_final_rendering_responses ... ok
+test application::tests::prepared_turn_runtime_keeps_final_rendering_as_default_response_client ... ok
+test infrastructure::runtime_preferences::tests::default_turn_runtime_preference_path_targets_machine_state ... ok
+test infrastructure::runtime_preferences::tests::turn_runtime_preferences_capture_model_clients_and_retrieval ... ok
+test infrastructure::runtime_preferences::tests::turn_runtime_preferences_capture_shared_thinking_mode ... ok
+test infrastructure::runtime_preferences::tests::turn_runtime_preference_store_writes_canonical_shape_without_lane_terms ... ok
+test infrastructure::runtime_preferences::tests::turn_runtime_preferences_record_shared_model_clients_without_lane_names ... ok
+test infrastructure::runtime_preferences::tests::turn_runtime_preference_store_preserves_openai_responses_only_models ... ok
+test infrastructure::runtime_preferences::tests::legacy_runtime_lane_preferences_migrate_into_turn_runtime_shape ... ok
+test application::tests::prepare_turn_runtime_treats_inception_as_remote_http_client_without_local_paths ... ok
+test infrastructure::runtime_preferences::tests::turn_runtime_preference_store_round_trips_preferences ... ok
+test application::tests::prepare_turn_runtime_downgrades_harness_profile_when_prompt_envelopes_are_required ... ok
+test application::tests::prepare_turn_runtime_resolves_structured_harness_profile_without_downgrade ... ok
+test application::tests::prepare_turn_runtime_preserves_sift_direct_retrieval_with_http_inference ... ok
+test application::tests::prepare_turn_runtime_rejects_legacy_sift_synthesizer_before_construction ... ok
+test application::tests::prepare_turn_runtime_rejects_legacy_sift_planner_before_construction ... ok
+test infrastructure::config::tests::configuration_documents_turn_runtime_preference_shape ... ok
+test application::tests::prepare_turn_runtime_preserves_local_gatherer_without_model_loading ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 748 filtered out; finished in 0.00s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 6f9699da-9a87-46be-87eb-6b7ac2caca9e with nextest profile: default
+    Starting 7 tests across 1 binary (759 tests skipped)
+        PASS [   0.017s] (1/7) paddles application::tests::prepare_turn_runtime_preserves_sift_direct_retrieval_with_http_inference
+        PASS [   0.022s] (2/7) paddles application::tests::prepare_turn_runtime_preserves_local_gatherer_without_model_loading
+        PASS [   0.022s] (3/7) paddles application::tests::prepare_turn_runtime_rejects_legacy_sift_synthesizer_before_construction
+        PASS [   0.022s] (4/7) paddles application::tests::prepare_turn_runtime_downgrades_harness_profile_when_prompt_envelopes_are_required
+        PASS [   0.022s] (5/7) paddles application::tests::prepare_turn_runtime_treats_inception_as_remote_http_client_without_local_paths
+        PASS [   0.022s] (6/7) paddles application::tests::prepare_turn_runtime_resolves_structured_harness_profile_without_downgrade
+        PASS [   0.023s] (7/7) paddles application::tests::prepare_turn_runtime_rejects_legacy_sift_planner_before_construction
+────────────
+     Summary [   0.025s] 7 tests run: 7 passed, 759 skipped
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-a4ac3330ca4ecb24)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s

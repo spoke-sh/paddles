@@ -1,5 +1,5 @@
 use crate::application::{
-    GathererProvider, LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT, RuntimeLaneConfig,
+    GathererProvider, LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT, TurnRuntimeConfig,
 };
 use crate::infrastructure::providers::ModelProvider;
 use anyhow::{Context, Result, anyhow};
@@ -46,21 +46,27 @@ pub struct TurnRuntimeRetrievalPreference {
     pub model: Option<String>,
 }
 
+/// Legacy compatibility alias for callers that still name the old runtime-lane
+/// preference document during migration. New code should use
+/// `TurnRuntimePreferences`.
 pub type RuntimeLanePreferences = TurnRuntimePreferences;
+/// Legacy compatibility alias for callers that still name the old runtime-lane
+/// preference store during migration. New code should use
+/// `TurnRuntimePreferenceStore`.
 pub type RuntimeLanePreferenceStore = TurnRuntimePreferenceStore;
 
 impl TurnRuntimePreferences {
-    pub fn from_runtime_lanes(runtime_lanes: &RuntimeLaneConfig) -> Self {
-        let final_rendering_provider = runtime_lanes.synthesizer_provider();
-        let final_rendering_model = runtime_lanes.synthesizer_model_id();
-        let action_selection_provider = runtime_lanes.planner_provider();
-        let action_selection_model = runtime_lanes
+    pub fn from_turn_runtime_config(turn_runtime_config: &TurnRuntimeConfig) -> Self {
+        let final_rendering_provider = turn_runtime_config.synthesizer_provider();
+        let final_rendering_model = turn_runtime_config.synthesizer_model_id();
+        let action_selection_provider = turn_runtime_config.planner_provider();
+        let action_selection_model = turn_runtime_config
             .planner_model_id()
-            .unwrap_or(runtime_lanes.synthesizer_model_id());
+            .unwrap_or(turn_runtime_config.synthesizer_model_id());
         let action_selection_thinking_mode = (action_selection_provider
             == final_rendering_provider
             && action_selection_model == final_rendering_model)
-            .then(|| runtime_lanes.synthesizer_thinking_mode())
+            .then(|| turn_runtime_config.synthesizer_thinking_mode())
             .flatten()
             .map(ToString::to_string);
 
@@ -75,14 +81,18 @@ impl TurnRuntimePreferences {
                     final_rendering: ModelClientPreference {
                         provider: Some(final_rendering_provider.name().to_string()),
                         model: Some(final_rendering_model.to_string()),
-                        thinking_mode: runtime_lanes
+                        thinking_mode: turn_runtime_config
                             .synthesizer_thinking_mode()
                             .map(ToString::to_string),
                     },
                 },
                 retrieval: TurnRuntimeRetrievalPreference {
-                    provider: Some(gatherer_provider_name(runtime_lanes.gatherer_provider())),
-                    model: runtime_lanes.gatherer_model_id().map(ToString::to_string),
+                    provider: Some(gatherer_provider_name(
+                        turn_runtime_config.gatherer_provider(),
+                    )),
+                    model: turn_runtime_config
+                        .gatherer_model_id()
+                        .map(ToString::to_string),
                 },
             },
         }
@@ -303,7 +313,7 @@ fn gatherer_provider_name(provider: GathererProvider) -> String {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
-struct LegacyRuntimeLanePreferences {
+struct LegacyTurnRuntimePreferences {
     provider: Option<String>,
     model: Option<String>,
     thinking_mode: Option<String>,
@@ -320,7 +330,7 @@ fn load_legacy_runtime_lane_preferences(path: &Path) -> Result<TurnRuntimePrefer
             path.display()
         )
     })?;
-    let legacy = toml::from_str::<LegacyRuntimeLanePreferences>(&contents).with_context(|| {
+    let legacy = toml::from_str::<LegacyTurnRuntimePreferences>(&contents).with_context(|| {
         format!(
             "parse legacy runtime lane preferences from {}",
             path.display()
@@ -330,7 +340,7 @@ fn load_legacy_runtime_lane_preferences(path: &Path) -> Result<TurnRuntimePrefer
 }
 
 fn migrate_legacy_runtime_lane_preferences(
-    legacy: LegacyRuntimeLanePreferences,
+    legacy: LegacyTurnRuntimePreferences,
 ) -> Result<TurnRuntimePreferences> {
     reject_legacy_sift_model_provider(&legacy.provider, "provider")?;
     reject_legacy_sift_model_provider(&legacy.planner_provider, "planner_provider")?;
@@ -400,21 +410,21 @@ fn normalized_optional_string(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimeLanePreferenceStore, RuntimeLanePreferences, default_turn_runtime_preference_path,
+        TurnRuntimePreferenceStore, TurnRuntimePreferences, default_turn_runtime_preference_path,
     };
-    use crate::application::{GathererProvider, RuntimeLaneConfig};
+    use crate::application::{GathererProvider, TurnRuntimeConfig};
     use crate::infrastructure::providers::ModelProvider;
 
     #[test]
     fn turn_runtime_preferences_capture_model_clients_and_retrieval() {
-        let runtime_lanes =
-            RuntimeLaneConfig::new("gpt-4o".to_string(), Some("retrieval-qwen".to_string()))
+        let turn_runtime_config =
+            TurnRuntimeConfig::new("gpt-4o".to_string(), Some("retrieval-qwen".to_string()))
                 .with_synthesizer_provider(ModelProvider::Openai)
                 .with_planner_provider(Some(ModelProvider::Anthropic))
                 .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()))
                 .with_gatherer_provider(GathererProvider::Local);
 
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes);
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(&turn_runtime_config);
 
         assert_eq!(
             preferences.action_selection().provider.as_deref(),
@@ -441,10 +451,10 @@ mod tests {
 
     #[test]
     fn turn_runtime_preferences_record_shared_model_clients_without_lane_names() {
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception);
 
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes);
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(&turn_runtime_config);
 
         assert_eq!(
             preferences.action_selection().provider.as_deref(),
@@ -472,12 +482,12 @@ mod tests {
     fn turn_runtime_preference_store_writes_canonical_shape_without_lane_terms() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("state/turn-runtime.toml");
-        let store = RuntimeLanePreferenceStore::with_path(&path);
-        let runtime_lanes = RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+        let store = TurnRuntimePreferenceStore::with_path(&path);
+        let turn_runtime_config = TurnRuntimeConfig::new("gpt-4o".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Openai)
             .with_planner_provider(Some(ModelProvider::Anthropic))
             .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes);
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(&turn_runtime_config);
 
         store.save(&preferences).expect("save runtime preferences");
         let contents = std::fs::read_to_string(&path).expect("read runtime preferences");
@@ -495,9 +505,9 @@ mod tests {
     fn turn_runtime_preference_store_round_trips_preferences() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store =
-            RuntimeLanePreferenceStore::with_path(dir.path().join("state/turn-runtime.toml"));
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(
-            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+            TurnRuntimePreferenceStore::with_path(dir.path().join("state/turn-runtime.toml"));
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(
+            &TurnRuntimeConfig::new("mercury-2".to_string(), None)
                 .with_synthesizer_provider(ModelProvider::Inception),
         );
 
@@ -514,7 +524,7 @@ mod tests {
     fn turn_runtime_preference_store_preserves_openai_responses_only_models() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("state/turn-runtime.toml");
-        let store = RuntimeLanePreferenceStore::with_path(&path);
+        let store = TurnRuntimePreferenceStore::with_path(&path);
         std::fs::create_dir_all(path.parent().expect("turn runtime preference parent"))
             .expect("create turn runtime preference parent");
         std::fs::write(
@@ -571,7 +581,7 @@ planner_model = "claude-sonnet-4-20250514"
 "#,
         )
         .expect("write legacy preferences");
-        let store = RuntimeLanePreferenceStore::with_migration_paths(
+        let store = TurnRuntimePreferenceStore::with_migration_paths(
             &turn_runtime_path,
             Some(&legacy_path),
         );
@@ -627,7 +637,7 @@ model = "qwen-1.5b"
 "#,
         )
         .expect("write legacy preferences");
-        let store = RuntimeLanePreferenceStore::with_migration_paths(
+        let store = TurnRuntimePreferenceStore::with_migration_paths(
             &turn_runtime_path,
             Some(&legacy_path),
         );
@@ -653,11 +663,11 @@ model = "qwen-1.5b"
 
     #[test]
     fn turn_runtime_preferences_capture_shared_thinking_mode() {
-        let runtime_lanes = RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("gpt-5.4".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Openai)
             .with_synthesizer_thinking_mode(Some("high".to_string()));
 
-        let preferences = RuntimeLanePreferences::from_runtime_lanes(&runtime_lanes);
+        let preferences = TurnRuntimePreferences::from_turn_runtime_config(&turn_runtime_config);
 
         assert_eq!(
             preferences.final_rendering().provider.as_deref(),

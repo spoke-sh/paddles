@@ -1,4 +1,4 @@
-use super::{EvalRunner, PreparedRuntimeLanes, recursive_harness_eval_corpus};
+use super::{EvalRunner, PreparedTurnRuntime, recursive_harness_eval_corpus};
 use crate::domain::model::{
     EvalReport, EvalRunConfig, EvalStatus, ExecutionGovernanceProfile, ExecutionPolicy,
     ExternalCapabilityDescriptor, default_local_execution_policy,
@@ -73,14 +73,15 @@ pub struct RuntimeHarnessCapabilityPostureService;
 
 impl RuntimeHarnessCapabilityPostureService {
     pub fn project(
-        prepared_lanes: &PreparedRuntimeLanes,
+        prepared_turn_runtime: &PreparedTurnRuntime,
         external_capabilities: &[ExternalCapabilityDescriptor],
     ) -> HarnessCapabilityRuntimeStatus {
-        let profile = prepared_lanes.harness_profile();
+        let profile = prepared_turn_runtime.harness_profile();
         let execution_policy = default_local_execution_policy();
         let eval_config = EvalRunConfig::default();
         let eval_reports = EvalRunner::new(recursive_harness_eval_corpus()).run(&eval_config);
-        let provider_posture = provider_registry_posture_for_prepared_lanes(prepared_lanes);
+        let provider_posture =
+            provider_registry_posture_for_prepared_turn_runtime(prepared_turn_runtime);
 
         HarnessCapabilityRuntimeStatus {
             external_capabilities: external_capabilities
@@ -100,17 +101,21 @@ impl RuntimeHarnessCapabilityPostureService {
     }
 }
 
-fn provider_registry_posture_for_prepared_lanes(
-    prepared_lanes: &PreparedRuntimeLanes,
+fn provider_registry_posture_for_prepared_turn_runtime(
+    prepared_turn_runtime: &PreparedTurnRuntime,
 ) -> ProviderRegistryPosture {
     let mut configured = BTreeSet::new();
     configured.insert((
-        prepared_lanes.planner.provider.name().to_string(),
-        prepared_lanes.planner.model_id.clone(),
+        prepared_turn_runtime.planner.provider.name().to_string(),
+        prepared_turn_runtime.planner.model_id.clone(),
     ));
     configured.insert((
-        prepared_lanes.synthesizer.provider.name().to_string(),
-        prepared_lanes.synthesizer.model_id.clone(),
+        prepared_turn_runtime
+            .synthesizer
+            .provider
+            .name()
+            .to_string(),
+        prepared_turn_runtime.synthesizer.model_id.clone(),
     ));
 
     ProviderRegistryPosture::from_configured_models(

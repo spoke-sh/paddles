@@ -10,8 +10,8 @@ use tokio::io::{self as tokio_io, AsyncBufReadExt, BufReader};
 
 use paddles::application::{
     AgentRuntime, ExternalCapabilityBrokerRegistry, GathererProvider,
-    HarnessCapabilityRuntimeStatus, PreparedGathererLane, PreparedModelLane,
-    RuntimeHarnessCapabilityPostureService, RuntimeLaneConfig,
+    HarnessCapabilityRuntimeStatus, PreparedModelClient, PreparedRetrievalProvider,
+    RuntimeHarnessCapabilityPostureService, TurnRuntimeConfig,
     ensure_supported_model_inference_provider,
 };
 use paddles::domain::ports::{ContextGatherer, ModelPaths, ModelRegistry, SynthesizerEngine};
@@ -38,7 +38,7 @@ use paddles::infrastructure::native_transport::{
     record_transport_failure, resolve_shared_web_bind_target,
 };
 use paddles::infrastructure::providers::{ApiFormat, ModelCapabilitySurface, ModelProvider};
-use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
+use paddles::infrastructure::runtime_preferences::TurnRuntimePreferenceStore;
 use paddles::infrastructure::transport_mediator::TransportToolMediator;
 
 /// The mech suit for the famous assistant, Paddles mate!
@@ -174,7 +174,7 @@ fn build_synthesizer_engine(
     workspace: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
-    lane: &PreparedModelLane,
+    lane: &PreparedModelClient,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn SynthesizerEngine>> {
     ensure_supported_model_inference_provider(lane.provider, "synthesizer.provider")?;
@@ -204,7 +204,7 @@ fn build_planner_engine(
     workspace: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
-    lane: &PreparedModelLane,
+    lane: &PreparedModelClient,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn paddles::domain::ports::RecursivePlanner>> {
     ensure_supported_model_inference_provider(lane.provider, "planner_provider")?;
@@ -381,7 +381,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let root_path = env::current_dir()?;
     let conversation_history_store = Arc::new(ConversationHistoryStore::new());
-    let runtime_preference_store = Arc::new(RuntimeLanePreferenceStore::new());
+    let runtime_preference_store = Arc::new(TurnRuntimePreferenceStore::new());
     let runtime_preferences = match runtime_preference_store.load() {
         Ok(preferences) => preferences,
         Err(err) => {
@@ -544,7 +544,7 @@ async fn main() -> Result<()> {
     let synth_execution_hands = Arc::clone(&execution_hand_registry);
     let synth_transport_mediator = Arc::clone(&transport_mediator);
     let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
-        Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
+        Box::new(move |workspace: &Path, lane: &PreparedModelClient| {
             build_synthesizer_engine(
                 workspace,
                 Arc::clone(&synth_execution_hands),
@@ -558,7 +558,7 @@ async fn main() -> Result<()> {
     let planner_execution_hands = Arc::clone(&execution_hand_registry);
     let planner_transport_mediator = Arc::clone(&transport_mediator);
     let planner_factory: Box<paddles::application::PlannerFactory> =
-        Box::new(move |workspace: &Path, lane: &PreparedModelLane| {
+        Box::new(move |workspace: &Path, lane: &PreparedModelClient| {
             build_planner_engine(
                 workspace,
                 Arc::clone(&planner_execution_hands),
@@ -568,15 +568,15 @@ async fn main() -> Result<()> {
             )
         });
     let gatherer_factory: Box<paddles::application::GathererFactory> = Box::new(
-        |config: &RuntimeLaneConfig,
+        |config: &TurnRuntimeConfig,
          workspace: &Path,
          verbose: u8,
          gatherer_model_paths: Option<paddles::domain::ports::ModelPaths>|
-         -> Result<Option<(PreparedGathererLane, Arc<dyn ContextGatherer>)>> {
+         -> Result<Option<(PreparedRetrievalProvider, Arc<dyn ContextGatherer>)>> {
             match config.gatherer_provider() {
                 GathererProvider::Local => match config.gatherer_model_id() {
                     Some(model_id) => {
-                        let lane = PreparedGathererLane {
+                        let lane = PreparedRetrievalProvider {
                             provider: GathererProvider::Local,
                             label: model_id.to_string(),
                             model_id: Some(model_id.to_string()),
@@ -590,7 +590,7 @@ async fn main() -> Result<()> {
                     None => Ok(None),
                 },
                 GathererProvider::SiftDirect => {
-                    let lane = PreparedGathererLane {
+                    let lane = PreparedRetrievalProvider {
                         provider: GathererProvider::SiftDirect,
                         label: "sift-direct".to_string(),
                         model_id: None,
@@ -601,7 +601,7 @@ async fn main() -> Result<()> {
                     Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
                 }
                 GathererProvider::Context1 => {
-                    let lane = PreparedGathererLane {
+                    let lane = PreparedRetrievalProvider {
                         provider: GathererProvider::Context1,
                         label: "context-1".to_string(),
                         model_id: None,
@@ -693,16 +693,16 @@ async fn main() -> Result<()> {
             GathererProvider::Local => {}
         }
     }
-    let runtime_lanes = RuntimeLaneConfig::new(model.clone(), gatherer_model.clone())
+    let turn_runtime_config = TurnRuntimeConfig::new(model.clone(), gatherer_model.clone())
         .with_synthesizer_provider(provider)
         .with_synthesizer_thinking_mode(thinking_mode)
         .with_planner_model_id(planner_model.clone())
         .with_planner_provider(planner_provider)
         .with_gatherer_provider(gatherer_provider)
         .with_context1_harness_ready(context1_harness_ready);
-    let prepared_lanes = service.prepare_runtime_lanes(&runtime_lanes).await?;
+    let prepared_turn_runtime = service.prepare_turn_runtime(&turn_runtime_config).await?;
     if verbose >= 3 {
-        println!("[BOOT] Runtime lanes ready.");
+        println!("[BOOT] Turn runtime ready.");
     }
 
     let http_transport = &config.native_transports.http_request_response;
@@ -841,7 +841,7 @@ async fn main() -> Result<()> {
 
     if service_mode_enabled {
         let harness_posture = RuntimeHarnessCapabilityPostureService::project(
-            &prepared_lanes,
+            &prepared_turn_runtime,
             &service.external_capability_descriptors(),
         );
         let status = service_runtime_ready_status(
@@ -868,7 +868,7 @@ async fn main() -> Result<()> {
                 let tui_ctx = TuiContext {
                     credential_store: Arc::clone(&credential_store),
                     runtime_preference_store: Arc::clone(&runtime_preference_store),
-                    runtime_lanes: runtime_lanes.clone(),
+                    turn_runtime_config: turn_runtime_config.clone(),
                     web_server_addr,
                     verbose,
                 };
@@ -937,8 +937,8 @@ mod tests {
         resolve_provider_from_name, service_runtime_failure_status, service_runtime_ready_status,
     };
     use paddles::application::{
-        PreparedModelLane, PreparedRuntimeLanes, RuntimeHarnessCapabilityPostureService,
-        RuntimeLaneRole,
+        ModelClientRole, PreparedModelClient, PreparedTurnRuntime,
+        RuntimeHarnessCapabilityPostureService,
     };
     use paddles::domain::model::{
         ExecutionHandKind, ExecutionHandPhase, ExternalCapabilityCatalog,
@@ -949,7 +949,7 @@ mod tests {
     use paddles::infrastructure::credentials::CredentialStore;
     use paddles::infrastructure::execution_hand::ExecutionHandRegistry;
     use paddles::infrastructure::providers::ModelProvider;
-    use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
+    use paddles::infrastructure::runtime_preferences::TurnRuntimePreferenceStore;
     use paddles::infrastructure::transport_mediator::TransportToolMediator;
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -1043,8 +1043,8 @@ mod tests {
     fn action_selection_http_client_rejects_local_model_paths() {
         let workspace = tempdir().expect("workspace");
         let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Planner,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::ActionSelection,
             provider: ModelProvider::Ollama,
             model_id: "qwen3".to_string(),
             paths: Some(sample_model_paths("planner")),
@@ -1073,8 +1073,8 @@ mod tests {
     fn action_selection_client_builds_from_http_provider_configuration() {
         let workspace = tempdir().expect("workspace");
         let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Planner,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::ActionSelection,
             provider: ModelProvider::Ollama,
             model_id: "qwen3".to_string(),
             paths: None,
@@ -1094,8 +1094,8 @@ mod tests {
     fn action_selection_client_rejects_legacy_sift_provider_with_migration_hint() {
         let workspace = tempdir().expect("workspace");
         let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Planner,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::ActionSelection,
             provider: ModelProvider::Sift,
             model_id: "qwen-1.5b".to_string(),
             paths: None,
@@ -1124,8 +1124,8 @@ mod tests {
     fn final_rendering_http_client_rejects_local_model_paths() {
         let workspace = tempdir().expect("workspace");
         let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Synthesizer,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::FinalRendering,
             provider: ModelProvider::Ollama,
             model_id: "qwen3".to_string(),
             paths: Some(sample_model_paths("synthesizer")),
@@ -1153,8 +1153,8 @@ mod tests {
     fn final_rendering_client_builds_from_http_provider_configuration() {
         let workspace = tempdir().expect("workspace");
         let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Synthesizer,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::FinalRendering,
             provider: ModelProvider::Ollama,
             model_id: "qwen3".to_string(),
             paths: None,
@@ -1176,8 +1176,8 @@ mod tests {
         let credentials = tempdir().expect("credentials");
         let (execution_hand_registry, transport_mediator) =
             transport_mediator_with_empty_credentials_for_test(credentials.path());
-        let planner_lane = PreparedModelLane {
-            role: RuntimeLaneRole::Planner,
+        let planner_lane = PreparedModelClient {
+            role: ModelClientRole::ActionSelection,
             provider: ModelProvider::Ollama,
             model_id: "qwen3".to_string(),
             paths: None,
@@ -1204,8 +1204,8 @@ mod tests {
             planner_diagnostic.summary
         );
 
-        let synthesizer_lane = PreparedModelLane {
-            role: RuntimeLaneRole::Synthesizer,
+        let synthesizer_lane = PreparedModelClient {
+            role: ModelClientRole::FinalRendering,
             provider: ModelProvider::Ollama,
             model_id: "qwen3".to_string(),
             paths: None,
@@ -1235,7 +1235,7 @@ model = "gpt-5.4"
 "#,
         )
         .expect("write legacy runtime lane preferences");
-        let store = RuntimeLanePreferenceStore::with_migration_paths(
+        let store = TurnRuntimePreferenceStore::with_migration_paths(
             &turn_runtime_path,
             Some(&legacy_path),
         );
@@ -1253,8 +1253,8 @@ model = "gpt-5.4"
             .model
             .clone()
             .expect("migrated final rendering model");
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Synthesizer,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::FinalRendering,
             provider,
             model_id,
             paths: None,
@@ -1295,8 +1295,8 @@ model = "gpt-5.4"
     fn final_rendering_client_rejects_legacy_sift_provider_with_migration_hint() {
         let workspace = tempdir().expect("workspace");
         let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
-        let lane = PreparedModelLane {
-            role: RuntimeLaneRole::Synthesizer,
+        let lane = PreparedModelClient {
+            role: ModelClientRole::FinalRendering,
             provider: ModelProvider::Sift,
             model_id: "qwen-1.5b".to_string(),
             paths: None,
@@ -1396,15 +1396,15 @@ model = "gpt-5.4"
 
     #[test]
     fn runtime_entrypoint_smoke_exposes_harness_capability_configuration_posture() {
-        let prepared_lanes = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared_turn_runtime = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Google,
                 model_id: "gemini-2.5-flash".to_string(),
                 paths: None,
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
@@ -1417,7 +1417,7 @@ model = "gpt-5.4"
         .descriptors();
 
         let status = RuntimeHarnessCapabilityPostureService::project(
-            &prepared_lanes,
+            &prepared_turn_runtime,
             &external_capabilities,
         );
 

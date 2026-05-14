@@ -1238,7 +1238,7 @@ mod tests {
         ForensicTurnProjectionResponse, HealthResponse, conversation_forensics, parse_task_id,
         turn_forensics,
     };
-    use crate::application::{AgentRuntime, RuntimeLaneConfig};
+    use crate::application::{AgentRuntime, TurnRuntimeConfig};
     use crate::domain::model::NullTurnEventSink;
     use crate::domain::model::{
         ArtifactKind, ControlOperation, ControlResult, ControlResultStatus, ControlSubject,
@@ -1504,11 +1504,11 @@ mod tests {
             provider.base_url.clone(),
             recorder.clone(),
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
             .expect("prepare lanes");
         let registry = Arc::new(
@@ -1610,7 +1610,7 @@ mod tests {
 
         let synth_base_url = base_url.clone();
         let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
-            move |workspace: &FsPath, lane: &crate::application::PreparedModelLane| {
+            move |workspace: &FsPath, lane: &crate::application::PreparedModelClient| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     ModelProvider::Inception.name(),
@@ -1625,7 +1625,7 @@ mod tests {
 
         let planner_base_url = base_url;
         let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
-            move |workspace: &FsPath, lane: &crate::application::PreparedModelLane| {
+            move |workspace: &FsPath, lane: &crate::application::PreparedModelClient| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     ModelProvider::Inception.name(),
@@ -2018,11 +2018,11 @@ mod tests {
             server.base_url.clone(),
             recorder.clone(),
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
             .expect("prepare lanes");
 
@@ -2633,11 +2633,11 @@ mod tests {
             server.base_url.clone(),
             recorder.clone(),
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
             .expect("prepare lanes");
 
@@ -2801,11 +2801,11 @@ mod tests {
             server.base_url.clone(),
             recorder_one,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception));
         service_one
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
             .expect("prepare lanes");
 
@@ -2889,11 +2889,11 @@ mod tests {
             server.base_url.clone(),
             recorder_one,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception));
         service_one
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
             .expect("prepare lanes");
 
@@ -2973,11 +2973,11 @@ mod tests {
             server.base_url.clone(),
             recorder_one,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception));
         service_one
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
             .expect("prepare lanes");
 

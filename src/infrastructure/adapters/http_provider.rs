@@ -3903,7 +3903,7 @@ mod tests {
         PLANNER_ACTION_SCHEMA_BEGIN, PLANNER_ACTION_SCHEMA_END, PlannerActionSchemaVariant,
         render_planner_action_schema,
     };
-    use crate::application::{AgentRuntime, RuntimeLaneConfig};
+    use crate::application::{AgentRuntime, TurnRuntimeConfig};
     use crate::domain::model::DeliberationState;
     use crate::domain::model::{
         ExternalCapabilityInvocation, ForensicArtifactCapture, ForensicTraceSink,
@@ -4834,7 +4834,7 @@ mod tests {
         let synth_api_key = api_key.clone();
         let synth_provider_name = provider.name().to_string();
         let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
-            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
+            move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     synth_provider_name.clone(),
@@ -4851,7 +4851,7 @@ mod tests {
         let planner_api_key = api_key;
         let planner_provider_name = provider.name().to_string();
         let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
-            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
+            move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     planner_provider_name.clone(),
@@ -4892,7 +4892,7 @@ mod tests {
         let synth_api_key = api_key.clone();
         let synth_provider_name = provider.name().to_string();
         let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
-            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
+            move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     synth_provider_name.clone(),
@@ -4909,7 +4909,7 @@ mod tests {
         let planner_api_key = api_key;
         let planner_provider_name = provider.name().to_string();
         let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
-            move |workspace: &Path, lane: &crate::application::PreparedModelLane| {
+            move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
                     planner_provider_name.clone(),
@@ -4969,14 +4969,14 @@ mod tests {
             provider,
             format,
         );
-        let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new(model_id.to_string(), None)
             .with_synthesizer_provider(provider)
             .with_planner_provider(Some(provider))
             .with_planner_model_id(Some(model_id.to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let sink = Arc::new(RecordingTurnEventSink::default());
         let response = service
@@ -5165,7 +5165,7 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Openai,
             ApiFormat::OpenAi,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("gpt-5.4".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai)
             .with_synthesizer_thinking_mode(Some("high".to_string()))
             .with_planner_provider(Some(
@@ -5173,9 +5173,9 @@ mod tests {
             ))
             .with_planner_model_id(Some("gpt-5.4".to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let response = service
             .process_prompt("Sup dawg")
@@ -5255,7 +5255,7 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Inception,
             ApiFormat::OpenAi,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Inception)
             .with_synthesizer_thinking_mode(Some("instant".to_string()))
             .with_planner_provider(Some(
@@ -5263,9 +5263,9 @@ mod tests {
             ))
             .with_planner_model_id(Some("mercury-2".to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let response = service
             .process_prompt("Sup dawg")
@@ -5309,17 +5309,20 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Anthropic,
             ApiFormat::Anthropic,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("claude-sonnet-4-20250514".to_string(), None)
-            .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Anthropic)
-            .with_synthesizer_thinking_mode(Some("none".to_string()))
-            .with_planner_provider(Some(
-                crate::infrastructure::providers::ModelProvider::Anthropic,
-            ))
-            .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
+        let turn_runtime_config =
+            TurnRuntimeConfig::new("claude-sonnet-4-20250514".to_string(), None)
+                .with_synthesizer_provider(
+                    crate::infrastructure::providers::ModelProvider::Anthropic,
+                )
+                .with_synthesizer_thinking_mode(Some("none".to_string()))
+                .with_planner_provider(Some(
+                    crate::infrastructure::providers::ModelProvider::Anthropic,
+                ))
+                .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let response = service
             .process_prompt("Sup dawg")
@@ -5357,7 +5360,7 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Google,
             ApiFormat::Gemini,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("gemini-2.5-flash".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("gemini-2.5-flash".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Google)
             .with_synthesizer_thinking_mode(Some("high".to_string()))
             .with_planner_provider(Some(
@@ -5365,9 +5368,9 @@ mod tests {
             ))
             .with_planner_model_id(Some("gemini-2.5-flash".to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let response = service
             .process_prompt("Sup dawg")
@@ -5413,7 +5416,7 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Moonshot,
             ApiFormat::OpenAi,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("kimi-k2.6".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("kimi-k2.6".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Moonshot)
             .with_synthesizer_thinking_mode(Some("none".to_string()))
             .with_planner_provider(Some(
@@ -5421,9 +5424,9 @@ mod tests {
             ))
             .with_planner_model_id(Some("kimi-k2.6".to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let response = service
             .process_prompt("Sup dawg")
@@ -5464,7 +5467,7 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Ollama,
             ApiFormat::OpenAi,
         );
-        let qwen_runtime_lanes = RuntimeLaneConfig::new("qwen3".to_string(), None)
+        let qwen_turn_runtime_config = TurnRuntimeConfig::new("qwen3".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Ollama)
             .with_synthesizer_thinking_mode(Some("thinking".to_string()))
             .with_planner_provider(Some(
@@ -5472,9 +5475,9 @@ mod tests {
             ))
             .with_planner_model_id(Some("qwen3".to_string()));
         qwen_service
-            .prepare_runtime_lanes(&qwen_runtime_lanes)
+            .prepare_turn_runtime(&qwen_turn_runtime_config)
             .await
-            .expect("prepare qwen runtime lanes");
+            .expect("prepare qwen turn runtime");
         qwen_service
             .process_prompt("Sup dawg")
             .await
@@ -5501,7 +5504,7 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Ollama,
             ApiFormat::OpenAi,
         );
-        let gpt_oss_runtime_lanes = RuntimeLaneConfig::new("gpt-oss:20b".to_string(), None)
+        let gpt_oss_turn_runtime_config = TurnRuntimeConfig::new("gpt-oss:20b".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Ollama)
             .with_synthesizer_thinking_mode(Some("high".to_string()))
             .with_planner_provider(Some(
@@ -5509,9 +5512,9 @@ mod tests {
             ))
             .with_planner_model_id(Some("gpt-oss:20b".to_string()));
         gpt_oss_service
-            .prepare_runtime_lanes(&gpt_oss_runtime_lanes)
+            .prepare_turn_runtime(&gpt_oss_turn_runtime_config)
             .await
-            .expect("prepare gpt-oss runtime lanes");
+            .expect("prepare gpt-oss turn runtime");
         gpt_oss_service
             .process_prompt("Sup dawg")
             .await
@@ -5633,12 +5636,12 @@ mod tests {
             ApiFormat::OpenAi,
             recorder.clone(),
         );
-        let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new(model_id.to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai);
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         service
             .process_prompt("Sup dawg")
@@ -5732,16 +5735,16 @@ mod tests {
             ApiFormat::OpenAi,
             recorder.clone(),
         );
-        let runtime_lanes = RuntimeLaneConfig::new(model_id.to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new(model_id.to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Inception)
             .with_planner_provider(Some(
                 crate::infrastructure::providers::ModelProvider::Inception,
             ))
             .with_planner_model_id(Some(model_id.to_string()));
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         service
             .process_prompt("Sup dawg")
@@ -7667,12 +7670,12 @@ mod tests {
             crate::infrastructure::providers::ModelProvider::Openai,
             ApiFormat::OpenAi,
         );
-        let runtime_lanes = RuntimeLaneConfig::new("kimi-k2.5".to_string(), None)
+        let turn_runtime_config = TurnRuntimeConfig::new("kimi-k2.5".to_string(), None)
             .with_synthesizer_provider(crate::infrastructure::providers::ModelProvider::Openai);
         service
-            .prepare_runtime_lanes(&runtime_lanes)
+            .prepare_turn_runtime(&turn_runtime_config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let err = service
             .process_prompt("Sup dawg")

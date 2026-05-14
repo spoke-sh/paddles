@@ -541,7 +541,7 @@ mod tests {
                 retained_artifacts: vec![RetainedEvidence {
                     source: "src/application/mod.rs".into(),
                     snippet: Some(
-                        "PreparedRuntimeLanes keeps synthesizer and gatherer lanes.".into(),
+                        "PreparedTurnRuntime keeps synthesizer and gatherer lanes.".into(),
                     ),
                     rationale: Some("Carry the runtime lane wiring into the next step.".into()),
                     locator: None,

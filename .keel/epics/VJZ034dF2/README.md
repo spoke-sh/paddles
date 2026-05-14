@@ -23,12 +23,12 @@ mission: VJZ8ABnX2
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 4/5 voyages complete, 13/16 stories done
+**Progress:** 4/5 voyages complete, 14/16 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Adopt HTTP-Only Inference Decision](voyages/VJZ8Bws9Z/) | done | 3/3 |
 | [Route Runtime Inference Through HTTP Model Clients](voyages/VJZ8CYrLb/) | done | 3/3 |
 | [Migrate Provider Preferences To Turn Runtime Config](voyages/VJZ8DAKbC/) | done | 4/4 |
 | [Remove In-Process Sift Inference Code](voyages/VJZ8DqFnJ/) | done | 3/3 |
-| [Collapse Runtime Lane Terminology](voyages/VJZ8ERr2f/) | planned | 0/3 |
+| [Collapse Runtime Lane Terminology](voyages/VJZ8ERr2f/) | in-progress | 1/3 |
 <!-- END GENERATED -->

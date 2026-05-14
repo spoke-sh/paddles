@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-05-13T22:56:40.551405764-07:00
+command: sh -lc 'cd "$(git rev-parse --show-toplevel)" && ! rg -n "RuntimeLaneConfig|PreparedRuntimeLanes|PreparedModelLane|PreparedGathererLane|RuntimeLaneRole|prepare_runtime_lanes|prepared_runtime_lanes|default_response_lane|default_response_role|build_lane|from_runtime_lanes" src'
+---

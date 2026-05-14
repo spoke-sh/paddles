@@ -132,11 +132,11 @@ use tokio::sync::RwLock;
 
 /// Factory that constructs a synthesizer engine for a given model ID.
 pub type SynthesizerFactory =
-    dyn Fn(&Path, &PreparedModelLane) -> Result<Arc<dyn SynthesizerEngine>> + Send + Sync;
+    dyn Fn(&Path, &PreparedModelClient) -> Result<Arc<dyn SynthesizerEngine>> + Send + Sync;
 
 /// Factory that constructs a recursive planner for a given model ID.
 pub type PlannerFactory =
-    dyn Fn(&Path, &PreparedModelLane) -> Result<Arc<dyn RecursivePlanner>> + Send + Sync;
+    dyn Fn(&Path, &PreparedModelClient) -> Result<Arc<dyn RecursivePlanner>> + Send + Sync;
 
 /// Factory that constructs an optional gatherer from runtime configuration.
 ///
@@ -144,11 +144,11 @@ pub type PlannerFactory =
 /// `gatherer_model_paths` is retained for adapter compatibility and is no
 /// longer populated by the turn runtime.
 pub type GathererFactory = dyn Fn(
-        &RuntimeLaneConfig,
+        &TurnRuntimeConfig,
         &Path,
         u8,
         Option<ModelPaths>,
-    ) -> Result<Option<(PreparedGathererLane, Arc<dyn ContextGatherer>)>>
+    ) -> Result<Option<(PreparedRetrievalProvider, Arc<dyn ContextGatherer>)>>
     + Send
     + Sync;
 
@@ -179,10 +179,9 @@ pub struct AgentRuntime {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RuntimeLaneRole {
-    Planner,
-    Synthesizer,
-    Gatherer,
+pub enum ModelClientRole {
+    ActionSelection,
+    FinalRendering,
 }
 
 pub const LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT: &str = "provider `sift` no longer performs model inference; run a local HTTP model service such as Ollama and select `ollama:<model>`.";
@@ -214,7 +213,7 @@ pub enum GathererProvider {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeLaneConfig {
+pub struct TurnRuntimeConfig {
     synthesizer_provider: ModelProvider,
     planner_model_id: Option<String>,
     planner_provider: Option<ModelProvider>,
@@ -225,7 +224,7 @@ pub struct RuntimeLaneConfig {
     context1_harness_ready: bool,
 }
 
-impl RuntimeLaneConfig {
+impl TurnRuntimeConfig {
     pub fn new(synthesizer_model_id: impl Into<String>, gatherer_model_id: Option<String>) -> Self {
         Self {
             synthesizer_provider: ModelProvider::Sift,
@@ -305,27 +304,27 @@ impl RuntimeLaneConfig {
         self.context1_harness_ready
     }
 
-    pub fn default_response_role(&self) -> RuntimeLaneRole {
-        RuntimeLaneRole::Synthesizer
+    pub fn default_final_rendering_role(&self) -> ModelClientRole {
+        ModelClientRole::FinalRendering
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreparedModelLane {
-    pub role: RuntimeLaneRole,
+pub struct PreparedModelClient {
+    pub role: ModelClientRole,
     pub provider: ModelProvider,
     pub model_id: String,
     pub paths: Option<ModelPaths>,
 }
 
-impl PreparedModelLane {
+impl PreparedModelClient {
     pub fn qualified_model_label(&self) -> String {
         self.provider.qualified_model_label(&self.model_id)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreparedGathererLane {
+pub struct PreparedRetrievalProvider {
     pub provider: GathererProvider,
     pub label: String,
     pub model_id: Option<String>,
@@ -333,14 +332,14 @@ pub struct PreparedGathererLane {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreparedRuntimeLanes {
-    pub planner: PreparedModelLane,
-    pub synthesizer: PreparedModelLane,
-    pub gatherer: Option<PreparedGathererLane>,
+pub struct PreparedTurnRuntime {
+    pub planner: PreparedModelClient,
+    pub synthesizer: PreparedModelClient,
+    pub gatherer: Option<PreparedRetrievalProvider>,
 }
 
-impl PreparedRuntimeLanes {
-    pub fn default_response_lane(&self) -> &PreparedModelLane {
+impl PreparedTurnRuntime {
+    pub fn default_response_client(&self) -> &PreparedModelClient {
         &self.synthesizer
     }
 
@@ -359,7 +358,7 @@ impl PreparedRuntimeLanes {
 }
 
 struct ActiveRuntimeState {
-    prepared: PreparedRuntimeLanes,
+    prepared: PreparedTurnRuntime,
     planner_engine: Arc<dyn RecursivePlanner>,
     synthesizer_engine: Arc<dyn SynthesizerEngine>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
@@ -384,7 +383,7 @@ impl Drop for ActiveTurnGuard {
 }
 
 struct PlannerLoopContext {
-    prepared: PreparedRuntimeLanes,
+    prepared: PreparedTurnRuntime,
     planner_engine: Arc<dyn RecursivePlanner>,
     gatherer: Option<Arc<dyn ContextGatherer>>,
     resolver: Arc<dyn ContextResolver>,
@@ -557,7 +556,7 @@ impl StructuredTurnTrace {
         &self,
         prompt: &str,
         interpretation: &InterpretationContext,
-        prepared: &PreparedRuntimeLanes,
+        prepared: &PreparedTurnRuntime,
     ) {
         let prompt_artifact = self.text_artifact(
             ArtifactKind::Prompt,
@@ -2965,13 +2964,13 @@ impl AgentRuntime {
         BootContext::new(credits, weight, bias, hf_token, reality_mode)
     }
 
-    fn build_lane(
-        role: RuntimeLaneRole,
+    fn build_model_client(
+        role: ModelClientRole,
         provider: ModelProvider,
         model_id: impl Into<String>,
         paths: Option<ModelPaths>,
-    ) -> PreparedModelLane {
-        PreparedModelLane {
+    ) -> PreparedModelClient {
+        PreparedModelClient {
             role,
             provider,
             model_id: model_id.into(),
@@ -2979,11 +2978,11 @@ impl AgentRuntime {
         }
     }
 
-    /// Prepare the configured runtime lanes for inference.
-    pub async fn prepare_runtime_lanes(
+    /// Prepare the configured turn runtime for inference.
+    pub async fn prepare_turn_runtime(
         &self,
-        config: &RuntimeLaneConfig,
-    ) -> Result<PreparedRuntimeLanes> {
+        config: &TurnRuntimeConfig,
+    ) -> Result<PreparedTurnRuntime> {
         ensure_supported_model_inference_provider(
             config.synthesizer_provider(),
             "synthesizer.provider",
@@ -3005,14 +3004,14 @@ impl AgentRuntime {
         .flatten();
         let planner_prepared_model_id =
             planner_provider.prepare_runtime_model_id(&planner_model_id, planner_thinking_mode);
-        let planner = Self::build_lane(
-            RuntimeLaneRole::Planner,
+        let planner = Self::build_model_client(
+            ModelClientRole::ActionSelection,
             planner_provider,
             planner_prepared_model_id,
             None,
         );
-        let synthesizer = Self::build_lane(
-            RuntimeLaneRole::Synthesizer,
+        let synthesizer = Self::build_model_client(
+            ModelClientRole::FinalRendering,
             config.synthesizer_provider(),
             synthesizer_prepared_model_id,
             None,
@@ -3029,7 +3028,7 @@ impl AgentRuntime {
             None => (None, None),
         };
 
-        let prepared = PreparedRuntimeLanes {
+        let prepared = PreparedTurnRuntime {
             planner,
             synthesizer,
             gatherer: prepared_gatherer,
@@ -3611,7 +3610,7 @@ fn turn_control_result_for_request(
     }
 }
 
-fn fallback_execution_plan(prepared: &PreparedRuntimeLanes) -> PromptExecutionPlan {
+fn fallback_execution_plan(prepared: &PreparedTurnRuntime) -> PromptExecutionPlan {
     PromptExecutionPlan {
         intent: TurnIntent::DirectResponse,
         path: PromptExecutionPath::SynthesizerOnly,
@@ -4143,7 +4142,7 @@ fn blocked_instruction_response(frame: &InstructionFrame) -> AuthoredResponse {
 }
 
 fn execution_plan_from_initial_action(
-    prepared: &PreparedRuntimeLanes,
+    prepared: &PreparedTurnRuntime,
     decision: InitialActionDecision,
 ) -> PromptExecutionPlan {
     let InitialActionDecision {
@@ -6796,7 +6795,7 @@ fn stop_reason_direct_answer(reason: &str, answer: Option<String>) -> Option<Aut
 }
 
 fn build_planner_evidence_bundle(
-    prepared: &PreparedRuntimeLanes,
+    prepared: &PreparedTurnRuntime,
     prompt: &str,
     loop_state: &PlannerLoopState,
     completed: bool,
@@ -6958,9 +6957,9 @@ fn normalize_event_source(workspace_root: &std::path::Path, source: &str) -> Str
 mod tests {
     use crate::application::{
         ActiveRuntimeState, AgentRuntime, DeliberationContinuation, DeliberationSignal,
-        DeliberationSignals, GathererProvider, POLICY_VIOLATION_DIRECT_REPLY, PreparedGathererLane,
-        PreparedModelLane, PreparedRuntimeLanes, RuntimeLaneConfig, RuntimeLaneRole,
-        StructuredTurnTrace, TurnIntent, budget_signal_details, render_turn_event,
+        DeliberationSignals, GathererProvider, ModelClientRole, POLICY_VIOLATION_DIRECT_REPLY,
+        PreparedModelClient, PreparedRetrievalProvider, PreparedTurnRuntime, StructuredTurnTrace,
+        TurnIntent, TurnRuntimeConfig, budget_signal_details, render_turn_event,
     };
     use crate::domain::model::DeliberationState;
     use crate::domain::model::{
@@ -7054,15 +7053,15 @@ mod tests {
 
     async fn install_direct_answer_runtime(service: &AgentRuntime) {
         *service.runtime.write().await = Some(ActiveRuntimeState {
-            prepared: PreparedRuntimeLanes {
-                planner: PreparedModelLane {
-                    role: RuntimeLaneRole::Planner,
+            prepared: PreparedTurnRuntime {
+                planner: PreparedModelClient {
+                    role: ModelClientRole::ActionSelection,
                     provider: ModelProvider::Sift,
                     model_id: "planner".to_string(),
                     paths: Some(sample_model_paths("planner")),
                 },
-                synthesizer: PreparedModelLane {
-                    role: RuntimeLaneRole::Synthesizer,
+                synthesizer: PreparedModelClient {
+                    role: ModelClientRole::FinalRendering,
                     provider: ModelProvider::Sift,
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
@@ -7762,16 +7761,16 @@ mod tests {
         }
     }
 
-    fn prepared_runtime_lanes_for_tests() -> PreparedRuntimeLanes {
-        PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+    fn prepared_turn_runtime_for_tests() -> PreparedTurnRuntime {
+        PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -7808,15 +7807,15 @@ mod tests {
         initial_edit: InitialEditInstruction,
     ) -> super::PlannerLoopContext {
         super::PlannerLoopContext {
-            prepared: PreparedRuntimeLanes {
-                planner: PreparedModelLane {
-                    role: RuntimeLaneRole::Planner,
+            prepared: PreparedTurnRuntime {
+                planner: PreparedModelClient {
+                    role: ModelClientRole::ActionSelection,
                     provider: ModelProvider::Sift,
                     model_id: "planner".to_string(),
                     paths: Some(sample_model_paths("planner")),
                 },
-                synthesizer: PreparedModelLane {
-                    role: RuntimeLaneRole::Synthesizer,
+                synthesizer: PreparedModelClient {
+                    role: ModelClientRole::FinalRendering,
                     provider: ModelProvider::Sift,
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
@@ -7848,10 +7847,13 @@ mod tests {
     }
 
     #[test]
-    fn runtime_lane_config_defaults_to_synthesizer_responses() {
-        let config = RuntimeLaneConfig::new("qwen-1.5b", None);
+    fn turn_runtime_config_defaults_to_final_rendering_responses() {
+        let config = TurnRuntimeConfig::new("qwen-1.5b", None);
 
-        assert_eq!(config.default_response_role(), RuntimeLaneRole::Synthesizer);
+        assert_eq!(
+            config.default_final_rendering_role(),
+            ModelClientRole::FinalRendering
+        );
         assert_eq!(config.synthesizer_model_id(), "qwen-1.5b");
         assert_eq!(config.gatherer_model_id(), None);
         assert_eq!(config.gatherer_provider(), GathererProvider::SiftDirect);
@@ -7859,7 +7861,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_rejects_legacy_sift_synthesizer_before_construction() {
+    async fn prepare_turn_runtime_rejects_legacy_sift_synthesizer_before_construction() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
@@ -7890,9 +7892,9 @@ mod tests {
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
-        let config = RuntimeLaneConfig::new("qwen-1.5b".to_string(), None);
+        let config = TurnRuntimeConfig::new("qwen-1.5b".to_string(), None);
 
-        let error = match service.prepare_runtime_lanes(&config).await {
+        let error = match service.prepare_turn_runtime(&config).await {
             Ok(_) => panic!("legacy sift synthesizer provider should fail"),
             Err(error) => error,
         };
@@ -7919,7 +7921,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction() {
+    async fn prepare_turn_runtime_rejects_legacy_sift_planner_before_construction() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
@@ -7950,12 +7952,12 @@ mod tests {
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
-        let config = RuntimeLaneConfig::new("gpt-4o".to_string(), None)
+        let config = TurnRuntimeConfig::new("gpt-4o".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Openai)
             .with_planner_provider(Some(ModelProvider::Sift))
             .with_planner_model_id(Some("qwen-1.5b".to_string()));
 
-        let error = match service.prepare_runtime_lanes(&config).await {
+        let error = match service.prepare_turn_runtime(&config).await {
             Ok(_) => panic!("legacy sift planner provider should fail"),
             Err(error) => error,
         };
@@ -7982,11 +7984,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_treats_inception_as_remote_http_lane_without_local_paths() {
+    async fn prepare_turn_runtime_treats_inception_as_remote_http_client_without_local_paths() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelClient>));
         let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
         let service = AgentRuntime::new(
             workspace.path(),
@@ -8007,15 +8009,15 @@ mod tests {
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
-        let config = RuntimeLaneConfig::new("mercury-2".to_string(), None)
+        let config = TurnRuntimeConfig::new("mercury-2".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Inception)
             .with_planner_provider(Some(ModelProvider::Inception))
             .with_planner_model_id(Some("mercury-2".to_string()));
 
         let prepared = service
-            .prepare_runtime_lanes(&config)
+            .prepare_turn_runtime(&config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         assert_eq!(prepared.synthesizer.provider, ModelProvider::Inception);
         assert_eq!(prepared.synthesizer.paths, None);
@@ -8037,12 +8039,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_preserves_sift_direct_retrieval_with_http_inference() {
+    async fn prepare_turn_runtime_preserves_sift_direct_retrieval_with_http_inference() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
-        let captured_planner_lane = Arc::new(Mutex::new(None::<PreparedModelLane>));
+        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelClient>));
+        let captured_planner_lane = Arc::new(Mutex::new(None::<PreparedModelClient>));
         let captured_gatherer_input =
             Arc::new(Mutex::new(None::<(GathererProvider, Option<ModelPaths>)>));
         let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
@@ -8072,7 +8074,7 @@ mod tests {
                     .expect("captured gatherer input lock") =
                     Some((config.gatherer_provider(), gatherer_model_paths));
                 Ok(Some((
-                    PreparedGathererLane {
+                    PreparedRetrievalProvider {
                         provider: GathererProvider::SiftDirect,
                         label: "sift-direct".to_string(),
                         model_id: None,
@@ -8085,16 +8087,16 @@ mod tests {
                 )))
             }),
         );
-        let config = RuntimeLaneConfig::new("qwen3".to_string(), None)
+        let config = TurnRuntimeConfig::new("qwen3".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Ollama)
             .with_planner_provider(Some(ModelProvider::Openai))
             .with_planner_model_id(Some("gpt-4o".to_string()))
             .with_gatherer_provider(GathererProvider::SiftDirect);
 
         let prepared = service
-            .prepare_runtime_lanes(&config)
+            .prepare_turn_runtime(&config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         assert_eq!(prepared.synthesizer.provider, ModelProvider::Ollama);
         assert_eq!(prepared.synthesizer.paths, None);
@@ -8139,7 +8141,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_preserves_local_gatherer_without_model_loading() {
+    async fn prepare_turn_runtime_preserves_local_gatherer_without_model_loading() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
@@ -8170,7 +8172,7 @@ mod tests {
                     .expect("captured gatherer input lock") =
                     Some((config.gatherer_provider(), gatherer_model_paths.clone()));
                 Ok(Some((
-                    PreparedGathererLane {
+                    PreparedRetrievalProvider {
                         provider: GathererProvider::Local,
                         label: "retrieval-qwen".to_string(),
                         model_id: Some("retrieval-qwen".to_string()),
@@ -8184,16 +8186,16 @@ mod tests {
             }),
         );
         let config =
-            RuntimeLaneConfig::new("qwen3".to_string(), Some("retrieval-qwen".to_string()))
+            TurnRuntimeConfig::new("qwen3".to_string(), Some("retrieval-qwen".to_string()))
                 .with_synthesizer_provider(ModelProvider::Ollama)
                 .with_planner_provider(Some(ModelProvider::Anthropic))
                 .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()))
                 .with_gatherer_provider(GathererProvider::Local);
 
         let prepared = service
-            .prepare_runtime_lanes(&config)
+            .prepare_turn_runtime(&config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
         assert_eq!(
@@ -8216,7 +8218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_resolves_structured_harness_profile_without_downgrade() {
+    async fn prepare_turn_runtime_resolves_structured_harness_profile_without_downgrade() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
@@ -8236,15 +8238,15 @@ mod tests {
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
-        let config = RuntimeLaneConfig::new("gpt-5.4".to_string(), None)
+        let config = TurnRuntimeConfig::new("gpt-5.4".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Openai)
             .with_planner_provider(Some(ModelProvider::Google))
             .with_planner_model_id(Some("gemini-2.5-flash".to_string()));
 
         let prepared = service
-            .prepare_runtime_lanes(&config)
+            .prepare_turn_runtime(&config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let selection = prepared.harness_profile();
         assert_eq!(selection.requested.id(), "recursive-structured-v1");
@@ -8253,7 +8255,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_runtime_lanes_downgrades_harness_profile_when_prompt_envelopes_are_required() {
+    async fn prepare_turn_runtime_downgrades_harness_profile_when_prompt_envelopes_are_required() {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
@@ -8273,15 +8275,15 @@ mod tests {
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
-        let config = RuntimeLaneConfig::new("claude-sonnet-4-20250514".to_string(), None)
+        let config = TurnRuntimeConfig::new("claude-sonnet-4-20250514".to_string(), None)
             .with_synthesizer_provider(ModelProvider::Anthropic)
             .with_planner_provider(Some(ModelProvider::Anthropic))
             .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string()));
 
         let prepared = service
-            .prepare_runtime_lanes(&config)
+            .prepare_turn_runtime(&config)
             .await
-            .expect("prepare runtime lanes");
+            .expect("prepare turn runtime");
 
         let selection = prepared.harness_profile();
         assert_eq!(selection.requested.id(), "recursive-structured-v1");
@@ -8293,38 +8295,38 @@ mod tests {
     }
 
     #[test]
-    fn prepared_runtime_lanes_keep_synthesizer_as_default_response_lane() {
-        let planner = AgentRuntime::build_lane(
-            RuntimeLaneRole::Planner,
+    fn prepared_turn_runtime_keeps_final_rendering_as_default_response_client() {
+        let planner = AgentRuntime::build_model_client(
+            ModelClientRole::ActionSelection,
             ModelProvider::Sift,
             "qwen-1.5b",
             Some(sample_model_paths("planner")),
         );
-        let synthesizer = AgentRuntime::build_lane(
-            RuntimeLaneRole::Synthesizer,
+        let synthesizer = AgentRuntime::build_model_client(
+            ModelClientRole::FinalRendering,
             ModelProvider::Sift,
             "qwen-1.5b",
             Some(sample_model_paths("synth")),
         );
-        let gatherer = PreparedGathererLane {
+        let gatherer = PreparedRetrievalProvider {
             provider: GathererProvider::Local,
             label: "qwen-7b".to_string(),
             model_id: Some("qwen-7b".to_string()),
             paths: Some(sample_model_paths("gather")),
         };
-        let lanes = PreparedRuntimeLanes {
+        let lanes = PreparedTurnRuntime {
             planner,
             synthesizer: synthesizer.clone(),
             gatherer: Some(gatherer.clone()),
         };
 
-        assert_eq!(lanes.default_response_lane(), &synthesizer);
+        assert_eq!(lanes.default_response_client(), &synthesizer);
         assert_eq!(lanes.gatherer.as_ref(), Some(&gatherer));
     }
 
     #[test]
     fn context1_boundary_can_be_prepared_without_local_model_paths() {
-        let gatherer = PreparedGathererLane {
+        let gatherer = PreparedRetrievalProvider {
             provider: GathererProvider::Context1,
             label: "context-1".to_string(),
             model_id: None,
@@ -8339,7 +8341,7 @@ mod tests {
 
     #[test]
     fn sift_direct_boundary_can_be_prepared_without_local_model_paths() {
-        let gatherer = PreparedGathererLane {
+        let gatherer = PreparedRetrievalProvider {
             provider: GathererProvider::SiftDirect,
             label: "sift-direct".to_string(),
             model_id: None,
@@ -8354,15 +8356,15 @@ mod tests {
 
     #[test]
     fn answer_initial_actions_enter_loop_for_terminal_response() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -8392,15 +8394,15 @@ mod tests {
 
     #[test]
     fn explicit_workspace_initial_actions_route_to_the_planner_loop() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -8427,20 +8429,20 @@ mod tests {
 
     #[test]
     fn resource_initial_actions_route_to_the_planner_loop() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedGathererLane {
+            gatherer: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -8468,15 +8470,15 @@ mod tests {
 
     #[test]
     fn stop_initial_actions_enter_loop_for_terminal_response() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -8501,15 +8503,15 @@ mod tests {
 
     #[test]
     fn first_action_does_not_bypass_agent_loop() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -8558,15 +8560,15 @@ mod tests {
 
     #[test]
     fn first_agent_action_terminal_answer_and_stop() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -8662,15 +8664,15 @@ mod tests {
 
     #[test]
     fn first_agent_action_executes_as_loop_step_zero() {
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -8781,7 +8783,7 @@ mod tests {
 
     #[test]
     fn unified_loop_preserves_known_edit_instruction_frame() {
-        let prepared = prepared_runtime_lanes_for_tests();
+        let prepared = prepared_turn_runtime_for_tests();
         let edit = InitialEditInstruction {
             known_edit: true,
             candidate_files: vec![
@@ -8885,7 +8887,7 @@ mod tests {
 
     #[test]
     fn unified_loop_fail_closed_paths() {
-        let prepared = prepared_runtime_lanes_for_tests();
+        let prepared = prepared_turn_runtime_for_tests();
         let fallback = super::fallback_execution_plan(&prepared);
         assert_eq!(fallback.path, super::PromptExecutionPath::SynthesizerOnly);
         assert!(fallback.route_summary.contains("planner lane"));
@@ -9227,15 +9229,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -9398,15 +9400,15 @@ mod tests {
     fn external_capability_governance_blocks_network_access_before_broker_invocation() {
         let workspace = tempfile::tempdir().expect("workspace");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -9593,15 +9595,15 @@ mod tests {
     fn external_capability_actions_remain_useful_when_the_fabric_is_disabled() {
         let workspace = tempfile::tempdir().expect("workspace");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -9712,15 +9714,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -9878,15 +9880,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -9974,15 +9976,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -10077,15 +10079,15 @@ mod tests {
         let turn_id = session.allocate_turn_id();
         let active_thread = session.active_thread().thread_ref;
         let recorder = Arc::new(InMemoryTraceRecorder::default());
-        let prepared = PreparedRuntimeLanes {
-            planner: AgentRuntime::build_lane(
-                RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: AgentRuntime::build_model_client(
+                ModelClientRole::ActionSelection,
                 ModelProvider::Anthropic,
                 "claude-sonnet-4-20250514",
                 None,
             ),
-            synthesizer: AgentRuntime::build_lane(
-                RuntimeLaneRole::Synthesizer,
+            synthesizer: AgentRuntime::build_model_client(
+                ModelClientRole::FinalRendering,
                 ModelProvider::Anthropic,
                 "claude-sonnet-4-20250514",
                 None,
@@ -10168,15 +10170,15 @@ mod tests {
             turn_id.clone(),
             ConversationThreadRef::Mainline,
         ));
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -10350,15 +10352,15 @@ mod tests {
             turn_id,
             ConversationThreadRef::Mainline,
         ));
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -10681,15 +10683,15 @@ mod tests {
         service_one.set_conversation_history_store(Arc::clone(&history_store));
         let planner_requests_one = Arc::new(Mutex::new(Vec::new()));
         *service_one.runtime.write().await = Some(ActiveRuntimeState {
-            prepared: PreparedRuntimeLanes {
-                planner: PreparedModelLane {
-                    role: RuntimeLaneRole::Planner,
+            prepared: PreparedTurnRuntime {
+                planner: PreparedModelClient {
+                    role: ModelClientRole::ActionSelection,
                     provider: ModelProvider::Sift,
                     model_id: "planner".to_string(),
                     paths: Some(sample_model_paths("planner")),
                 },
-                synthesizer: PreparedModelLane {
-                    role: RuntimeLaneRole::Synthesizer,
+                synthesizer: PreparedModelClient {
+                    role: ModelClientRole::FinalRendering,
                     provider: ModelProvider::Sift,
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
@@ -10718,15 +10720,15 @@ mod tests {
         service_two.set_conversation_history_store(Arc::clone(&history_store));
         let planner_requests_two = Arc::new(Mutex::new(Vec::new()));
         *service_two.runtime.write().await = Some(ActiveRuntimeState {
-            prepared: PreparedRuntimeLanes {
-                planner: PreparedModelLane {
-                    role: RuntimeLaneRole::Planner,
+            prepared: PreparedTurnRuntime {
+                planner: PreparedModelClient {
+                    role: ModelClientRole::ActionSelection,
                     provider: ModelProvider::Sift,
                     model_id: "planner".to_string(),
                     paths: Some(sample_model_paths("planner")),
                 },
-                synthesizer: PreparedModelLane {
-                    role: RuntimeLaneRole::Synthesizer,
+                synthesizer: PreparedModelClient {
+                    role: ModelClientRole::FinalRendering,
                     provider: ModelProvider::Sift,
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
@@ -10773,15 +10775,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -10858,15 +10860,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -10941,15 +10943,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11129,15 +11131,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11240,15 +11242,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11333,15 +11335,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11436,15 +11438,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11560,15 +11562,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11695,15 +11697,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11802,15 +11804,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -11901,15 +11903,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -12252,15 +12254,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
@@ -12323,20 +12325,20 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedGathererLane {
+            gatherer: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -12748,20 +12750,20 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedGathererLane {
+            gatherer: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -12956,15 +12958,15 @@ mod tests {
         .expect("write app file");
         fs::write(workspace.path().join("README.md"), "# Docs\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -13143,15 +13145,15 @@ mod tests {
         )
         .expect("write css");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -13280,20 +13282,20 @@ mod tests {
         fs::write(workspace.path().join("src/one.rs"), "fn one() {}\n").expect("write one");
         fs::write(workspace.path().join("src/two.rs"), "fn two() {}\n").expect("write two");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedGathererLane {
+            gatherer: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -13743,15 +13745,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -13827,15 +13829,15 @@ mod tests {
     fn shell_actions_stream_terminal_output_before_completion() {
         let workspace = tempfile::tempdir().expect("workspace");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -13943,15 +13945,15 @@ mod tests {
     fn failed_shell_actions_stay_in_the_loop_as_evidence_for_recovery() {
         let workspace = tempfile::tempdir().expect("workspace");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14043,15 +14045,15 @@ mod tests {
     fn workspace_editor_edits_emit_applied_edit_events() {
         let workspace = tempfile::tempdir().expect("workspace");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14176,15 +14178,15 @@ mod tests {
         }
 
         let workspace = tempfile::tempdir().expect("workspace");
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14294,15 +14296,15 @@ mod tests {
         }
 
         let workspace = tempfile::tempdir().expect("workspace");
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14438,15 +14440,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14513,15 +14515,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14577,15 +14579,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14650,15 +14652,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14720,15 +14722,15 @@ mod tests {
         )
         .expect("write css");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -14836,15 +14838,15 @@ mod tests {
         let css_path = workspace.path().join("apps/web/src/runtime-shell.css");
         fs::write(&css_path, ".runtime-shell-host {\n  padding: 0;\n}\n").expect("write css");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15037,15 +15039,15 @@ mod tests {
         )
         .expect("write working change");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15186,15 +15188,15 @@ mod tests {
         )
         .expect("write css");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15318,15 +15320,15 @@ mod tests {
         let css_path = workspace.path().join("apps/web/src/runtime-shell.css");
         fs::write(&css_path, ".runtime-shell-host {\n  padding: 0;\n}\n").expect("write css");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15437,15 +15439,15 @@ mod tests {
         )
         .expect("write runtime store");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15630,15 +15632,15 @@ mod tests {
         )
         .expect("write runtime app");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15880,15 +15882,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -15939,15 +15941,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16026,15 +16028,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16091,15 +16093,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16206,15 +16208,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16299,15 +16301,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16405,15 +16407,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16485,15 +16487,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16584,15 +16586,15 @@ mod tests {
         )
         .expect("write generative module");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16728,15 +16730,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -16895,15 +16897,15 @@ mod tests {
         )
         .expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -17018,15 +17020,15 @@ mod tests {
             fs::set_permissions(&gh_path, permissions).expect("chmod fake gh");
         }
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -17387,20 +17389,20 @@ mod tests {
         }
 
         let workspace = tempfile::tempdir().expect("workspace");
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedGathererLane {
+            gatherer: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -17464,15 +17466,15 @@ mod tests {
         );
         service.trace_counter.store(3, Ordering::Relaxed);
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Openai,
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
@@ -17522,15 +17524,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let service = test_service(workspace.path());
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Anthropic,
                 model_id: "claude-sonnet-4-20250514".to_string(),
                 paths: None,
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "qwen-1.5b".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -17984,15 +17986,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -18133,15 +18135,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -18245,15 +18247,15 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
@@ -18381,15 +18383,15 @@ mod tests {
             Use the raw `keel` CLI directly. Run `keel mission show <id>` to inspect a mission.\n";
         fs::write(workspace.path().join("AGENTS.md"), agents_md).expect("write AGENTS.md");
 
-        let prepared = PreparedRuntimeLanes {
-            planner: PreparedModelLane {
-                role: RuntimeLaneRole::Planner,
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
                 provider: ModelProvider::Sift,
                 model_id: "planner".to_string(),
                 paths: Some(sample_model_paths("planner")),
             },
-            synthesizer: PreparedModelLane {
-                role: RuntimeLaneRole::Synthesizer,
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
                 provider: ModelProvider::Sift,
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),

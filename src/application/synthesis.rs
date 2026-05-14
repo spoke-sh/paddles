@@ -31,7 +31,7 @@ pub(super) fn specialist_runtime_notes(
     service: &AgentRuntime,
     prompt: &str,
     session: &ConversationSession,
-    prepared: &PreparedRuntimeLanes,
+    prepared: &PreparedTurnRuntime,
 ) -> Vec<String> {
     let Ok(session_context) = service.query_session_context_slice(
         &session.task_id(),
