@@ -27,11 +27,11 @@ started_at: 2026-05-13T21:57:03
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Resolve Action Selection Through HTTP Model Clients](../../../../stories/VJZ8JjSkG/README.md) | feat | done |
-| [Resolve Final Rendering Through HTTP Model Clients](../../../../stories/VJZ8KHZvT/README.md) | feat | icebox |
+| [Resolve Final Rendering Through HTTP Model Clients](../../../../stories/VJZ8KHZvT/README.md) | feat | done |
 | [Preserve Sift Retrieval Outside Inference Cleanup](../../../../stories/VJZ8KqF7U/README.md) | feat | icebox |
 <!-- END GENERATED -->

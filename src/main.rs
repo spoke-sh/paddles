@@ -18,7 +18,6 @@ use paddles::domain::ports::{ContextGatherer, SynthesizerEngine};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
 use paddles::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
 use paddles::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
-use paddles::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
@@ -167,39 +166,27 @@ fn build_synthesizer_engine(
     lane: &PreparedModelLane,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn SynthesizerEngine>> {
-    match lane.provider {
-        ModelProvider::Sift => Ok(Arc::new(SiftAgentAdapter::new_with_runtime_mediator(
-            workspace.to_path_buf(),
-            execution_hand_registry,
-            transport_mediator,
-            &lane.model_id,
-            lane.paths
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("local sift lane missing prepared model paths"))?,
-            lane.provider
-                .capability_surface(&lane.model_id)
-                .render_capability,
-        )?) as Arc<dyn SynthesizerEngine>),
-        provider => {
-            let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
-                provider,
-                &lane.model_id,
-                transport_mediator.as_ref(),
-                provider_url_overrides,
-            )?;
-            Ok(Arc::new(HttpProviderAdapter::new_with_runtime_mediator(
-                workspace.to_path_buf(),
-                execution_hand_registry,
-                transport_mediator,
-                provider.name(),
-                lane.model_id.clone(),
-                api_key,
-                base_url,
-                format,
-                capabilities.render_capability,
-            )) as Arc<dyn SynthesizerEngine>)
-        }
+    ensure_supported_model_inference_provider(lane.provider, "synthesizer.provider")?;
+    if lane.paths.is_some() {
+        bail!("final-rendering HTTP model client must not receive local ModelPaths");
     }
+    let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
+        lane.provider,
+        &lane.model_id,
+        transport_mediator.as_ref(),
+        provider_url_overrides,
+    )?;
+    Ok(Arc::new(HttpProviderAdapter::new_with_runtime_mediator(
+        workspace.to_path_buf(),
+        execution_hand_registry,
+        transport_mediator,
+        lane.provider.name(),
+        lane.model_id.clone(),
+        api_key,
+        base_url,
+        format,
+        capabilities.render_capability,
+    )) as Arc<dyn SynthesizerEngine>)
 }
 
 fn build_planner_engine(
@@ -934,7 +921,7 @@ async fn run_plain_interactive_loop(service: Arc<AgentRuntime>) -> Result<()> {
 mod tests {
     use super::{
         OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
-        build_planner_engine, build_trace_recorder_from_config,
+        build_planner_engine, build_synthesizer_engine, build_trace_recorder_from_config,
         ensure_remote_provider_transport_support, resolve_operator_surface_bootstrap,
         resolve_provider_from_name, service_runtime_failure_status, service_runtime_ready_status,
     };
@@ -1091,6 +1078,86 @@ mod tests {
             &BTreeMap::new(),
         ) {
             Ok(_) => panic!("legacy sift action-selection provider should fail"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
+        );
+        assert!(message.contains("ollama:<model>"), "{message}");
+    }
+
+    #[test]
+    fn final_rendering_http_client_rejects_local_model_paths() {
+        let workspace = tempdir().expect("workspace");
+        let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Synthesizer,
+            provider: ModelProvider::Ollama,
+            model_id: "qwen3".to_string(),
+            paths: Some(sample_model_paths("synthesizer")),
+        };
+
+        let error = match build_synthesizer_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        ) {
+            Ok(_) => panic!("final-rendering HTTP model client should reject local ModelPaths"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("final-rendering HTTP model client must not receive local ModelPaths"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn final_rendering_client_builds_from_http_provider_configuration() {
+        let workspace = tempdir().expect("workspace");
+        let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Synthesizer,
+            provider: ModelProvider::Ollama,
+            model_id: "qwen3".to_string(),
+            paths: None,
+        };
+
+        build_synthesizer_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        )
+        .expect("Ollama synthesizer should build through the HTTP provider adapter");
+    }
+
+    #[test]
+    fn final_rendering_client_rejects_legacy_sift_provider_with_migration_hint() {
+        let workspace = tempdir().expect("workspace");
+        let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Synthesizer,
+            provider: ModelProvider::Sift,
+            model_id: "qwen-1.5b".to_string(),
+            paths: None,
+        };
+
+        let error = match build_synthesizer_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        ) {
+            Ok(_) => panic!("legacy sift final-rendering provider should fail"),
             Err(error) => error,
         };
         let message = format!("{error:#}");

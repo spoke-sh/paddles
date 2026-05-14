@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T22:03:23.468457166-07:00
+command: cargo nextest run final_rendering_http_client_rejects_local_model_paths prepare_runtime_lanes_treats_inception_as_remote_http_lane_without_local_paths
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID 6999b76a-1be7-424f-8277-a0981aedc639 with nextest profile: default
+    Starting 2 tests across 3 binaries (828 tests skipped)
+        PASS [   0.009s] (1/2) paddles::bin/paddles tests::final_rendering_http_client_rejects_local_model_paths
+        PASS [   0.013s] (2/2) paddles application::tests::prepare_runtime_lanes_treats_inception_as_remote_http_lane_without_local_paths
+────────────
+     Summary [   0.015s] 2 tests run: 2 passed, 828 skipped

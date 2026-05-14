@@ -2996,15 +2996,6 @@ impl AgentRuntime {
             config.synthesizer_model_id(),
             config.synthesizer_thinking_mode(),
         );
-        let synthesizer_paths = if config.synthesizer_provider() == ModelProvider::Sift {
-            Some(
-                self.registry
-                    .get_model_paths(config.synthesizer_model_id())
-                    .await?,
-            )
-        } else {
-            None
-        };
         let planner_model_id = config
             .planner_model_id()
             .unwrap_or(config.synthesizer_model_id())
@@ -3025,7 +3016,7 @@ impl AgentRuntime {
             RuntimeLaneRole::Synthesizer,
             config.synthesizer_provider(),
             synthesizer_prepared_model_id,
-            synthesizer_paths,
+            None,
         );
 
         let gatherer_model_paths = match config.gatherer_provider() {

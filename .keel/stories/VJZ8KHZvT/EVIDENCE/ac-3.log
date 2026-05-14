@@ -1,0 +1,17 @@
+---
+recorded_at: 2026-05-13T22:03:33.041788947-07:00
+command: cargo nextest run openai_provider_normalizes_structured_final_answers send_with_retry_retries_on_429_then_succeeds gemini_provider_executes_a_full_turn_against_a_mock_server anthropic_provider_executes_a_full_turn_against_a_mock_server moonshot_provider_executes_full_turn_without_planner_tool_choice
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID 2db594c2-0b28-43bc-b2a1-502111cf8522 with nextest profile: default
+    Starting 5 tests across 3 binaries (825 tests skipped)
+        PASS [   1.193s] (1/5) paddles infrastructure::adapters::http_provider::tests::anthropic_provider_executes_a_full_turn_against_a_mock_server
+        PASS [   1.220s] (2/5) paddles infrastructure::adapters::http_provider::tests::gemini_provider_executes_a_full_turn_against_a_mock_server
+        PASS [   1.236s] (3/5) paddles infrastructure::adapters::http_provider::tests::moonshot_provider_executes_full_turn_without_planner_tool_choice
+        PASS [   1.241s] (4/5) paddles infrastructure::adapters::http_provider::tests::openai_provider_normalizes_structured_final_answers
+        PASS [   2.059s] (5/5) paddles infrastructure::adapters::http_provider::tests::send_with_retry_retries_on_429_then_succeeds
+────────────
+     Summary [   2.060s] 5 tests run: 5 passed, 825 skipped
