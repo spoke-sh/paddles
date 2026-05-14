@@ -477,7 +477,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Inventory Legacy Inference And Lane Surfaces](epics/VJZ0tpZQJ/voyages/VJZ14yp0U/) | planned |
+| [Inventory Legacy Inference And Lane Surfaces](epics/VJZ0tpZQJ/voyages/VJZ14yp0U/) | in-progress |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

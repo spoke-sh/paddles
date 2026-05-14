@@ -1,0 +1,123 @@
+---
+recorded_at: 2026-05-13T21:07:17.927312191-07:00
+mode: manual
+files: [".keel/epics/VJZ0tpZQJ/voyages/VJZ14yp0U/SIFT_MODEL_INFERENCE_INVENTORY.md"]
+---
+
+--- File: SIFT_MODEL_INFERENCE_INVENTORY.md ---
+# Sift Model Inference Surface Inventory
+
+Story: VJZ1K8trb
+
+## Executive Finding
+
+`sift` currently has two different meanings in paddles:
+
+- **Sift as model provider / local inference runtime**: load-bearing and targeted
+  for removal or migration behind HTTP.
+- **Sift as retrieval/indexing backend**: separate from model inference and not
+  safe to delete in the same first slice without a separate retrieval decision.
+
+The first cleanup implementation should remove or migrate Sift-as-model-provider
+surfaces before touching Sift-backed retrieval.
+
+## Source Inventory
+
+| Surface | Classification | Evidence | Cleanup Direction |
+|---------|----------------|----------|-------------------|
+| `src/infrastructure/adapters/sift_registry.rs` | Model preparation | Defines supported local model IDs, maps aliases to `ModelSource`, calls `sift::prepare_model(..., CandleSafetensorsBundle)`, and returns local `ModelPaths`. | Delete or replace with HTTP provider/model catalog. |
+| `src/infrastructure/adapters/sift_agent.rs` | In-process model inference | Imports Candle, Qwen model structs, tokenizers, Sift `Conversation`; loads tokenizer/config/weights; builds Qwen sessions; retries CUDA load/generation on CPU; implements `SynthesizerEngine`. | Delete as inference adapter after HTTP-only replacement is proven. |
+| `src/infrastructure/adapters/sift_planner.rs` | Sift model as planner | Wraps `SiftAgentAdapter` behind `RecursivePlanner`, so planner execution uses the same local model runtime. | Delete once planner action selection uses HTTP model clients only. |
+| `src/infrastructure/providers.rs` | Public model provider enum/capability surface | `ModelProvider::Sift` is listed in `ALL`, parses from `sift`, has no base URL/API key, gets model IDs from `sift_registry`, and reports `http_format: None`. | Remove as a model provider, or temporarily reject/deprecate it. |
+| `src/application/mod.rs` | Runtime lane preparation | Defaults `RuntimeLaneConfig` to `ModelProvider::Sift`, resolves `ModelPaths` for Sift planner/synthesizer lanes, and resolves gatherer `ModelPaths` for `GathererProvider::Local`. | Replace with HTTP-first defaults and no planner/synth local paths. |
+| `src/main.rs` | Runtime factory branch | `build_synthesizer_engine` and `build_planner_engine` branch `ModelProvider::Sift` to `SiftAgentAdapter` / `SiftPlannerAdapter`; non-Sift providers already go through `HttpProviderAdapter`. | First implementation seam for failing Sift-as-model-provider and proving HTTP-only inference. |
+| `Cargo.toml`, `flake.nix` | Build/dependency ownership | Paddles depends directly on `sift`, Candle crates, tokenizers, CUDA features, and Nix packages `sift` / `sift-cuda`. | Remove only after inference adapter deletion and retrieval dependency decision. |
+| `README.md`, `CONFIGURATION.md`, `ARCHITECTURE.md`, `POLICY.md` | Operator-facing docs | Docs describe local models, Sift/Qwen defaults, local CUDA guidance, Sift provider capability matrix, Bonsai, and local-first defaults. | Update in the same implementation slices that change runtime behavior. |
+| `.keel/missions/VE5jRmMzR`, `.keel/missions/VE5ztxZUb`, `.keel/missions/VF7t3HtQY` | Historical board context | Prior missions intentionally shipped Candle/local inference and Sift-native runtime behavior. | Use as ADR rationale for an explicit reversal. |
+
+## Classification Map
+
+### Model Inference
+
+- `SiftAgentAdapter`
+- `SiftPlannerAdapter`
+- `ModelProvider::Sift`
+- `PreparedModelLane.paths` when the provider is Sift
+- Sift provider capability rows and local model selection UI/tests
+
+### Model Preparation
+
+- `SiftRegistryAdapter`
+- `ModelRegistry::get_model_paths`
+- `ModelPaths`
+- `sift::prepare_model`
+- Qwen/Bonsai model source aliases
+- Candle safetensors/GGUF compatibility code and tests
+
+### Retrieval / Indexing
+
+- `SiftDirectGathererAdapter`
+- `SiftContextGathererAdapter`
+- `SiftAutonomousGathererAdapter`
+- `GathererProvider::SiftDirect`
+- `sift-direct` cache and progress reporting
+- `ContextLocator::Sift`
+
+These should remain out of the first inference-removal slice unless a separate
+retrieval ADR or story says otherwise.
+
+### Compatibility / Config
+
+- `provider = "sift"` default in `PaddlesConfig`
+- `--provider sift`
+- `--planner-provider sift`
+- `--model qwen-1.5b`
+- `--planner-model qwen3.5-2b`
+- runtime preference tests that preserve Sift defaults
+- `/model` TUI tests expecting Sift availability without auth
+
+### Test Fixtures
+
+High-risk test clusters for future migration:
+
+- `src/application/mod.rs` tests around `prepare_runtime_lanes_*`,
+  Sift path resolution, default response lanes, and gatherer preparation.
+- `src/infrastructure/adapters/sift_agent.rs` tests for prompt rendering,
+  Qwen family inference, dtype choice, generation config, and Sift prompt
+  parity.
+- `src/infrastructure/adapters/sift_registry.rs` tests for supported aliases,
+  Bonsai preparation, and registry reporting.
+- `src/infrastructure/providers.rs` tests for capability matrix and selectable
+  model inventory.
+- `src/infrastructure/cli/interactive_tui.rs` tests for provider/model UI state
+  and Sift auth-free availability.
+
+## Initial Red/Green Test Anchors
+
+1. `cargo test prepare_runtime_lanes_mix_provider_selection_and_only_resolve_sift_paths`
+   should be replaced by a failing test that proves planner/synth inference no
+   longer resolves local `ModelPaths` for any model provider.
+2. `cargo test sift_direct_boundary_can_be_prepared_without_local_model_paths`
+   should remain green to prove Sift-backed retrieval is not coupled to Sift
+   model inference.
+3. `cargo test infrastructure::providers::tests` should gain/adjust coverage so
+   providers with model inference all declare an HTTP format or explicit
+   unsupported/deprecated status.
+4. `cargo test infrastructure::adapters::http_provider::tests` should become the
+   primary action-selection/final-answer transport proof after Sift planner
+   prompt parity tests are retired.
+5. CLI/config tests should first fail against `provider = "sift"` defaults, then
+   pass when the default model provider is HTTP-backed and local execution is
+   represented by an HTTP service such as Ollama.
+
+## Migration Notes
+
+- The lowest-risk first code slice is not "delete the sift crate." It is
+  "Sift is no longer a model provider." That slice should fail closed or
+  deprecate `--provider sift`, remove planner/synth path resolution, and route
+  local model examples through HTTP-backed local services.
+- Dependency removal comes later. The `sift` crate may still be needed for
+  retrieval/indexing until `sift-direct` is replaced or renamed.
+- A short ADR is recommended because this reverses prior verified missions that
+  made in-process local inference a shipped capability.
+
