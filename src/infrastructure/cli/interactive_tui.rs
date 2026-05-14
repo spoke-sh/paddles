@@ -1534,7 +1534,7 @@ impl InteractiveApp {
     }
 
     fn start_model_provider_selection(&mut self) {
-        let selected_index = ModelProvider::all()
+        let selected_index = ModelProvider::selectable_model_providers()
             .iter()
             .position(|provider| *provider == self.turn_runtime_config.synthesizer_provider())
             .unwrap_or(0);
@@ -1593,7 +1593,7 @@ impl InteractiveApp {
             return 0;
         };
         match &state.stage {
-            ModelSelectionStage::Provider => ModelProvider::all().len(),
+            ModelSelectionStage::Provider => ModelProvider::selectable_model_providers().len(),
             ModelSelectionStage::Model { provider } => provider.selectable_model_ids().len(),
             ModelSelectionStage::ThinkingMode { provider, model } => {
                 provider.thinking_modes(model).len()
@@ -1626,7 +1626,7 @@ impl InteractiveApp {
                 self.cursor_pos = self.input.chars().count();
             }
             ModelSelectionStage::Model { provider } => {
-                let selected_index = ModelProvider::all()
+                let selected_index = ModelProvider::selectable_model_providers()
                     .iter()
                     .position(|candidate| *candidate == provider)
                     .unwrap_or(0);
@@ -1660,7 +1660,10 @@ impl InteractiveApp {
         };
         match state.stage {
             ModelSelectionStage::Provider => {
-                let Some(provider) = ModelProvider::all().get(state.selected_index).copied() else {
+                let Some(provider) = ModelProvider::selectable_model_providers()
+                    .get(state.selected_index)
+                    .copied()
+                else {
                     return true;
                 };
                 let availability = self.provider_availability_for(provider);
@@ -1752,7 +1755,7 @@ impl InteractiveApp {
 
         match &state.stage {
             ModelSelectionStage::Provider => {
-                let providers = ModelProvider::all();
+                let providers = ModelProvider::selectable_model_providers();
                 for offset in 0..providers.len() {
                     let index = (selected_index + offset) % providers.len();
                     let provider = providers[index];
@@ -1977,7 +1980,7 @@ impl InteractiveApp {
             return Vec::new();
         }
         if let Some(provider_query) = query.strip_prefix("/login ") {
-            return ModelProvider::all()
+            return ModelProvider::selectable_model_providers()
                 .iter()
                 .copied()
                 .filter(|provider| provider.supports_interactive_login())
@@ -2458,8 +2461,9 @@ impl InteractiveApp {
                         "Login unavailable",
                         format!(
                             "Unknown provider `{provider}`. Try one of: {}.",
-                            ModelProvider::all()
+                            ModelProvider::selectable_model_providers()
                                 .iter()
+                                .filter(|provider| provider.supports_interactive_login())
                                 .map(|provider| provider.name())
                                 .collect::<Vec<_>>()
                                 .join(", ")
@@ -6454,6 +6458,47 @@ mod tests {
     }
 
     #[test]
+    fn model_command_omits_legacy_sift_provider_from_selector() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        app.set_runtime_catalog(
+            TurnRuntimeConfig::new("qwen-1.5b".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Sift),
+            vec![
+                provider_availability(ModelProvider::Sift, true, "auth not required"),
+                provider_availability(ModelProvider::Openai, true, "using local credential store"),
+                provider_availability(ModelProvider::Ollama, true, "auth not required"),
+            ],
+        );
+        app.input = "/model".to_string();
+
+        app.submit_prompt();
+
+        let rendered = app
+            .model_selection_lines()
+            .expect("provider selector lines")
+            .iter()
+            .map(rendered_line_text)
+            .collect::<Vec<_>>();
+        assert!(
+            rendered.iter().any(|line| line.contains("ollama")),
+            "selector should keep HTTP model clients available: {rendered:?}"
+        );
+        assert!(
+            !rendered.iter().any(|line| line.contains("sift")),
+            "legacy sift model provider should not be selectable: {rendered:?}"
+        );
+    }
+
+    #[test]
     fn model_provider_selector_wraps_visible_order_from_active_selection() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
@@ -6468,7 +6513,7 @@ mod tests {
         app.input = "/model".to_string();
         app.submit_prompt();
         if let InputMode::ModelSelection(state) = &mut app.input_mode {
-            state.selected_index = ModelProvider::all().len() - 1;
+            state.selected_index = ModelProvider::selectable_model_providers().len() - 1;
         }
 
         let rendered = app
@@ -6477,13 +6522,15 @@ mod tests {
             .iter()
             .map(rendered_line_text)
             .collect::<Vec<_>>();
+        let selectable_providers = ModelProvider::selectable_model_providers();
 
-        assert!(
-            rendered
-                .first()
-                .is_some_and(|line| line.contains("> ollama"))
-        );
-        assert!(rendered.get(1).is_some_and(|line| line.contains("sift")));
+        assert!(rendered.first().is_some_and(|line| line.contains(&format!(
+            "> {}",
+            selectable_providers.last().expect("last provider").name()
+        ))));
+        assert!(rendered.get(1).is_some_and(|line| {
+            line.contains(selectable_providers.first().expect("first provider").name())
+        }));
     }
 
     #[test]
@@ -6542,7 +6589,7 @@ mod tests {
         app.input = "/model".to_string();
         app.submit_prompt();
         if let InputMode::ModelSelection(state) = &mut app.input_mode {
-            state.selected_index = ModelProvider::all()
+            state.selected_index = ModelProvider::selectable_model_providers()
                 .iter()
                 .position(|provider| *provider == ModelProvider::Openai)
                 .expect("openai index");
@@ -6660,7 +6707,7 @@ mod tests {
         app.input = "/model".to_string();
         app.submit_prompt();
         if let InputMode::ModelSelection(state) = &mut app.input_mode {
-            state.selected_index = ModelProvider::all()
+            state.selected_index = ModelProvider::selectable_model_providers()
                 .iter()
                 .position(|provider| *provider == ModelProvider::Openai)
                 .expect("openai index");
@@ -6711,7 +6758,7 @@ mod tests {
 
         app.submit_prompt();
         if let InputMode::ModelSelection(state) = &mut app.input_mode {
-            state.selected_index = ModelProvider::all()
+            state.selected_index = ModelProvider::selectable_model_providers()
                 .iter()
                 .position(|provider| *provider == ModelProvider::Anthropic)
                 .expect("anthropic index");
@@ -6836,11 +6883,18 @@ mod tests {
 
         assert!(matches!(app.input_mode, InputMode::ModelSelection(_)));
         assert_eq!(app.input, "/model");
-        assert!(rendered.contains("> sift"));
+        assert!(rendered.contains("> ollama"));
+        assert!(
+            !app.model_selection_lines()
+                .expect("provider selector lines")
+                .iter()
+                .map(rendered_line_text)
+                .any(|line| line.contains("sift"))
+        );
         assert!(!rendered.contains("Commands"));
         assert_eq!(
             app.input_area_height(120),
-            ModelProvider::all().len() as u16 + 2
+            ModelProvider::selectable_model_providers().len() as u16 + 2
         );
     }
 
@@ -7488,7 +7542,7 @@ mod tests {
 
         app.submit_prompt();
         if let InputMode::ModelSelection(state) = &mut app.input_mode {
-            state.selected_index = ModelProvider::all()
+            state.selected_index = ModelProvider::selectable_model_providers()
                 .iter()
                 .position(|provider| *provider == ModelProvider::Ollama)
                 .expect("ollama index");

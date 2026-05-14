@@ -617,9 +617,21 @@ impl ModelProvider {
         Self::Moonshot,
         Self::Ollama,
     ];
+    pub const SELECTABLE_MODEL_PROVIDERS: [Self; 6] = [
+        Self::Ollama,
+        Self::Openai,
+        Self::Inception,
+        Self::Anthropic,
+        Self::Google,
+        Self::Moonshot,
+    ];
 
     pub fn all() -> &'static [Self] {
         &Self::ALL
+    }
+
+    pub fn selectable_model_providers() -> &'static [Self] {
+        &Self::SELECTABLE_MODEL_PROVIDERS
     }
 
     pub fn name(self) -> &'static str {
@@ -1484,6 +1496,14 @@ mod tests {
                 .paddles_http_transport_error("gpt-5.4-pro")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn selectable_model_providers_exclude_legacy_sift_sentinel() {
+        let providers = ModelProvider::selectable_model_providers();
+
+        assert!(providers.contains(&ModelProvider::Ollama));
+        assert!(!providers.contains(&ModelProvider::Sift));
     }
 
     #[test]
