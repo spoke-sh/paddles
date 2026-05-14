@@ -14388,6 +14388,94 @@ mod tests {
     }
 
     #[test]
+    fn recursive_loop_preserves_model_selected_repeated_read_actions() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# AGENTS.md\n\nOperator contract.\n",
+        )
+        .expect("write agents");
+
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            retrieval_provider: None,
+        };
+        let repeated_read = WorkspaceAction::Read {
+            path: "AGENTS.md".to_string(),
+        };
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(
+                InitialAction::Workspace {
+                    action: repeated_read.clone(),
+                },
+                "read the operator contract before answering",
+            ),
+            vec![
+                ActionSelectionEngineDecision {
+                    action: PlannerAction::Workspace {
+                        action: repeated_read.clone(),
+                    },
+                    rationale: "the model selected the same read again".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                },
+                ActionSelectionEngineDecision {
+                    action: PlannerAction::Stop {
+                        reason: "workspace reads were enough".to_string(),
+                    },
+                    rationale: "stop after the model-selected repeated read".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                },
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
+            });
+            service
+                .process_prompt("Where is that operator contract defined? Can you show it to me?")
+                .await
+                .expect("process prompt")
+        });
+
+        assert_eq!(reply, "Applied the bounded action.");
+        assert_eq!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .as_slice(),
+            [repeated_read.clone(), repeated_read],
+            "the controller should preserve model-selected reads instead of stopping them as duplicates"
+        );
+    }
+
+    #[test]
     fn structured_turn_trace_records_governance_profile_and_decision_artifacts() {
         let task_id = TaskTraceId::new("task-governance").expect("task");
         let session = ConversationSession::new(task_id.clone());

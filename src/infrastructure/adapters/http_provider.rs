@@ -3275,6 +3275,16 @@ fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
         }
     }
 
+    let completed_reads = completed_read_observations(request);
+    if !completed_reads.is_empty() {
+        lines.push("Completed read observations:".to_string());
+        for (path, count) in completed_reads {
+            lines.push(format!(
+                "- `{path}` already read {count} time(s); retained evidence from that read is available below and will be handed to final rendering when you choose `stop`."
+            ));
+        }
+    }
+
     if !request.loop_state.evidence_items.is_empty() {
         lines.push("Current evidence:".to_string());
         for item in request
@@ -3286,7 +3296,7 @@ fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
             lines.push(format!(
                 "- {}: {}",
                 item.source,
-                truncate(&item.snippet, 180)
+                truncate(&item.snippet, 600)
             ));
         }
     }
@@ -3299,6 +3309,24 @@ fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
     }
 
     lines.join("\n")
+}
+
+fn completed_read_observations(request: &PlannerRequest) -> Vec<(String, usize)> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for step in &request.loop_state.steps {
+        if let PlannerAction::Workspace {
+            action: WorkspaceAction::Read { path },
+        } = &step.action
+        {
+            *counts.entry(path.clone()).or_insert(0) += 1;
+        }
+    }
+    counts.into_iter().collect()
+}
+
+fn planner_completed_evidence_stop_guidance() -> &'static str {
+    "Choose `stop` as soon as the current loop state contains enough evidence. `stop` is the model-owned handoff to final rendering; final rendering receives retained evidence and can quote, summarize, or answer from it. Do not leave the harness state space by answering the user in prose.\n\
+If a completed read observation already contains the requested source and no edit or command is needed, prefer `stop` over selecting the same read again unless the observation is stale, incomplete, or a mutation changed the file."
 }
 
 fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
@@ -3374,12 +3402,13 @@ fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat)
     user.push('\n');
     user.push_str(&format!(
         "\nSelect the next bounded agent action inside the recursive agent loop.\n\
-Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
+{}\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
 Use `inspect` only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use `shell` for broader governed workspace command execution.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the loop-state notes contain a steering review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
 {}",
+        planner_completed_evidence_stop_guidance(),
         planner_transport_reply_instruction(format)
     ));
     user
@@ -3392,6 +3421,7 @@ Return the next bounded agent action inside the recursive agent loop.\n\
 {}\n\
 Current loop state:\n\
 {}\n\
+{}\n\
 Use `inspect` only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use `shell` for broader governed workspace command execution.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
@@ -3399,6 +3429,7 @@ If one likely target file is already known or already read, move into exact-diff
 Current user request: {}",
         build_http_planner_runtime_context(request),
         build_http_planner_loop_state_digest(request),
+        planner_completed_evidence_stop_guidance(),
         planner_transport_retry_instruction(format, false),
         request.user_prompt
     )
@@ -3415,6 +3446,7 @@ fn build_http_planner_redecision_prompt(
 Current loop state:\n\
 {}\n\
 Make one final next bounded agent action selection inside the recursive agent loop.\n\
+{}\n\
 Use `inspect` only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use `shell` for broader governed workspace command execution.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
@@ -3425,6 +3457,7 @@ Invalid reply to correct:\n\
         Current user request: {}",
         build_http_planner_runtime_context(request),
         build_http_planner_loop_state_digest(request),
+        planner_completed_evidence_stop_guidance(),
         planner_transport_retry_instruction(format, false),
         truncate(invalid_reply, 800),
         request.user_prompt
@@ -6232,6 +6265,49 @@ mod tests {
         assert!(prompt.contains("Complete the turn once the current evidence is sufficient."));
         assert!(prompt.contains("single read-only probe"));
         assert!(prompt.contains("Do not chain inspect commands"));
+    }
+
+    #[test]
+    fn http_planner_action_prompt_surfaces_completed_reads_as_model_owned_handoff_context() {
+        let retained_snippet = format!(
+            "Read file AGENTS.md:\n# AGENTS.md\n\n{}\nTail evidence confirms this is the operator contract.",
+            "Shared guidance for AI agents using `paddles` to work on `paddles`. ".repeat(3)
+        );
+        let request = PlannerRequest::new(
+            "Where is that operator contract defined? Can you show it to me?",
+            "/workspace",
+            InterpretationContext::default(),
+            PlannerBudget::default(),
+        )
+        .with_loop_state(PlannerLoopState {
+            steps: vec![crate::domain::ports::PlannerStepRecord {
+                step_id: "planner-step-0".to_string(),
+                sequence: 0,
+                branch_id: None,
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::Read {
+                        path: "AGENTS.md".to_string(),
+                    },
+                },
+                outcome: retained_snippet.clone(),
+            }],
+            evidence_items: vec![EvidenceItem {
+                source: "AGENTS.md".to_string(),
+                snippet: retained_snippet,
+                rationale: "read the operator contract before answering".to_string(),
+                rank: 1,
+            }],
+            ..PlannerLoopState::default()
+        });
+
+        let prompt = super::build_http_planner_action_prompt(&request, ApiFormat::OpenAi);
+
+        assert!(prompt.contains("Completed read observations"));
+        assert!(prompt.contains("`AGENTS.md` already read 1 time(s)"));
+        assert!(prompt.contains("model-owned handoff to final rendering"));
+        assert!(prompt.contains("final rendering receives retained evidence"));
+        assert!(prompt.contains("Shared guidance for AI agents"));
+        assert!(prompt.contains("Tail evidence confirms this is the operator contract."));
     }
 
     #[tokio::test(flavor = "multi_thread")]
