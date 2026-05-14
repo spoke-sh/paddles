@@ -1,0 +1,15 @@
+---
+recorded_at: 2026-05-13T22:13:30.546174462-07:00
+command: cargo nextest run load_layers_runtime_preferences_after_authored_config runtime_preferences_override_workspace_config_for_lane_fields openai_gpt_5_4_thinking_mode_selection_queues_runtime_update_from_prompt_box
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID bbec5945-7efb-4d9b-b3d8-fb208da1c3f6 with nextest profile: default
+    Starting 3 tests across 3 binaries (830 tests skipped)
+        PASS [   0.012s] (1/3) paddles infrastructure::config::tests::runtime_preferences_override_workspace_config_for_lane_fields
+        PASS [   0.015s] (2/3) paddles infrastructure::config::tests::load_layers_runtime_preferences_after_authored_config
+        PASS [   0.019s] (3/3) paddles infrastructure::cli::interactive_tui::tests::openai_gpt_5_4_thinking_mode_selection_queues_runtime_update_from_prompt_box
+────────────
+     Summary [   0.021s] 3 tests run: 3 passed, 830 skipped

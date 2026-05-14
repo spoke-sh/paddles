@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJZ8DAKbC
-status: planned
+status: in-progress
 epic: VJZ034dF2
 created_at: 2026-05-13T21:29:15
 # authored
 title: Migrate Provider Preferences To Turn Runtime Config
 index: 3
 updated_at: 2026-05-13T21:36:11
+started_at: 2026-05-13T22:08:55
 ---
 
 # Migrate Provider Preferences To Turn Runtime Config
@@ -26,11 +27,11 @@ updated_at: 2026-05-13T21:36:11
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Introduce Turn Runtime Preference Schema](../../../../stories/VJZ8LOzJi/README.md) | feat | icebox |
+| [Introduce Turn Runtime Preference Schema](../../../../stories/VJZ8LOzJi/README.md) | feat | done |
 | [Migrate Legacy Runtime Lane Preferences](../../../../stories/VJZ8Lz4V9/README.md) | feat | icebox |
 | [Document Ollama Local HTTP Defaults](../../../../stories/VJZ8MXfkO/README.md) | docs | icebox |
 | [Preserve HTTP Provider Credential Rules](../../../../stories/VJZ9qwaWd/README.md) | feat | icebox |

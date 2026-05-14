@@ -351,29 +351,55 @@ impl PaddlesConfig {
     }
 
     fn apply_runtime_preferences(&mut self, preferences: &RuntimeLanePreferences) {
-        if let Some(provider) = preferences
+        let final_rendering = preferences.final_rendering();
+        if let Some(provider) = final_rendering
             .provider
             .as_ref()
             .filter(|value| !value.trim().is_empty())
         {
             self.provider = provider.clone();
         }
-        if let Some(model) = preferences
+        if let Some(model) = final_rendering
             .model
             .as_ref()
             .filter(|value| !value.trim().is_empty())
         {
             self.model = model.clone();
         }
-        self.thinking_mode = preferences
+        self.thinking_mode = final_rendering
             .thinking_mode
             .as_ref()
             .filter(|value| !value.trim().is_empty())
             .cloned();
         self.synthesizer_provider = None;
         self.synthesizer_model = None;
-        self.planner_provider = None;
-        self.planner_model = None;
+        let action_selection = preferences.action_selection();
+        self.planner_provider = action_selection
+            .provider
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .filter(|provider| **provider != self.provider)
+            .cloned();
+        self.planner_model = action_selection
+            .model
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .filter(|model| **model != self.model)
+            .cloned();
+        if let Some(provider) = preferences
+            .retrieval()
+            .provider
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            self.gatherer_provider = provider.clone();
+        }
+        self.gatherer_model = preferences
+            .retrieval()
+            .model
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+            .cloned();
     }
 
     pub fn resolve_trace_authority_selection(
@@ -653,6 +679,7 @@ fn parse_trace_authority_mode(value: String) -> Option<TraceAuthorityMode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::RuntimeLaneConfig;
     use std::fs;
     use std::path::PathBuf;
 
@@ -863,13 +890,13 @@ port = 9090
         )
         .expect("write workspace config");
 
-        let preferences = RuntimeLanePreferences {
-            provider: Some("inception".to_string()),
-            model: Some("mercury-2".to_string()),
-            thinking_mode: Some("high".to_string()),
-            planner_provider: Some("anthropic".to_string()),
-            planner_model: Some("claude-sonnet-4-20250514".to_string()),
-        };
+        let preferences = RuntimeLanePreferences::from_runtime_lanes(
+            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Inception)
+                .with_synthesizer_thinking_mode(Some("high".to_string()))
+                .with_planner_provider(Some(ModelProvider::Anthropic))
+                .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string())),
+        );
 
         let config = PaddlesConfig::load_from_explicit_paths(
             Some(workspace.as_path()),
@@ -883,8 +910,11 @@ port = 9090
         assert_eq!(config.thinking_mode.as_deref(), Some("high"));
         assert!(config.synthesizer_provider.is_none());
         assert!(config.synthesizer_model.is_none());
-        assert!(config.planner_provider.is_none());
-        assert!(config.planner_model.is_none());
+        assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            config.planner_model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
         assert_eq!(config.port, 9090);
     }
 
@@ -901,13 +931,10 @@ model = "gpt-4o"
         )
         .expect("write user config");
 
-        let preferences = RuntimeLanePreferences {
-            provider: Some("inception".to_string()),
-            model: Some("mercury-2".to_string()),
-            thinking_mode: None,
-            planner_provider: None,
-            planner_model: None,
-        };
+        let preferences = RuntimeLanePreferences::from_runtime_lanes(
+            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Inception),
+        );
 
         let config = PaddlesConfig::load_from_explicit_paths(
             None,
@@ -942,13 +969,12 @@ model = "claude-sonnet-4-20250514"
         )
         .expect("write workspace config");
 
-        let preferences = RuntimeLanePreferences {
-            provider: Some("inception".to_string()),
-            model: Some("mercury-2".to_string()),
-            thinking_mode: None,
-            planner_provider: Some("anthropic".to_string()),
-            planner_model: Some("claude-sonnet-4-20250514".to_string()),
-        };
+        let preferences = RuntimeLanePreferences::from_runtime_lanes(
+            &RuntimeLaneConfig::new("mercury-2".to_string(), None)
+                .with_synthesizer_provider(ModelProvider::Inception)
+                .with_planner_provider(Some(ModelProvider::Anthropic))
+                .with_planner_model_id(Some("claude-sonnet-4-20250514".to_string())),
+        );
 
         let config = PaddlesConfig::load_from_explicit_paths(
             Some(workspace.as_path()),
@@ -961,8 +987,11 @@ model = "claude-sonnet-4-20250514"
         assert_eq!(config.model, "mercury-2");
         assert!(config.synthesizer_provider.is_none());
         assert!(config.synthesizer_model.is_none());
-        assert!(config.planner_provider.is_none());
-        assert!(config.planner_model.is_none());
+        assert_eq!(config.planner_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            config.planner_model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
     }
 
     #[test]

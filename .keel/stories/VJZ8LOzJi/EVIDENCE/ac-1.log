@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T22:13:29.060330566-07:00
+command: cargo nextest run turn_runtime_preferences_capture_model_clients_and_retrieval turn_runtime_preferences_record_shared_model_clients_without_lane_names
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID c107d201-2e20-40a5-9154-1a163553442d with nextest profile: default
+    Starting 2 tests across 3 binaries (831 tests skipped)
+        PASS [   0.013s] (1/2) paddles infrastructure::runtime_preferences::tests::turn_runtime_preferences_capture_model_clients_and_retrieval
+        PASS [   0.015s] (2/2) paddles infrastructure::runtime_preferences::tests::turn_runtime_preferences_record_shared_model_clients_without_lane_names
+────────────
+     Summary [   0.017s] 2 tests run: 2 passed, 831 skipped

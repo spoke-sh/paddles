@@ -7050,7 +7050,11 @@ mod tests {
             Some("high")
         );
         assert_eq!(
-            update.persisted_preferences.thinking_mode.as_deref(),
+            update
+                .persisted_preferences
+                .final_rendering()
+                .thinking_mode
+                .as_deref(),
             Some("high")
         );
     }
@@ -7103,7 +7107,14 @@ mod tests {
         );
         assert_eq!(update.runtime_lanes.synthesizer_model_id(), "gpt-4o");
         assert_eq!(update.runtime_lanes.synthesizer_thinking_mode(), None);
-        assert_eq!(update.persisted_preferences.thinking_mode.as_deref(), None);
+        assert_eq!(
+            update
+                .persisted_preferences
+                .final_rendering()
+                .thinking_mode
+                .as_deref(),
+            None
+        );
     }
 
     #[test]
@@ -7552,7 +7563,11 @@ mod tests {
             Some("instant")
         );
         assert_eq!(
-            update.persisted_preferences.thinking_mode.as_deref(),
+            update
+                .persisted_preferences
+                .final_rendering()
+                .thinking_mode
+                .as_deref(),
             Some("instant")
         );
     }

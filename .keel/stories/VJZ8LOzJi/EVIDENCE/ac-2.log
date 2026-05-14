@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T22:13:29.807889135-07:00
+command: cargo nextest run turn_runtime_preference_store_writes_canonical_shape_without_lane_terms turn_runtime_preference_store_round_trips_preferences
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID a54bcddc-7a9f-4491-9f3e-0476968660f2 with nextest profile: default
+    Starting 2 tests across 3 binaries (831 tests skipped)
+        PASS [   0.017s] (1/2) paddles infrastructure::runtime_preferences::tests::turn_runtime_preference_store_writes_canonical_shape_without_lane_terms
+        PASS [   0.017s] (2/2) paddles infrastructure::runtime_preferences::tests::turn_runtime_preference_store_round_trips_preferences
+────────────
+     Summary [   0.019s] 2 tests run: 2 passed, 831 skipped
