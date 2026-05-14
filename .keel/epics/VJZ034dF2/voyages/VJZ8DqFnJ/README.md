@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJZ8DqFnJ
-status: planned
+status: in-progress
 epic: VJZ034dF2
 created_at: 2026-05-13T21:29:18
 # authored
 title: Remove In-Process Sift Inference Code
 index: 4
 updated_at: 2026-05-13T21:36:14
+started_at: 2026-05-13T22:27:19
 ---
 
 # Remove In-Process Sift Inference Code
@@ -26,11 +27,11 @@ updated_at: 2026-05-13T21:36:14
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Delete Sift Agent And Planner Inference Adapters](../../../../stories/VJZ8N7avc/README.md) | refactor | icebox |
+| [Delete Sift Agent And Planner Inference Adapters](../../../../stories/VJZ8N7avc/README.md) | refactor | done |
 | [Remove Inference-Only Sift Model Dependencies](../../../../stories/VJZ8NgA6d/README.md) | chore | icebox |
 | [Purge Local Model Loading Documentation](../../../../stories/VJZ8OERIu/README.md) | docs | icebox |
 <!-- END GENERATED -->

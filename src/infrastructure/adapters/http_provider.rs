@@ -4108,48 +4108,6 @@ mod tests {
     ) -> Vec<(&'static str, PlannerActionSchemaVariant, String)> {
         vec![
             (
-                "sift first action",
-                PlannerActionSchemaVariant::Initial,
-                crate::infrastructure::adapters::sift_agent::build_initial_action_prompt_for_schema_test(
-                    request,
-                ),
-            ),
-            (
-                "sift first action retry",
-                PlannerActionSchemaVariant::Initial,
-                crate::infrastructure::adapters::sift_agent::build_initial_action_retry_prompt_for_schema_test(
-                    request,
-                ),
-            ),
-            (
-                "sift first action redecision",
-                PlannerActionSchemaVariant::Initial,
-                crate::infrastructure::adapters::sift_agent::build_initial_action_redecision_prompt_for_schema_test(
-                    request,
-                ),
-            ),
-            (
-                "sift later action",
-                PlannerActionSchemaVariant::Recursive,
-                crate::infrastructure::adapters::sift_agent::build_planner_action_prompt_for_schema_test(
-                    request,
-                ),
-            ),
-            (
-                "sift later action retry",
-                PlannerActionSchemaVariant::Recursive,
-                crate::infrastructure::adapters::sift_agent::build_planner_retry_prompt_for_schema_test(
-                    request,
-                ),
-            ),
-            (
-                "sift later action redecision",
-                PlannerActionSchemaVariant::Recursive,
-                crate::infrastructure::adapters::sift_agent::build_planner_redecision_prompt_for_schema_test(
-                    request,
-                ),
-            ),
-            (
                 "http first action",
                 PlannerActionSchemaVariant::Initial,
                 combined_http_action_prompt(
@@ -4400,7 +4358,7 @@ mod tests {
     }
 
     #[test]
-    fn mocked_initial_planner_lanes_receive_same_canonical_schema_block() {
+    fn initial_http_planner_prompts_receive_the_canonical_schema_block() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
             workspace.path(),
@@ -4413,22 +4371,12 @@ mod tests {
         );
         let request = schema_parity_request();
 
-        let sift_prompt =
-            crate::infrastructure::adapters::sift_agent::build_initial_action_prompt_for_schema_test(
-                &request,
-            );
         let http_prompt = adapter.build_planner_system_prompt_for_variant(
             &request.interpretation,
             &request.operator_memory,
             PlannerActionSchemaVariant::Initial,
         );
 
-        let sift_block = assert_planner_schema_block(
-            "sift",
-            "initial",
-            &sift_prompt,
-            PlannerActionSchemaVariant::Initial,
-        );
         let http_block = assert_planner_schema_block(
             "http",
             "initial",
@@ -4436,13 +4384,17 @@ mod tests {
             PlannerActionSchemaVariant::Initial,
         );
         assert_eq!(
-            sift_block, http_block,
-            "sift and http initial planner schema blocks drifted"
+            http_block,
+            extract_planner_schema_block(
+                &render_planner_action_schema(PlannerActionSchemaVariant::Initial),
+                "shared renderer",
+                "initial"
+            )
         );
     }
 
     #[test]
-    fn mocked_recursive_planner_lanes_receive_same_canonical_schema_block() {
+    fn recursive_http_planner_prompts_receive_the_canonical_schema_block() {
         let workspace = tempfile::tempdir().expect("workspace");
         let adapter = super::HttpProviderAdapter::new(
             workspace.path(),
@@ -4455,22 +4407,12 @@ mod tests {
         );
         let request = schema_parity_request();
 
-        let sift_prompt =
-            crate::infrastructure::adapters::sift_agent::build_planner_action_prompt_for_schema_test(
-                &request,
-            );
         let http_prompt = adapter.build_planner_system_prompt_for_variant(
             &request.interpretation,
             &request.operator_memory,
             PlannerActionSchemaVariant::Recursive,
         );
 
-        let sift_block = assert_planner_schema_block(
-            "sift",
-            "recursive",
-            &sift_prompt,
-            PlannerActionSchemaVariant::Recursive,
-        );
         let http_block = assert_planner_schema_block(
             "http",
             "recursive",
@@ -4478,55 +4420,13 @@ mod tests {
             PlannerActionSchemaVariant::Recursive,
         );
         assert_eq!(
-            sift_block, http_block,
-            "sift and http recursive planner schema blocks drifted"
+            http_block,
+            extract_planner_schema_block(
+                &render_planner_action_schema(PlannerActionSchemaVariant::Recursive),
+                "shared renderer",
+                "recursive"
+            )
         );
-    }
-
-    #[test]
-    fn agent_action_schema_prompt_parity() {
-        let workspace = tempfile::tempdir().expect("workspace");
-        let adapter = super::HttpProviderAdapter::new(
-            workspace.path(),
-            "inception",
-            "mercury-2",
-            "test-key",
-            "https://api.inceptionlabs.ai",
-            ApiFormat::OpenAi,
-            RenderCapability::OpenAiJsonSchema,
-        );
-        let request = schema_parity_request();
-
-        for (variant_label, variant, sift_prompt) in [
-            (
-                "initial",
-                PlannerActionSchemaVariant::Initial,
-                crate::infrastructure::adapters::sift_agent::build_initial_action_prompt_for_schema_test(
-                    &request,
-                ),
-            ),
-            (
-                "recursive",
-                PlannerActionSchemaVariant::Recursive,
-                crate::infrastructure::adapters::sift_agent::build_planner_action_prompt_for_schema_test(
-                    &request,
-                ),
-            ),
-        ] {
-            let http_prompt = adapter.build_planner_system_prompt_for_variant(
-                &request.interpretation,
-                &request.operator_memory,
-                variant,
-            );
-            let sift_block =
-                assert_planner_schema_block("sift", variant_label, &sift_prompt, variant);
-            let http_block =
-                assert_planner_schema_block("http", variant_label, &http_prompt, variant);
-            assert_eq!(
-                sift_block, http_block,
-                "sift and http {variant_label} agent action schema blocks drifted"
-            );
-        }
     }
 
     #[test]

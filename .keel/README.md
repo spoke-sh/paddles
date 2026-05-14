@@ -498,6 +498,6 @@
 | [Adopt HTTP-Only Inference Decision](epics/VJZ034dF2/voyages/VJZ8Bws9Z/) | done |
 | [Route Runtime Inference Through HTTP Model Clients](epics/VJZ034dF2/voyages/VJZ8CYrLb/) | done |
 | [Migrate Provider Preferences To Turn Runtime Config](epics/VJZ034dF2/voyages/VJZ8DAKbC/) | done |
-| [Remove In-Process Sift Inference Code](epics/VJZ034dF2/voyages/VJZ8DqFnJ/) | planned |
+| [Remove In-Process Sift Inference Code](epics/VJZ034dF2/voyages/VJZ8DqFnJ/) | in-progress |
 | [Collapse Runtime Lane Terminology](epics/VJZ034dF2/voyages/VJZ8ERr2f/) | planned |
 

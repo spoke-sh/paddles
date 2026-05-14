@@ -40,6 +40,7 @@ struct MemoryDocument {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemoryDocumentKind {
     AgentMemory,
+    #[cfg(test)]
     LinkedGuidance,
 }
 
@@ -63,6 +64,7 @@ impl AgentMemory {
         Self::load_with_search_paths(start_dir, MemorySearchPaths::defaults())
     }
 
+    #[cfg(test)]
     pub(crate) fn render_for_prompt(&self) -> String {
         let prompt_docs = self
             .documents
@@ -83,10 +85,6 @@ impl AgentMemory {
         }
 
         sections.join("\n\n")
-    }
-
-    pub(crate) fn warnings(&self) -> &[String] {
-        &self.warnings
     }
 
     pub(crate) fn build_interpretation_context(
@@ -278,6 +276,7 @@ fn default_user_memory_path() -> Option<PathBuf> {
     env::var_os("HOME").map(|home| PathBuf::from(home).join(USER_MEMORY_RELATIVE_PATH))
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_guidance_target(base_path: &Path, target: &str) -> Option<PathBuf> {
     if target.starts_with("http://")
         || target.starts_with("https://")
@@ -304,6 +303,7 @@ pub(crate) fn resolve_guidance_target(base_path: &Path, target: &str) -> Option<
     }
 }
 
+#[cfg(test)]
 pub(crate) fn load_guidance_document(
     base_path: &Path,
     target: &str,

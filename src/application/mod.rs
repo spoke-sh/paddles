@@ -7010,7 +7010,6 @@ mod tests {
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
-    use crate::infrastructure::adapters::sift_agent::SiftAgentAdapter;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
     use crate::infrastructure::adapters::workspace_entity_resolver::WorkspaceEntityResolver;
     use crate::infrastructure::conversation_history::ConversationHistoryStore;
@@ -7019,7 +7018,6 @@ mod tests {
     use async_trait::async_trait;
     use paddles_conversation::ConversationSession;
     use serde_json::json;
-    use sift::Conversation;
     use std::collections::VecDeque;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -7592,30 +7590,52 @@ mod tests {
         }
     }
 
-    struct StaticConversation {
-        responses: VecDeque<String>,
-        history: Vec<String>,
+    struct StaticSynthesizer {
+        responses: Mutex<VecDeque<String>>,
     }
 
-    impl StaticConversation {
+    impl StaticSynthesizer {
         fn new(responses: Vec<String>) -> Self {
             Self {
-                responses: VecDeque::from(responses),
-                history: Vec::new(),
+                responses: Mutex::new(VecDeque::from(responses)),
             }
         }
     }
 
-    impl Conversation for StaticConversation {
-        fn send(&mut self, message: &str, _max_tokens: usize) -> Result<String> {
-            self.history.push(message.to_string());
+    impl SynthesizerEngine for StaticSynthesizer {
+        fn set_verbose(&self, _level: u8) {}
+
+        fn respond_for_turn(
+            &self,
+            _prompt: &str,
+            _turn_intent: TurnIntent,
+            gathered_evidence: Option<&EvidenceBundle>,
+            _handoff: &SynthesisHandoff,
+            event_sink: Arc<dyn TurnEventSink>,
+        ) -> Result<String> {
+            event_sink.emit(TurnEvent::SynthesisReady {
+                grounded: gathered_evidence.is_some(),
+                citations: gathered_evidence
+                    .map(|bundle| {
+                        bundle
+                            .items
+                            .iter()
+                            .take(4)
+                            .map(|item| item.source.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                insufficient_evidence: false,
+            });
             self.responses
+                .lock()
+                .expect("static synthesizer responses lock")
                 .pop_front()
-                .ok_or_else(|| anyhow!("static conversation exhausted"))
+                .ok_or_else(|| anyhow!("static synthesizer exhausted"))
         }
 
-        fn history(&self) -> &[String] {
-            &self.history
+        fn recent_turn_summaries(&self) -> Result<Vec<String>> {
+            Ok(Vec::new())
         }
     }
 
@@ -9895,13 +9915,9 @@ mod tests {
             Vec::new(),
             Arc::clone(&request_log),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Hello from the planner path.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Hello from the planner path.".to_string(),
+        ]));
         let service = test_service(workspace.path());
         let sink = Arc::new(RecordingTurnEventSink::default());
 
@@ -9991,13 +10007,9 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Recorded response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Recorded response.".to_string(),
+        ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder.clone());
         let sink = Arc::new(RecordingTurnEventSink::default());
@@ -10794,13 +10806,9 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Chamber response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Chamber response.".to_string(),
+        ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
         let session = service.shared_conversation_session();
@@ -10883,13 +10891,9 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Transcript response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Transcript response.".to_string(),
+        ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
         let session = service.shared_conversation_session();
@@ -10970,13 +10974,9 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Projection response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Projection response.".to_string(),
+        ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
         let session = service.shared_conversation_session();
@@ -11162,13 +11162,9 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Projection update response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Projection update response.".to_string(),
+        ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
         let transcript_updates = Arc::new(RecordingTranscriptUpdateSink::default());
@@ -11277,13 +11273,8 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Update response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> =
+            Arc::new(StaticSynthesizer::new(vec!["Update response.".to_string()]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
         let updates = Arc::new(RecordingTranscriptUpdateSink::default());
@@ -12294,13 +12285,9 @@ mod tests {
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Forensic update response.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Forensic update response.".to_string(),
+        ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
         let updates = Arc::new(RecordingForensicUpdateSink::default());
@@ -12395,13 +12382,9 @@ mod tests {
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(SiftAgentAdapter::new_for_test(
-            workspace.path(),
-            "qwen-1.5b",
-            Box::new(StaticConversation::new(vec![
-                "Graph-backed answer.".to_string(),
-            ])),
-        ));
+        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+            "Graph-backed answer from src/application/mod.rs.".to_string(),
+        ]));
         let gatherer_requests = Arc::new(Mutex::new(Vec::new()));
         let gatherer_bundle = EvidenceBundle::new(
             "Autonomous `heuristic` graph gatherer collected 2 evidence item(s) for `what should the recursive gatherer inspect` across 1 turn(s); stop reason: goal-satisfied. branches: 2, frontier: 1, active branch: branch-root.".to_string(),
