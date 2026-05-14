@@ -30,7 +30,7 @@ updated_at: 2026-05-13T21:36:09
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Resolve Action Selection Through HTTP Model Clients](../../../../stories/VJZ8JjSkG/README.md) | feat | backlog |
-| [Resolve Final Rendering Through HTTP Model Clients](../../../../stories/VJZ8KHZvT/README.md) | feat | backlog |
-| [Preserve Sift Retrieval Outside Inference Cleanup](../../../../stories/VJZ8KqF7U/README.md) | feat | backlog |
+| [Resolve Action Selection Through HTTP Model Clients](../../../../stories/VJZ8JjSkG/README.md) | feat | icebox |
+| [Resolve Final Rendering Through HTTP Model Clients](../../../../stories/VJZ8KHZvT/README.md) | feat | icebox |
+| [Preserve Sift Retrieval Outside Inference Cleanup](../../../../stories/VJZ8KqF7U/README.md) | feat | icebox |
 <!-- END GENERATED -->

@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VJZ8MXfkO
-status: backlog
+status: icebox
 created_at: 2026-05-13T21:29:51
-updated_at: 2026-05-13T21:36:11
+updated_at: 2026-05-13T21:38:13
 # authored
 title: Document Ollama Local HTTP Defaults
 type: docs

@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VJZ9qwaWd
-status: backlog
+status: icebox
 created_at: 2026-05-13T21:35:47
-updated_at: 2026-05-13T21:36:11
+updated_at: 2026-05-13T21:38:18
 # authored
 title: Preserve HTTP Provider Credential Rules
 type: feat

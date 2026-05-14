@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VJZ8KqF7U
-status: backlog
+status: icebox
 created_at: 2026-05-13T21:29:45
-updated_at: 2026-05-13T21:36:09
+updated_at: 2026-05-13T21:38:06
 # authored
 title: Preserve Sift Retrieval Outside Inference Cleanup
 type: feat

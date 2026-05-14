@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VJZ8KHZvT
-status: backlog
+status: icebox
 created_at: 2026-05-13T21:29:43
-updated_at: 2026-05-13T21:36:09
+updated_at: 2026-05-13T21:38:03
 # authored
 title: Resolve Final Rendering Through HTTP Model Clients
 type: feat

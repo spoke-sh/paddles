@@ -30,8 +30,8 @@ updated_at: 2026-05-13T21:36:11
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Introduce Turn Runtime Preference Schema](../../../../stories/VJZ8LOzJi/README.md) | feat | backlog |
-| [Migrate Legacy Runtime Lane Preferences](../../../../stories/VJZ8Lz4V9/README.md) | feat | backlog |
-| [Document Ollama Local HTTP Defaults](../../../../stories/VJZ8MXfkO/README.md) | docs | backlog |
-| [Preserve HTTP Provider Credential Rules](../../../../stories/VJZ9qwaWd/README.md) | feat | backlog |
+| [Introduce Turn Runtime Preference Schema](../../../../stories/VJZ8LOzJi/README.md) | feat | icebox |
+| [Migrate Legacy Runtime Lane Preferences](../../../../stories/VJZ8Lz4V9/README.md) | feat | icebox |
+| [Document Ollama Local HTTP Defaults](../../../../stories/VJZ8MXfkO/README.md) | docs | icebox |
+| [Preserve HTTP Provider Credential Rules](../../../../stories/VJZ9qwaWd/README.md) | feat | icebox |
 <!-- END GENERATED -->
