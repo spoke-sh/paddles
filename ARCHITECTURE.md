@@ -10,9 +10,9 @@ loop where model reasoning is the planning.
 ## The Story of a Turn
 
 Every turn through Paddles follows the same narrative arc: understand,
-investigate, and then act or synthesize. The architecture exists to give small
-local models the structured support they need to produce grounded code edits and
-answers that rival much larger models.
+investigate, and then act or synthesize. The architecture exists to give smaller
+HTTP-hosted models the structured support they need to produce grounded code
+edits and answers that rival much larger models.
 
 ### Act 1: Interpretation
 
@@ -33,8 +33,8 @@ action, `external_capability`, `refine`, or `branch`.
 The bounded JSON action schema is rendered by
 `src/application/planner_action_schema.rs`. That application-layer boundary owns
 the first-action and later-action schema variants, action names, JSON examples,
-required fields, and shared selection rules. Sift/local and HTTP/remote
-action-selection adapters do not author action schema lists; they embed the
+required fields, and shared selection rules. HTTP action-selection adapters do
+not author action schema lists; they embed the
 shared renderer output inside their prompt or transport envelope.
 
 Provider adapters still own provider-specific mechanics: native tool calls,
@@ -409,11 +409,11 @@ The boundary split must preserve the recursive agent-loop/synthesizer contract:
   checklists must not replace model-authored control artifacts
 
 The local-first runtime remains the default constraint across every boundary.
-Local inference, local filesystem state, local trace durability, and local
-execution hands are the baseline. Network-backed providers, connectors, and
-external capability fabrics stay opt-in, disclose degraded or unavailable
-states explicitly, and require ADR justification when they become new runtime
-dependencies.
+Local HTTP model services, local filesystem state, local trace durability, and
+local execution hands are the baseline. Model weights stay outside the Paddles
+process. Network-backed providers, connectors, and external capability
+fabrics stay opt-in, disclose degraded or unavailable states explicitly, and
+require ADR justification when they become new runtime dependencies.
 
 ### Extraction Order
 
@@ -716,8 +716,7 @@ The target architecture is implemented across these modules:
 | **Runtime** | [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs) | Controller-owned service, session-scoped thread orchestration |
 | **Turn Events** | [src/domain/model/turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs) | Typed turn and planner event definitions |
 | **Agent Action Contract** | [src/domain/ports/planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs) | Bounded action schema and action-selection port |
-| **Action-Selection Adapter** | [src/infrastructure/adapters/sift_planner.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_planner.rs) | Sift-backed action-selection model |
-| **Synthesizer Adapter** | [src/infrastructure/adapters/sift_agent.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_agent.rs) | Sift-backed synthesis + guidance graph derivation |
+| **HTTP Model Client Adapter** | [src/infrastructure/adapters/http_provider.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/http_provider.rs) | HTTP-backed action selection and final rendering |
 | **Gatherer** | [src/infrastructure/adapters/sift_direct_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_direct_gatherer.rs) | Direct sift-backed retrieval backend |
 | **Operator Memory** | [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs) | AGENTS.md hierarchy + tool hint extraction + procedure derivation |
 | **Trace Contract** | [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs) | Stable task/turn/record/branch/checkpoint ids |
@@ -877,7 +876,7 @@ Two capabilities are still maturing:
 ## Current Model Routing
 
 > Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) moves model
-> inference to HTTP model clients. The local-first inference path is a local HTTP
+> inference to HTTP model clients. The local-first model path is a local HTTP
 > provider such as `ollama:<model>`. Sift remains documented here only as a
 > retrieval/indexing backend until a separate retrieval decision changes it.
 

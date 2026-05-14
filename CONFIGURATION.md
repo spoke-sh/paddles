@@ -128,7 +128,7 @@ weight = 1.5
 
 > Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP
 > model clients the only supported inference boundary for action selection and
-> final rendering. Local-first inference should run through a local HTTP model
+> final rendering. Local-first model execution should run through a local HTTP model
 > service such as Ollama and use `ollama:<model>`. Sift-backed retrieval is a
 > separate boundary and remains available through explicit retrieval providers.
 
@@ -349,11 +349,11 @@ Current specialist-brain contract:
 - the brain only activates when `recursive-structured-v1` is active and the session exposes durable turn summaries through `query_session_context(...)`
 - unsupported profiles or empty session history produce an explicit runtime note rather than silently bypassing the recursive planner loop
 
-Current local model guidance:
+Current local HTTP model guidance:
 
-- Paddles no longer treats in-process model loading as the future-supported
-  inference path. See [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md).
-- Run local models behind an HTTP service such as Ollama and select them with
+- Paddles no longer owns model execution inside its process. See
+  [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md).
+- Run local model services behind an HTTP API such as Ollama and select them with
   `ollama:<model>`.
 - GPU, quantization, batching, and model residency are owned by that local HTTP
   service rather than by paddles runtime construction.
@@ -596,7 +596,7 @@ family exposes more than one contract:
 | `anthropic` | `claude-sonnet-4-20250514` | `anthropic` | `supported` | `anthropic-tool-use` | `prompt-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | Messages API with thinking blocks and interleaved-thinking support. |
 | `google` | `gemini-2.5-flash` | `gemini` | `supported` | `gemini-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `low`, `medium`, `high` | generateContent path with thought-signature continuity. |
 | `moonshot` | `kimi-k2.6` | `openai` | `supported` | `openai-json-schema` | `structured-json-envelope` | `native_continuation` | `opaque_round_trip` | `none`, `thinking` | OpenAI-compatible chat with reasoning_content continuity. |
-| `ollama` | `qwen3` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `thinking` | Freeform local models; qwen3 shown for thinking-capable toggle behavior. |
+| `ollama` | `qwen3` | `openai` | `supported` | `openai-json-schema` | `native-function-tool` | `toggle_only` | `none` | `none`, `thinking` | Freeform local HTTP model IDs; qwen3 shown for thinking-capable toggle behavior. |
 <!-- END_PROVIDER_CAPABILITY_MATRIX -->
 
 - `summary_only` means the provider can surface reasoning summaries or similar
@@ -608,7 +608,7 @@ family exposes more than one contract:
 
 Legacy local `sift` model-provider selections are migration-only inputs. They
 should fail before runtime construction with an `ollama:<model>` migration hint.
-Do not add new local model-loading examples for this path.
+Do not add examples where Paddles owns the model process for this path.
 
 ```bash
 paddles --model ollama:<model>

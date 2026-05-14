@@ -72,8 +72,8 @@ the controller.
 The shared agent action schema renderer is the JSON action contract's one
 owner. It lives in `src/application/planner_action_schema.rs` and emits the
 canonical first-action and later-action variants, including action names, JSON
-examples, required fields, and common selection rules. Sift/local and
-HTTP/remote action-selection prompts embed that same rendered block. Adapter
+examples, required fields, and common selection rules. HTTP action-selection
+prompts embed that same rendered block. Adapter
 prompts may add transport mechanics, but they do not author their own action
 lists.
 
@@ -450,7 +450,7 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 
 > Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP
 > model clients the only supported inference boundary for action selection and
-> final rendering. Local-first inference should run through a local HTTP model
+> final rendering. Local-first model execution should run through a local HTTP model
 > service such as Ollama and use the `ollama:<model>` provider form. Sift remains
 > a retrieval/indexing concern until a separate decision changes that boundary.
 
@@ -572,7 +572,7 @@ Use a heavier action-selection model while keeping a lighter final-rendering
 model:
 
 ```bash
-paddles --model ollama:<model> --planner-model openai:gpt-5.4
+paddles --model ollama:<model> --planner-provider openai --planner-model gpt-5.4
 ```
 
 One-shot prompt mode stays plain for scripts:
@@ -593,7 +593,7 @@ Later files are more specific. That memory now participates in turn interpretati
 
 ## Why This Architecture
 
-Paddles raises the effective performance of smaller local models through recursive resource use. A small model with bounded tools and iterative evidence gathering consistently outperforms the same model answering in one shot.
+Paddles raises the effective performance of smaller HTTP-hosted models through recursive resource use. A small model with bounded tools and iterative evidence gathering consistently outperforms the same model answering in one shot.
 
 That is the contract:
 

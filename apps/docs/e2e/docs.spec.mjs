@@ -7,12 +7,12 @@ test('docs app serves the Keel-style landing page and intro route', async ({
 
   await expect(
     page.getByRole('heading', {
-      name: 'Make small local models behave like grounded coding agents.',
+      name: 'Make smaller HTTP-hosted models behave like grounded coding agents.',
     }),
   ).toBeVisible();
   await expect(
     page.getByRole('heading', {
-      name: 'Paddles changes what a small local model can actually do.',
+      name: 'Paddles changes what a smaller HTTP-hosted model can actually do.',
     }),
   ).toBeVisible();
   await expect(

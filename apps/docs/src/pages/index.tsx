@@ -21,7 +21,7 @@ const capabilityItems: SignalItem[] = [
   {
     eyebrow: 'Recursive Investigation',
     title: 'Search, read, and refine until evidence is sufficient',
-    body: 'The planner can branch through the workspace in bounded steps, which lets small local models inspect code instead of bluffing through uncertainty.',
+    body: 'The planner can branch through the workspace in bounded steps, which lets smaller HTTP-hosted models inspect code instead of bluffing through uncertainty.',
     href: '/docs/concepts/recursive-planning',
     cta: 'See the planner loop',
   },
@@ -47,7 +47,7 @@ const firstTurnItems = [
   },
   {
     label: 'Start Session',
-    command: 'paddles --cuda',
+    command: 'paddles --model ollama:qwen3',
     href: '/docs/start-here/first-turn#start-interactive-mode',
   },
   {
@@ -188,11 +188,12 @@ export default function Home(): ReactNode {
             <div className={styles.heroGrid}>
               <div className={styles.heroCopy}>
                 <p className={styles.eyebrow}>Recursive Planning Harness</p>
-                <h1>Make small local models behave like grounded coding agents.</h1>
+                <h1>Make smaller HTTP-hosted models behave like grounded coding agents.</h1>
                 <p className={styles.lede}>
-                  Paddles is a local-first harness that gives small models
-                  operator context, bounded recursive investigation, and a
-                  synthesis pass that writes from evidence instead of guesswork.
+                  Paddles is a local-first harness that gives selected model
+                  clients operator context, bounded recursive investigation,
+                  and a synthesis pass that writes from evidence instead of
+                  guesswork.
                 </p>
                 <div className={styles.actions}>
                   <Link
@@ -246,12 +247,12 @@ export default function Home(): ReactNode {
           <div className="container">
             <div className={styles.sectionHeader}>
               <p className={styles.sectionEyebrow}>Why Teams Reach For Paddles</p>
-              <h2>Paddles changes what a small local model can actually do.</h2>
+              <h2>Paddles changes what a smaller HTTP-hosted model can actually do.</h2>
               <p>
                 The harness is opinionated on purpose. It adds repo-grounded
                 context, recursive evidence gathering, and a visible answer path
-                so local models can behave more like careful operators than
-                autocomplete with better marketing.
+                so local HTTP model clients can behave more like careful
+                operators than autocomplete with better marketing.
               </p>
             </div>
             <SignalGrid items={capabilityItems} tone="hero" />

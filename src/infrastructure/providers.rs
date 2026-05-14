@@ -1012,7 +1012,7 @@ const DOCUMENTED_PROVIDER_CAPABILITY_PATHS: &[(ModelProvider, &str, &str)] = &[
     (
         ModelProvider::Ollama,
         "qwen3",
-        "Freeform local models; qwen3 shown for thinking-capable toggle behavior.",
+        "Freeform local HTTP model IDs; qwen3 shown for thinking-capable toggle behavior.",
     ),
 ];
 

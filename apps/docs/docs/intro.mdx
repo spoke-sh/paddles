@@ -1,18 +1,18 @@
 ---
 title: Paddles, Explained
 sidebar_position: 1
-description: Understand what Paddles is, how it turns small local models into capable coding agents, and where to start reading.
+description: Understand what Paddles is, how it turns smaller HTTP-hosted models into capable coding agents, and where to start reading.
 ---
 
 # Paddles, Explained
 
-Paddles is a recursive in-context planning harness for local-first coding agents. It wraps small language models in a structured loop that lets them investigate a workspace iteratively instead of answering in one shot.
+Paddles is a recursive in-context planning harness for local-first coding agents. It wraps HTTP model clients in a structured loop that lets them investigate a workspace iteratively instead of answering in one shot.
 
-The result: a 1.5B parameter model with bounded tools and recursive evidence gathering consistently outperforms the same model answering from memory alone.
+The result: a smaller model hosted behind a local HTTP service can use bounded tools and recursive evidence gathering instead of answering from memory alone.
 
 ## What The Harness Does
 
-Paddles gives a small model three things it cannot provide for itself:
+Paddles gives the selected model client three things it cannot provide for itself:
 
 - **Operator context** — project conventions, guidance, and priorities loaded from `AGENTS.md` memory files before the model sees the prompt
 - **Recursive investigation** — a bounded loop where the model searches, reads, refines, and branches until it has real evidence from the workspace

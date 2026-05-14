@@ -18,7 +18,10 @@ Progress is blocked if structural or requirement drift is detected:
 - **Scaffold Drift**: Unfilled template placeholders (`{{goal}}`).
 
 ## 3. Local Capacity Invariant
-Features should be implemented using local inference (`candle`) or local-first tools whenever possible. New network dependencies must be justified via an ADR.
+Features should preserve a local-first path whenever possible. Model inference
+for action selection and final rendering runs through HTTP model clients,
+including local services such as Ollama; Paddles does not host model weights
+inside its own process. New network dependencies must be justified via an ADR.
 
 ## 4. Specialized Model Routing
 Model selection is an architectural decision that shapes every turn.
@@ -42,7 +45,7 @@ Model selection is an architectural decision that shapes every turn.
 ### Recursive Agent Loop and Synthesis
 - **Recursive Agent-Loop Reasoning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
 - **Agent Action Contract**: Turns flow through one constrained recursive action vocabulary: terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
-- **Shared Agent Action Schema Ownership**: Action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared action schema renderer. Adapter-local action schema lists are forbidden for Sift, HTTP, retry, redecision, or future action-selection lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
+- **Shared Agent Action Schema Ownership**: Action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared action schema renderer. Adapter-local action schema lists are forbidden for HTTP, retry, redecision, or future action-selection lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
 - **First Action Is In The Loop**: The primary mech-suit runtime asks the model for its first bounded agent action as part of the recursive agent loop. A direct answer is a terminal action in that loop, not a separate route.
 - **Reasoning Budget Is For Reasoning**: Recursive budget exists to let the
   model think through the harness' dynamically available capabilities and
@@ -77,7 +80,7 @@ Model selection is an architectural decision that shapes every turn.
 ### Model Integration
 - **Separate Catalog, Runtime, and Prompting**: Model integration isolates alias/asset resolution, family-specific inference runtime, and prompt/protocol behavior — new families integrate cleanly.
 - **Specialized Models Require Their Harness**: A specialized retrieval model runs within its proper harness, pruning loop, or context manager — recognized as a distinct capability rather than a drop-in substitute.
-- **Local-First By Default**: The default path runs on local models. Remote or heavyweight models are explicit, observable, and degrade gracefully to local fallbacks.
+- **Local-First By Default**: The default path must remain compatible with local HTTP model services and local tools. Remote or heavyweight providers are explicit, observable, and degrade gracefully to local-first fallbacks.
 
 ### Interactive Sessions and Threading
 - **Durable Conversation Root**: Multi-turn interactive work reuses one paddles-owned task root with stable turn, branch, candidate, and decision ids.
@@ -99,7 +102,7 @@ Model selection is an architectural decision that shapes every turn.
 - **Hierarchical Memory**: The REPL reloads `AGENTS.md` memory on every turn from system, user, and ancestor scopes, with more specific files taking precedence.
 - **Memory Drives Action, Control Drives Safety**: Instruction memory rooted at `AGENTS.md` and its model-derived guidance graph influence action selection. Typed evidence contracts, validation, and budgets remain controller-owned.
 - **AGENTS.md Is The Interpretation Root**: The harness discovers `AGENTS.md` memory files; additional guidance flows through the model-derived graph — keeping the system extensible.
-- **Guidance Graph Bootstraps Tool Hints**: The turn-time guidance graph contributes read-only command hints so small local models discover better next actions through project knowledge.
+- **Guidance Graph Bootstraps Tool Hints**: The turn-time guidance graph contributes read-only command hints so smaller HTTP-hosted models discover better next actions through project knowledge.
 - **Guidance Graph Bootstraps Decision Procedures**: The same model-derived graph contributes ordered, prompt-relevant procedures so fallback action selection and stop decisions are shaped by project guidance.
 - **Project Engines Are Context**: Keel and other board engines inform recursive agent-loop reasoning through context and tools — the harness stays general-purpose and useful across domains.
 
