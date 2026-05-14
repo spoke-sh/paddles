@@ -1,13 +1,15 @@
 ---
 # system-managed
 id: VJZ034dF2
-status: ready
+status: laid
 created_at: 2026-05-13T20:56:50
 # authored
 title: Map Turn Loop And HTTP Inference Cleanup
 index: 3
 mission: VJYzz3ivM
 updated_at: 2026-05-13T20:56:52
+laid_at: 2026-05-13T21:17:27
+epic: VJZ034dF2
 ---
 
 # Map Turn Loop And HTTP Inference Cleanup

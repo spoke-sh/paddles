@@ -9,7 +9,7 @@
 |---------|--------|----------|------------|-----------|----|------|
 | [HTTP API Design For Paddles](bearings/VFKApee25/) | laid | ✓ | ✓ | decision-ready | 10.31 | ✓ |
 | [Adaptive Interpretation Context Refinement](bearings/VFUNJz9zT/) | laid | ✓ | ✓ | decision-ready | 4.89 | ✓ |
-| [Map Turn Loop And HTTP Inference Cleanup](bearings/VJZ034dF2/) | ready | ✓ | ✓ | decision-ready | 3.22 | - |
+| [Map Turn Loop And HTTP Inference Cleanup](bearings/VJZ034dF2/) | laid | ✓ | ✓ | decision-ready | 3.22 | ✓ |
 
 ## Epics
 
@@ -490,4 +490,6 @@
 | Voyage | Status |
 |--------|--------|
 | [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | done |
+
+### [Map Turn Loop And HTTP Inference Cleanup](epics/VJZ034dF2/) (draft)
 
