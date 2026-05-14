@@ -3015,18 +3015,11 @@ impl AgentRuntime {
         .flatten();
         let planner_prepared_model_id =
             planner_provider.prepare_runtime_model_id(&planner_model_id, planner_thinking_mode);
-        let planner_paths = if planner_provider != ModelProvider::Sift {
-            None
-        } else if planner_model_id == config.synthesizer_model_id() {
-            synthesizer_paths.clone()
-        } else {
-            Some(self.registry.get_model_paths(&planner_model_id).await?)
-        };
         let planner = Self::build_lane(
             RuntimeLaneRole::Planner,
             planner_provider,
             planner_prepared_model_id,
-            planner_paths,
+            None,
         );
         let synthesizer = Self::build_lane(
             RuntimeLaneRole::Synthesizer,

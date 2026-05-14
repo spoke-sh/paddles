@@ -1,0 +1,13 @@
+---
+recorded_at: 2026-05-13T22:00:37.171175602-07:00
+command: cargo nextest run action_selection_client_builds_from_http_provider_configuration
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 81d78499-55d0-4ec6-81ff-70072cc40190 with nextest profile: default
+    Starting 1 test across 3 binaries (826 tests skipped)
+        PASS [   0.031s] (1/1) paddles::bin/paddles tests::action_selection_client_builds_from_http_provider_configuration
+────────────
+     Summary [   0.032s] 1 test run: 1 passed, 826 skipped

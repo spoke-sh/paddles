@@ -21,7 +21,6 @@ use paddles::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpP
 use paddles::infrastructure::adapters::sift_agent::SiftAgentAdapter;
 use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
 use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
-use paddles::infrastructure::adapters::sift_planner::SiftPlannerAdapter;
 use paddles::infrastructure::adapters::sift_registry::SiftRegistryAdapter;
 use paddles::infrastructure::adapters::trace_recorders::HostedTransitTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -210,45 +209,29 @@ fn build_planner_engine(
     lane: &PreparedModelLane,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn paddles::domain::ports::RecursivePlanner>> {
-    match lane.provider {
-        ModelProvider::Sift => {
-            let engine = Arc::new(SiftAgentAdapter::new_with_runtime_mediator(
-                workspace.to_path_buf(),
-                execution_hand_registry,
-                transport_mediator,
-                &lane.model_id,
-                lane.paths.clone().ok_or_else(|| {
-                    anyhow::anyhow!("local sift lane missing prepared model paths")
-                })?,
-                lane.provider
-                    .capability_surface(&lane.model_id)
-                    .render_capability,
-            )?);
-            Ok(Arc::new(SiftPlannerAdapter::new(engine))
-                as Arc<dyn paddles::domain::ports::RecursivePlanner>)
-        }
-        provider => {
-            let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
-                provider,
-                &lane.model_id,
-                transport_mediator.as_ref(),
-                provider_url_overrides,
-            )?;
-            let engine = Arc::new(HttpProviderAdapter::new_with_runtime_mediator(
-                workspace.to_path_buf(),
-                execution_hand_registry,
-                transport_mediator,
-                provider.name(),
-                lane.model_id.clone(),
-                api_key,
-                base_url,
-                format,
-                capabilities.render_capability,
-            ));
-            Ok(Arc::new(HttpPlannerAdapter::new(engine))
-                as Arc<dyn paddles::domain::ports::RecursivePlanner>)
-        }
+    ensure_supported_model_inference_provider(lane.provider, "planner_provider")?;
+    if lane.paths.is_some() {
+        bail!("action-selection HTTP model client must not receive local ModelPaths");
     }
+    let (format, base_url, api_key, capabilities) = resolve_remote_provider_config(
+        lane.provider,
+        &lane.model_id,
+        transport_mediator.as_ref(),
+        provider_url_overrides,
+    )?;
+    let engine = Arc::new(HttpProviderAdapter::new_with_runtime_mediator(
+        workspace.to_path_buf(),
+        execution_hand_registry,
+        transport_mediator,
+        lane.provider.name(),
+        lane.model_id.clone(),
+        api_key,
+        base_url,
+        format,
+        capabilities.render_capability,
+    ));
+    Ok(Arc::new(HttpPlannerAdapter::new(engine))
+        as Arc<dyn paddles::domain::ports::RecursivePlanner>)
 }
 
 fn build_trace_recorder_from_config(
@@ -951,18 +934,23 @@ async fn run_plain_interactive_loop(service: Arc<AgentRuntime>) -> Result<()> {
 mod tests {
     use super::{
         OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
-        build_trace_recorder_from_config, ensure_remote_provider_transport_support,
-        resolve_operator_surface_bootstrap, resolve_provider_from_name,
-        service_runtime_failure_status, service_runtime_ready_status,
+        build_planner_engine, build_trace_recorder_from_config,
+        ensure_remote_provider_transport_support, resolve_operator_surface_bootstrap,
+        resolve_provider_from_name, service_runtime_failure_status, service_runtime_ready_status,
     };
     use paddles::application::{
         PreparedModelLane, PreparedRuntimeLanes, RuntimeHarnessCapabilityPostureService,
         RuntimeLaneRole,
     };
     use paddles::domain::model::{ExternalCapabilityCatalog, ExternalCapabilityCatalogConfig};
+    use paddles::domain::ports::ModelPaths;
     use paddles::infrastructure::config::{HostedTransitAuthorityConfig, TraceAuthoritySelection};
+    use paddles::infrastructure::execution_hand::ExecutionHandRegistry;
     use paddles::infrastructure::providers::ModelProvider;
-    use std::path::Path;
+    use paddles::infrastructure::transport_mediator::TransportToolMediator;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use tempfile::tempdir;
     use transit_core::engine::LocalEngineConfig;
     use transit_core::membership::NodeId;
@@ -976,6 +964,23 @@ mod tests {
         ))
         .expect("bind hosted transit server");
         (temp, server)
+    }
+
+    fn sample_model_paths(prefix: &str) -> ModelPaths {
+        ModelPaths {
+            weights: vec![PathBuf::from(format!("{prefix}-weights.safetensors"))],
+            tokenizer: PathBuf::from(format!("{prefix}-tokenizer.json")),
+            config: PathBuf::from(format!("{prefix}-config.json")),
+            generation_config: Some(PathBuf::from(format!("{prefix}-generation-config.json"))),
+        }
+    }
+
+    fn transport_mediator_for_test() -> (Arc<ExecutionHandRegistry>, Arc<TransportToolMediator>) {
+        let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+        let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
+            Arc::clone(&execution_hand_registry),
+        ));
+        (execution_hand_registry, transport_mediator)
     }
 
     #[test]
@@ -1007,6 +1012,87 @@ mod tests {
     fn planner_provider_config_rejects_legacy_sift_model_provider_with_migration_hint() {
         let error = resolve_provider_from_name("sift", "planner_provider")
             .expect_err("legacy sift planner provider config should fail");
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
+        );
+        assert!(message.contains("ollama:<model>"), "{message}");
+    }
+
+    #[test]
+    fn action_selection_http_client_rejects_local_model_paths() {
+        let workspace = tempdir().expect("workspace");
+        let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Planner,
+            provider: ModelProvider::Ollama,
+            model_id: "qwen3".to_string(),
+            paths: Some(sample_model_paths("planner")),
+        };
+
+        let error = match build_planner_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        ) {
+            Ok(_) => panic!("action-selection HTTP model client should reject local ModelPaths"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+
+        assert!(
+            message
+                .contains("action-selection HTTP model client must not receive local ModelPaths"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn action_selection_client_builds_from_http_provider_configuration() {
+        let workspace = tempdir().expect("workspace");
+        let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Planner,
+            provider: ModelProvider::Ollama,
+            model_id: "qwen3".to_string(),
+            paths: None,
+        };
+
+        build_planner_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        )
+        .expect("Ollama planner should build through the HTTP provider adapter");
+    }
+
+    #[test]
+    fn action_selection_client_rejects_legacy_sift_provider_with_migration_hint() {
+        let workspace = tempdir().expect("workspace");
+        let (execution_hand_registry, transport_mediator) = transport_mediator_for_test();
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Planner,
+            provider: ModelProvider::Sift,
+            model_id: "qwen-1.5b".to_string(),
+            paths: None,
+        };
+
+        let error = match build_planner_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        ) {
+            Ok(_) => panic!("legacy sift action-selection provider should fail"),
+            Err(error) => error,
+        };
         let message = format!("{error:#}");
 
         assert!(

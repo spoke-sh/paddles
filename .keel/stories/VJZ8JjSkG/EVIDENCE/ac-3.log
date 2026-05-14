@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T22:00:43.560278118-07:00
+command: cargo nextest run action_selection_client_rejects_legacy_sift_provider_with_migration_hint prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
+────────────
+ Nextest run ID e23a1f4c-acb2-4115-863b-6278828d00ca with nextest profile: default
+    Starting 2 tests across 3 binaries (825 tests skipped)
+        PASS [   0.007s] (1/2) paddles::bin/paddles tests::action_selection_client_rejects_legacy_sift_provider_with_migration_hint
+        PASS [   0.014s] (2/2) paddles application::tests::prepare_runtime_lanes_rejects_legacy_sift_planner_before_construction
+────────────
+     Summary [   0.015s] 2 tests run: 2 passed, 825 skipped
