@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJXwlG70U
-status: planned
+status: in-progress
 epic: VJXwbmekZ
 created_at: 2026-05-13T16:37:30
 # authored
 title: Agent Vocabulary Cleanup
 index: 3
 updated_at: 2026-05-13T16:40:08
+started_at: 2026-05-13T17:09:02
 ---
 
 # Agent Vocabulary Cleanup
@@ -26,10 +27,10 @@ updated_at: 2026-05-13T16:40:08
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Migrate Adapter Prompts To Agent Loop Vocabulary](../../../../stories/VJXwmnTaa/README.md) | feat | backlog |
+| [Migrate Adapter Prompts To Agent Loop Vocabulary](../../../../stories/VJXwmnTaa/README.md) | feat | done |
 | [Update Foundational Docs For Recursive Agent Loop](../../../../stories/VJXwmpZXz/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -63,11 +63,11 @@ fn planner_action_schema_entries_for_variant(
 
 pub fn render_planner_action_schema(variant: PlannerActionSchemaVariant) -> String {
     let mut rendered = format!(
-        "## Planner Action Schema\n\
+        "## Agent Action Schema\n\
 {PLANNER_ACTION_SCHEMA_BEGIN}\n\
 Variant: {}\n\
 \n\
-You must respond with exactly one complete JSON object selecting the next bounded action.\n\
+You must respond with exactly one complete JSON object selecting the next bounded agent action inside the recursive agent loop.\n\
 The first key must be `action`.\n\
 \n\
 Available actions:\n",
@@ -101,8 +101,8 @@ Available actions:\n",
 impl PlannerActionSchemaVariant {
     fn label(self) -> &'static str {
         match self {
-            Self::Initial => "initial routing decision",
-            Self::Recursive => "recursive next-action decision",
+            Self::Initial => "first bounded agent action in the recursive agent loop",
+            Self::Recursive => "next bounded agent action in the recursive agent loop",
         }
     }
 
@@ -134,16 +134,16 @@ const SHARED_ACTION_SCHEMA_RULES: &[&str] = &[
 ];
 
 const INITIAL_ACTION_SCHEMA_RULES: &[&str] = &[
-    "Every initial routing reply must include top-level `edit` and `candidate_files` fields.",
+    "Every first action reply must include top-level `edit` and `candidate_files` fields.",
     "`edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.",
     "`candidate_files` must list up to 3 plausible relative file paths to inspect or edit first; use `[]` only when `edit` is `no`.",
-    "For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.",
+    "For `answer`, put the user-facing reply in `answer` and keep `rationale` as the control-only reason for selecting it.",
     "Answer or stop as soon as you have sufficient evidence; do not spend remaining budget on redundant searches.",
 ];
 
 const RECURSIVE_ACTION_SCHEMA_RULES: &[&str] = &[
-    "Every recursive action reply must include top-level `edit` and `candidate_files` fields.",
-    "Stop as soon as you have enough evidence to answer; if stopping with the final user-facing answer, include it in `answer` and keep `rationale` for planner-only control reasoning.",
+    "Every agent-loop action reply must include top-level `edit` and `candidate_files` fields.",
+    "Stop as soon as you have enough evidence to answer; if stopping with the final user-facing answer, include it in `answer` and keep `rationale` for control-only reasoning.",
     "Use `refine` when an earlier search needs a sharper query.",
     "Use `branch` when the investigation should split into multiple bounded subqueries.",
 ];

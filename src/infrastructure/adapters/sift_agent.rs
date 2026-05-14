@@ -2589,8 +2589,8 @@ fn format_operator_memory_documents(documents: &[OperatorMemoryDocument]) -> Str
 
 fn build_initial_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
     format!(
-        "You are the top-level routing planner for Paddles.\n\
-Choose the NEXT bounded action for this turn after reading the interpretation context.\n\
+        "You select bounded agent actions inside Paddles' recursive agent loop.\n\
+Choose the first bounded agent action for this turn after reading the interpretation context.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
@@ -2600,7 +2600,7 @@ Use the capability manifest and completion contract below as the harness source 
 Rules:\n\
 - Read the interpretation context before choosing.\n\
 - Answer or stop as soon as you have sufficient evidence. Do not use remaining budget for redundant or confirmatory searches.\n\
-- For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
+- For `answer`, put the user-facing reply in `answer` and keep `rationale` as the control-only reason for selecting it.\n\
 - Choose the most specific next workspace action when the turn requires repository work.\n\
 - `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 - `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
@@ -2667,15 +2667,15 @@ Current user request:\n\
 
 fn build_initial_action_retry_prompt(request: &PlannerRequest) -> String {
     format!(
-        "Your last top-level routing reply was empty or invalid.\n\
-Return ONLY one valid JSON initial action.\n\
+        "Your last first-action reply was empty or invalid.\n\
+Return ONLY one valid JSON first bounded agent action inside the recursive agent loop.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
 {}\n\
 \n\
 Do not answer the user directly.\n\
-For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
+For `answer`, put the user-facing reply in `answer` and keep `rationale` as the control-only reason for selecting it.\n\
 `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
 `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
@@ -2733,8 +2733,8 @@ Current user request:\n\
 
 fn build_initial_action_redecision_prompt(request: &PlannerRequest, invalid_reply: &str) -> String {
     format!(
-        "Your previous initial-action replies were invalid.\n\
-Make one final constrained routing decision.\n\
+        "Your previous first-action replies were invalid.\n\
+Make one final bounded agent action selection inside the recursive agent loop.\n\
 If no workspace action is clearly justified by the interpretation context, return stop.\n\
 Return ONLY one valid JSON object.\n\
 Every reply MUST include top-level `edit` and `candidate_files` fields.\n\
@@ -2746,7 +2746,7 @@ Invalid reply to correct:\n\
 {}\n\
 \n\
 `edit` must be `yes` when the user is clearly asking for a code or file edit; otherwise return `no`.\n\
-For `answer`, put the user-facing reply in `answer` and keep `rationale` as the planner-only reason for selecting it.\n\
+For `answer`, put the user-facing reply in `answer` and keep `rationale` as the control-only reason for selecting it.\n\
 `candidate_files` must list up to 3 plausible relative file paths to inspect or edit first. Use `[]` only when `edit` is `no`.\n\
 	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
 	Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
@@ -2800,8 +2800,8 @@ Current user request:\n\
 
 fn build_planner_action_prompt(prompt: &PlannerPrompt<'_>) -> String {
     format!(
-        "You are the recursive planner lane for Paddles.\n\
-Choose the NEXT bounded workspace resource action for this turn.\n\
+        "You select bounded agent actions inside Paddles' recursive agent loop.\n\
+Choose the next bounded agent action for this turn.\n\
 Reply with ONLY one JSON object and no prose or markdown.\n\
 Use the capability manifest and completion contract below as the harness source of truth.\n\
 \n\
@@ -2822,11 +2822,11 @@ Rules:\n\
 - Read when a specific file or artifact should be opened.\n\
 - Inspect when a read-only workspace command would clarify state.\n\
 - Prefer a relevant interpretation tool hint over a generic search when the hint clearly matches the current request and has not been used yet.\n\
-- Use shell, diff, or edit actions when the requested next step is a concrete workspace action that should stay inside the planner loop.\n\
+- Use shell, diff, or edit actions when the requested next step is a concrete workspace action that should stay inside the recursive agent loop.\n\
 - Refine when an earlier search needs a sharper query.\n\
 - Branch when the investigation should split into multiple subqueries.\n\
 - Stop as soon as you have enough evidence to answer. Do not use remaining budget for redundant or confirmatory searches — efficiency matters more than thoroughness.\n\
-- If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
+- If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for control-only reasoning.\n\
 - When the user requests a code change, use write_file, replace_in_file, or apply_patch to make the edit directly — never describe the edit for the user to apply manually.\n\
 - If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 - Never answer the user directly here.\n\
@@ -2895,6 +2895,20 @@ pub(crate) fn build_initial_action_prompt_for_schema_test(request: &PlannerReque
 }
 
 #[cfg(test)]
+pub(crate) fn build_initial_action_retry_prompt_for_schema_test(
+    request: &PlannerRequest,
+) -> String {
+    build_initial_action_retry_prompt(request)
+}
+
+#[cfg(test)]
+pub(crate) fn build_initial_action_redecision_prompt_for_schema_test(
+    request: &PlannerRequest,
+) -> String {
+    build_initial_action_redecision_prompt(request, "not json")
+}
+
+#[cfg(test)]
 pub(crate) fn build_planner_action_prompt_for_schema_test(request: &PlannerRequest) -> String {
     build_planner_action_prompt(&PlannerPrompt {
         workspace_root: request.workspace_root.as_path(),
@@ -2904,15 +2918,25 @@ pub(crate) fn build_planner_action_prompt_for_schema_test(request: &PlannerReque
     })
 }
 
+#[cfg(test)]
+pub(crate) fn build_planner_retry_prompt_for_schema_test(request: &PlannerRequest) -> String {
+    build_planner_retry_prompt(request)
+}
+
+#[cfg(test)]
+pub(crate) fn build_planner_redecision_prompt_for_schema_test(request: &PlannerRequest) -> String {
+    build_planner_redecision_prompt(request, "not json")
+}
+
 fn build_planner_retry_prompt(request: &PlannerRequest) -> String {
     format!(
-        "Your last planner reply was empty or invalid.\n\
-Return ONLY one valid JSON planner action.\n\
+        "Your last agent-action reply was empty or invalid.\n\
+Return ONLY one valid JSON next bounded agent action inside the recursive agent loop.\n\
 \n\
 {}\n\
 \n\
 Do not answer the user directly.\n\
-If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
+If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for control-only reasoning.\n\
 	Optional `retrievers` may include `path-fuzzy` and `segment-fuzzy` when structural fuzzy lookup would help.\n\
 	Use `retrievers:[\"path-fuzzy\"]` when the query names a likely file, path, selector, or symbol.\n\
 	Use `retrievers:[\"path-fuzzy\",\"segment-fuzzy\"]` when you need fuzzy definition lookup for a structural code shape or snippet.\n\
@@ -2923,6 +2947,8 @@ If one likely target file is already known or already read, move into exact-diff
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
+{}\n\
+\n\
 {}\n\
 \n\
 Interpretation context:\n\
@@ -2950,6 +2976,7 @@ Current user request:\n\
 {}\n",
         render_planner_action_schema(PlannerActionSchemaVariant::Recursive),
         planner_grounding_rules(),
+        format_execution_contract(request),
         format_interpretation_context_digest(&request.interpretation),
         format_interpretation_tool_hints(&request.interpretation),
         format_decision_framework(&request.interpretation),
@@ -2966,10 +2993,10 @@ Current user request:\n\
 
 fn build_planner_redecision_prompt(request: &PlannerRequest, invalid_reply: &str) -> String {
     format!(
-        "Your previous planner replies were invalid.\n\
-Make one final constrained next-action decision.\n\
+        "Your previous agent-action replies were invalid.\n\
+Make one final next bounded agent action selection inside the recursive agent loop.\n\
 If the loop state already contains enough evidence, return stop.\n\
-Return ONLY one valid JSON planner action.\n\
+Return ONLY one valid JSON next bounded agent action.\n\
 \n\
 {}\n\
 \n\
@@ -2984,9 +3011,11 @@ When the user requests a specific code or UI change, use at most one bounded sea
 Action produces information. Once you have a plausible target file, prefer reading or editing it over another broad search.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the current loop state notes contain a `Steering review`, judge the proposed move against the gathered sources and return the action that should actually execute next.\n\
-If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for planner-only control reasoning.\n\
+If you are stopping because you already have the final user-facing answer, put that reply in `answer` and keep `rationale` for control-only reasoning.\n\
 For `search.query` and `refine.query`, return concise retrieval terms, not an instruction sentence. Omit prefixes like `search`, `find`, `look for`, or `search for` unless they are part of the literal text to match.\n\
 - Use inspect only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use shell for broader workspace command execution.\n\
+{}\n\
+\n\
 {}\n\
 \n\
 Interpretation context:\n\
@@ -3012,6 +3041,7 @@ Current user request:\n\
         render_planner_action_schema(PlannerActionSchemaVariant::Recursive),
         trim_for_context(invalid_reply, 800),
         planner_grounding_rules(),
+        format_execution_contract(request),
         format_interpretation_context_digest(&request.interpretation),
         format_decision_framework(&request.interpretation),
         format_recent_turn_list(&request.recent_turns),

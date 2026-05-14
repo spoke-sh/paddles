@@ -1190,7 +1190,7 @@ impl HttpProviderAdapter {
                 "type": "function",
                 "function": {
                     "name": OPENAI_PLANNER_TOOL_NAME,
-                    "description": "Select the next bounded planner action for local execution in the Paddles harness.",
+                    "description": "Select the next bounded agent action for local execution in the Paddles harness.",
                     "parameters": planner_action_json_schema(),
                     "strict": true
                 }
@@ -1263,7 +1263,7 @@ impl HttpProviderAdapter {
                 Value::Array(vec![json!({
                     "type": "function",
                     "name": OPENAI_PLANNER_TOOL_NAME,
-                    "description": "Select the next bounded planner action for local execution in the Paddles harness.",
+                    "description": "Select the next bounded agent action for local execution in the Paddles harness.",
                     "parameters": planner_action_json_schema(),
                     "strict": true,
                 })]),
@@ -1774,11 +1774,11 @@ impl HttpProviderAdapter {
         operator_memory: &[crate::domain::ports::OperatorMemoryDocument],
     ) -> String {
         let mut system = String::from(
-            "You are Paddles, a recursive in-context planning harness. \
+            "You are Paddles, a recursive coding agent loop. \
              You provide concise, accurate technical assistance.\n\n",
         );
         system.push_str(
-            "Core mission: reason within the harness capability manifest and completion contract. \
+            "Core mission: reason by selecting bounded agent actions within the harness capability manifest and completion contract. \
              When local evidence and allowed actions support a bounded workspace change, take the \
              change instead of stopping at diagnosis or prose.\n\n",
         );
@@ -1829,7 +1829,7 @@ impl HttpProviderAdapter {
             r#"
 ## Harness Reality
 
-- You are the remote planner model inside Paddles.
+- You are the remote model selecting bounded agent actions inside Paddles' recursive agent loop.
 - Paddles executes your selected action locally inside the operator's repository workspace.
 - Treat user-reported failures or broken states as working hypotheses until local evidence confirms them.
 - As evidence accumulates, revise the premise explicitly when commands weaken or contradict it.
@@ -2957,7 +2957,7 @@ fn planner_action_json_schema() -> Value {
                     "branch",
                     "stop"
                 ],
-                "description": "The next planner action."
+                "description": "The next bounded agent action."
             },
             "rationale": {
                 "type": "string",
@@ -2965,7 +2965,7 @@ fn planner_action_json_schema() -> Value {
             },
             "answer": {
                 "type": "string",
-                "description": "User-facing answer text when the planner is ending the loop with a direct answer."
+                "description": "User-facing answer text when the agent loop is ending with a direct answer."
             },
             "reason": {
                 "type": "string",
@@ -3067,12 +3067,12 @@ fn planner_action_json_schema() -> Value {
             "edit": {
                 "type": "string",
                 "enum": ["yes", "no"],
-                "description": "Optional known-edit routing hint for initial actions."
+                "description": "Optional known-edit hint for first agent actions."
             },
             "candidate_files": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Optional likely edit targets for initial actions."
+                "description": "Optional likely edit targets for first agent actions."
             },
             "grounding": {
                 "type": "object",
@@ -3086,7 +3086,7 @@ fn planner_action_json_schema() -> Value {
                     },
                     "reason": {
                         "type": "string",
-                        "description": "Short planner rationale for why grounding is required."
+                        "description": "Short control rationale for why grounding is required."
                     }
                 },
                 "required": ["domain", "reason"]
@@ -3189,7 +3189,7 @@ fn normalize_external_capability_payload(payload: Option<Value>) -> Value {
 fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
     let mut context = format!(
         "Runtime context:\n\
-- You are the remote planner model inside Paddles.\n\
+- You are selecting bounded agent actions inside Paddles' recursive agent loop.\n\
 - Paddles executes the action you choose locally in the workspace at `{}`.\n\
 - Treat user-reported failures or broken states as working hypotheses until local evidence confirms them.\n\
 - As evidence accumulates, revise the premise explicitly when commands weaken or contradict it.\n\
@@ -3302,7 +3302,7 @@ fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
 
 fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
-        "User prompt: {}\n\n{}\nSelect your first action.\n\
+        "User prompt: {}\n\n{}\nSelect the first bounded agent action inside the recursive agent loop.\n\
 If the user is asking to debug a repository failure like CI, build, test, workflow, or lint breakage, do not answer directly before at least one local workspace action unless the interpretation context already contains the exact failure evidence.\n\
 When the user is asking for a code or file change, set `edit` to `yes` and include up to 3 plausible relative paths in `candidate_files`.\n\
 Use `inspect` only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use `shell` for broader governed workspace command execution.\n\
@@ -3316,7 +3316,8 @@ If `edit` is `yes` and one likely target file is already known, move into exact-
 
 fn build_http_initial_action_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
-        "Your last planner reply was empty or invalid.\n\
+        "Your last agent-action reply was empty or invalid.\n\
+Return the first bounded agent action inside the recursive agent loop.\n\
 {}\n\
 {}\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
@@ -3337,9 +3338,9 @@ fn build_http_initial_action_redecision_prompt(
     format: ApiFormat,
 ) -> String {
     format!(
-        "Your previous initial-action replies were invalid.\n\
+        "Your previous first-action replies were invalid.\n\
 {}\n\
-Make one final constrained routing decision.\n\
+Make one final first bounded agent action selection inside the recursive agent loop.\n\
 {}\n\
 Do not ask the user for logs or repository state that the harness can inspect locally.\n\
 If the user is asking to debug a repository failure, prefer a local workspace action over `answer`.\n\
@@ -3371,7 +3372,7 @@ fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat)
     user.push_str(&build_http_planner_loop_state_digest(request));
     user.push('\n');
     user.push_str(&format!(
-        "\nSelect your next action.\n\
+        "\nSelect the next bounded agent action inside the recursive agent loop.\n\
 Choose `stop` as soon as you have enough evidence, but do not leave the harness state space by answering the user in prose.\n\
 Use `diff`, `write_file`, `replace_in_file`, or `apply_patch` when a concrete edit should happen now instead of more research.\n\
 Use `inspect` only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use `shell` for broader governed workspace command execution.\n\
@@ -3385,7 +3386,8 @@ If the loop-state notes contain a steering review, judge the proposed next move 
 
 fn build_http_planner_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
-        "Your last planner reply was empty or invalid.\n\
+        "Your last agent-action reply was empty or invalid.\n\
+Return the next bounded agent action inside the recursive agent loop.\n\
 {}\n\
 Current loop state:\n\
 {}\n\
@@ -3407,11 +3409,11 @@ fn build_http_planner_redecision_prompt(
     format: ApiFormat,
 ) -> String {
     format!(
-        "Your previous planner replies were invalid.\n\
+        "Your previous agent-action replies were invalid.\n\
 {}\n\
 Current loop state:\n\
 {}\n\
-Make one final constrained next-action decision.\n\
+Make one final next bounded agent action selection inside the recursive agent loop.\n\
 Use `inspect` only for a single read-only probe. Do not chain inspect commands with `&&`, `||`, or `;`, do not use redirection, and use `shell` for broader governed workspace command execution.\n\
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}\n\
@@ -3549,9 +3551,9 @@ fn planner_transport_reply_instruction(format: ApiFormat) -> &'static str {
 
 fn planner_transport_retry_instruction(format: ApiFormat, initial: bool) -> String {
     let label = if initial {
-        "initial action"
+        "first bounded agent action"
     } else {
-        "planner action"
+        "next bounded agent action"
     };
     match format {
         ApiFormat::OpenAi => format!(
@@ -3911,9 +3913,9 @@ mod tests {
     use crate::domain::ports::{
         EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
         InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
-        PlannerBudget, PlannerLoopState, PlannerRequest, RecursivePlanner,
-        RecursivePlannerDecision, RetrieverOption, SynthesisHandoff, SynthesizerEngine,
-        TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
+        PlannerBudget, PlannerExecutionContract, PlannerLoopState, PlannerRequest,
+        RecursivePlanner, RecursivePlannerDecision, RetrieverOption, SynthesisHandoff,
+        SynthesizerEngine, TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -4055,6 +4057,176 @@ mod tests {
         )
     }
 
+    fn agent_loop_prompt_contract_request() -> PlannerRequest {
+        schema_parity_request().with_execution_contract(PlannerExecutionContract {
+            capability_manifest: vec![
+                "workspace: read/list/search/shell/diff/write actions are governed by local policy"
+                    .to_string(),
+                "semantic actions: definitions/references/symbols/hover/diagnostics are available"
+                    .to_string(),
+                "external_capability:web.search is available only when external grounding is allowed"
+                    .to_string(),
+            ],
+            completion_contract: vec![
+                "stop with an answer when repository evidence is sufficient".to_string(),
+            ],
+        })
+    }
+
+    fn test_http_adapter(workspace: &Path) -> HttpProviderAdapter {
+        HttpProviderAdapter::new(
+            workspace,
+            "inception",
+            "mercury-2",
+            "test-key",
+            "https://api.inceptionlabs.ai",
+            ApiFormat::OpenAi,
+            RenderCapability::OpenAiJsonSchema,
+        )
+    }
+
+    fn combined_http_action_prompt(
+        adapter: &HttpProviderAdapter,
+        request: &PlannerRequest,
+        variant: PlannerActionSchemaVariant,
+        user_prompt: String,
+    ) -> String {
+        format!(
+            "{}\n\n{}",
+            adapter.build_planner_system_prompt_for_variant(
+                &request.interpretation,
+                &request.operator_memory,
+                variant,
+            ),
+            user_prompt
+        )
+    }
+
+    fn action_prompt_surfaces(
+        adapter: &HttpProviderAdapter,
+        request: &PlannerRequest,
+    ) -> Vec<(&'static str, PlannerActionSchemaVariant, String)> {
+        vec![
+            (
+                "sift first action",
+                PlannerActionSchemaVariant::Initial,
+                crate::infrastructure::adapters::sift_agent::build_initial_action_prompt_for_schema_test(
+                    request,
+                ),
+            ),
+            (
+                "sift first action retry",
+                PlannerActionSchemaVariant::Initial,
+                crate::infrastructure::adapters::sift_agent::build_initial_action_retry_prompt_for_schema_test(
+                    request,
+                ),
+            ),
+            (
+                "sift first action redecision",
+                PlannerActionSchemaVariant::Initial,
+                crate::infrastructure::adapters::sift_agent::build_initial_action_redecision_prompt_for_schema_test(
+                    request,
+                ),
+            ),
+            (
+                "sift later action",
+                PlannerActionSchemaVariant::Recursive,
+                crate::infrastructure::adapters::sift_agent::build_planner_action_prompt_for_schema_test(
+                    request,
+                ),
+            ),
+            (
+                "sift later action retry",
+                PlannerActionSchemaVariant::Recursive,
+                crate::infrastructure::adapters::sift_agent::build_planner_retry_prompt_for_schema_test(
+                    request,
+                ),
+            ),
+            (
+                "sift later action redecision",
+                PlannerActionSchemaVariant::Recursive,
+                crate::infrastructure::adapters::sift_agent::build_planner_redecision_prompt_for_schema_test(
+                    request,
+                ),
+            ),
+            (
+                "http first action",
+                PlannerActionSchemaVariant::Initial,
+                combined_http_action_prompt(
+                    adapter,
+                    request,
+                    PlannerActionSchemaVariant::Initial,
+                    super::build_http_initial_action_prompt(request, ApiFormat::OpenAi),
+                ),
+            ),
+            (
+                "http first action retry",
+                PlannerActionSchemaVariant::Initial,
+                combined_http_action_prompt(
+                    adapter,
+                    request,
+                    PlannerActionSchemaVariant::Initial,
+                    super::build_http_initial_action_retry_prompt(request, ApiFormat::OpenAi),
+                ),
+            ),
+            (
+                "http first action redecision",
+                PlannerActionSchemaVariant::Initial,
+                combined_http_action_prompt(
+                    adapter,
+                    request,
+                    PlannerActionSchemaVariant::Initial,
+                    super::build_http_initial_action_redecision_prompt(
+                        request,
+                        "not json",
+                        ApiFormat::OpenAi,
+                    ),
+                ),
+            ),
+            (
+                "http later action",
+                PlannerActionSchemaVariant::Recursive,
+                combined_http_action_prompt(
+                    adapter,
+                    request,
+                    PlannerActionSchemaVariant::Recursive,
+                    super::build_http_planner_action_prompt(request, ApiFormat::OpenAi),
+                ),
+            ),
+            (
+                "http later action retry",
+                PlannerActionSchemaVariant::Recursive,
+                combined_http_action_prompt(
+                    adapter,
+                    request,
+                    PlannerActionSchemaVariant::Recursive,
+                    super::build_http_planner_retry_prompt(request, ApiFormat::OpenAi),
+                ),
+            ),
+            (
+                "http later action redecision",
+                PlannerActionSchemaVariant::Recursive,
+                combined_http_action_prompt(
+                    adapter,
+                    request,
+                    PlannerActionSchemaVariant::Recursive,
+                    super::build_http_planner_redecision_prompt(
+                        request,
+                        "not json",
+                        ApiFormat::OpenAi,
+                    ),
+                ),
+            ),
+        ]
+    }
+
+    fn schema_variant_test_label(variant: PlannerActionSchemaVariant) -> &'static str {
+        match variant {
+            PlannerActionSchemaVariant::Initial => "first action",
+            PlannerActionSchemaVariant::Recursive => "later action",
+        }
+    }
+
     fn extract_planner_schema_block(prompt: &str, lane: &str, variant: &str) -> String {
         let start = prompt.find(PLANNER_ACTION_SCHEMA_BEGIN).unwrap_or_else(|| {
             panic!("{lane} {variant} planner prompt is missing the schema start marker")
@@ -4083,6 +4255,148 @@ mod tests {
             "{lane} {variant_label} planner prompt schema block drifted"
         );
         actual
+    }
+
+    #[test]
+    fn agent_loop_prompt_vocabulary() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = test_http_adapter(workspace.path());
+        let request = agent_loop_prompt_contract_request();
+        let surfaces = action_prompt_surfaces(&adapter, &request);
+        let forbidden = [
+            "top-level routing planner",
+            "top-level routing reply",
+            "initial routing decision",
+            "recursive next-action decision",
+            "separate planner phase",
+            "choosing whether to enter",
+            "recursive planner lane",
+            "workspace resource action",
+            "constrained routing decision",
+        ];
+
+        for (name, variant, prompt) in &surfaces {
+            assert!(
+                prompt.contains("recursive agent loop"),
+                "{name} prompt must name the recursive agent loop"
+            );
+            assert!(
+                prompt.contains("bounded agent action"),
+                "{name} prompt must name bounded agent actions"
+            );
+            for phrase in forbidden {
+                assert!(
+                    !prompt.contains(phrase),
+                    "{name} prompt reintroduced stale planner vocabulary `{phrase}`"
+                );
+            }
+
+            match variant {
+                PlannerActionSchemaVariant::Initial => assert!(
+                    prompt.contains("first bounded agent action"),
+                    "{name} prompt must describe the first action as part of the loop"
+                ),
+                PlannerActionSchemaVariant::Recursive => assert!(
+                    prompt.contains("next bounded agent action"),
+                    "{name} prompt must describe later actions as loop recursion"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn agent_loop_prompt_schema_parity() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = test_http_adapter(workspace.path());
+        let request = agent_loop_prompt_contract_request();
+        let surfaces = action_prompt_surfaces(&adapter, &request);
+
+        for (name, variant, prompt) in &surfaces {
+            let block = assert_planner_schema_block(
+                name,
+                schema_variant_test_label(*variant),
+                prompt,
+                *variant,
+            );
+            assert!(prompt.contains("## Agent Action Schema"));
+            assert!(block.contains("Variant: "));
+            assert!(!block.contains("initial routing"));
+            assert!(!block.contains("recursive next-action"));
+        }
+    }
+
+    #[test]
+    fn agent_loop_prompt_capability_manifest_split() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let adapter = test_http_adapter(workspace.path());
+        let request = agent_loop_prompt_contract_request();
+        let surfaces = action_prompt_surfaces(&adapter, &request);
+        let initial_schema = render_planner_action_schema(PlannerActionSchemaVariant::Initial);
+        let recursive_schema = render_planner_action_schema(PlannerActionSchemaVariant::Recursive);
+
+        for action in [
+            "answer",
+            "stop",
+            "search",
+            "read",
+            "apply_patch",
+            "semantic_definitions",
+            "semantic_references",
+            "semantic_symbols",
+            "semantic_hover",
+            "semantic_diagnostics",
+            "external_capability",
+        ] {
+            assert!(
+                initial_schema.contains(&format!("\"action\":\"{action}\"")),
+                "first action schema missing {action}"
+            );
+        }
+        assert!(!recursive_schema.contains("\"action\":\"answer\""));
+        for action in [
+            "stop",
+            "search",
+            "read",
+            "apply_patch",
+            "semantic_definitions",
+            "semantic_references",
+            "semantic_symbols",
+            "semantic_hover",
+            "semantic_diagnostics",
+            "external_capability",
+        ] {
+            assert!(
+                recursive_schema.contains(&format!("\"action\":\"{action}\"")),
+                "later action schema missing {action}"
+            );
+        }
+        assert!(
+            !initial_schema.contains("external_capability:web.search"),
+            "schema must not inline turn-specific capability availability"
+        );
+
+        for (name, _variant, prompt) in &surfaces {
+            assert!(
+                prompt.contains("Capability manifest"),
+                "{name} prompt must carry the live capability manifest separately"
+            );
+            assert!(
+                prompt.contains("external_capability:web.search"),
+                "{name} prompt must carry external capability availability in the manifest"
+            );
+            assert!(
+                prompt.contains("Completion contract"),
+                "{name} prompt must carry the completion contract separately"
+            );
+            assert!(
+                prompt.contains("external_capability"),
+                "{name} prompt must keep external_capability in the action vocabulary"
+            );
+            assert!(
+                prompt.contains("semantic_definitions"),
+                "{name} prompt must keep semantic actions in the action vocabulary"
+            );
+        }
     }
 
     #[test]
@@ -5943,7 +6257,7 @@ mod tests {
         assert!(prompt.contains("Paddles executes your selected action locally"));
         assert!(prompt.contains("working hypotheses until local evidence confirms them"));
         assert!(prompt.contains(
-            "Core mission: reason within the harness capability manifest and completion contract."
+            "Core mission: reason by selecting bounded agent actions within the harness capability manifest and completion contract."
         ));
         assert!(prompt.contains(
             "When local evidence and allowed actions support a bounded workspace change"
@@ -6062,7 +6376,7 @@ mod tests {
             requests[1].body["messages"][1]["content"]
                 .as_str()
                 .expect("retry prompt")
-                .contains("Your last planner reply was empty or invalid.")
+                .contains("Your last agent-action reply was empty or invalid.")
         );
     }
 
@@ -6904,7 +7218,7 @@ mod tests {
             requests[1].body["messages"][1]["content"]
                 .as_str()
                 .expect("retry prompt")
-                .contains("Your last planner reply was empty or invalid.")
+                .contains("Your last agent-action reply was empty or invalid.")
         );
     }
 
