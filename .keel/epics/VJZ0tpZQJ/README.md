@@ -22,8 +22,8 @@ mission: VJYzz3ivM
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/4 stories done
+**Progress:** 0/1 voyages complete, 3/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Inventory Legacy Inference And Lane Surfaces](voyages/VJZ14yp0U/) | in-progress | 2/4 |
+| [Inventory Legacy Inference And Lane Surfaces](voyages/VJZ14yp0U/) | in-progress | 3/4 |
 <!-- END GENERATED -->

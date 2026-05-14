@@ -1,0 +1,141 @@
+---
+recorded_at: 2026-05-13T21:13:14.897461279-07:00
+mode: manual
+files: [".keel/epics/VJZ0tpZQJ/voyages/VJZ14yp0U/LANE_TO_TURN_LOOP_PHASE_MAP.md"]
+---
+
+--- File: LANE_TO_TURN_LOOP_PHASE_MAP.md ---
+# Lane Concepts To Turn Loop Phase Map
+
+Story: VJZ1LW0JX
+
+## Executive Finding
+
+Planner, synthesizer, and gatherer should stop being public runtime "lanes."
+They are better understood as phases and helpers inside one turn loop:
+
+- **Action selection**: the model-client phase that chooses the next bounded
+  agent action.
+- **Retrieval**: helper-backed evidence acquisition used by action selection.
+- **Execution**: local tool/workspace action execution under governance.
+- **Evidence accumulation**: typed loop state and trace artifacts.
+- **Final rendering**: the answer/edit-summary/block response phase.
+- **Compatibility**: old lane-shaped CLI/config/state accepted only long enough
+  to migrate operators.
+
+The implementation should retire lane language from operator-facing surfaces
+while preserving the internal ports that keep the turn loop testable.
+
+## Public Lane Inventory
+
+| Surface | Current Lane Vocabulary | Target Classification |
+|---------|-------------------------|-----------------------|
+| `src/main.rs` CLI flags | `--planner-provider`, `--planner-model`, `--gatherer-provider`, `--gatherer-model`, shared `--provider` / `--model`, boot messages for synthesizer/planner/gatherer lanes. | Public vocabulary to retire behind compatibility aliases. |
+| `src/infrastructure/config.rs` | `provider`, `shared`, `[synthesizer]`, `[planner]`, `planner_provider`, `planner_model`, `gatherer_provider`, `gatherer_model`, and runtime-lane overlay ordering. | Public config to migrate toward turn model-client and retriever settings. |
+| `src/infrastructure/runtime_preferences.rs` | Machine-managed `runtime-lanes.toml` with provider/model/planner fields. | Compatibility layer; preserve reader while writing a turn-runtime preference shape later. |
+| `src/application/mod.rs` runtime state | `RuntimeLaneRole::{Planner,Synthesizer,Gatherer}`, `RuntimeLaneConfig`, `PreparedModelLane`, `PreparedGathererLane`, `PreparedRuntimeLanes`, `ActiveRuntimeState`. | Internal structs to rename/reshape around prepared turn runtime and model clients by phase. |
+| `src/main.rs` factories | `build_synthesizer_engine`, `build_planner_engine`, and gatherer factory consume prepared lanes. | Preserve factories initially, then collapse into model-client/retriever construction for turn phases. |
+| `src/domain/ports/planning.rs` | `RecursivePlanner`, `PlannerRequest`, `PlannerDecision`, `PlannerCapability`, and planner execution contract. | Preserve as action-selection port; rename after behavior is stable. |
+| `src/domain/ports/synthesis.rs` | `SynthesizerEngine` and `SynthesisHandoff`; comments and handoff naming refer to synthesis/answer lane. | Preserve as final-rendering port; rename public language to answer/final rendering. |
+| `src/domain/ports/context_gathering.rs` | `ContextGatherer`, `ContextGatherRequest`, `ContextGatherResult`, `EvidenceBundle`, comments about gatherer and synthesizer lanes. | Preserve as retrieval/evidence helper; remove "lane" wording. |
+| `src/application/turn.rs` | The top-level turn loop already performs interpretation, initial action selection, recursive loop dispatch, synthesis/finalization, and thread decision handling. Error text still says "Runtime lanes not initialized." | Preserve as canonical center; rename runtime initialization around prepared turn runtime. |
+| `src/application/agent_loop.rs` | Drives recursive planner loop: action selection, governance, retrieval, tool execution, evidence accumulation, refinement, replan, and stop/direct answer decisions. | Preserve as turn-loop action/execution phase, not a separate public planner lane. |
+| Events and traces | `TurnEvent::PlannerCapability`, `PlannerActionSelected`, `PlannerStepProgress`, `GathererCapability`, `GathererSummary`, `SynthesisReady`; `TraceModelExchangeLane::{Planner,Synthesizer}`. | Keep observability, but rename public labels toward action selection, retrieval, and final rendering. |
+| Prompts/adapters | HTTP and Sift adapters refer to planner lanes, recursive planner lanes, synthesizer lanes, answer lanes, and transport-specific action-schema prompts. | Preserve model-client request shaping; strip public "lane" framing from prompt prose. |
+| Tests | `prepare_runtime_lanes_*`, `prepared_runtime_lanes_keep_synthesizer_as_default_response_lane`, HTTP schema parity tests naming planner lanes, TUI runtime lane activation tests, docs cross-check tests. | Change alongside implementation slices; use tests to pin phase behavior rather than lane names. |
+| Foundational docs | `README.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `POLICY.md`, `INSTRUCTIONS.md`, voyage PRD/SRS/SDD mention planner/synthesizer/gatherer lanes. | Update owning docs after code behavior changes; keep this research artifact as migration evidence. |
+
+## Target Phase Map
+
+| Current Concept | Target Phase / Helper | Preserve, Rename, Or Remove |
+|-----------------|-----------------------|-----------------------------|
+| Shared lane selection | Capability discovery and default model-client selection for the turn runtime. | Rename to default turn model client or shared model-client defaults. |
+| Planner lane | Action-selection model-client phase inside the turn loop. | Retire public "planner lane"; preserve `RecursivePlanner` until renamed to an action-selection port. |
+| Synthesizer lane / response lane | Final-rendering phase that turns evidence, direct-answer decisions, and instruction state into the user response. | Retire public "synthesizer lane"; preserve `SynthesizerEngine` until renamed to answer/final renderer. |
+| Gatherer lane | Retrieval/evidence-acquisition helper used by the loop when an action requests search/context. | Retire public "gatherer lane"; preserve `ContextGatherer` as retriever/evidence provider. |
+| `RuntimeLaneConfig` | Turn runtime configuration: provider/model/thinking for model clients plus retriever configuration. | Rename/reshape to `TurnRuntimeConfig` or equivalent. |
+| `PreparedRuntimeLanes` | Prepared turn runtime containing action-selection client, final-rendering client, optional retriever, and negotiated harness profile. | Rename/reshape to `PreparedTurnRuntime`. |
+| `PreparedModelLane` | Prepared model client for a specific turn phase. | Rename to `PreparedModelClient` with phase role such as action selection or final rendering. |
+| `PreparedGathererLane` | Prepared retriever/evidence helper metadata. | Rename to `PreparedRetriever` or `PreparedEvidenceProvider`. |
+| `RuntimeLaneRole` | Internal phase role only if needed for trace labels or factory dispatch. | Remove from public API; replace with turn phase/model-client role labels. |
+| `ActiveRuntimeState` lane fields | Live turn runtime state. | Preserve structure, rename fields to action selector, answer renderer, retriever. |
+| `PlannerLoopContext` | Action/execution/evidence loop context. | Preserve; it already belongs to `agent_loop`, not public runtime selection. |
+| `PlannerExecutionContract` | Capability discovery and completion contract exposed to the model during action selection. | Preserve; it is turn-specific capability disclosure, not lane configuration. |
+| `SynthesisHandoff` | Conversational and instruction handoff into final rendering. | Preserve; rename only after lane vocabulary is gone. |
+| `EvidenceBundle` / `PlannerLoopState` | Evidence accumulation. | Preserve; update comments/docs that say evidence is "for the synthesizer lane." |
+| `TraceModelExchangeLane` | Model-client exchange classification for observability. | Rename labels to action_selection/final_rendering or keep internally with compatibility projection. |
+| `runtime-lanes.toml` | Backward-compatible persisted preferences. | Read as legacy; write a new turn-runtime preference filename in a later slice. |
+| `--planner-*`, `[planner]` | Compatibility aliases for action-selection model-client settings. | Deprecate or reject after migration; do not keep as preferred docs/API. |
+| `--gatherer-*`, `gatherer_provider` | Compatibility aliases for retriever settings. | Deprecate or rename to retriever/evidence-provider config. |
+
+## Concepts To Remove From Public Vocabulary
+
+The following should disappear from user-facing docs, CLI help, TUI copy, route
+summaries, persisted state names, and prompt prose:
+
+- "planner lane"
+- "synthesizer lane"
+- "response lane" when it implies a separate runtime lane
+- "gatherer lane"
+- "shared lane"
+- "runtime lanes"
+- "model lane"
+- "external evidence lane" / "external capability lane"
+
+The replacement vocabulary should be turn-loop centric:
+
+- "action selection"
+- "retrieval" or "retriever"
+- "workspace execution"
+- "evidence"
+- "final rendering" or "answer rendering"
+- "turn runtime"
+- "model client"
+
+## Tests And Docs That Must Change
+
+High-risk test clusters for future implementation:
+
+1. `src/application/mod.rs` tests around `prepare_runtime_lanes_*`,
+   `runtime_lane_config_defaults_to_synthesizer_responses`,
+   `prepared_runtime_lanes_keep_synthesizer_as_default_response_lane`, route
+   summaries, fallback strings, and prepared lane fixtures.
+2. `src/infrastructure/adapters/http_provider.rs` tests that name mocked
+   planner lanes or assert `TraceModelExchangeLane::{Planner,Synthesizer}`.
+   These should become action-selection/final-rendering schema parity tests.
+3. `src/infrastructure/adapters/sift_agent.rs` prompt and response tests that
+   mention planner/synthesizer lanes; many disappear when Sift model inference
+   is removed.
+4. `src/infrastructure/cli/interactive_tui.rs` tests around runtime lane
+   activation, `/model` rows, provider selection, and reconfiguration messages.
+5. `src/infrastructure/runtime_preferences.rs` and
+   `src/infrastructure/config.rs` tests for `runtime-lanes.toml`, `[planner]`,
+   `[synthesizer]`, shared overlays, and `gatherer_provider`.
+6. Docs cross-check tests that assert `README.md` and `CONFIGURATION.md`
+   mention `runtime-lanes.toml` or lane-specific examples.
+7. Runtime presentation and transcript tests that surface "planner lane is
+   reconfiguring" or route summaries naming planner/synthesizer/gatherer lanes.
+
+Owning docs to update with code slices:
+
+- `README.md`: top-level architecture, diagrams, local-first defaults, examples.
+- `ARCHITECTURE.md`: `PlannerLane`, action/answer lane handoff, context-1 lane
+  framing, and rename note.
+- `CONFIGURATION.md`: CLI examples, `[planner]` / `[synthesizer]`, provider
+  matrix notes, runtime preference file name, gatherer provider examples.
+- `POLICY.md`: action-schema ownership and answer-lane handoff language.
+- `INSTRUCTIONS.md`: recursive loop before synthesizer language.
+
+## Migration Notes
+
+- Do not flatten the internals into one undifferentiated service. The turn loop
+  should be the public conceptual center, while action selection, retrieval,
+  execution, evidence, and final rendering remain explicit internal phases.
+- Remove Sift model-provider behavior before or alongside lane vocabulary cleanup
+  so the new naming does not preserve old in-process inference assumptions.
+- Keep compatibility aliases small and explicit. A user who still passes
+  `--planner-provider` should receive a migration message to the new
+  action-selection model-client setting.
+- Observability can keep old labels briefly if projections need compatibility,
+  but new trace records should prefer phase names over lane names.
+

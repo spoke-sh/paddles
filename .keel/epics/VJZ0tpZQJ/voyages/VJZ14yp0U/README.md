@@ -27,12 +27,12 @@ started_at: 2026-05-13T21:06:12
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Inventory Sift Model Inference Surfaces](../../../../stories/VJZ1K8trb/README.md) | chore | done |
 | [Inventory HTTP Model Client Seams](../../../../stories/VJZ1Krd85/README.md) | chore | done |
-| [Map Lane Concepts To Turn Loop Phases](../../../../stories/VJZ1LW0JX/README.md) | chore | backlog |
+| [Map Lane Concepts To Turn Loop Phases](../../../../stories/VJZ1LW0JX/README.md) | chore | done |
 | [Draft Cleanup Migration Recommendation](../../../../stories/VJZ1MAaZq/README.md) | chore | backlog |
 <!-- END GENERATED -->
