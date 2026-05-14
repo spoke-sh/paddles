@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-05-13T17:26:52.759836409-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "model reasoning is the planning|recursive agent loop" README.md POLICY.md ARCHITECTURE.md CONFIGURATION.md'
+---
+CONFIGURATION.md:131:planning inside the recursive agent loop; configuration only chooses which lane
+CONFIGURATION.md:200:- `paddles` remains the only recursive agent loop in the runtime path.
+ARCHITECTURE.md:5:loop where model reasoning is the planning.
+ARCHITECTURE.md:114:**`SynthesisLane`** takes the accumulated loop trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the recursive agent loop gathered. At boot, Paddles negotiates one shared provider capability surface from the selected provider/model pair and then uses that surface to resolve:
+ARCHITECTURE.md:178:- It must not select workspace actions. That remains the recursive agent loop.
+ARCHITECTURE.md:276:- **Model-directed action selection.** Model reasoning is the planning inside the recursive agent loop. The model selects from a constrained action schema; the controller validates and executes.
+ARCHITECTURE.md:320:- run the recursive agent loop and enforce budget, schema, and completion
+ARCHITECTURE.md:399:- model reasoning is the planning inside the recursive agent loop
+ARCHITECTURE.md:429:The recursive agent loop is the heart of the backbone. Each cycle follows a
+ARCHITECTURE.md:512:enough path evidence, it re-enters the recursive agent loop with an action-bias
+ARCHITECTURE.md:535:keeps the turn inside the recursive agent loop until a `git commit` action
+ARCHITECTURE.md:550:   A user can supply the initial hypothesis, but gathered sources must be allowed to overturn it. When the turn has enough source material to question the premise, the controller re-enters the recursive agent loop with an explicit premise-challenge review note. The model then chooses whether to stop, revise the premise, or continue with one more specific action.
+ARCHITECTURE.md:697:Keel, board state, mission files, PRDs, and domain knowledge all enter the recursive agent loop through the same channels as any other evidence:
+ARCHITECTURE.md:738:2. **Action selection** — workspace actions stay inside the recursive agent loop. Search/refine actions carry model-selected retrieval mode, strategy, and optional structural fuzzy retriever overrides into the gatherer boundary. The `sift-direct` gatherer executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second action selector.
+ARCHITECTURE.md:835:Specialist brains are optional bounded helpers, not alternate agent architectures. They receive the same `HarnessProfileSelection` and `query_session_context(...)` slice contract as the recursive agent loop and can only contribute runtime notes back into the action-selection request.
+ARCHITECTURE.md:913:The recursive agent loop tracks toward full delivery under mission `VFDv1ha1G`.
+README.md:6:> `paddles` is a coding agent that can run with local models, opt into remote planner lanes, and be embedded as a Rust library. Its backbone architecture is one recursive agent loop: operator memory shapes turn interpretation, model reasoning is the planning, and the model selects bounded agent actions until Paddles can apply code edits, answer source-grounded codebase questions, or report an explicit block.
+README.md:12:- **Let model reasoning be the planning.** Interpretation context — operator memory, guidance graphs, tool hints, derived procedures — arrives before action selection. The model sees the full picture and chooses its own next bounded agent action inside the recursive agent loop.
+README.md:53:This is the heart of Paddles: a bounded recursive agent loop where the model drives
+README.md:145:the recursive agent loop. The controller validates, executes, and enforces
+README.md:384:- **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the recursive agent loop until evidence is sufficient or budgets are met
+README.md:460:- `paddles` owns the recursive agent loop. `sift` executes direct retrieval only.
+POLICY.md:30:- **Model-Directed Action Selection**: Model reasoning is the planning inside the recursive agent loop. The model selects its next bounded agent action through a constrained response after interpretation context is assembled.
+POLICY.md:46:- **First Action Is In The Loop**: The primary mech-suit runtime asks the model for its first bounded agent action as part of the recursive agent loop. A direct answer is a terminal action in that loop, not a separate route.

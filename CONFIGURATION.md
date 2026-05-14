@@ -126,16 +126,18 @@ weight = 1.5
 
 ## Runtime Lane Selection
 
-`paddles` now treats runtime configuration as shared/planner/synth/gatherer
-lane selection rather than single-model-only routing:
+`paddles` treats runtime configuration as shared/action-selection/synth/gatherer
+lane selection rather than single-model-only routing. Model reasoning is the
+planning inside the recursive agent loop; configuration only chooses which lane
+does that bounded action selection.
 
-- The **shared lane selection** is the default provider/model pair for both planner and synthesizer lanes.
+- The **shared lane selection** is the default provider/model pair for both action-selection and synthesizer lanes.
 - The **synthesizer lane** is the default response path and must always be configured.
-- The **planner lane** owns first bounded action selection for the primary mech-suit path. Every planner lane receives the shared planner action schema renderer output for `answer`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic workspace actions, `external_capability`, `refine`, `branch`, and `stop`.
-- The **gatherer backend** services planner search/refine actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the planner.
+- The **planner lane** is the configurable action-selection lane for the primary mech-suit path. Every planner lane receives the shared agent action schema renderer output for terminal `answer`/`stop`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
+- The **gatherer backend** services `search`/`refine` agent actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the model.
 - If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
-The planner action schema is lane-independent. The turn-specific capability
+The agent action schema is lane-independent. The turn-specific capability
 manifest is the lane-time source of truth for which retrievers, semantic
 workspace services, external capability fabrics, execution constraints, and
 completion requirements are actually available on a given turn.
@@ -193,20 +195,20 @@ For local sift-backed retrieval, select the explicit provider:
 paddles --model qwen-1.5b --gatherer-provider sift-direct
 ```
 
-That backend stays local-first and services bounded planner search.
+That backend stays local-first and services bounded agent search/refine actions.
 
-- `paddles` remains the only recursive planner in the runtime path.
-- Direct retrieval progress is surfaced as concrete execution stages instead of autonomous planner states.
-- The provider returns evidence bundles and retrieval metadata consumed by the planner and synthesizer lanes.
-- Planner `search` and `refine` actions may now add `retrievers=["path-fuzzy"]` or `retrievers=["path-fuzzy","segment-fuzzy"]` when `sift` should bias toward structural fuzzy lookup.
+- `paddles` remains the only recursive agent loop in the runtime path.
+- Direct retrieval progress is surfaced as concrete execution stages instead of autonomous action-selection states.
+- The provider returns evidence bundles and retrieval metadata consumed by the action-selection and synthesizer lanes.
+- `search` and `refine` actions may now add `retrievers=["path-fuzzy"]` or `retrievers=["path-fuzzy","segment-fuzzy"]` when `sift` should bias toward structural fuzzy lookup.
 See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
 ### Harness Profiles
 
-Paddles resolves an explicit harness profile from the prepared planner and synthesizer capability surfaces before each turn. The profile is not chosen by provider name. The current runtime contract is:
+Paddles resolves an explicit harness profile from the prepared action-selection and synthesizer capability surfaces before each turn. The profile is not chosen by provider name. The current runtime contract is:
 
-- `recursive-structured-v1`: active when planner next-action transport and final-answer rendering both stay structured
-- `prompt-envelope-safe-v1`: explicit downgrade when prompt-envelope planner recovery or prompt-envelope rendering is required
+- `recursive-structured-v1`: active when action-selection transport and final-answer rendering both stay structured
+- `prompt-envelope-safe-v1`: explicit downgrade when prompt-envelope action recovery or prompt-envelope rendering is required
 
 The active profile owns:
 
@@ -216,7 +218,7 @@ The active profile owns:
 - execution-governance posture for local hands, including sandbox mode, approval policy, and supported permission-reuse scopes
 - active specialist-brain ids that may contribute bounded runtime notes
 
-The selected profile and any downgrade reason are recorded on turn-start traces and reused in planner/gatherer metadata as the `profile` field.
+The selected profile and any downgrade reason are recorded on turn-start traces and reused in action-selection/gatherer metadata as the `profile` field.
 
 Current execution-governance posture by profile:
 
@@ -347,19 +349,19 @@ for:
 - interpretation context assembly
 - model-selected first action
 - automatic plan updates when planned turns need explicit execution containment
-- planner action selection
+- agent action selection
 - gatherer capability and gathered evidence
-- planner summaries and stop reasons
+- loop summaries and stop reasons
 - tool calls, live background terminal stdout/stderr, and final results
 - fallback reasons
 - grounded or insufficient-evidence synthesis
 
 Lower-verbosity sessions intentionally keep direct-response bookkeeping terse.
-For casual turns, the first planner step remains visible, but route
+For casual turns, the first agent-loop step remains visible, but route
 classification, route-selection bookkeeping, and "synthesized direct answer"
 status rows stay behind higher verbosity tiers.
-The default TUI stream also folds matching planner-owned `inspect` calls into
-their planner-step row and suppresses duplicate tooling/governor shadow rows
+The default TUI stream also folds matching loop-owned `inspect` calls into
+their agent-step row and suppresses duplicate tooling/governor shadow rows
 when the underlying tool output or fallback is already visible.
 
 ### Verbosity Levels
@@ -367,12 +369,12 @@ when the underlying tool output or fallback is already visible.
 Paddles resolves one shared runtime verbosity level and applies it to both the
 TUI transcript stream and the web UI event stream.
 
-- `0` (`default`) keeps the stream operational: interpretation, first planner
+- `0` (`default`) keeps the stream operational: interpretation, first agent
   action, plan updates, tool/gatherer work, fallbacks, grounded synthesis, and
   insufficient-evidence outcomes remain visible. Direct-response bookkeeping is
   intentionally suppressed at this level.
 - `1` (`-v`) adds the next layer of control metadata: direct-answer synthesis
-  status, planner summaries and stop reasons, context strain/refinement
+  status, loop summaries and stop reasons, context strain/refinement
   summaries, and other info-tier turn events.
 - `2` (`-vv`) adds debug-tier routing detail: route classification and route
   selection rows, provider capability checks, richer interpretation rendering,
@@ -388,15 +390,15 @@ Repository-question answers also include source/file citations by default.
 When a turn carries edit pressure, grounding pressure, or multi-step follow-up
 pressure from recent conversation turns, Paddles now emits a Codex-style
 checklist of the remaining work in the stream and feeds the same unfinished
-items back into planner loop notes so the execution stays contained until the
+items back into agent-loop notes so the execution stays contained until the
 checklist is complete.
-Known-edit turns also get one bounded replan when they hit planner budget
+Known-edit turns also get one bounded replan when they hit agent-loop budget
 before an applied edit lands. That replan keeps the current evidence, updates
 the checklist, and expands the per-turn read/inspect/search envelope instead of
 dropping straight to the blocked-edit reply.
 Prompted git-commit turns now use the same containment path. When the prompt
 explicitly asks Paddles to record a commit, the controller opens a commit
-obligation, bootstraps a `git status --short` probe if the planner tried to
+obligation, bootstraps a `git status --short` probe if the model tried to
 answer directly, and keeps the turn open until a `git commit` shell action
 lands. After `git status` and `git diff` have already been inspected,
 action-bias review steers advice-only `stop` answers back toward recording the
@@ -499,15 +501,15 @@ search cache under `~/.cache/paddles/sift/workspaces/<workspace-key>` instead
 of inside the repository workspace, and the repo-level `.siftignore` excludes
 workspace-local `.sift/**` paths so search never indexes its own cache tree.
 
-For OpenAI-compatible remote providers, planner turns now use native tool calls
+For OpenAI-compatible remote providers, action-selection turns now use native tool calls
 to select the next bounded workspace action. The provider chooses the action
-through the planner tool, and Paddles executes that action locally in the
+through the action-selection tool, and Paddles executes that action locally in the
 workspace harness.
 
 For OpenAI specifically, non-reasoning turns on chat-completions models such as
 `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-4o` stay on Chat Completions with
 structured JSON/tool calls. When a GPT-5 lane enables thinking, Paddles now
-routes planner tool calls and structured-answer requests through
+routes action-selection tool calls and structured-answer requests through
 `/v1/responses` so reasoning-aware turns stay compatible with OpenAI's
 Responses-only tool/schema contract. OpenAI pro models that Paddles routes
 through Responses, such as `gpt-5.5-pro`, `gpt-5.4-pro`, `gpt-5.2-pro`,
@@ -524,7 +526,7 @@ For Inception, the supported core model path is `mercury-2`. Authenticate with
 `/login inception`, then select it with `/model inception mercury-2`. That chat-completions compatibility
 path is usable today without provider-native streaming/diffusion views.
 Workspace edits still execute locally through the shared workspace editor
-boundary, even when the planner lane is Inception-backed.
+boundary, even when the action-selection lane is Inception-backed.
 
 ### Negotiated Provider Capability Surface
 
@@ -537,7 +539,7 @@ That surface currently carries five shared decisions:
 - `render_capability` — the strictest final-answer contract the synthesizer can
   use (`OpenAiJsonSchema`, `AnthropicToolUse`, `GeminiJsonSchema`, or prompt
   envelope fallback)
-- `planner_tool_call` — how the remote planner selects its next bounded action
+- `planner_tool_call` — how the remote action-selection lane selects its next bounded agent action
   (`NativeFunctionTool`, `StructuredJsonEnvelope`, or `PromptEnvelope`)
 - `transport_support` — whether the selected model is supported on the current
   transport, plus an explicit operator-facing rejection reason when it is not
@@ -546,7 +548,7 @@ That surface currently carries five shared decisions:
   whether any provider-native state can be round-tripped
 
 When a future provider is added, extend this negotiated surface first. The
-controller, planner, and renderer should consume the shared capability record
+controller, action-selection adapter, and renderer should consume the shared capability record
 rather than branching on provider names for behavior that is conceptually the
 same.
 

@@ -1,32 +1,32 @@
-# Paddles: Recursive In-Context Planning Harness
+# Paddles: Recursive Coding Agent Loop
 
 [![Keel Board](https://img.shields.io/badge/Keel-Board-blue)](.keel/README.md)
 [![CI](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml)
 
-> `paddles` is a coding agent that can run with local models, opt into remote planner lanes, and be embedded as a Rust library. Its backbone architecture is a recursive in-context planning harness: operator memory shapes turn interpretation, a planner model reasons through bounded repository actions, and the agent can finish by applying code edits, answering source-grounded codebase questions, or reporting an explicit block.
+> `paddles` is a coding agent that can run with local models, opt into remote planner lanes, and be embedded as a Rust library. Its backbone architecture is one recursive agent loop: operator memory shapes turn interpretation, model reasoning is the planning, and the model selects bounded agent actions until Paddles can apply code edits, answer source-grounded codebase questions, or report an explicit block.
 
 ## Backbone Architecture
 
 The architecture rests on five commitments:
 
-- **Let the model reason first.** Interpretation context — operator memory, guidance graphs, tool hints, derived procedures — arrives before any routing decision. The model sees the full picture and chooses its own next action.
-- **Disclose live capabilities and constraints before planning.** The harness
+- **Let model reasoning be the planning.** Interpretation context — operator memory, guidance graphs, tool hints, derived procedures — arrives before action selection. The model sees the full picture and chooses its own next bounded agent action inside the recursive agent loop.
+- **Disclose live capabilities and constraints before action selection.** The harness
   exposes its dynamically available recursive capabilities, execution posture,
   and completion contract to the model before asking it to decide what to do
   next, and leaves enough recursive budget for the model to reason with them.
 - **Earn code changes and answers through recursive work.** Small models become dramatically more capable when the harness gives them bounded tools to inspect, edit, verify, and gather evidence iteratively rather than answering in one shot.
-- **Separate planning from response authoring.** Recursive repository work and user-facing response generation are distinct workloads, each routed to the smallest model that excels at that role. The response lane reports what happened; it is not the only purpose of the turn.
-- **Keep every step visible.** The harness shows its recursive work — planner actions, evidence gathered, decisions made — so the operator always knows why an outcome was produced.
+- **Separate action selection from response authoring.** Recursive repository work and user-facing response generation are distinct workloads, each routed to the smallest model that excels at that role. The response lane reports what happened; it is not the only purpose of the turn.
+- **Keep every step visible.** The harness shows its recursive work — agent actions, evidence gathered, decisions made — so the operator always knows why an outcome was produced.
 
 ### The Turn Loop
 
-Every interaction follows the same recursive cycle. The harness assembles context, the planner model chooses one bounded next action, the controller validates and executes that action, and the loop continues until the requested repository work is done, the codebase question can be answered from evidence, or the turn must stop explicitly.
+Every interaction follows the same recursive cycle. The harness assembles context, the model reasons over that context, chooses one bounded agent action, and the controller validates and executes that action. The loop continues until the requested repository work is done, the codebase question can be answered from evidence, or the turn must stop explicitly.
 
 ```mermaid
 flowchart TD
     U["🎯 User Turn"]
     I["📖 Interpretation Context<br/>operator memory · guidance graph · tool hints<br/>derived procedures · recent turns · prior evidence"]
-    P["🧠 Planner Lane<br/>model chooses next bounded action"]
+    P["🧠 Action Selection Lane<br/>model chooses next bounded agent action"]
     D{"What should<br/>happen next?"}
     W["🔧 Workspace Action<br/>search · list_files · read · inspect · shell · diff<br/>write_file · replace_in_file · apply_patch"]
     R["🔄 Refine / Branch<br/>sharpen the query · split into subqueries"]
@@ -50,7 +50,7 @@ flowchart TD
     style O fill:#e8f4f8,stroke:#2196F3
 ```
 
-This is the heart of Paddles: a bounded recursive loop where the model drives
+This is the heart of Paddles: a bounded recursive agent loop where the model drives
 its own repository work within explicit harness guardrails. Each pass through
 the loop can add evidence, inspect runtime state, apply an edit, verify a
 change, or narrow the question. The response lane is the user-facing handoff
@@ -64,19 +64,20 @@ action, observe the result, and repeat. The difference is that Paddles makes the
 action surface typed, capability-disclosed, budgeted, and locally executed by
 the controller.
 
-The shared planner action schema renderer is the JSON action contract's one
+The shared agent action schema renderer is the JSON action contract's one
 owner. It lives in `src/application/planner_action_schema.rs` and emits the
-canonical initial and recursive variants, including action names, JSON examples,
-required fields, and common selection rules. Sift/local planner prompts and
-HTTP/remote planner prompts embed that same rendered block. Adapter prompts may
-add transport mechanics, but they do not author their own planner action lists.
+canonical first-action and later-action variants, including action names, JSON
+examples, required fields, and common selection rules. Sift/local and
+HTTP/remote action-selection prompts embed that same rendered block. Adapter
+prompts may add transport mechanics, but they do not author their own action
+lists.
 
 That schema is separate from the turn-specific capability manifest. The schema
-defines which JSON envelopes are valid; the manifest tells the planner which
-retrievers, semantic workspace services, external capability fabrics, execution
+defines which JSON envelopes are valid; the manifest tells the recursive agent
+loop which retrievers, semantic actions, external capability fabrics, execution
 constraints, budgets, and completion requirements are available for this turn.
 
-The canonical planner actions are:
+The canonical recursive agent actions are:
 
 | Action | Purpose | Mutates workspace |
 | --- | --- | --- |
@@ -96,16 +97,17 @@ The canonical planner actions are:
 | `branch` | Split the turn into bounded subquestions or branches. | No |
 | `stop` | End with an explicit reason, block, or insufficiency report. | No |
 
-Capability-disclosed actions use the same pattern as core workspace actions:
-the planner can select only actions the active harness profile exposes, and the
+Terminal `answer` and `stop`, concrete workspace actions, semantic actions, and
+`external_capability` all live in this one recursive action vocabulary. The
+active capability manifest gates which backing services are available, and the
 controller still owns validation, execution, budgets, and fail-closed behavior.
 
 ### Model Routing
 
 Each phase of the turn flows to the smallest model capable of that workload. A
-more capable planner drives recursive repository work. A lightweight response
-authoring lane turns the resulting trace into an answer, edit summary, or
-explicit block for the operator.
+more capable action-selection lane may drive recursive repository work. A
+lightweight response authoring lane turns the resulting trace into an answer,
+edit summary, or explicit block for the operator.
 
 ```mermaid
 flowchart LR
@@ -117,10 +119,10 @@ flowchart LR
         Hints["Tool hints +<br/>derived procedures"]
     end
 
-    subgraph Plan ["Recursive Planning"]
+    subgraph Plan ["Recursive Agent Loop"]
         Decide["Model selects<br/>next bounded action"]
-        Local["Local planner<br/>Sift / Qwen"]
-        Heavy["Specialized planner<br/>Context-1 boundary"]
+        Local["Local action-selection lane<br/>Sift / Qwen"]
+        Heavy["Specialized action-selection lane<br/>Context-1 boundary"]
         Evidence["Evidence bundle<br/>typed trace + metadata"]
     end
 
@@ -139,17 +141,19 @@ flowchart LR
 ### The Recursive Harness in Practice
 
 The primary mech-suit path assembles interpretation context first, then lets the
-planner model choose each bounded action. The controller validates, executes,
-and enforces budgets - the model drives direction, the controller ensures
-safety. Intent routing no longer comes from controller-side prompt token
-guesses; the planner decides when a turn should answer directly, inspect or
+model choose each bounded agent action. Model reasoning is the planning inside
+the recursive agent loop. The controller validates, executes, and enforces
+budgets - the model drives direction, the controller ensures safety. Intent
+routing no longer comes from controller-side prompt token guesses; terminal
+direct answers are `answer` or `stop` actions in the same loop, not a separate
+direct-answer path. The model decides when a turn should answer, inspect or
 modify the workspace, refine its focus, branch, or stop.
 
 ```mermaid
 flowchart TD
     U["User turn arrives"]
     I["Assemble interpretation context<br/>operator memory · guidance graph · tool hints · procedures"]
-    M["Planner model evaluates context"]
+    M["Model reasons over context"]
     C{"Model's choice"}
     A["Answer — evidence is sufficient"]
     T["Act — workspace action needed<br/>read · shell · diff · edit"]
@@ -180,7 +184,7 @@ Paddles does not rely on one generic control score. It runs a family of controll
 flowchart TD
     P["Prompt prior<br/>user claim · operator intent"]
     I["Interpretation context<br/>memory · hints · procedures"]
-    L["Planner loop state<br/>actions · evidence · retained context"]
+    L["Agent loop state<br/>actions · evidence · retained context"]
     C["Controller steering layer"]
     S["Synthesis<br/>judge sources and answer"]
 
@@ -273,8 +277,8 @@ and web projections replay those records as system policy rows, and downgraded
 profiles such as `prompt-envelope-safe-v1` surface their disabled features
 explicitly instead of silently pretending full parity.
 
-Collaboration mode follows the same projection rule. Planning, execution, and
-review requests now resolve into typed mode results with explicit `applied`,
+Collaboration mode follows the same projection rule. Planning mode, execution,
+and review requests now resolve into typed mode results with explicit `applied`,
 `defaulted`, `invalid`, or `unavailable` status. When planning mode halts
 before mutation, the structured clarification request is replayable as its own
 runtime/trace record instead of collapsing into an untyped conversational
@@ -374,14 +378,14 @@ flowchart TD
 
 The recursive harness runs as a bounded local-first runtime:
 
-- **Interpretation-first routing** — every turn assembles operator memory, a model-derived guidance subgraph, read-only tool hints, and derived decision procedures before the planner chooses its first action
-- **Model-driven action selection** — the planner chooses from `answer`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), `refine`, `branch`, or `stop`
+- **Interpretation-first action selection** — every turn assembles operator memory, a model-derived guidance subgraph, read-only tool hints, and derived decision procedures before the model chooses its first bounded agent action
+- **Model-driven action selection** — the model chooses from terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, or `branch`
 - **Guidance-aware fallbacks** — fallback selection draws on command hints and decision procedures from foundational docs, and halts recursion when a procedure step has already resolved the request
-- **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the planner until evidence is sufficient or budgets are met
+- **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the recursive agent loop until evidence is sufficient or budgets are met
 - **Separate response authoring** — a distinct response lane turns the accumulated trace into a grounded answer, edit summary, or explicit block
-- **Full-stream visibility** — a default TUI/event stream shows interpretation, first planner actions, retrieval, fallbacks, edits, and response authoring as they happen, while low-value direct-response bookkeeping stays behind higher verbosity
+- **Full-stream visibility** — a default TUI/event stream shows interpretation, first agent actions, retrieval, fallbacks, edits, and response authoring as they happen, while low-value direct-response bookkeeping stays behind higher verbosity
 - **Shared verbosity contract** — one resolved `0/1/2/3` verbosity level governs both the TUI transcript and the web event stream: `0` is the default operational view, `1` adds info-tier planner metadata, `2` adds debug-tier routing/capability detail, and `3` enables trace diagnostics
-- **Typed collaboration modes** — planning, execution, and review mode selection plus blocked-mutation clarification requests project through the same turn-event and durable-trace vocabulary instead of living only in prompts
+- **Typed collaboration modes** — planning mode, execution, and review selection plus blocked-mutation clarification requests project through the same turn-event and durable-trace vocabulary instead of living only in prompts
 - **Steering-signal control** — context strain and budget boundary remain controller-owned, while premise challenge and action bias now trigger recursive planner review passes over the current sources instead of hard-coded redirects
 - **Durable trace lineage** — a paddles-owned trace contract with stable task/turn/record/branch/checkpoint ids, backed by a `TraceRecorder` boundary whose default runtime posture now prefers embedded `transit-core` and degrades to bounded in-memory recording only when persistence cannot be opened locally
 - **Session wake and slice contract** — the recorder boundary now defines how a harness wakes a prior task, resumes from checkpoints, and interrogates deterministic replay slices without falling back to ad hoc prompt summaries
@@ -426,12 +430,12 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 ## Design Principles
 
 - **Interpretation shapes direction.** `AGENTS.md` memory influences what the planner investigates, how it prioritizes, and which procedures it follows.
-- **The model drives, the controller guards.** The model selects its next bounded action from interpretation context; the controller validates, executes, and enforces budgets.
-- **Conversation continuity is shared, not inferred twice.** Planner and response lanes receive the same recent-turn and active-thread handoff, so follow-up turns do not reset just because the response path changed.
+- **The model drives, the controller guards.** Model reasoning is the planning: the model selects its next bounded agent action from interpretation context; the controller validates, executes, and enforces budgets.
+- **Conversation continuity is shared, not inferred twice.** Action-selection and response lanes receive the same recent-turn and active-thread handoff, so follow-up turns do not reset just because the response path changed.
 - **Recursive work earns better outcomes.** Difficult codebase questions and edits improve through iterative evidence gathering rather than one-shot generation.
-- **Separation of concerns.** Planner and synthesizer are distinct roles, potentially using different models optimized for their respective workloads.
+- **Separation of concerns.** Action selection and response authoring are distinct roles, potentially using different models optimized for their respective workloads.
 - **Context over hardcoding.** Keel, project artifacts, and board state flow through memory, search, and tool outputs — the harness stays general-purpose.
-- **Local-first by default.** The core loop runs on local models. Heavier planner lanes are opt-in and degrade gracefully.
+- **Local-first by default.** The core loop runs on local models. Heavier action-selection lanes are opt-in and degrade gracefully.
 - **Hands stay explicit.** Workspace editing, background terminal execution, and credential-bearing transport mediation share one execution-hand lifecycle instead of inventing adapter-local state names.
 - **Visible execution.** Every recursive step is surfaced to the operator. The harness shows its work because transparency builds trust.
 
@@ -439,9 +443,9 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 
 - The synthesizer lane defaults to `qwen-1.5b` on the local `sift` provider.
 - Authored `paddles.toml` can define `[shared]`, `[synthesizer]`, and `[planner]` model sections. `shared` is the default fallback for both lanes when the specific section does not set its own provider/model.
-- The planner lane defaults to the shared provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
+- The planner lane is the configurable action-selection lane. It defaults to the shared provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
 - Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect the active lanes or switch the shared runtime selection.
-- OpenAI-compatible remote planners now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
+- OpenAI-compatible remote action-selection lanes now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
 - Remote provider behavior now resolves from one negotiated capability surface per provider/model pair: HTTP wire format, response render contract, planner tool-call shape, and transport support. Adding a future provider should extend that surface instead of forking controller logic by provider name.
 - Successful `/model` changes persist to the machine-managed runtime state file at `~/.local/state/paddles/runtime-lanes.toml` so they survive restarts without rewriting authored `paddles.toml`.
 - Local `sift` search artifacts now live under the machine-managed cache root at `~/.cache/paddles/sift/workspaces/<workspace-key>` instead of inside the repo workspace, so search does not index its own cache on restart.
@@ -452,9 +456,9 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 - `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, `qwen3.5-2b`, and `bonsai-8b` remain available as opt-in local planner or synthesizer variants on the `sift` provider.
 - Local `sift` model preparation now goes through the stable crate-root `sift::prepare_model(...)` seam for compatible single-bundle local models. `bonsai-8b` now resolves back through Prism's published GGUF source and the upstream `metamorph` compatibility path instead of bypassing that seam with an unpacked-bundle download.
 - That Bonsai preparation path is still a compatibility path, not native 1-bit execution. It makes the model usable on the current local runtime, but it does not preserve the original 1-bit efficiency of the published GGUF artifact.
-- `sift-direct` is the default local gatherer/search backend used by planner `search` and `refine` actions.
-- `paddles` owns recursive planning. `sift` executes direct retrieval only.
-- Planner `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.
+- `sift-direct` is the default local gatherer/search backend used by `search` and `refine` agent actions.
+- `paddles` owns the recursive agent loop. `sift` executes direct retrieval only.
+- `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.
 - Gatherer progress now reflects direct retrieval stages such as initialization, indexing, retrieval, and ranking.
 - `context-1` remains an explicit experimental planner/gatherer boundary and stays fail-closed until its harness is real.
 
@@ -549,7 +553,7 @@ Opt into the GPU lane explicitly:
 just paddles --cuda
 ```
 
-Use a heavier planner lane while keeping a lighter synthesizer:
+Use a heavier action-selection lane while keeping a lighter synthesizer:
 
 ```bash
 paddles --model qwen-1.5b --planner-model qwen3.5-2b
@@ -569,7 +573,7 @@ paddles --prompt "Summarize the current runtime lanes"
 2. `~/.config/paddles/AGENTS.md`
 3. every ancestor `AGENTS.md` from filesystem root to the current workspace
 
-Later files are more specific. That memory now participates in turn interpretation before planner action selection, and additional guidance is loaded through a turn-time model-derived subgraph rooted at `AGENTS.md` rather than a hardcoded foundational file list.
+Later files are more specific. That memory now participates in turn interpretation before recursive agent action selection, and additional guidance is loaded through a turn-time model-derived subgraph rooted at `AGENTS.md` rather than a hardcoded foundational file list.
 
 ## Why This Architecture
 
@@ -578,7 +582,7 @@ Paddles raises the effective performance of smaller local models through recursi
 That is the contract:
 
 - **Human-authored guidance** shapes every turn through operator memory and derived procedures
-- **Bounded recursive planning** lets the model investigate iteratively within safe guardrails
+- **Bounded recursive agent-loop reasoning** lets the model investigate iteratively within safe guardrails
 - **Explicit evidence accumulation** grounds answers and edits in real workspace artifacts
 - **Separate response authoring** optimizes repository work and user-facing reporting independently
 - **Visible execution** makes every decision transparent and auditable

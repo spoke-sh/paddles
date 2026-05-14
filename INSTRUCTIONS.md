@@ -45,21 +45,21 @@ Focus on **technical discovery and fog reduction**.
 
 Paddles treats inference as a routing problem — each phase of the turn flows to the smallest capable model for that workload.
 
-1. **Interpretation Context First**: Every turn assembles `AGENTS.md` memory, a model-derived guidance subgraph, tool hints, derived decision procedures, recent turns, and local state before the planner selects its first action.
+1. **Interpretation Context First**: Every turn assembles `AGENTS.md` memory, a model-derived guidance subgraph, tool hints, derived decision procedures, recent turns, and local state before the model selects its first bounded agent action.
 2. **Runtime Capability And Constraint Surfaces First**: The harness must expose
    its live recursive capabilities, execution posture, and completion contract
-   to the model as runtime data before asking it to plan.
-3. **Model Drives Action Selection**: The planner model receives the allowed
+   to the model as runtime data before asking it to select an action.
+3. **Model Drives Action Selection**: Model reasoning is the planning inside the recursive agent loop. The model receives the allowed
    action options plus the current harness constraints and selects its next
-   bounded action. The model reasons about direction; the controller ensures
+   bounded agent action. The model reasons about direction; the controller ensures
    safety.
 4. **Controller Ensures Safety, Not Pseudo-Planning**: The controller validates
    schemas, enforces command allowlists, manages budgets, and executes
    deterministically with fail-closed behavior. It must not replace the model's
    reasoning with generic obligation language or synthetic checklists.
-5. **Planner Before Synthesizer**: Resource-intensive turns recurse through bounded planner actions, accumulating typed evidence before handing the bundle to the synthesizer lane.
+5. **Recursive Agent Loop Before Synthesizer**: Resource-intensive turns recurse through bounded agent actions, accumulating typed evidence before handing the bundle to the synthesizer lane.
 6. **Grounded Repository Answers**: Repository-question answers cite source files by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
-7. **Visible Turn Stream**: TTY interactive sessions render a compact inline live tail above the boxed composer, showing interpretation, planner actions, gatherer work, tool calls, live background terminal output, fallback reasons, and synthesis readiness while preserving normal terminal scrollback.
+7. **Visible Turn Stream**: TTY interactive sessions render a compact inline live tail above the boxed composer, showing interpretation, agent actions, gatherer work, tool calls, live background terminal output, fallback reasons, and synthesis readiness while preserving normal terminal scrollback.
 8. **Typed Final Answer Rendering**: Synthesizer answers use the constrained final-answer render envelope (`paragraph`, `bullet_list`, `code_block`, `citations`), with boot-resolved provider capabilities selecting native structured-output transports when available and prompt-enveloped JSON when they are not.
 9. **Model-Driven Auto-Threading**: Steering prompts captured during an active turn become structured thread candidates, flowing through a constrained model-selected thread decision (`continue`, `open-child-thread`, or `merge/reconcile`) at a safe checkpoint.
 10. **Explicit Merge Outcomes**: Merge-back behavior is recorded as explicit lineage plus visible transcript output — full traceability for every thread transition.

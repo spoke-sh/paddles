@@ -1,0 +1,27 @@
+---
+recorded_at: 2026-05-13T17:27:00.707095049-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "terminal.*answer.*stop|semantic actions|external_capability|capability manifest" README.md POLICY.md ARCHITECTURE.md CONFIGURATION.md'
+---
+CONFIGURATION.md:136:- The **planner lane** is the configurable action-selection lane for the primary mech-suit path. Every planner lane receives the shared agent action schema renderer output for terminal `answer`/`stop`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
+CONFIGURATION.md:289:`external_capability` through the descriptor-governed transport boundary. The
+POLICY.md:44:- **Agent Action Contract**: Turns flow through one constrained recursive action vocabulary: terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
+POLICY.md:45:- **Shared Agent Action Schema Ownership**: Action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared action schema renderer. Adapter-local action schema lists are forbidden for Sift, HTTP, retry, redecision, or future action-selection lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
+ARCHITECTURE.md:30:bounded agent action: terminal `answer`/`stop`, a workspace action, a semantic
+ARCHITECTURE.md:31:action, `external_capability`, `refine`, or `branch`.
+ARCHITECTURE.md:42:wire transport. They also pass through the turn-specific capability manifest,
+ARCHITECTURE.md:44:external capability fabrics such as `external_capability`, execution posture,
+ARCHITECTURE.md:319:  capability manifest without making adapters own action lists
+ARCHITECTURE.md:670:| **semantic_definitions** / **semantic_references** / **semantic_symbols** / **semantic_hover** / **semantic_diagnostics** | Query semantic workspace evidence when the turn-specific capability manifest exposes that service |
+ARCHITECTURE.md:671:| **external_capability** | Invoke a manifest-disclosed external fabric such as web search, MCP tools, or connector app actions |
+ARCHITECTURE.md:679:JSON envelopes; the live capability manifest determines which backing services
+ARCHITECTURE.md:682:Terminal `answer` and `stop`, concrete workspace actions, semantic actions, and
+ARCHITECTURE.md:683:`external_capability` all remain one recursive action vocabulary gated by the
+ARCHITECTURE.md:684:capability manifest.
+README.md:75:That schema is separate from the turn-specific capability manifest. The schema
+README.md:77:loop which retrievers, semantic actions, external capability fabrics, execution
+README.md:94:| `semantic_definitions`, `semantic_references`, `semantic_symbols`, `semantic_hover`, `semantic_diagnostics` | Query semantic workspace evidence when the active capability manifest discloses that service. | No |
+README.md:95:| `external_capability` | Invoke a manifest-disclosed external fabric such as `web.search`, `mcp.tool`, or `connector.app_action`. | No local workspace mutation |
+README.md:100:Terminal `answer` and `stop`, concrete workspace actions, semantic actions, and
+README.md:101:`external_capability` all live in this one recursive action vocabulary. The
+README.md:102:active capability manifest gates which backing services are available, and the
+README.md:382:- **Model-driven action selection** — the model chooses from terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, or `branch`

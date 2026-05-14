@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-05-13T17:26:56.716893390-07:00
+command: zsh -lc 'cd /home/alex/workspace/spoke-sh/paddles && ! rg -n "pre-loop routing|outside the recursive agent loop" README.md POLICY.md ARCHITECTURE.md CONFIGURATION.md'
+---

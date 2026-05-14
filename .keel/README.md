@@ -464,13 +464,13 @@
 | [Planner Lane Schema Adoption](epics/VJXeteRQ5/voyages/VJXf4hlYW/) | done |
 | [Planner Schema Documentation](epics/VJXeteRQ5/voyages/VJXf4iAYl/) | done |
 
-### [Unified Recursive Agent Action Contract](epics/VJXwbmekZ/) (active)
+### [Unified Recursive Agent Action Contract](epics/VJXwbmekZ/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Unified Agent Action Contract](epics/VJXwbmekZ/voyages/VJXwlCA0P/) | done |
 | [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | done |
-| [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | in-progress |
+| [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 

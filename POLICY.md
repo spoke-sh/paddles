@@ -25,37 +25,37 @@ Model selection is an architectural decision that shapes every turn.
 
 ### Routing Principles
 - **Smallest Capable Model**: Each request routes to the smallest model that satisfies the workload within active runtime constraints.
-- **Intent Before Size**: Models are chosen by workload shape first — direct answer, tool orchestration, retrieval, context gathering, or final synthesis.
-- **Interpretation Before Routing**: Operator memory and foundational guidance are available to the planner before any routing commitment.
-- **Model-Directed Action Selection**: The planner selects its next bounded action through a constrained model response after interpretation context is assembled.
-- **Runtime Capability Disclosure Before Reasoning**: Planner and synthesizer
+- **Intent Before Size**: Models are chosen by workload shape first — recursive agent action selection, tool orchestration, retrieval, context gathering, or response authoring.
+- **Interpretation Before Action Selection**: Operator memory and foundational guidance are available before the model selects a bounded action.
+- **Model-Directed Action Selection**: Model reasoning is the planning inside the recursive agent loop. The model selects its next bounded agent action through a constrained response after interpretation context is assembled.
+- **Runtime Capability Disclosure Before Reasoning**: Action-selection and synthesizer
   lanes receive the live, dynamically discovered harness capability surface,
   execution posture, and completion contract as runtime data before they decide
   what to do next.
 - **Controller Owns Validation and Safety**: The controller remains authoritative for schema validation, budgets, safe command allowlists, deterministic execution, and fail-closed behavior. The model drives direction; the controller ensures safety.
-- **Intent Lives In Model Decisions, Not Controller Heuristics**: The controller must not infer workspace engagement or direct-answer intent from prompt-token heuristics. Intent routing comes from the planner's typed decision.
+- **Intent Lives In Model Decisions, Not Controller Heuristics**: The controller must not infer workspace engagement or direct-answer intent from prompt-token heuristics. Intent routing comes from the model's typed action decision.
 - **No Synthetic Planning Surfaces**: The controller must not replace model
   reasoning with generic obligation prose, canned checklists, or other
   pseudo-plan language. User-visible plan state should come from model-authored
   control artifacts or not exist at all.
 
-### Planning and Synthesis
-- **Recursive Planning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
-- **Planner Action Contract**: Turns flow through a constrained planner contract: answer/synthesize, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), refine, branch, and stop.
-- **Shared Planner Action Schema Ownership**: Planner action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared planner action schema renderer. Adapter-local planner action schema lists are forbidden for Sift, HTTP, retry, redecision, or future planner lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
-- **Turns Plan First**: The primary mech-suit runtime asks the planner for its first bounded action before route selection. This recursive path is the primary mode of operation.
+### Recursive Agent Loop and Synthesis
+- **Recursive Agent-Loop Reasoning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
+- **Agent Action Contract**: Turns flow through one constrained recursive action vocabulary: terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
+- **Shared Agent Action Schema Ownership**: Action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared action schema renderer. Adapter-local action schema lists are forbidden for Sift, HTTP, retry, redecision, or future action-selection lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
+- **First Action Is In The Loop**: The primary mech-suit runtime asks the model for its first bounded agent action as part of the recursive agent loop. A direct answer is a terminal action in that loop, not a separate route.
 - **Reasoning Budget Is For Reasoning**: Recursive budget exists to let the
   model think through the harness' dynamically available capabilities and
   enforced constraints. The harness may bound the loop, but it should not
   pre-chew the model's plan into generic fallback language.
-- **Separate Planner From Synthesizer**: Planning and final answer generation are distinct steps, each routed to the model best suited for that workload.
+- **Separate Action Selection From Response Authoring**: Recursive action selection and final response generation are distinct steps, each routed to the model best suited for that workload.
 - **Grounded Answers Cite Sources**: Repository-question answers include file citations by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
-- **Final Answer Rendering Stays Typed**: Planner-direct answers and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
-- **Planner Rationale Is Never The User Answer**: Planner rationale explains control decisions. User-facing answer text must travel through an explicit answer payload before it enters the render pipeline.
-- **Planner And Answer Lanes Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into the answer lane, so follow-up turns remain coherent across planner-direct and synthesizer-authored replies.
-- **Instruction Obligations Must Be Satisfied Before Completion**: When the planner marks a turn as an edit turn, that creates an explicit instruction obligation. Advice-only prose does not satisfy an open `applied_edit` obligation; the turn must either apply a workspace write or surface a blocked reply that says the edit is still unsatisfied.
+- **Final Answer Rendering Stays Typed**: Terminal `answer`/`stop` payloads and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
+- **Control Rationale Is Never The User Answer**: Action-selection rationale explains control decisions. User-facing answer text must travel through an explicit answer payload before it enters the render pipeline.
+- **Action-Selection And Answer Lanes Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into the answer lane, so follow-up turns remain coherent across direct terminal actions and synthesizer-authored replies.
+- **Instruction Obligations Must Be Satisfied Before Completion**: When the model marks a turn as an edit turn, that creates an explicit instruction obligation. Advice-only prose does not satisfy an open `applied_edit` obligation; the turn must either apply a workspace write or surface a blocked reply that says the edit is still unsatisfied.
 - **Generative Authoring Stays Separate From Rendering**: Rich surface-aware expression belongs in a generative authoring layer that targets the canonical render AST and surface affordances. Renderers project that typed output; they do not invent or reinterpret content.
-- **The Harness Is An Engine With Typed Chambers**: Interpretation, routing, planning, gathering, tooling, threading, rendering, and governor ownership are first-class runtime states. Operator surfaces should project those states directly instead of guessing them from incidental event text.
+- **The Harness Is An Engine With Typed Chambers**: Interpretation, action selection, gathering, tooling, threading, rendering, and governor ownership are first-class runtime states. Operator surfaces should project those states directly instead of guessing them from incidental event text.
 - **The Governor Owns Stall And Timeout Semantics**: Slow, stalled, expired, and intervention states belong to the governor layer of the harness, not to scattered local timers or UI heuristics.
 - **Harness State Must Be Observable**: Chamber ownership, governor status, timeout phase, and intervention detail must remain visible as typed runtime events so TUI, web, and future API clients all read from one source of truth.
 
@@ -71,7 +71,7 @@ Model selection is an architectural decision that shapes every turn.
 ### Evidence and Gathering
 - **Evidence-First Gatherers**: Context-gathering adapters return typed evidence bundles and capability state for downstream synthesis.
 - **Graph Retrieval Strengthens The Gatherer Path**: Richer graph/branching retrieval enhances the generic gatherer boundary and typed evidence contract, keeping the harness general-purpose.
-- **Planner Metadata Stays Observable**: Planner strategy, stop reason, and retained-evidence summaries remain visible once the operator asks for verbose output and in evidence digests.
+- **Action-Selection Metadata Stays Observable**: Strategy, stop reason, and retained-evidence summaries remain visible once the operator asks for verbose output and in evidence digests.
 - **Graph Lineage Stays Typed**: Branch ids, frontier ids, node ids, edge kinds, and graph stop state live in `paddles`-owned structured metadata, ready for embedded recorders and replay.
 
 ### Model Integration
@@ -99,9 +99,9 @@ Model selection is an architectural decision that shapes every turn.
 - **Hierarchical Memory**: The REPL reloads `AGENTS.md` memory on every turn from system, user, and ancestor scopes, with more specific files taking precedence.
 - **Memory Drives Action, Control Drives Safety**: Instruction memory rooted at `AGENTS.md` and its model-derived guidance graph influence action selection. Typed evidence contracts, validation, and budgets remain controller-owned.
 - **AGENTS.md Is The Interpretation Root**: The harness discovers `AGENTS.md` memory files; additional guidance flows through the model-derived graph — keeping the system extensible.
-- **Guidance Graph Bootstraps Tool Hints**: The turn-time guidance graph contributes read-only command hints so small local planner models discover better next actions through project knowledge.
-- **Guidance Graph Bootstraps Decision Procedures**: The same model-derived graph contributes ordered, prompt-relevant procedures so fallback planning and stop decisions are shaped by project guidance.
-- **Project Engines Are Context**: Keel and other board engines inform planning through recursive context and tools — the harness stays general-purpose and useful across domains.
+- **Guidance Graph Bootstraps Tool Hints**: The turn-time guidance graph contributes read-only command hints so small local models discover better next actions through project knowledge.
+- **Guidance Graph Bootstraps Decision Procedures**: The same model-derived graph contributes ordered, prompt-relevant procedures so fallback action selection and stop decisions are shaped by project guidance.
+- **Project Engines Are Context**: Keel and other board engines inform recursive agent-loop reasoning through context and tools — the harness stays general-purpose and useful across domains.
 
 ## 5. Entity State Machine
 Follow strict transition gates for all `.keel/` entities:
