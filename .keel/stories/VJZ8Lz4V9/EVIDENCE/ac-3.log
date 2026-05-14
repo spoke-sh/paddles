@@ -1,0 +1,13 @@
+---
+recorded_at: 2026-05-13T22:17:10.605242741-07:00
+command: cargo nextest run legacy_runtime_lane_preferences_reject_sift_model_provider_with_migration_hint
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID d9e953de-5656-41fd-a1d9-e51ff95d2f2d with nextest profile: default
+    Starting 1 test across 3 binaries (834 tests skipped)
+        PASS [   0.017s] (1/1) paddles infrastructure::runtime_preferences::tests::legacy_runtime_lane_preferences_reject_sift_model_provider_with_migration_hint
+────────────
+     Summary [   0.019s] 1 test run: 1 passed, 834 skipped

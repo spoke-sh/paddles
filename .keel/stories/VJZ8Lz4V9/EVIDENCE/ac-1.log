@@ -1,0 +1,13 @@
+---
+recorded_at: 2026-05-13T22:17:09.069914854-07:00
+command: cargo nextest run legacy_runtime_lane_preferences_migrate_into_turn_runtime_shape
+---
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID fff2c877-f786-4d6d-a2f8-b0b6fa498ec2 with nextest profile: default
+    Starting 1 test across 3 binaries (834 tests skipped)
+        PASS [   0.011s] (1/1) paddles infrastructure::runtime_preferences::tests::legacy_runtime_lane_preferences_migrate_into_turn_runtime_shape
+────────────
+     Summary [   0.012s] 1 test run: 1 passed, 834 skipped

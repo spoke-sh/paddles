@@ -1,12 +1,15 @@
-use crate::application::{GathererProvider, RuntimeLaneConfig};
+use crate::application::{
+    GathererProvider, LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT, RuntimeLaneConfig,
+};
 use crate::infrastructure::providers::ModelProvider;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const TURN_RUNTIME_PREFERENCES_FILE: &str = "turn-runtime.toml";
+const LEGACY_RUNTIME_LANE_PREFERENCES_FILE: &str = "runtime-lanes.toml";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -139,6 +142,7 @@ impl TurnRuntimeRetrievalPreference {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRuntimePreferenceStore {
     path: PathBuf,
+    legacy_path: Option<PathBuf>,
 }
 
 impl Default for TurnRuntimePreferenceStore {
@@ -149,11 +153,28 @@ impl Default for TurnRuntimePreferenceStore {
 
 impl TurnRuntimePreferenceStore {
     pub fn new() -> Self {
-        Self::with_path(default_turn_runtime_preference_path())
+        Self::with_migration_paths(
+            default_turn_runtime_preference_path(),
+            Some(default_legacy_runtime_lane_preference_path()),
+        )
     }
 
     pub fn with_path(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            legacy_path: None,
+        }
+    }
+
+    pub fn with_migration_paths<P, L>(path: P, legacy_path: Option<L>) -> Self
+    where
+        P: Into<PathBuf>,
+        L: Into<PathBuf>,
+    {
+        Self {
+            path: path.into(),
+            legacy_path: legacy_path.map(Into::into),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -161,10 +182,25 @@ impl TurnRuntimePreferenceStore {
     }
 
     pub fn load(&self) -> Result<Option<TurnRuntimePreferences>> {
-        if !self.path.exists() {
-            return Ok(None);
+        if self.path.exists() {
+            return self.load_turn_runtime_preferences();
         }
 
+        if let Some(legacy_path) = &self.legacy_path
+            && legacy_path.exists()
+        {
+            let preferences = load_legacy_runtime_lane_preferences(legacy_path)?;
+            if preferences.is_empty() {
+                return Ok(None);
+            }
+            self.save(&preferences)?;
+            return Ok(Some(preferences));
+        }
+
+        Ok(None)
+    }
+
+    fn load_turn_runtime_preferences(&self) -> Result<Option<TurnRuntimePreferences>> {
         let contents = fs::read_to_string(&self.path).with_context(|| {
             format!("read turn runtime preferences from {}", self.path.display())
         })?;
@@ -209,10 +245,22 @@ impl TurnRuntimePreferenceStore {
 }
 
 pub fn default_turn_runtime_preference_path() -> PathBuf {
+    default_preference_state_path(TURN_RUNTIME_PREFERENCES_FILE)
+}
+
+pub fn default_legacy_runtime_lane_preference_path() -> PathBuf {
+    default_preference_state_path(LEGACY_RUNTIME_LANE_PREFERENCES_FILE)
+}
+
+pub fn default_runtime_lane_preference_path() -> PathBuf {
+    default_turn_runtime_preference_path()
+}
+
+fn default_preference_state_path(file_name: &str) -> PathBuf {
     if let Some(project_dirs) = ProjectDirs::from("", "", "paddles")
         && let Some(state_dir) = project_dirs.state_dir()
     {
-        return state_dir.join(TURN_RUNTIME_PREFERENCES_FILE);
+        return state_dir.join(file_name);
     }
 
     if let Ok(home) = std::env::var("HOME") {
@@ -220,14 +268,10 @@ pub fn default_turn_runtime_preference_path() -> PathBuf {
             .join(".local")
             .join("state")
             .join("paddles")
-            .join(TURN_RUNTIME_PREFERENCES_FILE);
+            .join(file_name);
     }
 
-    PathBuf::from(TURN_RUNTIME_PREFERENCES_FILE)
-}
-
-pub fn default_runtime_lane_preference_path() -> PathBuf {
-    default_turn_runtime_preference_path()
+    PathBuf::from(file_name)
 }
 
 fn normalize_machine_managed_model_alias(
@@ -255,6 +299,102 @@ fn gatherer_provider_name(provider: GathererProvider) -> String {
         GathererProvider::Context1 => "context1",
     }
     .to_string()
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+struct LegacyRuntimeLanePreferences {
+    provider: Option<String>,
+    model: Option<String>,
+    thinking_mode: Option<String>,
+    planner_provider: Option<String>,
+    planner_model: Option<String>,
+    gatherer_provider: Option<String>,
+    gatherer_model: Option<String>,
+}
+
+fn load_legacy_runtime_lane_preferences(path: &Path) -> Result<TurnRuntimePreferences> {
+    let contents = fs::read_to_string(path).with_context(|| {
+        format!(
+            "read legacy runtime lane preferences from {}",
+            path.display()
+        )
+    })?;
+    let legacy = toml::from_str::<LegacyRuntimeLanePreferences>(&contents).with_context(|| {
+        format!(
+            "parse legacy runtime lane preferences from {}",
+            path.display()
+        )
+    })?;
+    migrate_legacy_runtime_lane_preferences(legacy)
+}
+
+fn migrate_legacy_runtime_lane_preferences(
+    legacy: LegacyRuntimeLanePreferences,
+) -> Result<TurnRuntimePreferences> {
+    reject_legacy_sift_model_provider(&legacy.provider, "provider")?;
+    reject_legacy_sift_model_provider(&legacy.planner_provider, "planner_provider")?;
+
+    let final_rendering_provider = normalized_optional_string(legacy.provider);
+    let final_rendering_model = normalized_optional_string(legacy.model);
+    let final_rendering_thinking_mode = normalized_optional_string(legacy.thinking_mode);
+    let action_selection_provider = normalized_optional_string(legacy.planner_provider)
+        .or_else(|| final_rendering_provider.clone());
+    let action_selection_model =
+        normalized_optional_string(legacy.planner_model).or_else(|| final_rendering_model.clone());
+    let action_selection_thinking_mode = (action_selection_provider == final_rendering_provider
+        && action_selection_model == final_rendering_model)
+        .then(|| final_rendering_thinking_mode.clone())
+        .flatten();
+    let retrieval_model = normalized_optional_string(legacy.gatherer_model);
+    let has_legacy_preference = final_rendering_provider.is_some()
+        || final_rendering_model.is_some()
+        || final_rendering_thinking_mode.is_some()
+        || action_selection_provider.is_some()
+        || action_selection_model.is_some()
+        || retrieval_model.is_some();
+    let retrieval_provider = normalized_optional_string(legacy.gatherer_provider)
+        .or_else(|| has_legacy_preference.then(|| "sift-direct".to_string()));
+
+    Ok(TurnRuntimePreferences {
+        turn_runtime: TurnRuntimePreferenceDocument {
+            model_clients: TurnRuntimeModelClientPreferences {
+                action_selection: ModelClientPreference {
+                    provider: action_selection_provider,
+                    model: action_selection_model,
+                    thinking_mode: action_selection_thinking_mode,
+                },
+                final_rendering: ModelClientPreference {
+                    provider: final_rendering_provider,
+                    model: final_rendering_model,
+                    thinking_mode: final_rendering_thinking_mode,
+                },
+            },
+            retrieval: TurnRuntimeRetrievalPreference {
+                provider: retrieval_provider,
+                model: retrieval_model,
+            },
+        },
+    })
+}
+
+fn reject_legacy_sift_model_provider(provider: &Option<String>, field_name: &str) -> Result<()> {
+    if provider
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("sift"))
+    {
+        return Err(anyhow!(
+            "{field_name} uses legacy {LEGACY_SIFT_MODEL_PROVIDER_MIGRATION_HINT}"
+        ));
+    }
+    Ok(())
+}
+
+fn normalized_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]
@@ -412,6 +552,97 @@ provider = "sift-direct"
             Some("gpt-5.4-pro")
         );
         assert_eq!(loaded.retrieval().provider.as_deref(), Some("sift-direct"));
+    }
+
+    #[test]
+    fn legacy_runtime_lane_preferences_migrate_into_turn_runtime_shape() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let turn_runtime_path = dir.path().join("state/turn-runtime.toml");
+        let legacy_path = dir.path().join("state/runtime-lanes.toml");
+        std::fs::create_dir_all(legacy_path.parent().expect("legacy preference parent"))
+            .expect("create legacy preference parent");
+        std::fs::write(
+            &legacy_path,
+            r#"provider = "openai"
+model = "gpt-5.4"
+thinking_mode = "high"
+planner_provider = "anthropic"
+planner_model = "claude-sonnet-4-20250514"
+"#,
+        )
+        .expect("write legacy preferences");
+        let store = RuntimeLanePreferenceStore::with_migration_paths(
+            &turn_runtime_path,
+            Some(&legacy_path),
+        );
+
+        let loaded = store
+            .load()
+            .expect("load migrated runtime preferences")
+            .expect("stored preferences");
+
+        assert_eq!(loaded.final_rendering().provider.as_deref(), Some("openai"));
+        assert_eq!(loaded.final_rendering().model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(
+            loaded.final_rendering().thinking_mode.as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            loaded.action_selection().provider.as_deref(),
+            Some("anthropic")
+        );
+        assert_eq!(
+            loaded.action_selection().model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
+        assert_eq!(loaded.retrieval().provider.as_deref(), Some("sift-direct"));
+        let migrated = std::fs::read_to_string(&turn_runtime_path)
+            .expect("read migrated turn runtime preferences");
+        assert!(migrated.contains("[turn_runtime.model_clients.action_selection]"));
+        assert!(migrated.contains("[turn_runtime.model_clients.final_rendering]"));
+        assert!(!migrated.contains("planner_provider"));
+        assert!(!migrated.contains("planner_model"));
+        assert_eq!(
+            std::fs::read_to_string(&legacy_path).expect("read legacy preferences"),
+            r#"provider = "openai"
+model = "gpt-5.4"
+thinking_mode = "high"
+planner_provider = "anthropic"
+planner_model = "claude-sonnet-4-20250514"
+"#
+        );
+    }
+
+    #[test]
+    fn legacy_runtime_lane_preferences_reject_sift_model_provider_with_migration_hint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let turn_runtime_path = dir.path().join("state/turn-runtime.toml");
+        let legacy_path = dir.path().join("state/runtime-lanes.toml");
+        std::fs::create_dir_all(legacy_path.parent().expect("legacy preference parent"))
+            .expect("create legacy preference parent");
+        std::fs::write(
+            &legacy_path,
+            r#"provider = "sift"
+model = "qwen-1.5b"
+"#,
+        )
+        .expect("write legacy preferences");
+        let store = RuntimeLanePreferenceStore::with_migration_paths(
+            &turn_runtime_path,
+            Some(&legacy_path),
+        );
+
+        let error = store
+            .load()
+            .expect_err("legacy sift model provider should fail migration");
+        let message = format!("{error:#}");
+
+        assert!(
+            message.contains("provider `sift` no longer performs model inference"),
+            "{message}"
+        );
+        assert!(message.contains("ollama:<model>"), "{message}");
+        assert!(!turn_runtime_path.exists());
     }
 
     #[test]

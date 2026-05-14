@@ -27,12 +27,12 @@ started_at: 2026-05-13T22:08:55
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Introduce Turn Runtime Preference Schema](../../../../stories/VJZ8LOzJi/README.md) | feat | done |
-| [Migrate Legacy Runtime Lane Preferences](../../../../stories/VJZ8Lz4V9/README.md) | feat | icebox |
+| [Migrate Legacy Runtime Lane Preferences](../../../../stories/VJZ8Lz4V9/README.md) | feat | done |
 | [Document Ollama Local HTTP Defaults](../../../../stories/VJZ8MXfkO/README.md) | docs | icebox |
 | [Preserve HTTP Provider Credential Rules](../../../../stories/VJZ9qwaWd/README.md) | feat | icebox |
 <!-- END GENERATED -->
