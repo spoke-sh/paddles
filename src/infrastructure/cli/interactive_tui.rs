@@ -23,7 +23,7 @@ use crossterm::event::{
     KeyModifiers,
 };
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size as terminal_size};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, Line, Modifier, Span, Style, Text};
@@ -51,8 +51,7 @@ pub struct TuiContext {
 const FRAME_INTERVAL: Duration = Duration::from_millis(32);
 const ASSISTANT_REVEAL_STEP: usize = 24;
 const EVENT_DETAIL_LINE_LIMIT: usize = 8;
-const INLINE_VIEWPORT_MIN_HEIGHT: u16 = 5;
-const INLINE_VIEWPORT_MAX_HEIGHT: u16 = 9;
+const INLINE_VIEWPORT_MIN_HEIGHT: u16 = 1;
 /// Max prose width for assistant responses (accounts for the 4-char body indent).
 const MAX_PROSE_WIDTH: usize = 96;
 const MULTILINE_INLINE_SEPARATOR: &str = " ⏎ ";
@@ -238,13 +237,8 @@ pub fn select_interactive_frontend(
 
 pub async fn run_interactive_tui(service: Arc<AgentRuntime>, tui_ctx: TuiContext) -> Result<()> {
     let _terminal_session = TerminalSession::enter()?;
-    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Inline(inline_viewport_height()),
-        },
-    )?;
+    let mut viewport_height = INLINE_VIEWPORT_MIN_HEIGHT;
+    let mut terminal = inline_terminal(viewport_height)?;
 
     let (tx, mut rx) = unbounded_channel();
     let session = service.shared_conversation_session();
@@ -396,6 +390,14 @@ pub async fn run_interactive_tui(service: Arc<AgentRuntime>, tui_ctx: TuiContext
         }
 
         flush_scrollback_rows(&mut terminal, &mut app)?;
+        let terminal_size = terminal.size()?;
+        let next_viewport_height =
+            app.inline_viewport_height(terminal_size.width, terminal_size.height);
+        if next_viewport_height != viewport_height {
+            prepare_inline_terminal_rebuild(&mut terminal)?;
+            terminal = inline_terminal(next_viewport_height)?;
+            viewport_height = next_viewport_height;
+        }
         terminal.draw(|frame| app.render(frame))?;
 
         if event::poll(FRAME_INTERVAL)? {
@@ -413,6 +415,22 @@ pub async fn run_interactive_tui(service: Arc<AgentRuntime>, tui_ctx: TuiContext
     }
 
     Ok(())
+}
+
+fn prepare_inline_terminal_rebuild<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
+    terminal.clear()
+}
+
+fn inline_terminal(
+    viewport_height: u16,
+) -> io::Result<Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>> {
+    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
+    Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(viewport_height.max(INLINE_VIEWPORT_MIN_HEIGHT)),
+        },
+    )
 }
 
 fn drain_messages(app: &mut InteractiveApp, rx: &mut UnboundedReceiver<UiMessage>) {
@@ -3395,9 +3413,11 @@ impl InteractiveApp {
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
         let input_height = self.input_area_height(area.width);
-        let activity_height = u16::from(self.busy && !self.is_masked_input());
-        let status_height = u16::from(self.model_selection_state().is_none());
-        let fixed_bottom = input_height + activity_height + status_height;
+        let activity_height = self.activity_indicator_height();
+        let status_height = self.status_bar_height();
+        let fixed_bottom = input_height
+            .saturating_add(activity_height)
+            .saturating_add(status_height);
         let transcript_height = self.live_tail_height(
             usize::from(area.width.max(1)),
             usize::from(area.height.saturating_sub(fixed_bottom)),
@@ -3405,7 +3425,8 @@ impl InteractiveApp {
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(transcript_height),
+                Constraint::Min(0),
+                Constraint::Length(transcript_height),
                 Constraint::Length(activity_height),
                 Constraint::Length(input_height),
                 Constraint::Length(status_height),
@@ -3413,20 +3434,44 @@ impl InteractiveApp {
             .split(area);
 
         if transcript_height > 0 {
-            frame.render_widget(self.render_transcript(layout[0]), layout[0]);
+            frame.render_widget(self.render_transcript(layout[1]), layout[1]);
         }
         if activity_height > 0 {
-            frame.render_widget(self.render_activity_indicator(), layout[1]);
+            frame.render_widget(self.render_activity_indicator(), layout[2]);
         }
-        frame.render_widget(self.render_input(), layout[2]);
-        if let Some(popup_area) = self.command_popup_area(area, layout[2]) {
+        frame.render_widget(self.render_input(), layout[3]);
+        if let Some(popup_area) = self.command_popup_area(area, layout[3]) {
             frame.render_widget(Clear, popup_area);
             frame.render_widget(self.render_command_popup(popup_area), popup_area);
         }
-        frame.set_cursor_position(self.cursor_position(layout[2]));
+        frame.set_cursor_position(self.cursor_position(layout[3]));
         if status_height > 0 {
-            frame.render_widget(self.render_status_bar(), layout[3]);
+            frame.render_widget(self.render_status_bar(), layout[4]);
         }
+    }
+
+    fn inline_viewport_height(&self, width: u16, terminal_height: u16) -> u16 {
+        let terminal_height = terminal_height.max(INLINE_VIEWPORT_MIN_HEIGHT);
+        let fixed_bottom = self
+            .input_area_height(width)
+            .saturating_add(self.activity_indicator_height())
+            .saturating_add(self.status_bar_height());
+        let transcript_height = self.live_tail_height(
+            usize::from(width.max(1)),
+            usize::from(terminal_height.saturating_sub(fixed_bottom)),
+        );
+        fixed_bottom
+            .saturating_add(transcript_height)
+            .max(INLINE_VIEWPORT_MIN_HEIGHT)
+            .min(terminal_height)
+    }
+
+    fn activity_indicator_height(&self) -> u16 {
+        u16::from(self.busy && !self.is_masked_input())
+    }
+
+    fn status_bar_height(&self) -> u16 {
+        u16::from(self.model_selection_state().is_none())
     }
 
     fn render_status_bar(&self) -> Paragraph<'static> {
@@ -3828,18 +3873,6 @@ impl InteractiveApp {
     }
 }
 
-fn inline_viewport_height() -> u16 {
-    terminal_size()
-        .map(|(_, height)| inline_viewport_height_for_terminal(height))
-        .unwrap_or(INLINE_VIEWPORT_MAX_HEIGHT)
-}
-
-fn inline_viewport_height_for_terminal(terminal_height: u16) -> u16 {
-    terminal_height
-        .saturating_sub(2)
-        .clamp(INLINE_VIEWPORT_MIN_HEIGHT, INLINE_VIEWPORT_MAX_HEIGHT)
-}
-
 fn step_timing_cache_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home)
@@ -3931,10 +3964,14 @@ fn inline_multiline_text(input: &str) -> String {
 }
 
 fn rendered_rows_height(rows: &[TranscriptRow], palette: &Palette, width: usize) -> usize {
-    rows.iter()
-        .enumerate()
-        .map(|(index, row)| row_rendered_height(row, palette, width) + usize::from(index > 0))
-        .sum()
+    let mut lines = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        lines.extend(render_row_lines_for_width(row, palette, width));
+        if index + 1 < rows.len() {
+            lines.push(Line::default());
+        }
+    }
+    rendered_lines_height(&lines, width)
 }
 
 fn render_row_lines_for_width(
@@ -4108,9 +4145,7 @@ fn render_full_width_user_row_lines(
 }
 
 fn row_rendered_height(row: &TranscriptRow, palette: &Palette, width: usize) -> usize {
-    let mut lines = render_row_lines_for_width(row, palette, width);
-    lines.push(Line::default());
-    rendered_lines_height(&lines, width)
+    rendered_lines_height(&render_row_lines_for_width(row, palette, width), width)
 }
 
 fn rendered_lines_height(lines: &[Line<'_>], width: usize) -> usize {
@@ -4841,7 +4876,7 @@ mod tests {
         RuntimeUpdateCompletion, TranscriptRow, TranscriptRowKind, TranscriptTiming,
         TranscriptTimingKind, UiMessage, collapse_event_details, detect_palette,
         format_duration_compact, format_turn_event_row, inline_multiline_text,
-        inline_viewport_height_for_terminal, render_row_lines, select_interactive_frontend,
+        prepare_inline_terminal_rebuild, render_row_lines, select_interactive_frontend,
         web_server_ready_row,
     };
     use crate::application::{ConversationSession, RuntimeLaneConfig};
@@ -4908,6 +4943,12 @@ mod tests {
             .map(|y| buffer_line(buffer, y))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn buffer_line_index_containing(buffer: &Buffer, needle: &str) -> u16 {
+        (0..buffer.area.height)
+            .find(|y| buffer_line(buffer, *y).contains(needle))
+            .unwrap_or_else(|| panic!("buffer should contain {needle:?}\n{}", buffer_text(buffer)))
     }
 
     fn rendered_line_text(line: &Line<'_>) -> String {
@@ -5516,15 +5557,7 @@ mod tests {
     }
 
     #[test]
-    fn inline_viewport_height_remains_compact() {
-        assert_eq!(inline_viewport_height_for_terminal(0), 5);
-        assert_eq!(inline_viewport_height_for_terminal(7), 5);
-        assert_eq!(inline_viewport_height_for_terminal(11), 9);
-        assert_eq!(inline_viewport_height_for_terminal(48), 9);
-    }
-
-    #[test]
-    fn idle_viewport_keeps_prompt_attached_to_scrollback() {
+    fn inline_viewport_height_stays_compact_after_scrollback_flush_and_grows_with_prompt() {
         let palette = detect_palette();
         let mut app = InteractiveApp::new(
             "qwen-1.5b".to_string(),
@@ -5537,10 +5570,128 @@ mod tests {
         );
         let _ = app.take_scrollback_rows();
 
+        assert_eq!(app.inline_viewport_height(80, 48), 4);
+
+        app.input = "line one\nline two\nline three".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        assert_eq!(app.inline_viewport_height(80, 48), 6);
+    }
+
+    #[test]
+    fn inline_viewport_height_includes_only_the_visible_live_tail() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let _ = app.take_scrollback_rows();
+        app.rows.push(TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Tail",
+            "done",
+        ));
+
+        assert_eq!(app.inline_viewport_height(80, 48), 6);
+
         let buffer = render_buffer(&app, 80, 9);
-        // transcript (5 empty) + prompt box (3) + status bar (1) = 9
-        // Prompt box border with title starts at line 5.
-        assert!(buffer_line(&buffer, 5).contains("Prompt"));
+        let tail_body = buffer_line_index_containing(&buffer, "done");
+        let prompt_top = buffer_line_index_containing(&buffer, "Prompt");
+        assert_eq!(prompt_top, tail_body + 1);
+    }
+
+    #[test]
+    fn prompt_box_stays_attached_to_live_tail_and_expands_upward() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let _ = app.take_scrollback_rows();
+        app.rows.push(TranscriptRow::new(
+            TranscriptRowKind::Event,
+            "• Tail",
+            "done",
+        ));
+
+        let viewport_height = app.inline_viewport_height(80, 48);
+        let buffer = render_buffer(&app, 80, viewport_height);
+        let tail_body = buffer_line_index_containing(&buffer, "done");
+        let prompt_top = buffer_line_index_containing(&buffer, "Prompt");
+        assert_eq!(prompt_top, tail_body + 1);
+
+        app.input = "line one\nline two\nline three".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let grown_viewport_height = app.inline_viewport_height(80, 48);
+        let grown = render_buffer(&app, 80, grown_viewport_height);
+        let grown_tail_body = buffer_line_index_containing(&grown, "done");
+        let grown_prompt_top = buffer_line_index_containing(&grown, "Prompt");
+        assert_eq!(grown_prompt_top, grown_tail_body + 1);
+        assert!(
+            grown_viewport_height > viewport_height,
+            "the inline viewport should grow when typed prompt lines are added"
+        );
+    }
+
+    #[test]
+    fn inline_terminal_rebuild_replaces_the_previous_prompt_box() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+        let width = 80;
+        let height = 12;
+        let initial_height = app.inline_viewport_height(width, height);
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::with_options(
+            backend,
+            ratatui::TerminalOptions {
+                viewport: ratatui::Viewport::Inline(initial_height),
+            },
+        )
+        .expect("terminal");
+        terminal.draw(|frame| app.render(frame)).expect("draw");
+
+        app.input = "line one\nline two".to_string();
+        app.cursor_pos = app.input.chars().count();
+        let grown_height = app.inline_viewport_height(width, height);
+
+        prepare_inline_terminal_rebuild(&mut terminal).expect("prepare rebuild");
+        let backend = terminal.backend().clone();
+        let mut terminal = Terminal::with_options(
+            backend,
+            ratatui::TerminalOptions {
+                viewport: ratatui::Viewport::Inline(grown_height),
+            },
+        )
+        .expect("rebuilt terminal");
+        terminal.draw(|frame| app.render(frame)).expect("redraw");
+
+        let rendered = buffer_text(terminal.backend().buffer());
+        assert_eq!(
+            rendered.matches("Prompt").count(),
+            1,
+            "rebuilding after Ctrl+J should not leave a stale prompt box\n{rendered}"
+        );
+        assert!(rendered.contains("line one"));
+        assert!(rendered.contains("line two"));
     }
 
     #[test]
