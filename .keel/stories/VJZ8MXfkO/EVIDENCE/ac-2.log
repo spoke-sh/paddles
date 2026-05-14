@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T22:20:10.759258770-07:00
+mode: manual
+---
+README.md and CONFIGURATION.md local inference examples use the generic ollama:<model> form and avoid selecting a fixed Ollama model. The doc-backed README/CONFIGURATION tests pass with turn-runtime.toml expectations.

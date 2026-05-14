@@ -436,17 +436,17 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 
 - **Interpretation shapes direction.** `AGENTS.md` memory influences what the planner investigates, how it prioritizes, and which procedures it follows.
 - **The model drives, the controller guards.** Model reasoning is the planning: the model selects its next bounded agent action from interpretation context; the controller validates, executes, and enforces budgets.
-- **Conversation continuity is shared, not inferred twice.** Action-selection and response lanes receive the same recent-turn and active-thread handoff, so follow-up turns do not reset just because the response path changed.
+- **Conversation continuity is shared, not inferred twice.** Action selection and final rendering receive the same recent-turn and active-thread handoff, so follow-up turns do not reset just because the response path changed.
 - **Recursive work earns better outcomes.** Difficult codebase questions and edits improve through iterative evidence gathering rather than one-shot generation.
 - **Separation of concerns.** Action selection and response authoring are distinct roles, potentially using different models optimized for their respective workloads.
 - **Context over hardcoding.** Keel, project artifacts, and board state flow through memory, search, and tool outputs — the harness stays general-purpose.
 - **Local-first by default.** The core loop can run against local HTTP model
-  services. Heavier hosted action-selection lanes are opt-in and degrade
+  services. Heavier hosted action-selection clients are opt-in and degrade
   gracefully.
 - **Hands stay explicit.** Workspace editing, background terminal execution, and credential-bearing transport mediation share one execution-hand lifecycle instead of inventing adapter-local state names.
 - **Visible execution.** Every recursive step is surfaced to the operator. The harness shows its work because transparency builds trust.
 
-## Current Runtime Lanes
+## Current Turn Runtime
 
 > Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP
 > model clients the only supported inference boundary for action selection and
@@ -457,21 +457,21 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 - The response model defaults to the configured HTTP model client. Local-first
   users should run a local HTTP model service and select it with
   `ollama:<model>`.
-- Authored `paddles.toml` can define `[shared]`, `[synthesizer]`, and `[planner]` model sections. `shared` is the default fallback for both lanes when the specific section does not set its own provider/model.
-- The planner lane is the configurable action-selection lane. It defaults to the shared provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
-- Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect the active lanes or switch the shared runtime selection.
-- OpenAI-compatible remote action-selection lanes now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
+- Authored `paddles.toml` can still define legacy `[shared]`, `[synthesizer]`, and `[planner]` model sections as compatibility input. Runtime state normalizes those selections into turn-runtime preferences for action selection, final rendering, and retrieval.
+- The action-selection model client defaults to the final-rendering provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable HTTP client.
+- Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect or switch the shared turn-runtime model client.
+- OpenAI-compatible remote action-selection clients now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
 - Remote provider behavior now resolves from one negotiated capability surface per provider/model pair: HTTP wire format, response render contract, planner tool-call shape, and transport support. Adding a future provider should extend that surface instead of forking controller logic by provider name.
-- Successful `/model` changes persist to the machine-managed runtime state file at `~/.local/state/paddles/runtime-lanes.toml` so they survive restarts without rewriting authored `paddles.toml`.
+- Successful `/model` changes persist to the machine-managed turn-runtime state file at `~/.local/state/paddles/turn-runtime.toml` so they survive restarts without rewriting authored `paddles.toml`; any existing `runtime-lanes.toml` is read only as migration input.
 - Local `sift` search artifacts now live under the machine-managed cache root at `~/.cache/paddles/sift/workspaces/<workspace-key>` instead of inside the repo workspace, so search does not index its own cache on restart.
-- That runtime lane state overrides authored model-lane config on startup, while non-lane settings like `port` still come from layered config and CLI flags still win over everything.
-- Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model inception mercury-2`.
-- `mercury-2` remains the supported Inception planner/synthesizer chat model. Workspace edits still execute locally through the shared workspace editor boundary, so provider selection does not change `apply_patch` semantics.
+- That turn-runtime state overrides authored model-client config on startup, while non-model settings like `port` still come from layered config and CLI flags still win over everything.
+- Inception is available through the same OpenAI-compatible HTTP model-client boundary used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model inception mercury-2`.
+- `mercury-2` remains the supported Inception action-selection/final-rendering chat model. Workspace edits still execute locally through the shared workspace editor boundary, so provider selection does not change `apply_patch` semantics.
 - Provider-native streaming/diffusion views remain optional follow-on capabilities; they are still not required to use Inception in `paddles`.
 - Legacy local Sift model-provider selections are migration-only inputs. They
   should fail with an `ollama:<model>` migration hint instead of being silently
   remapped to another provider.
-- `sift-direct` is the default local gatherer/search backend used by `search` and `refine` agent actions.
+- `sift-direct` is the default local retrieval backend used by `search` and `refine` agent actions.
 - `paddles` owns the recursive agent loop. `sift` executes direct retrieval only.
 - `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.
 - Gatherer progress now reflects direct retrieval stages such as initialization, indexing, retrieval, and ranking.
@@ -578,7 +578,7 @@ paddles --model ollama:<model> --planner-model openai:gpt-5.4
 One-shot prompt mode stays plain for scripts:
 
 ```bash
-paddles --prompt "Summarize the current runtime lanes"
+paddles --prompt "Summarize the current turn runtime"
 ```
 
 ## REPL Memory

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T22:20:10.670574708-07:00
+mode: manual
+---
+CONFIGURATION.md now documents the machine-managed turn-runtime preference precedence, the canonical ~/.local/state/paddles/turn-runtime.toml file, and the [turn_runtime.model_clients.action_selection], [turn_runtime.model_clients.final_rendering], and [turn_runtime.retrieval] shape. The doc-backed test configuration_documents_turn_runtime_preference_shape passes.

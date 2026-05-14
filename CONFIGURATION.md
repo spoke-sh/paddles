@@ -124,7 +124,7 @@ weight = 1.0
 weight = 1.5
 ```
 
-## Runtime Lane Selection
+## Turn Runtime Preferences
 
 > Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP
 > model clients the only supported inference boundary for action selection and
@@ -132,23 +132,43 @@ weight = 1.5
 > service such as Ollama and use `ollama:<model>`. Sift-backed retrieval is a
 > separate boundary and remains available through explicit retrieval providers.
 
-`paddles` treats runtime configuration as shared/action-selection/synth/gatherer
-lane selection rather than single-model-only routing. Model reasoning is the
-planning inside the recursive agent loop; configuration only chooses which lane
-does that bounded action selection.
+`paddles` treats provider preferences as turn-runtime model-client selection:
+action selection, final rendering, and retrieval. Model reasoning is the
+planning inside the recursive agent loop; configuration chooses the HTTP model
+clients and retrieval provider used by that turn loop.
 
-- The **shared lane selection** is the default provider/model pair for both action-selection and synthesizer lanes.
-- The **synthesizer lane** is the default response path and must always be configured.
-- The **planner lane** is the configurable action-selection lane for the primary mech-suit path. Every planner lane receives the shared agent action schema renderer output for terminal `answer`/`stop`, concrete workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
-- The **gatherer backend** services `search`/`refine` agent actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the model.
-- If the planner or gatherer backend is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
+- The **final-rendering model client** produces terminal user-facing responses and must always be configured.
+- The **action-selection model client** selects bounded workspace actions. It defaults to the final-rendering provider/model unless explicitly overridden by a planner-compatible HTTP provider/model.
+- The **retrieval provider** services `search`/`refine` agent actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the model.
+- If the action-selection model client or retrieval provider is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
 The agent action schema is lane-independent. The turn-specific capability
-manifest is the lane-time source of truth for which retrievers, semantic
+manifest is the runtime source of truth for which retrievers, semantic
 workspace services, external capability fabrics, execution constraints, and
 completion requirements are actually available on a given turn.
 
-`paddles.toml` can define those model selections explicitly:
+The machine-managed preference file is
+`~/.local/state/paddles/turn-runtime.toml`. New writes use this shape:
+
+```toml
+[turn_runtime.model_clients.action_selection]
+provider = "ollama"
+model = "<model>"
+
+[turn_runtime.model_clients.final_rendering]
+provider = "ollama"
+model = "<model>"
+
+[turn_runtime.retrieval]
+provider = "sift-direct"
+```
+
+Legacy `~/.local/state/paddles/runtime-lanes.toml` is read-only migration
+input. On startup, Paddles normalizes that legacy file into
+`turn-runtime.toml`; new writes never emit planner, synthesizer, gatherer, or
+lane-shaped state fields.
+
+Authored `paddles.toml` can still define compatibility model selections:
 
 ```toml
 [shared]
@@ -168,16 +188,16 @@ model = "claude-sonnet-4-20250514"
 provider/model catalog exposes selectable reasoning effort, provider-native
 thinking toggles, or an explicit `none` mode.
 
-When `[synthesizer]` or `[planner]` is omitted, that lane falls back to
-`[shared]`. CLI flags still win over everything:
+When `[synthesizer]` or `[planner]` is omitted, that compatibility section falls
+back to `[shared]`. CLI flags still win over everything:
 
 ```bash
 paddles --model ollama:<model> --gatherer-provider sift-direct
 ```
 
-Provider selection is now lane-specific as well. The synthesizer lane uses
-`--provider <name>`, while the planner can either inherit that provider or set
-its own with `--planner-provider <name>`:
+Provider selection is turn-phase-specific as well. Final rendering uses
+`--provider <name>`, while action selection can either inherit that provider or
+set its own with `--planner-provider <name>`:
 
 ```bash
 paddles \
@@ -186,8 +206,8 @@ paddles \
   --gatherer-provider sift-direct
 ```
 
-That keeps providers authenticated side-by-side and lets the planner/synthesizer
-mix providers without restarting the session.
+That keeps providers authenticated side-by-side and lets action selection and
+final rendering mix providers without restarting the session.
 
 If you want local-first inference with local retrieval, run a local HTTP model
 service and keep retrieval explicit:
@@ -206,7 +226,7 @@ That backend stays local-first and services bounded agent search/refine actions.
 
 - `paddles` remains the only recursive agent loop in the runtime path.
 - Direct retrieval progress is surfaced as concrete execution stages instead of autonomous action-selection states.
-- The provider returns evidence bundles and retrieval metadata consumed by the action-selection and synthesizer lanes.
+- The provider returns evidence bundles and retrieval metadata consumed by the action-selection and final-rendering model clients.
 - `search` and `refine` actions may now add `retrievers=["path-fuzzy"]` or `retrievers=["path-fuzzy","segment-fuzzy"]` when `sift` should bias toward structural fuzzy lookup.
 See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
@@ -452,7 +472,7 @@ openai = "keys/openai.key"
 
 Key files are written with restricted permissions on Unix systems. In the TUI,
 use `/login <provider>` to enter a provider API key through masked input;
-`paddles` updates the referenced key file and rebuilds the active runtime lanes
+`paddles` updates the referenced key file and rebuilds the active turn runtime
 so subsequent turns use the new credential immediately. `/model` shows the full
 known model catalog; providers with resolved credentials are marked enabled and
 providers without credentials are marked disabled. Local HTTP providers such as
@@ -465,20 +485,19 @@ ad hoc from generated shell/tool execution paths. The mediator also strips
 known credential env vars from local terminal and workspace child processes
 before they spawn.
 
-Successful `/model` changes are written to the machine-managed runtime lane
-state file at `~/.local/state/paddles/runtime-lanes.toml`. That file preserves
-the last selected shared runtime model across restarts without mutating
-authored `paddles.toml` files. Runtime lane state is applied after authored
-config for the model lane fields, so the last `/model` selection is restored
-even when a project-local `./paddles.toml` also sets shared/planner/synthesizer
-models. When the selected shared model exposes provider-specific thinking
-controls, the same machine-managed file also stores `thinking_mode = "..."`
-next to the shared provider/model pair so `/model` restores that third-stage
-selection on restart. When runtime lane state points at OpenAI pro variants
-such as `gpt-5.5-pro`, `gpt-5.4-pro`, or `o3-pro`, Paddles preserves that
-shared model selection, and any older machine-managed planner split is dropped
-so `/model` remains a single shared-lane override. Other settings such as
-`port`, verbosity, gatherer
+Successful `/model` changes are written to the machine-managed turn-runtime
+state file at `~/.local/state/paddles/turn-runtime.toml`. That file preserves
+the selected action-selection model client, final-rendering model client, and
+retrieval provider across restarts without mutating authored `paddles.toml`
+files. Turn-runtime state is applied after authored config for model-client and
+retrieval fields, so the last `/model` selection is restored even when a
+project-local `./paddles.toml` also sets compatibility
+shared/planner/synthesizer models. When the selected model exposes
+provider-specific thinking controls, the same machine-managed file stores the
+model-client `thinking_mode = "..."` so `/model` restores that third-stage
+selection on restart. Existing `~/.local/state/paddles/runtime-lanes.toml`
+files remain read-only migration input; after migration, new writes target
+`turn-runtime.toml` only. Other settings such as `port`, verbosity, retrieval
 configuration, and CLI flags keep their normal precedence. If no authored config layer explicitly
 sets `port` and you do not pass `--port`, Paddles asks the OS for an ephemeral
 HTTP port at startup and reports the resolved HTTP bind address in the intro
@@ -600,7 +619,7 @@ paddles --model ollama:<model>
 
 Paddles resolves final-answer rendering capability at boot from the selected
 provider/model pair and then uses the strictest supported transport for the
-synthesizer lane:
+final-rendering model client:
 
 - `openai`: Chat Completions models use native JSON Schema via
   `response_format`; Responses-only models degrade to prompt-enveloped
@@ -608,7 +627,7 @@ synthesizer lane:
 - `anthropic`: native structured tool use with a forced render tool
 - `google`: native JSON Schema via Gemini `generationConfig`
 - `inception`: OpenAI-compatible JSON Schema via the `mercury-2` chat completions path
-- `moonshot` and local `sift`: prompt-enveloped JSON with post-response normalization
+- `moonshot`: prompt-enveloped JSON with post-response normalization
 - `ollama`: OpenAI-compatible JSON Schema on the current local HTTP boundary
 
 All providers still normalize into the same transcript-safe render envelope
@@ -623,7 +642,7 @@ The supported Inception boundary is now:
 - Core chat compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
 - Local workspace editor: `write_file`, `replace_in_file`, `diff`, and `apply_patch` execute through one provider-agnostic local workspace editor boundary, but that boundary is limited to authored workspace files. When the workspace has a root `.gitignore`, Paddles uses it as the primary authored-file boundary for planner targeting, `list_files`, gatherer evidence filtering, and execution-time edit rejection. Only when no root `.gitignore` is present does Paddles fall back to a small generated/vendored directory denylist (`node_modules`, `dist`, `result`, `target`, `.docusaurus`, `.turbo`, `.sift`, `.direnv`, plus `.git`).
 - Optional native capabilities: provider-specific streaming/diffusion behavior remains a follow-on slice.
-- Operator expectation: Inception is usable today for planner or synthesizer lanes without changing local workspace edit semantics.
+- Operator expectation: Inception is usable today for action selection or final rendering without changing local workspace edit semantics.
 
 ### Shared Execution Hands
 
@@ -676,7 +695,7 @@ paddles --model ollama:<model> --gatherer-provider context1
 That provider is explicit and honest about its readiness:
 
 - Without `--context1-harness-ready`, the adapter reports `harness-required`
-  and Paddles gracefully falls back to the synthesizer lane.
+  and Paddles gracefully falls back to the final-rendering model client.
 - With `--context1-harness-ready`, the adapter boundary reports the current
   harness state transparently until a real harness-backed implementation exists.
 - The default REPL event stream surfaces the selected gatherer provider,

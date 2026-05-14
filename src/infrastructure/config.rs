@@ -1143,7 +1143,7 @@ mode = "embedded_local"
         assert!(readme.contains("/login inception"));
         assert!(readme.contains("/model inception mercury-2"));
         assert!(readme.contains("mercury-2"));
-        assert!(readme.contains("runtime-lanes.toml"));
+        assert!(readme.contains("turn-runtime.toml"));
     }
 
     #[test]
@@ -1163,6 +1163,17 @@ mode = "embedded_local"
         assert!(configuration.contains("without"));
         assert!(configuration.contains("streaming/diffusion"));
         assert!(configuration.contains("workspace editor"));
+        assert!(configuration.contains("turn-runtime.toml"));
+    }
+
+    #[test]
+    fn configuration_documents_turn_runtime_preference_shape() {
+        let configuration = repo_doc("CONFIGURATION.md");
+        assert!(configuration.contains("turn-runtime.toml"));
+        assert!(configuration.contains("[turn_runtime.model_clients.action_selection]"));
+        assert!(configuration.contains("[turn_runtime.model_clients.final_rendering]"));
+        assert!(configuration.contains("[turn_runtime.retrieval]"));
         assert!(configuration.contains("runtime-lanes.toml"));
+        assert!(configuration.contains("read-only migration input"));
     }
 }

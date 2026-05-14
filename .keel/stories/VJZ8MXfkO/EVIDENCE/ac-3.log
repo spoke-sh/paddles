@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T22:20:10.842995785-07:00
+mode: manual
+---
+CONFIGURATION.md and README.md no longer present runtime lanes as the canonical provider preference model; they describe turn-runtime model clients and retrieval providers, with runtime-lanes.toml called out only as read-only migration input.
