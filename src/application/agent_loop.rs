@@ -33,7 +33,11 @@ pub(super) async fn execute_recursive_planner_loop(
     let mut pending_deliberation_signals = DeliberationSignals::default();
     let mut steps_without_new_evidence = 0usize;
     let mut replan_count = 0usize;
-    let mut sequence = 1usize;
+    let mut sequence = if pending_initial_decision.is_some() {
+        0usize
+    } else {
+        1usize
+    };
     let gatherer_provider = context
         .prepared
         .gatherer

@@ -247,7 +247,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                     &DeliberationSignals::default(),
                 );
                 trace.emit(TurnEvent::PlannerActionSelected {
-                    sequence: 1,
+                    sequence: 0,
                     action: decision.action.summary(),
                     rationale: decision.rationale.clone(),
                     signal_summary: signal_summary.clone(),

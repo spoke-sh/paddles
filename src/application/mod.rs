@@ -4159,46 +4159,65 @@ fn execution_plan_from_initial_action(
     let instruction_frame = instruction_frame_from_initial_edit(&edit);
     match action {
         InitialAction::Answer => {
-            let direct_answer = normalized_direct_answer(answer);
-            let route_summary = if direct_answer.is_some() {
-                "model selected a direct response; controller will render it directly".to_string()
+            let has_direct_answer = normalized_direct_answer(answer.clone()).is_some();
+            let route_summary = if has_direct_answer {
+                "model selected a direct response; recursive agent loop will terminate at step zero"
+                    .to_string()
             } else {
                 format!(
-                    "model selected a direct response on synthesizer lane '{}'",
+                    "model selected a direct response; recursive agent loop will terminate at step zero before synthesizer lane '{}'",
                     prepared.synthesizer.model_id
                 )
             };
 
             PromptExecutionPlan {
                 intent: TurnIntent::DirectResponse,
-                path: PromptExecutionPath::SynthesizerOnly,
+                path: PromptExecutionPath::PlannerThenSynthesize,
                 route_summary,
-                initial_planner_decision: None,
-                direct_answer,
+                initial_planner_decision: Some(RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: "answer".to_string(),
+                    },
+                    rationale,
+                    answer,
+                    edit: edit.clone(),
+                    grounding: grounding.clone(),
+                    deliberation_state: None,
+                }),
+                direct_answer: None,
                 instruction_frame,
                 initial_edit: edit,
                 grounding,
             }
         }
         InitialAction::Stop { reason } => {
-            let direct_answer = stop_reason_direct_answer(&reason, answer);
+            let direct_answer = stop_reason_direct_answer(&reason, answer.clone());
             let route_summary = if direct_answer.is_some() {
                 format!(
-                    "model selected stop before recursive resource use ({reason}); controller will render the direct response"
+                    "model selected stop ({reason}); recursive agent loop will terminate at step zero"
                 )
             } else {
                 format!(
-                    "model selected stop before recursive resource use ({reason}); synthesizer lane '{}' will answer directly",
+                    "model selected stop ({reason}); recursive agent loop will terminate at step zero before synthesizer lane '{}'",
                     prepared.synthesizer.model_id
                 )
             };
 
             PromptExecutionPlan {
                 intent: TurnIntent::DirectResponse,
-                path: PromptExecutionPath::SynthesizerOnly,
+                path: PromptExecutionPath::PlannerThenSynthesize,
                 route_summary,
-                initial_planner_decision: None,
-                direct_answer,
+                initial_planner_decision: Some(RecursivePlannerDecision {
+                    action: PlannerAction::Stop {
+                        reason: reason.clone(),
+                    },
+                    rationale,
+                    answer,
+                    edit: edit.clone(),
+                    grounding: grounding.clone(),
+                    deliberation_state: None,
+                }),
+                direct_answer: None,
                 instruction_frame,
                 initial_edit: edit,
                 grounding,
@@ -8068,7 +8087,7 @@ mod tests {
     }
 
     #[test]
-    fn answer_initial_actions_route_to_direct_responses() {
+    fn answer_initial_actions_enter_loop_for_terminal_response() {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
@@ -8091,7 +8110,8 @@ mod tests {
         );
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
-        assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
+        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert!(plan.initial_planner_decision.is_some());
     }
 
     #[test]
@@ -8181,7 +8201,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_initial_actions_fall_back_to_direct_responses() {
+    fn stop_initial_actions_enter_loop_for_terminal_response() {
         let prepared = PreparedRuntimeLanes {
             planner: PreparedModelLane {
                 role: RuntimeLaneRole::Planner,
@@ -8209,7 +8229,288 @@ mod tests {
         );
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
-        assert_eq!(plan.path, super::PromptExecutionPath::SynthesizerOnly);
+        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert!(plan.initial_planner_decision.is_some());
+    }
+
+    #[test]
+    fn first_action_does_not_bypass_agent_loop() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+
+        for action in [
+            InitialAction::Answer,
+            InitialAction::Stop {
+                reason: "done".to_string(),
+            },
+            InitialAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: "src/application/mod.rs".to_string(),
+                },
+            },
+            InitialAction::Refine {
+                query: "agent loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                rationale: None,
+            },
+            InitialAction::Branch {
+                branches: vec!["domain".to_string(), "runtime".to_string()],
+                rationale: None,
+            },
+        ] {
+            let plan = super::execution_plan_from_initial_action(
+                &prepared,
+                initial_action_decision(action, "first model decision"),
+            );
+
+            assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+            assert!(
+                plan.initial_planner_decision.is_some(),
+                "first model decision must enter the recursive loop"
+            );
+            assert!(
+                plan.direct_answer.is_none(),
+                "direct answers are produced by the loop terminal path"
+            );
+        }
+    }
+
+    #[test]
+    fn first_agent_action_terminal_answer_and_stop() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+
+        let answer_plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "answer directly".to_string(),
+                answer: Some("The loop is recursive.".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+        );
+        assert_eq!(
+            answer_plan.path,
+            super::PromptExecutionPath::PlannerThenSynthesize
+        );
+        let answer_decision = answer_plan
+            .initial_planner_decision
+            .clone()
+            .expect("answer enters loop");
+        assert!(matches!(
+            answer_decision.action,
+            PlannerAction::Stop { ref reason } if reason == "answer"
+        ));
+        assert_eq!(
+            answer_decision.answer.as_deref(),
+            Some("The loop is recursive.")
+        );
+
+        let stop_plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Stop {
+                    reason: "enough evidence".to_string(),
+                },
+                rationale: "stop directly".to_string(),
+                answer: Some("No more workspace actions are needed.".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+            },
+        );
+        assert_eq!(
+            stop_plan.path,
+            super::PromptExecutionPath::PlannerThenSynthesize
+        );
+        let stop_decision = stop_plan
+            .initial_planner_decision
+            .clone()
+            .expect("stop enters loop");
+        assert!(matches!(
+            stop_decision.action,
+            PlannerAction::Stop { ref reason } if reason == "enough evidence"
+        ));
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = ConversationSession::new(TaskTraceId::new("task-answer").expect("task"));
+        let trace = Arc::new(StructuredTurnTrace::new(
+            sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            session.allocate_turn_id(),
+            session.active_thread().thread_ref,
+        ));
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let outcome = runtime
+            .block_on(super::agent_loop::execute_recursive_planner_loop(
+                &service,
+                "Explain the loop.",
+                test_planner_loop_context(InitialEditInstruction::default()),
+                Some(answer_decision),
+                trace,
+            ))
+            .expect("answer loop should finish");
+
+        let reply = outcome.direct_answer.expect("answer direct reply");
+        assert_eq!(reply.mode, ResponseMode::DirectAnswer);
+        assert_eq!(reply.to_plain_text(), "The loop is recursive.");
+        assert!(
+            sink.recorded().iter().any(|event| matches!(
+                event,
+                TurnEvent::PlannerStepProgress { step_number: 0, .. }
+            ))
+        );
+    }
+
+    #[test]
+    fn first_agent_action_executes_as_loop_step_zero() {
+        let prepared = PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        };
+
+        for action in [
+            InitialAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: "src/application/mod.rs".to_string(),
+                },
+            },
+            InitialAction::Refine {
+                query: "agent loop".to_string(),
+                mode: RetrievalMode::Linear,
+                strategy: RetrievalStrategy::Lexical,
+                retrievers: Vec::new(),
+                rationale: None,
+            },
+            InitialAction::Branch {
+                branches: vec!["domain".to_string(), "runtime".to_string()],
+                rationale: None,
+            },
+        ] {
+            let plan = super::execution_plan_from_initial_action(
+                &prepared,
+                initial_action_decision(action, "first resource decision"),
+            );
+            assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+            assert!(plan.initial_planner_decision.is_some());
+        }
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::write(
+            workspace.path().join("src/application/mod.rs"),
+            "loop code\n",
+        )
+        .expect("write source");
+        let service = test_service(workspace.path());
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        bind_workspace_action_executor(&service, synthesizer.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = ConversationSession::new(TaskTraceId::new("task-step-zero").expect("task"));
+        let trace = Arc::new(StructuredTurnTrace::new(
+            sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            session.allocate_turn_id(),
+            session.active_thread().thread_ref,
+        ));
+        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        context.planner_engine = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![planner_decision(
+                PlannerAction::Stop {
+                    reason: "done".to_string(),
+                },
+                "finish after first resource action",
+            )],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let initial_step = RecursivePlannerDecision {
+            action: PlannerAction::Workspace {
+                action: WorkspaceAction::Read {
+                    path: "src/application/mod.rs".to_string(),
+                },
+            },
+            rationale: "read the code".to_string(),
+            answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: None,
+            deliberation_state: None,
+        };
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime
+            .block_on(super::agent_loop::execute_recursive_planner_loop(
+                &service,
+                "Inspect the loop.",
+                context,
+                Some(initial_step),
+                trace,
+            ))
+            .expect("workspace loop should finish");
+
+        assert_eq!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .as_slice(),
+            &[WorkspaceAction::Read {
+                path: "src/application/mod.rs".to_string()
+            }]
+        );
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress {
+                step_number: 0,
+                action,
+                ..
+            } if action.contains("src/application/mod.rs")
+        )));
     }
 
     #[test]
@@ -16048,7 +16349,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
-                if *step_number == 2
+                if *step_number == 1
                     && action.contains("stop (reviewed evidence: recent CI runs are success/cancelled)")
         )));
     }
@@ -16206,7 +16507,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
-                if *step_number == 2
+                if *step_number == 1
                     && action.contains("stop (reviewed evidence: recent CI runs are success/cancelled)")
         )));
     }
@@ -16329,7 +16630,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
-                if *step_number == 2
+                if *step_number == 1
                     && action.contains("stop (reviewed evidence: current CI listing does not confirm a failure)")
         )));
     }
@@ -17315,7 +17616,7 @@ mod tests {
                     rationale,
                     signal_summary,
                     controller_summary,
-                } if *sequence == 3 => {
+                } if *sequence == 2 => {
                     Some((action, rationale, signal_summary, controller_summary))
                 }
                 _ => None,
@@ -17342,7 +17643,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             TurnEvent::PlannerStepProgress { step_number, action, .. }
-                if *step_number == 3 && action.contains("inspect `ls`")
+                if *step_number == 2 && action.contains("inspect `ls`")
         )));
     }
 
@@ -17438,7 +17739,7 @@ mod tests {
                     rationale,
                     signal_summary,
                     controller_summary,
-                } if *sequence == 3 => {
+                } if *sequence == 2 => {
                     Some((action, rationale, signal_summary, controller_summary))
                 }
                 _ => None,
@@ -17453,8 +17754,8 @@ mod tests {
         ));
         assert!(!events.iter().any(|event| matches!(
             event,
-            TurnEvent::PlannerStepProgress { step_number, action, .. }
-                if *step_number == 3 && action.contains("inspect `ls`")
+            TurnEvent::PlannerStepProgress { action, .. }
+                if action.contains("inspect `ls`")
         )));
     }
 
@@ -17539,7 +17840,7 @@ mod tests {
         assert!(planner_events.len() >= 2);
         let (_, initial_rationale, initial_controller) = planner_events
             .iter()
-            .find(|(seq, _, _)| *seq == 1)
+            .find(|(seq, _, _)| *seq == 0)
             .expect("initial planner action event");
         assert_eq!(initial_rationale, &model_initial_rationale);
         assert!(matches!(
@@ -17548,7 +17849,7 @@ mod tests {
         ));
         let (_, terminal_rationale, terminal_controller) = planner_events
             .iter()
-            .find(|(seq, _, _)| *seq == 2)
+            .find(|(seq, _, _)| *seq == 1)
             .expect("terminal planner action event");
         assert_eq!(terminal_rationale, &model_terminal_rationale);
         assert!(matches!(
