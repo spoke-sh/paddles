@@ -1,0 +1,261 @@
+---
+recorded_at: 2026-05-13T21:15:46.634137501-07:00
+mode: manual
+files: [".keel/epics/VJZ0tpZQJ/voyages/VJZ14yp0U/CLEANUP_MIGRATION_RECOMMENDATION.md"]
+---
+
+--- File: CLEANUP_MIGRATION_RECOMMENDATION.md ---
+# Cleanup Migration Recommendation
+
+Story: VJZ1MAaZq
+
+## Recommendation
+
+Proceed with the cleanup, but do it in sealed slices. The first implementation
+slice should make model inference HTTP-only for action selection and final
+rendering before broader turn-loop vocabulary cleanup. Do not start by deleting
+the whole `sift` dependency or by flattening the internal ports into one large
+runtime object.
+
+The target architecture is:
+
+- Paddles owns the turn loop, capability disclosure, governance, local tool
+  execution, evidence accumulation, and response finalization.
+- Model inference happens through HTTP model clients only.
+- Local-first model execution remains supported by local HTTP services, with
+  Ollama as the concrete default recommendation if a default local provider is
+  required.
+- Sift-backed retrieval/indexing is treated as a separate decision from
+  Sift-backed model inference.
+- Planner/synthesizer/gatherer disappear as public lane vocabulary. Internally,
+  keep explicit phases for action selection, retrieval, execution, evidence, and
+  final rendering.
+
+This document is the human-review gate. It intentionally introduces no runtime
+behavior changes.
+
+## Ordered Sealed Slices
+
+### Slice 1: ADR And Compatibility Policy
+
+**Goal:** Record the architectural reversal explicitly before code changes.
+
+**Red anchors:**
+
+- Add ADR expectation tests or doc checks that name HTTP-only model inference as
+  the accepted direction.
+- Add a compatibility-policy test fixture showing old `sift` model-provider
+  config receives an actionable migration outcome.
+
+**Green changes:**
+
+- Add an ADR under `.keel/adrs/` stating that paddles no longer loads inference
+  models in-process.
+- Record that local model execution is provided by HTTP services, not Candle/Qwen
+  sessions inside paddles.
+- State that Sift retrieval/indexing remains a separate follow-up decision.
+
+**Compatibility:** Choose explicit rejection for `sift` as a model provider.
+Silent remapping to Ollama or another HTTP provider would hide a model-quality,
+latency, and deployment change.
+
+**Docs:** ADR owns the decision. `ARCHITECTURE.md` should point to it once the
+runtime behavior changes.
+
+### Slice 2: HTTP-Only Model Inference Boundary
+
+**Goal:** Make action-selection and final-rendering model inference always use
+the HTTP model-client boundary.
+
+**Red anchors:**
+
+- Replace `prepare_runtime_lanes_mix_provider_selection_and_only_resolve_sift_paths`
+  with a failing test proving action-selection and final-rendering model clients
+  never receive local `ModelPaths`.
+- Add provider capability tests proving every inference provider negotiates
+  `http_format: Some(_)` or fails before runtime construction.
+- Add CLI/main tests proving `--provider sift`, `--planner-provider sift`, and
+  persisted `provider = "sift"` fail with a local HTTP migration hint.
+- Keep `sift_direct_boundary_can_be_prepared_without_local_model_paths` green to
+  prove retrieval is not coupled to inference removal.
+
+**Green changes:**
+
+- Remove Sift branches from `build_synthesizer_engine` and
+  `build_planner_engine`; both should resolve through HTTP provider config.
+- Remove planner/synthesizer model-path resolution from runtime preparation.
+- Keep `ModelCapabilitySurface` as the single provider negotiation contract.
+- Keep `HttpProviderAdapter` and `HttpPlannerAdapter` as the model-client
+  implementation.
+
+**Compatibility:** Reject old Sift model-provider selections with a message such
+as: "provider `sift` no longer performs model inference; run a local HTTP model
+service such as Ollama and select `ollama:<model>`." Keep legacy config parsing
+only so the error can be specific.
+
+**Docs:** Update `CONFIGURATION.md` and `README.md` local-first setup examples in
+the same commit. Mention Ollama as the local HTTP example and preserve
+`provider_url` override docs.
+
+### Slice 3: Provider Defaults, Credentials, And Runtime Preferences
+
+**Goal:** Move persisted model-client selection away from lane-shaped state.
+
+**Red anchors:**
+
+- Config tests proving new turn-runtime preferences override authored config
+  without using `runtime-lanes.toml` as the preferred write target.
+- Runtime preference tests proving legacy `runtime-lanes.toml` can be read for
+  migration but new writes use the new preference shape.
+- TUI tests proving optional Ollama credentials still show as available without
+  auth, while required HTTP providers fail closed without credentials.
+
+**Green changes:**
+
+- Introduce turn-runtime preference naming and data shape.
+- Read legacy `runtime-lanes.toml` as compatibility input.
+- Write only the new turn-runtime preference file.
+- Keep `CredentialStore` and `TransportToolMediator` as the HTTP auth boundary.
+
+**Compatibility:** Legacy planner/synthesizer preference fields should migrate
+to action-selection and final-rendering model-client settings. Legacy Sift model
+values should not silently become another model.
+
+**Docs:** `CONFIGURATION.md` owns file names and precedence. TUI docs or README
+snippets should stop saying "runtime lanes."
+
+### Slice 4: Delete In-Process Sift Inference Code
+
+**Goal:** Remove paddles-owned model loading and local inference once HTTP-only
+runtime construction is proven.
+
+**Red anchors:**
+
+- Compile/test failure caused by references to `SiftAgentAdapter`,
+  `SiftPlannerAdapter`, and Sift model provider rows.
+- Dependency tests or cargo checks proving Candle/Qwen/tokenizer inference-only
+  dependencies are gone when no remaining code uses them.
+- HTTP provider integration tests remain green for action selection, structured
+  final answers, retries, deliberation continuity, and provider-specific schema
+  transport.
+
+**Green changes:**
+
+- Delete `src/infrastructure/adapters/sift_agent.rs` and
+  `src/infrastructure/adapters/sift_planner.rs`.
+- Delete or split `src/infrastructure/adapters/sift_registry.rs` so model
+  preparation no longer exists for inference.
+- Remove `ModelProvider::Sift` from model-provider selection or keep only a
+  deprecated parser path that errors before runtime construction.
+- Remove Candle/Qwen/tokenizer dependencies that were only used by in-process
+  inference.
+
+**Compatibility:** Keep Sift retrieval adapters untouched unless their own tests
+prove they depend on inference-only code. If they do, split the slice rather than
+deleting retrieval by accident.
+
+**Docs:** `README.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `POLICY.md`, and
+`flake.nix` notes must stop describing paddles-owned local model loading.
+
+### Slice 5: Turn Runtime Terminology Collapse
+
+**Goal:** Retire public planner/synthesizer/gatherer lane vocabulary and make the
+turn loop the public conceptual center.
+
+**Red anchors:**
+
+- Tests should fail on public strings: "planner lane", "synthesizer lane",
+  "gatherer lane", "runtime lanes", and "shared lane" in CLI help, TUI copy,
+  route summaries, docs, and prompt prose.
+- Application tests should prove the same turn phases still execute:
+  interpretation, action selection, retrieval, execution, evidence accumulation,
+  and final rendering.
+- Trace/projection tests should prove old compatibility labels, if retained, are
+  projected intentionally rather than emitted by new runtime code.
+
+**Green changes:**
+
+- Rename `RuntimeLaneConfig` toward `TurnRuntimeConfig`.
+- Rename `PreparedRuntimeLanes` toward `PreparedTurnRuntime`.
+- Rename `PreparedModelLane` toward `PreparedModelClient`.
+- Rename `PreparedGathererLane` toward `PreparedRetriever` or
+  `PreparedEvidenceProvider`.
+- Keep `RecursivePlanner`, `SynthesizerEngine`, and `ContextGatherer` ports until
+  their behavior is stable under the new public vocabulary; then rename them in
+  smaller follow-up slices.
+- Update user-facing route summaries, prompt prose, TUI rows, and CLI help.
+
+**Compatibility:** Keep legacy CLI/config aliases temporarily, but every warning
+should point to turn-loop phase terminology:
+
+- `--planner-provider` -> action-selection provider.
+- `--planner-model` -> action-selection model.
+- `[planner]` -> `[action_selection]` or the chosen model-client phase name.
+- `gatherer_provider` -> retriever provider.
+
+**Docs:** `ARCHITECTURE.md` owns the turn-loop narrative. `CONFIGURATION.md`
+owns CLI/config names. `POLICY.md` owns capability disclosure and action-schema
+contract language. `INSTRUCTIONS.md` owns operator loop phrasing.
+
+### Slice 6: Retrieval / Indexing Follow-Up Decision
+
+**Goal:** Decide whether Sift remains as a retrieval/indexing dependency after
+model inference is gone.
+
+**Red anchors:**
+
+- Tests proving `sift-direct`, `context1`, and local retrieval providers are
+  independently selectable from model-client inference.
+- If Sift retrieval is removed, tests proving equivalent retrieval behavior or a
+  clear unsupported-state path.
+
+**Green changes:**
+
+- Either keep Sift retrieval with clearer naming, or replace it under a separate
+  retrieval ADR.
+- Remove remaining Sift build/dependency surfaces only when retrieval no longer
+  needs them.
+
+**Compatibility:** Do not bundle this with the first HTTP-only inference slice.
+The blast radius is different and the user-facing failure modes are different.
+
+**Docs:** Any retrieval decision belongs in a separate ADR plus
+`ARCHITECTURE.md` and `CONFIGURATION.md` retrieval sections.
+
+## Cross-Slice Test Strategy
+
+Use TDD at each slice:
+
+1. Write the failing behavior test first.
+2. Make the minimum behavior change.
+3. Refactor names and docs after behavior is green.
+
+Core proof points:
+
+- `ModelProvider::Sift` cannot be used for inference.
+- Every inference model client has HTTP format, URL resolution, and auth
+  preflight.
+- HTTP adapter tests protect planner action schema parity and final-answer
+  rendering.
+- Sift-backed retrieval, if retained, does not require planner/synthesizer model
+  paths.
+- Operator-facing docs and UI no longer teach lane concepts as the runtime
+  model.
+- The turn loop remains observable through action selection, retrieval,
+  execution, evidence, and final rendering events.
+
+## Human Review Items
+
+Before runtime implementation begins, confirm these product decisions:
+
+1. Whether the default local HTTP provider should be Ollama.
+2. Which default local model ID to document, if any.
+3. Whether old lane-shaped CLI/config aliases should warn for a transition window
+   or fail immediately.
+4. Whether Sift retrieval/indexing should remain after in-process model inference
+   is removed.
+
+My recommendation is Ollama as the documented local-first HTTP example, explicit
+rejection for Sift model-provider inference, temporary aliases for lane-shaped
+config names, and a separate follow-up decision for Sift retrieval.
+

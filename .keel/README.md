@@ -473,11 +473,11 @@
 | [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | done |
 | [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | done |
 
-### [HTTP Inference And Turn Loop Cleanup Research](epics/VJZ0tpZQJ/) (active)
+### [HTTP Inference And Turn Loop Cleanup Research](epics/VJZ0tpZQJ/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Inventory Legacy Inference And Lane Surfaces](epics/VJZ0tpZQJ/voyages/VJZ14yp0U/) | in-progress |
+| [Inventory Legacy Inference And Lane Surfaces](epics/VJZ0tpZQJ/voyages/VJZ14yp0U/) | done |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
