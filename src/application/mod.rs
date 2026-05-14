@@ -7745,6 +7745,24 @@ mod tests {
         }
     }
 
+    fn prepared_runtime_lanes_for_tests() -> PreparedRuntimeLanes {
+        PreparedRuntimeLanes {
+            planner: PreparedModelLane {
+                role: RuntimeLaneRole::Planner,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelLane {
+                role: RuntimeLaneRole::Synthesizer,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            gatherer: None,
+        }
+    }
+
     fn moonshot_continuation_state() -> DeliberationState {
         DeliberationState::new(
             ModelProvider::Moonshot.name(),
@@ -8511,6 +8529,258 @@ mod tests {
                 ..
             } if action.contains("src/application/mod.rs")
         )));
+    }
+
+    #[test]
+    fn unified_loop_preserves_known_edit_instruction_frame() {
+        let prepared = prepared_runtime_lanes_for_tests();
+        let edit = InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec![
+                "src/application/mod.rs".to_string(),
+                "src/application/agent_loop.rs".to_string(),
+            ],
+            resolution: Some(EntityResolutionOutcome::Resolved {
+                target: EntityResolutionCandidate::new(
+                    "src/application/mod.rs",
+                    EntityLookupMode::ExactPath,
+                    1,
+                ),
+                alternatives: vec![EntityResolutionCandidate::new(
+                    "src/application/agent_loop.rs",
+                    EntityLookupMode::PathFragment,
+                    2,
+                )],
+                explanation: "exact authored target".to_string(),
+            }),
+        };
+
+        let plan = super::execution_plan_from_initial_action(
+            &prepared,
+            InitialActionDecision {
+                action: InitialAction::Answer,
+                rationale: "answer after edit awareness".to_string(),
+                answer: Some("The edit target is known.".to_string()),
+                edit: edit.clone(),
+                grounding: None,
+            },
+        );
+
+        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert_eq!(
+            plan.initial_planner_decision
+                .as_ref()
+                .expect("step-zero decision")
+                .edit,
+            edit
+        );
+        let frame = plan
+            .instruction_frame
+            .as_ref()
+            .expect("known edit instruction frame");
+        assert!(frame.requires_applied_edit());
+        assert_eq!(frame.candidate_files, edit.candidate_files);
+        assert_eq!(frame.resolution, edit.resolution);
+    }
+
+    #[test]
+    fn unified_loop_preserves_bootstrap_guardrails() {
+        let terminal = InitialActionDecision {
+            action: InitialAction::Answer,
+            rationale: "answer directly".to_string(),
+            answer: Some("Looks fine.".to_string()),
+            edit: InitialEditInstruction {
+                known_edit: true,
+                candidate_files: vec!["src/application/mod.rs".to_string()],
+                resolution: None,
+            },
+            grounding: Some(GroundingRequirement {
+                domain: GroundingDomain::Repository,
+                reason: Some("repo-local answer".to_string()),
+            }),
+        };
+
+        let commit_bootstrap =
+            super::bootstrap_git_commit_initial_action("Make a git commit", &terminal)
+                .expect("commit turn should inspect git status");
+        assert!(matches!(
+            commit_bootstrap.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Inspect { ref command }
+            } if command == "git status --short"
+        ));
+        assert_eq!(commit_bootstrap.edit, terminal.edit);
+        assert_eq!(commit_bootstrap.grounding, terminal.grounding);
+
+        let grounding_bootstrap = super::bootstrap_repository_grounding_initial_action(
+            "Does this belong in our runtime architecture?",
+            &terminal,
+        )
+        .expect("repo-scoped answer should inspect local context");
+        assert!(matches!(
+            grounding_bootstrap.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Inspect { .. }
+            }
+        ));
+        assert_eq!(grounding_bootstrap.edit, terminal.edit);
+
+        let review_bootstrap = super::bootstrap_review_initial_action(&terminal)
+            .expect("review mode should force diff evidence");
+        assert!(matches!(
+            review_bootstrap.action,
+            InitialAction::Workspace {
+                action: WorkspaceAction::Diff { path: None }
+            }
+        ));
+    }
+
+    #[test]
+    fn unified_loop_fail_closed_paths() {
+        let prepared = prepared_runtime_lanes_for_tests();
+        let fallback = super::fallback_execution_plan(&prepared);
+        assert_eq!(fallback.path, super::PromptExecutionPath::SynthesizerOnly);
+        assert!(fallback.route_summary.contains("planner lane"));
+
+        let planning =
+            super::resolve_collaboration_mode_request(Some(CollaborationModeRequest::new(
+                CollaborationModeRequestTarget::Known(CollaborationMode::Planning),
+                CollaborationModeRequestSource::OperatorSurface,
+                None,
+            )));
+        let edit = InitialEditInstruction {
+            known_edit: true,
+            candidate_files: vec!["src/lib.rs".to_string()],
+            resolution: None,
+        };
+        let blocked = super::collaboration_boundary_for_action(
+            &planning,
+            &PlannerAction::Workspace {
+                action: WorkspaceAction::WriteFile {
+                    path: "src/lib.rs".to_string(),
+                    content: "updated".to_string(),
+                },
+            },
+            &edit,
+        )
+        .expect("planning mode blocks mutation");
+        assert_eq!(blocked.reason, "collaboration-mode-blocked");
+        assert_eq!(blocked.response.mode, ResponseMode::DirectAnswer);
+        assert!(
+            blocked
+                .summary
+                .contains("planning mode blocked mutating action")
+        );
+
+        let stop_reason = super::annotate_stop_reason_for_pending_instruction(
+            "instruction-unsatisfied".to_string(),
+            super::instruction_frame_from_initial_edit(&edit).as_ref(),
+        );
+        assert_eq!(stop_reason, "workspace-editor-boundary");
+    }
+
+    #[test]
+    fn unified_loop_observability_preserves_agent_actions() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src")).expect("create src");
+        fs::write(workspace.path().join("src/lib.rs"), "pub fn paddles() {}\n")
+            .expect("write source");
+        let service = test_service(workspace.path());
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        bind_workspace_action_executor(&service, synthesizer.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = ConversationSession::new(TaskTraceId::new("task-observe").expect("task"));
+        let trace = Arc::new(StructuredTurnTrace::new(
+            sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            session.allocate_turn_id(),
+            session.active_thread().thread_ref,
+        ));
+        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        context.planner_engine = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![planner_decision(
+                PlannerAction::Stop {
+                    reason: "observed".to_string(),
+                },
+                "terminal observation",
+            )],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime
+            .block_on(super::agent_loop::execute_recursive_planner_loop(
+                &service,
+                "Observe the loop.",
+                context,
+                Some(RecursivePlannerDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "src/lib.rs".to_string(),
+                        },
+                    },
+                    rationale: "read for evidence".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                }),
+                trace,
+            ))
+            .expect("observable loop should finish");
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress { step_number: 0, action, .. }
+                if action.contains("read `src/lib.rs`")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, .. } if tool_name == "read"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerActionSelected { sequence: 1, action, .. }
+                if action.contains("stop (observed)")
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::PlannerSummary { steps: 2, .. }))
+        );
+
+        let notes = super::collect_steering_review_notes(
+            &test_planner_loop_context(InitialEditInstruction::default()),
+            &PlannerLoopState::default(),
+            &RecursivePlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "answer now".to_string(),
+                },
+                rationale: "terminal too soon".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            },
+            Path::new("/workspace"),
+            &DeliberationSignals {
+                continuation: DeliberationSignal::Present(DeliberationContinuation {
+                    reusable_state: true,
+                    tool_results_required: true,
+                }),
+                ..Default::default()
+            },
+        );
+        assert!(notes.iter().any(|note| {
+            note.note.contains("Steering review [deliberation-signals]")
+                && note
+                    .note
+                    .contains("before branching, refining, or stopping")
+        }));
     }
 
     #[test]

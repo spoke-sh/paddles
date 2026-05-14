@@ -469,7 +469,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Unified Agent Action Contract](epics/VJXwbmekZ/voyages/VJXwlCA0P/) | done |
-| [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | in-progress |
+| [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | done |
 | [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
