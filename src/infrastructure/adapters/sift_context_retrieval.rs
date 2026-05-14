@@ -64,7 +64,7 @@ impl RetrievalProvider for SiftContextRetrievalAdapter {
         let path_policy = WorkspacePathPolicy::new(&self.workspace_root);
         if self.verbose.load(Ordering::Relaxed) >= 1 {
             println!(
-                "[LANE] Gatherer lane '{}' assembled {} hit(s) for retrieval-heavy prompt.",
+                "[RETRIEVAL] Sift context provider '{}' assembled {} hit(s) for retrieval-heavy prompt.",
                 self.model_id,
                 assembly.response.hits.len(),
             );

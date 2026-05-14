@@ -51,7 +51,7 @@ pub enum TraceAuthoritySelection {
 ///
 /// Layering order:
 /// `/etc/paddles/paddles.toml` < `~/.config/paddles/paddles.toml` <
-/// `./paddles.toml` < `~/.local/state/paddles/runtime-lanes.toml`.
+/// `./paddles.toml` < `~/.local/state/paddles/turn-runtime.toml`.
 /// CLI flags override all persisted values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaddlesConfig {
@@ -199,7 +199,7 @@ impl PaddlesConfig {
         Self::load_with_runtime_preferences(workspace_root, None)
     }
 
-    /// Load layered configuration with optional machine-managed runtime lane preferences.
+    /// Load layered configuration with optional machine-managed turn-runtime preferences.
     pub fn load_with_runtime_preferences(
         workspace_root: &Path,
         runtime_preferences: Option<&TurnRuntimePreferences>,
@@ -477,8 +477,8 @@ pub fn normalize_provider_model_alias(provider: &str, model: &str) -> String {
         .unwrap_or_else(|| model.to_string())
 }
 
-/// Returns the configured gatherer provider without legacy alias remapping.
-pub fn normalize_gatherer_provider_alias(provider: &str) -> String {
+/// Returns the configured retrieval provider without legacy alias remapping.
+pub fn normalize_retrieval_provider_alias(provider: &str) -> String {
     provider.to_string()
 }
 
@@ -1127,13 +1127,13 @@ mode = "embedded_local"
     }
 
     #[test]
-    fn normalizes_gatherer_provider_alias() {
+    fn normalizes_retrieval_provider_alias() {
         assert_eq!(
-            normalize_gatherer_provider_alias("sift-direct"),
+            normalize_retrieval_provider_alias("sift-direct"),
             "sift-direct"
         );
-        assert_eq!(normalize_gatherer_provider_alias("local"), "local");
-        assert_eq!(normalize_gatherer_provider_alias("context1"), "context1");
+        assert_eq!(normalize_retrieval_provider_alias("local"), "local");
+        assert_eq!(normalize_retrieval_provider_alias("context1"), "context1");
     }
 
     #[test]

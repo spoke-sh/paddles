@@ -138,11 +138,11 @@ planning inside the recursive agent loop; configuration chooses the HTTP model
 clients and retrieval provider used by that turn loop.
 
 - The **final-rendering model client** produces terminal user-facing responses and must always be configured.
-- The **action-selection model client** selects bounded workspace actions. It defaults to the final-rendering provider/model unless explicitly overridden by a planner-compatible HTTP provider/model.
+- The **action-selection model client** selects bounded workspace actions. It defaults to the final-rendering provider/model unless explicitly overridden by an action-selection-capable HTTP provider/model.
 - The **retrieval provider** services `search`/`refine` agent actions when workspace retrieval is needed, including optional structural fuzzy retriever overrides selected by the model.
 - If the action-selection model client or retrieval provider is unavailable, `paddles` emits labeled fallback events and degrades honestly to the remaining local-first path.
 
-The agent action schema is lane-independent. The turn-specific capability
+The agent action schema is turn-phase independent. The turn-specific capability
 manifest is the runtime source of truth for which retrievers, semantic
 workspace services, external capability fabrics, execution constraints, and
 completion requirements are actually available on a given turn.
@@ -168,7 +168,10 @@ input. On startup, Paddles normalizes that legacy file into
 `turn-runtime.toml`; new writes never emit planner, synthesizer, gatherer, or
 lane-shaped state fields.
 
-Authored `paddles.toml` can still define compatibility model selections:
+Authored `paddles.toml` can still define compatibility model selections. These
+legacy sections are migration shims: `[planner]` maps to action selection,
+`[synthesizer]` maps to final rendering, and `gatherer_*` fields map to
+retrieval:
 
 ```toml
 [shared]
@@ -192,19 +195,23 @@ When `[synthesizer]` or `[planner]` is omitted, that compatibility section falls
 back to `[shared]`. CLI flags still win over everything:
 
 ```bash
-paddles --model ollama:<model> --gatherer-provider sift-direct
+paddles --model ollama:<model> --retrieval-provider sift-direct
 ```
 
 Provider selection is turn-phase-specific as well. Final rendering uses
 `--provider <name>`, while action selection can either inherit that provider or
-set its own with `--planner-provider <name>`:
+set its own with `--action-selection-provider <name>`:
 
 ```bash
 paddles \
   --provider openai --model gpt-4o \
-  --planner-provider anthropic --planner-model claude-sonnet-4-20250514 \
-  --gatherer-provider sift-direct
+  --action-selection-provider anthropic --action-selection-model claude-sonnet-4-20250514 \
+  --retrieval-provider sift-direct
 ```
+
+The legacy CLI aliases `--planner-provider`, `--planner-model`,
+`--gatherer-provider`, and `--gatherer-model` remain accepted for migration, but
+new scripts should use the action-selection and retrieval flags above.
 
 That keeps providers authenticated side-by-side and lets action selection and
 final rendering mix providers without restarting the session.
@@ -213,13 +220,13 @@ If you want local-first inference with local retrieval, run a local HTTP model
 service and keep retrieval explicit:
 
 ```bash
-paddles --model ollama:<model> --gatherer-provider sift-direct
+paddles --model ollama:<model> --retrieval-provider sift-direct
 ```
 
 For local sift-backed retrieval, select the explicit provider:
 
 ```bash
-paddles --model ollama:<model> --gatherer-provider sift-direct
+paddles --model ollama:<model> --retrieval-provider sift-direct
 ```
 
 That backend stays local-first and services bounded agent search/refine actions.
@@ -232,7 +239,7 @@ See [SEARCH.md](SEARCH.md) for the full search boundary and capability contract.
 
 ### Harness Profiles
 
-Paddles resolves an explicit harness profile from the prepared action-selection and synthesizer capability surfaces before each turn. The profile is not chosen by provider name. The current runtime contract is:
+Paddles resolves an explicit harness profile from the prepared action-selection and final-rendering capability surfaces before each turn. The profile is not chosen by provider name. The current runtime contract is:
 
 - `recursive-structured-v1`: active when action-selection transport and final-answer rendering both stay structured
 - `prompt-envelope-safe-v1`: explicit downgrade when prompt-envelope action recovery or prompt-envelope rendering is required
@@ -245,7 +252,7 @@ The active profile owns:
 - execution-governance posture for local hands, including sandbox mode, approval policy, and supported permission-reuse scopes
 - active specialist-brain ids that may contribute bounded runtime notes
 
-The selected profile and any downgrade reason are recorded on turn-start traces and reused in action-selection/gatherer metadata as the `profile` field.
+The selected profile and any downgrade reason are recorded on turn-start traces and reused in action-selection/retrieval metadata as the `profile` field.
 
 Current execution-governance posture by profile:
 
@@ -285,7 +292,7 @@ Harness capability posture is configured and reported as four concrete
 surfaces: external capabilities, execution policy, evals, and provider
 registry posture. Service-mode startup emits the same shape in the
 `harness_posture` field so operators can compare authored configuration with
-the runtime's prepared lanes.
+the runtime's prepared turn runtime.
 
 External capabilities are local-first and unavailable by default. Enable only
 the fabrics this runtime is allowed to advertise:
@@ -316,7 +323,7 @@ workspace tools (`inspect`, `shell`, `diff`, `write_file`,
 `external_capability` through the descriptor-governed transport boundary. The
 profile still owns the sandbox, approval policy, allowed permissions, and
 permission-reuse scopes; model or provider selection can downgrade those values
-when the prepared planner or synthesizer surface requires prompt envelopes.
+when the prepared action-selection or final-rendering surface requires prompt envelopes.
 
 Run the deterministic harness eval corpus with:
 
@@ -331,7 +338,7 @@ offline run fails them with the `offline-guard` contract rather than opening a
 network path implicitly.
 
 Provider registry posture is also local-first. The runtime entrypoint reports
-the prepared planner and synthesizer provider/model pairs as `configured` and
+the prepared action-selection and final-rendering provider/model pairs as `configured` and
 keeps `network_discovery_required = false` unless a future caller explicitly
 requests discovery. The posture vocabulary is `configured`, `discovered`,
 `unavailable`, and `deprecated`; consumers should preserve those labels instead
@@ -377,7 +384,7 @@ for:
 - model-selected first action
 - automatic plan updates when planned turns need explicit execution containment
 - agent action selection
-- gatherer capability and gathered evidence
+- retrieval capability and gathered evidence
 - loop summaries and stop reasons
 - tool calls, live background terminal stdout/stderr, and final results
 - fallback reasons
@@ -397,7 +404,7 @@ Paddles resolves one shared runtime verbosity level and applies it to both the
 TUI transcript stream and the web UI event stream.
 
 - `0` (`default`) keeps the stream operational: interpretation, first agent
-  action, plan updates, tool/gatherer work, fallbacks, grounded synthesis, and
+  action, plan updates, retrieval/tool work, fallbacks, grounded synthesis, and
   insufficient-evidence outcomes remain visible. Direct-response bookkeeping is
   intentionally suppressed at this level.
 - `1` (`-v`) adds the next layer of control metadata: direct-answer synthesis
@@ -491,8 +498,8 @@ the selected action-selection model client, final-rendering model client, and
 retrieval provider across restarts without mutating authored `paddles.toml`
 files. Turn-runtime state is applied after authored config for model-client and
 retrieval fields, so the last `/model` selection is restored even when a
-project-local `./paddles.toml` also sets compatibility
-shared/planner/synthesizer models. When the selected model exposes
+project-local `./paddles.toml` also sets `[shared]`, `[planner]`, or
+`[synthesizer]` compatibility sections. When the selected model exposes
 provider-specific thinking controls, the same machine-managed file stores the
 model-client `thinking_mode = "..."` so `/model` restores that third-stage
 selection on restart. Existing `~/.local/state/paddles/runtime-lanes.toml`
@@ -553,20 +560,20 @@ For Inception, the supported core model path is `mercury-2`. Authenticate with
 `/login inception`, then select it with `/model inception mercury-2`. That chat-completions compatibility
 path is usable today without provider-native streaming/diffusion views.
 Workspace edits still execute locally through the shared workspace editor
-boundary, even when the action-selection lane is Inception-backed.
+boundary, even when the action-selection client is Inception-backed.
 
 ### Negotiated Provider Capability Surface
 
-Remote lane behavior now resolves from one negotiated capability surface per
+Remote model-client behavior now resolves from one negotiated capability surface per
 provider/model pair instead of repeating provider-name branches in the runtime.
 That surface currently carries five shared decisions:
 
-- `http_format` — whether the lane uses the HTTP adapter and which wire format
+- `http_format` — whether the model client uses the HTTP adapter and which wire format
   it speaks (`OpenAi`, `Anthropic`, or `Gemini`)
-- `render_capability` — the strictest final-answer contract the synthesizer can
+- `render_capability` — the strictest final-answer contract the final renderer can
   use (`OpenAiJsonSchema`, `AnthropicToolUse`, `GeminiJsonSchema`, or prompt
   envelope fallback)
-- `planner_tool_call` — how the remote action-selection lane selects its next bounded agent action
+- `planner_tool_call` — compatibility field for how the remote action-selection client selects its next bounded agent action
   (`NativeFunctionTool`, `StructuredJsonEnvelope`, or `PromptEnvelope`)
 - `transport_support` — whether the selected model is supported on the current
   transport, plus an explicit operator-facing rejection reason when it is not
@@ -639,7 +646,7 @@ raw.
 The supported Inception boundary is now:
 
 - Core chat compatibility: `mercury-2` through the existing OpenAI-compatible chat adapter, including structured final answers and forensic capture.
-- Local workspace editor: `write_file`, `replace_in_file`, `diff`, and `apply_patch` execute through one provider-agnostic local workspace editor boundary, but that boundary is limited to authored workspace files. When the workspace has a root `.gitignore`, Paddles uses it as the primary authored-file boundary for planner targeting, `list_files`, gatherer evidence filtering, and execution-time edit rejection. Only when no root `.gitignore` is present does Paddles fall back to a small generated/vendored directory denylist (`node_modules`, `dist`, `result`, `target`, `.docusaurus`, `.turbo`, `.sift`, `.direnv`, plus `.git`).
+- Local workspace editor: `write_file`, `replace_in_file`, `diff`, and `apply_patch` execute through one provider-agnostic local workspace editor boundary, but that boundary is limited to authored workspace files. When the workspace has a root `.gitignore`, Paddles uses it as the primary authored-file boundary for action targeting, `list_files`, retrieval evidence filtering, and execution-time edit rejection. Only when no root `.gitignore` is present does Paddles fall back to a small generated/vendored directory denylist (`node_modules`, `dist`, `result`, `target`, `.docusaurus`, `.turbo`, `.sift`, `.direnv`, plus `.git`).
 - Optional native capabilities: provider-specific streaming/diffusion behavior remains a follow-on slice.
 - Operator expectation: Inception is usable today for action selection or final rendering without changing local workspace edit semantics.
 
@@ -680,15 +687,15 @@ from the same shared runtime surface they already use for transport readiness.
 When native transport auth cannot resolve its configured `token_env`, or when a
 required remote provider credential is missing, the `transport_mediator` hand
 records that failure directly in `execution_hands` while the matching transport
-or lane surfaces keep their own protocol-specific error detail.
+or model-client surfaces keep their own protocol-specific error detail.
 
 ### Experimental Context-1 Boundary
 
-`context-1` is exposed as an explicit experimental gatherer provider, not as a
+`context-1` is exposed as an explicit experimental retrieval provider, not as a
 drop-in answer model:
 
 ```bash
-paddles --model ollama:<model> --gatherer-provider context1
+paddles --model ollama:<model> --retrieval-provider context1
 ```
 
 That provider is explicit and honest about its readiness:
@@ -697,7 +704,7 @@ That provider is explicit and honest about its readiness:
   and Paddles gracefully falls back to the final-rendering model client.
 - With `--context1-harness-ready`, the adapter boundary reports the current
   harness state transparently until a real harness-backed implementation exists.
-- The default REPL event stream surfaces the selected gatherer provider,
+- The default REPL event stream surfaces the selected retrieval provider,
   capability state, fallback reason, and evidence summary — making diagnosis
   straightforward from terminal output.
 
@@ -968,4 +975,4 @@ Payload invariants:
 - `Rewind { anchor, record_limit }` yields a deterministic backward slice from a task/turn/record/checkpoint/tail anchor
 - `CompactionWindow { anchor, before_record_limit, after_record_limit }` yields a bounded neighborhood around an anchor for non-destructive compaction and replay inspection
 
-The main runtime now asks the active session for an adaptive-replay slice before it falls back to persisted history or synthesizer-local summary caches. That keeps recent-turn handoff grounded in the durable session whenever recorder state is available.
+The main runtime now asks the active session for an adaptive-replay slice before it falls back to persisted history or final-rendering-local summary caches. That keeps recent-turn handoff grounded in the durable session whenever recorder state is available.

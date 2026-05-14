@@ -1,0 +1,35 @@
+---
+recorded_at: 2026-05-13T23:20:11.451464812-07:00
+command: sh -lc 'cargo test --lib unified_loop && cargo test --lib execute_planner_gather_step && cargo nextest run action_selection_client_builds_from_http_provider_configuration final_rendering_client_builds_from_http_provider_configuration direct_gatherer_returns_direct_retrieval_metadata_and_evidence --no-tests pass'
+---
+
+running 4 tests
+test application::tests::unified_loop_preserves_bootstrap_guardrails ... ok
+test application::tests::unified_loop_preserves_known_edit_instruction_frame ... ok
+test application::tests::unified_loop_fail_closed_paths ... ok
+test application::tests::unified_loop_observability_preserves_agent_actions ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 762 filtered out; finished in 0.01s
+
+
+running 2 tests
+test application::tests::execute_planner_gather_step_reuses_request_and_merge_path ... ok
+test application::tests::execute_planner_gather_step_refuses_warming_retrieval_without_invoking_gatherer ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 764 filtered out; finished in 0.01s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-a4ac3330ca4ecb24)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-a4ac3330ca4ecb24)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+────────────
+ Nextest run ID 1e506539-5eaa-4c93-a15b-a2b46abf4d90 with nextest profile: default
+    Starting 3 tests across 3 binaries (781 tests skipped)
+        PASS [   0.026s] (1/3) paddles::bin/paddles tests::action_selection_client_builds_from_http_provider_configuration
+        PASS [   0.027s] (2/3) paddles::bin/paddles tests::final_rendering_client_builds_from_http_provider_configuration
+        PASS [   0.046s] (3/3) paddles infrastructure::adapters::sift_direct_retrieval::tests::direct_gatherer_returns_direct_retrieval_metadata_and_evidence
+────────────
+     Summary [   0.047s] 3 tests run: 3 passed, 781 skipped

@@ -16,7 +16,7 @@ Paddles gives the selected model client three things it cannot provide for itsel
 
 - **Operator context** — project conventions, guidance, and priorities loaded from `AGENTS.md` memory files before the model sees the prompt
 - **Recursive investigation** — a bounded loop where the model searches, reads, refines, and branches until it has real evidence from the workspace
-- **Structured synthesis** — a separate synthesis step that produces a grounded answer from the accumulated evidence, not from the model's training data
+- **Structured final rendering** — a separate rendering step that produces a grounded answer from the accumulated evidence, not from the model's training data
 
 These are not plugins or prompt tricks. They are architectural commitments that change what a small model can accomplish.
 
@@ -26,11 +26,11 @@ Every interaction follows the same cycle:
 
 1. **Interpret** — load operator memory, derive a guidance graph, assemble tool hints and procedures
 2. **Classify** — the model classifies the prompt as casual, direct, deterministic, or planned
-3. **Plan** — for planned turns, a recursive loop lets the model search, read, and refine until evidence is sufficient
-4. **Synthesize** — a separate model call produces the final answer from the evidence bundle
+3. **Select actions** — for planned turns, a recursive loop lets the model search, read, and refine until evidence is sufficient
+4. **Render** — a separate model call produces the final answer from the evidence bundle
 5. **Record** — every step is captured as typed trace records with stable ids for replay
 
-The planner and synthesizer can be different models. The best recursive investigator is not always the best answer writer.
+The action-selection and final-rendering clients can be different models. The best recursive investigator is not always the best answer writer.
 
 ## What To Read Next
 
@@ -43,8 +43,8 @@ If you are brand new:
 If you want the architecture:
 
 1. [Turn Loop](./concepts/turn-loop.mdx) — the full cycle from prompt to answer
-2. [Recursive Planning](./concepts/recursive-planning.mdx) — how the planner loop works
+2. [Recursive Planning](./concepts/recursive-planning.mdx) — how recursive action selection works
 3. [Search and Retrieval](./concepts/search-retrieval.mdx) — how evidence queries work, constraints, and telemetry
 4. [Context Tiers](./concepts/context-tiers.mdx) — how context spans inline, transit, and filesystem
 5. [Steering Signals](./concepts/context-pressure.mdx) — how truncation and recursive guidance are tracked and surfaced
-6. [Model Routing](./concepts/model-routing.mdx) — how planner and synthesizer roles are assigned
+6. [Model Routing](./concepts/model-routing.mdx) — how action-selection and final-rendering roles are assigned

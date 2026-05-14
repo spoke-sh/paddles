@@ -29,8 +29,8 @@ use paddles::infrastructure::cli::interactive_tui::{
     InteractiveFrontend, TuiContext, run_interactive_tui, select_interactive_frontend,
 };
 use paddles::infrastructure::config::{
-    PaddlesConfig, TraceAuthoritySelection, normalize_gatherer_provider_alias,
-    normalize_provider_model_alias, resolve_runtime_verbosity, resolve_web_server_port,
+    PaddlesConfig, TraceAuthoritySelection, normalize_provider_model_alias,
+    normalize_retrieval_provider_alias, resolve_runtime_verbosity, resolve_web_server_port,
 };
 use paddles::infrastructure::conversation_history::ConversationHistoryStore;
 use paddles::infrastructure::credentials::CredentialStore;
@@ -79,21 +79,25 @@ struct Cli {
     #[arg(short, long)]
     model: Option<String>,
 
-    /// Optional planner model ID. Defaults to the synthesizer model when unset.
-    #[arg(long)]
-    planner_model: Option<String>,
+    /// Optional action-selection model ID. Defaults to the final-rendering model when unset.
+    #[arg(long = "action-selection-model", alias = "planner-model")]
+    action_selection_model: Option<String>,
 
-    /// Optional planner provider. Defaults to the synthesizer provider when unset.
-    #[arg(long, value_enum)]
-    planner_provider: Option<ModelProvider>,
+    /// Optional action-selection provider. Defaults to the final-rendering provider when unset.
+    #[arg(
+        long = "action-selection-provider",
+        alias = "planner-provider",
+        value_enum
+    )]
+    action_selection_provider: Option<ModelProvider>,
 
-    /// Optional model ID for the legacy static local retrieval provider.
-    #[arg(long)]
-    gatherer_model: Option<String>,
+    /// Optional model hint for retrieval providers that accept one.
+    #[arg(long = "retrieval-model", alias = "gatherer-model")]
+    retrieval_model: Option<String>,
 
     /// Provider to use for retrieval.
-    #[arg(long, value_enum)]
-    gatherer_provider: Option<GathererProvider>,
+    #[arg(long = "retrieval-provider", alias = "gatherer-provider", value_enum)]
+    retrieval_provider: Option<GathererProvider>,
 
     /// Acknowledge that the external Context-1 harness is actually available.
     #[arg(long)]
@@ -209,7 +213,7 @@ fn build_action_selector(
     lane: &PreparedModelClient,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
 ) -> Result<Arc<dyn paddles::domain::ports::ActionSelectionEngine>> {
-    ensure_supported_model_inference_provider(lane.provider, "planner_provider")?;
+    ensure_supported_model_inference_provider(lane.provider, "action_selection.provider")?;
     if lane.paths.is_some() {
         bail!("action-selection HTTP model client must not receive local ModelPaths");
     }
@@ -387,12 +391,12 @@ async fn main() -> Result<()> {
     let runtime_preferences = match runtime_preference_store.load() {
         Ok(preferences) => preferences,
         Err(err) => {
-            eprintln!("[WARN] Failed to load runtime lane preferences: {err:#}");
+            eprintln!("[WARN] Failed to load turn-runtime preferences: {err:#}");
             None
         }
     };
 
-    // Load layered config: system -> user -> workspace -> runtime lane state.
+    // Load layered config: system -> user -> workspace -> turn-runtime state.
     let config =
         PaddlesConfig::load_with_runtime_preferences(&root_path, runtime_preferences.as_ref());
     let trace_authority_selection = config
@@ -435,16 +439,16 @@ async fn main() -> Result<()> {
     let verbose = resolve_runtime_verbosity(cli.verbose, config.verbose);
     let hf_token = cli.hf_token.or(config.hf_token);
     let context1_harness_ready = cli.context1_harness_ready || config.context1_harness_ready;
-    let explicit_planner_provider = match cli.planner_provider {
-        Some(provider) => Some(resolve_cli_model_provider(provider, "planner_provider")?),
+    let explicit_action_selection_provider = match cli.action_selection_provider {
+        Some(provider) => Some(resolve_cli_model_provider(provider, "action_selection.provider")?),
         None => config
             .planner_provider
             .as_deref()
-            .map(|provider| resolve_provider_from_name(provider, "planner_provider"))
+            .map(|provider| resolve_provider_from_name(provider, "action_selection.provider"))
             .transpose()?,
     };
-    let mut planner_model = cli.planner_model.or(config.planner_model);
-    let gatherer_model = cli.gatherer_model.or(config.gatherer_model);
+    let mut action_selection_model = cli.action_selection_model.or(config.planner_model);
+    let retrieval_model = cli.retrieval_model.or(config.gatherer_model);
     let provider_url = cli.provider_url.or(config.provider_url.clone());
 
     let provider_name = provider.name();
@@ -476,31 +480,35 @@ async fn main() -> Result<()> {
         );
         thinking_mode = None;
     }
-    let normalized_planner_provider = explicit_planner_provider.unwrap_or(shared_provider);
-    let effective_planner_model = planner_model.take().unwrap_or_else(|| shared_model.clone());
-    let normalized_planner_model = normalize_provider_model_alias(
-        normalized_planner_provider.name(),
-        &effective_planner_model,
+    let normalized_action_selection_provider =
+        explicit_action_selection_provider.unwrap_or(shared_provider);
+    let effective_action_selection_model = action_selection_model
+        .take()
+        .unwrap_or_else(|| shared_model.clone());
+    let normalized_action_selection_model = normalize_provider_model_alias(
+        normalized_action_selection_provider.name(),
+        &effective_action_selection_model,
     );
-    if normalized_planner_model != effective_planner_model {
+    if normalized_action_selection_model != effective_action_selection_model {
         eprintln!(
-            "[WARN] Planner model `{effective_planner_model}` is no longer valid for provider `{}`; using `{normalized_planner_model}` instead.",
-            normalized_planner_provider.name()
+            "[WARN] Action-selection model `{effective_action_selection_model}` is no longer valid for provider `{}`; using `{normalized_action_selection_model}` instead.",
+            normalized_action_selection_provider.name()
         );
     }
     let planner_provider =
-        (normalized_planner_provider != provider).then_some(normalized_planner_provider);
-    let planner_model = (normalized_planner_model != model).then_some(normalized_planner_model);
+        (normalized_action_selection_provider != provider).then_some(normalized_action_selection_provider);
+    let planner_model =
+        (normalized_action_selection_model != model).then_some(normalized_action_selection_model);
 
-    let normalized_gatherer_provider = normalize_gatherer_provider_alias(&config.gatherer_provider);
-    let gatherer_provider = match cli.gatherer_provider {
+    let normalized_retrieval_provider = normalize_retrieval_provider_alias(&config.gatherer_provider);
+    let gatherer_provider = match cli.retrieval_provider {
         Some(provider) => provider,
-        None => match normalized_gatherer_provider.as_str() {
+        None => match normalized_retrieval_provider.as_str() {
             "sift-direct" => GathererProvider::SiftDirect,
             "local" => GathererProvider::Local,
             "context1" => GathererProvider::Context1,
             _ => bail!(
-                "Invalid gatherer provider `{}` in config. Expected one of `sift-direct`, `local`, or `context1`.",
+                "Invalid retrieval provider `{}` in config. Expected one of `sift-direct`, `local`, or `context1`.",
                 config.gatherer_provider
             ),
         },
@@ -680,22 +688,22 @@ async fn main() -> Result<()> {
                     .qualified_model_label(pm)
             );
         }
-        if let Some(gm) = &gatherer_model {
+        if let Some(gm) = &retrieval_model {
             println!("[BOOT] Retrieval model hint: {gm}.");
         }
         match gatherer_provider {
             GathererProvider::SiftDirect => {
-                println!("[BOOT] Sift direct retrieval gatherer provider selected.");
+                println!("[BOOT] Sift direct retrieval provider selected.");
             }
             GathererProvider::Context1 => {
                 println!(
-                    "[BOOT] Context-1 gatherer provider selected (harness ready: {context1_harness_ready})."
+                    "[BOOT] Context-1 retrieval provider selected (harness ready: {context1_harness_ready})."
                 );
             }
             GathererProvider::Local => {}
         }
     }
-    let turn_runtime_config = TurnRuntimeConfig::new(model.clone(), gatherer_model.clone())
+    let turn_runtime_config = TurnRuntimeConfig::new(model.clone(), retrieval_model.clone())
         .with_synthesizer_provider(provider)
         .with_synthesizer_thinking_mode(thinking_mode)
         .with_planner_model_id(planner_model.clone())
@@ -933,11 +941,12 @@ async fn run_plain_interactive_loop(service: Arc<AgentRuntime>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
+        Cli, OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
         build_action_selector, build_final_renderer, build_trace_recorder_from_config,
         ensure_remote_provider_transport_support, resolve_operator_surface_bootstrap,
         resolve_provider_from_name, service_runtime_failure_status, service_runtime_ready_status,
     };
+    use clap::CommandFactory;
     use paddles::application::{
         ModelClientRole, PreparedModelClient, PreparedTurnRuntime,
         RuntimeHarnessCapabilityPostureService,
@@ -1026,6 +1035,30 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("ollama:<model>"), "{message}");
+    }
+
+    #[test]
+    fn cli_help_presents_turn_phase_flags_and_hides_legacy_lane_aliases() {
+        let mut help = Vec::new();
+        Cli::command()
+            .write_long_help(&mut help)
+            .expect("render CLI help");
+        let help = String::from_utf8(help).expect("help is utf8");
+
+        assert!(help.contains("--action-selection-model"), "{help}");
+        assert!(help.contains("--action-selection-provider"), "{help}");
+        assert!(help.contains("--retrieval-model"), "{help}");
+        assert!(help.contains("--retrieval-provider"), "{help}");
+        assert!(!help.contains("--planner-model"), "{help}");
+        assert!(!help.contains("--planner-provider"), "{help}");
+        assert!(!help.contains("--gatherer-model"), "{help}");
+        assert!(!help.contains("--gatherer-provider"), "{help}");
+        assert!(
+            !help
+                .to_ascii_lowercase()
+                .contains(concat!("runtime", " lane")),
+            "{help}"
+        );
     }
 
     #[test]
@@ -1236,7 +1269,7 @@ mod tests {
 model = "gpt-5.4"
 "#,
         )
-        .expect("write legacy runtime lane preferences");
+        .expect("write legacy runtime-lanes.toml migration input");
         let store = TurnRuntimePreferenceStore::with_migration_paths(
             &turn_runtime_path,
             Some(&legacy_path),

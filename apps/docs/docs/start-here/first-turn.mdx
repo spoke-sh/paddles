@@ -24,7 +24,7 @@ The TUI opens with a prompt composer at the bottom and a transcript area above.
 Type a question about the workspace and press Enter:
 
 ```
-What does the planner loop do?
+How does the turn loop gather evidence?
 ```
 
 ## Read The Trace
@@ -35,27 +35,27 @@ The transcript shows each step as it happens:
 • Classified · 0ms
   └ planned
 
-• Checked planner capability · 120ms (+120ms)
+• Checked action-selection capability · 120ms (+120ms)
   └ ollama:qwen3: configured
 
 • Planning...
 
-• Planner step 1: search · 3.2s (+3.1s)
-  └ Rationale: Looking for planner loop implementation
+• Action step 1: search · 3.2s (+3.1s)
+  └ Rationale: Looking for turn-loop implementation
 
-• Planner step 2: read · 5.8s (+2.6s)
+• Action step 2: read · 5.8s (+2.6s)
   └ Rationale: Reading the recursive execution loop
 
-• Planner step 3: answer · 6.1s (+300ms)
+• Action step 3: answer · 6.1s (+300ms)
   └ Rationale: Evidence is sufficient
 
-• Synthesized grounded answer · 8.4s (+2.3s)
-  └ Sources: src/application/mod.rs, src/domain/ports/planning.rs
+• Final-rendered grounded answer · 8.4s (+2.3s)
+  └ Sources: src/application/mod.rs, src/domain/ports/action_selection.rs
 ```
 
-Each line is a real event from the harness — not decorative output. The planner searched the workspace, read relevant files, and decided it had enough evidence before synthesis.
+Each line is a real event from the harness — not decorative output. The action-selection client searched the workspace, read relevant files, and decided it had enough evidence before final rendering.
 
-The muted "Planning..." row appeared because the planner step took more than two seconds. These in-flight indicators show what the harness is doing during long operations.
+The muted "Planning..." row appeared because the action-selection step took more than two seconds. These in-flight indicators show what the harness is doing during long operations.
 
 ## Tune Verbosity
 
@@ -69,7 +69,7 @@ For example, a greeting at the default level stays short:
 User
   └ Howdy
 
-• Planner step 1: answer directly · 3.2s (+3.1s)
+• Action step 1: answer directly · 3.2s (+3.1s)
   └ Rationale: The user offered a casual greeting with no repository task or request for evidence, so a brief direct reply is appropriate.
 
 Paddles · 3.2s total (+6ms)
@@ -78,7 +78,7 @@ Paddles · 3.2s total (+6ms)
 
 Raise verbosity when you want more internals:
 
-- `-v` adds info-tier synthesis and planner summary rows.
+- `-v` adds info-tier final-rendering and action-selection summary rows.
 - `-vv` adds debug-tier routing and capability detail.
 - `-vvv` adds trace diagnostics such as boot and prompt-payload logging.
 
@@ -92,7 +92,7 @@ You can route action selection and final rendering to different HTTP model
 clients:
 
 ```bash
-paddles --model openai:gpt-5.4 --planner-provider ollama --planner-model qwen3
+paddles --model openai:gpt-5.4 --action-selection-provider ollama --action-selection-model qwen3
 ```
 
 The final renderer uses the remote provider while action selection uses the
@@ -103,11 +103,11 @@ local HTTP service for investigation.
 For scripts, use `--prompt` to skip the TUI:
 
 ```bash
-paddles --prompt "Summarize the current runtime lanes"
+paddles --prompt "Summarize the current turn runtime"
 ```
 
 ## What To Read Next
 
 - [Turn Loop](../concepts/turn-loop.mdx) — understand the full cycle from prompt to answer
-- [Recursive Planning](../concepts/recursive-planning.mdx) — how the planner drives investigation
-- [Search and Retrieval](../concepts/search-retrieval.mdx) — how planner queries are bounded and traced
+- [Recursive Planning](../concepts/recursive-planning.mdx) — how action selection drives investigation
+- [Search and Retrieval](../concepts/search-retrieval.mdx) — how retrieval queries are bounded and traced

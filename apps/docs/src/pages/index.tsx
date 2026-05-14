@@ -21,14 +21,14 @@ const capabilityItems: SignalItem[] = [
   {
     eyebrow: 'Recursive Investigation',
     title: 'Search, read, and refine until evidence is sufficient',
-    body: 'The planner can branch through the workspace in bounded steps, which lets smaller HTTP-hosted models inspect code instead of bluffing through uncertainty.',
+    body: 'The action-selection client can branch through the workspace in bounded steps, which lets smaller HTTP-hosted models inspect code instead of bluffing through uncertainty.',
     href: '/docs/concepts/recursive-planning',
-    cta: 'See the planner loop',
+    cta: 'See the turn loop',
   },
   {
-    eyebrow: 'Structured Synthesis',
+    eyebrow: 'Structured Final Rendering',
     title: 'Write the answer from evidence, not memory',
-    body: 'A separate synthesis pass turns the gathered evidence bundle into the operator-facing response, keeping the final output grounded and legible.',
+    body: 'A separate final-rendering pass turns the gathered evidence bundle into the operator-facing response, keeping the final output grounded and legible.',
     href: '/docs/concepts/turn-loop',
     cta: 'See the turn loop',
   },
@@ -71,15 +71,15 @@ const turnLoopItems: TurnStep[] = [
     href: '/docs/concepts/turn-loop',
   },
   {
-    label: 'Plan',
+    label: 'Select',
     command: 'Search, read, refine',
     body: 'Planned turns recurse through bounded evidence gathering instead of spending the entire budget on a single completion.',
     href: '/docs/concepts/recursive-planning',
   },
   {
-    label: 'Synthesize',
+    label: 'Render',
     command: 'Write from the evidence bundle',
-    body: 'The synthesizer turns the gathered trace into a grounded answer that stays readable for the operator.',
+    body: 'The final renderer turns the gathered trace into a grounded answer that stays readable for the operator.',
     href: '/docs/concepts/model-routing',
   },
   {
@@ -99,8 +99,8 @@ const vocabularyItems: TermRampItem[] = [
   },
   {
     plain: 'Workspace investigation',
-    term: 'Recursive planning',
-    body: 'A bounded loop of search, read, and refinement that gathers evidence until the planner decides the turn is grounded enough.',
+    term: 'Recursive action selection',
+    body: 'A bounded loop of search, read, and refinement that gathers evidence until the model decides the turn is grounded enough.',
     href: '/docs/concepts/recursive-planning',
   },
   {
@@ -118,12 +118,12 @@ const vocabularyItems: TermRampItem[] = [
   {
     plain: 'Model split',
     term: 'Model routing',
-    body: 'Planner and synthesizer roles can point at different models so deeper investigation does not force a heavier answer writer.',
+    body: 'Action-selection and final-rendering roles can point at different models so deeper investigation does not force a heavier answer writer.',
     href: '/docs/concepts/model-routing',
   },
   {
     plain: 'Grounded answer',
-    term: 'Synthesis step',
+    term: 'Final-rendering step',
     body: 'The final pass that assembles the response strictly from the evidence bundle accumulated during the turn.',
     href: '/docs/concepts/turn-loop',
   },
@@ -140,7 +140,7 @@ const surfaceItems: SignalItem[] = [
   {
     eyebrow: 'Model Routing',
     title: 'Route investigation and answer writing independently',
-    body: 'A light synthesizer can pair with a heavier planner, which gives you deeper workspace inspection without paying the same cost for every final response.',
+    body: 'A light final renderer can pair with a heavier action-selection client, which gives you deeper workspace inspection without paying the same cost for every final response.',
     href: '/docs/concepts/model-routing',
     cta: 'See routing strategy',
   },
@@ -156,7 +156,7 @@ const readingPathItems: SignalItem[] = [
   },
   {
     eyebrow: 'Turn Mechanics',
-    title: 'Understand the planner and synthesis loop',
+    title: 'Understand action selection and final rendering',
     body: 'Read how Paddles classifies prompts, runs recursive investigation, and assembles grounded answers.',
     href: '/docs/concepts/turn-loop',
     cta: 'Open the loop docs',
@@ -192,7 +192,7 @@ export default function Home(): ReactNode {
                 <p className={styles.lede}>
                   Paddles is a local-first harness that gives selected model
                   clients operator context, bounded recursive investigation,
-                  and a synthesis pass that writes from evidence instead of
+                  and a final-rendering pass that writes from evidence instead of
                   guesswork.
                 </p>
                 <div className={styles.actions}>
@@ -211,7 +211,7 @@ export default function Home(): ReactNode {
                 </div>
                 <ul className={styles.heroPoints}>
                   <li>Load operator memory and repo docs before the model answers.</li>
-                  <li>Let the planner search, read, and refine instead of improvising from memory.</li>
+                  <li>Let the model search, read, and refine instead of improvising from memory.</li>
                   <li>Keep the same turn trace visible in both the TUI and the web runtime.</li>
                 </ul>
               </div>

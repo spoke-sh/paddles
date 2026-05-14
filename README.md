@@ -20,7 +20,7 @@ The architecture rests on five commitments:
   and completion contract to the model before asking it to decide what to do
   next, and leaves enough recursive budget for the model to reason with them.
 - **Earn code changes and answers through recursive work.** Small models become dramatically more capable when the harness gives them bounded tools to inspect, edit, verify, and gather evidence iteratively rather than answering in one shot.
-- **Separate action selection from response authoring.** Recursive repository work and user-facing response generation are distinct workloads, each routed to the smallest model that excels at that role. The response lane reports what happened; it is not the only purpose of the turn.
+- **Separate action selection from final rendering.** Recursive repository work and user-facing response generation are distinct workloads, each routed to the smallest model that excels at that role. Final rendering reports what happened; it is not the only purpose of the turn.
 - **Keep every step visible.** The harness shows its recursive work — agent actions, evidence gathered, decisions made — so the operator always knows why an outcome was produced.
 
 ### The Turn Loop
@@ -31,13 +31,13 @@ Every interaction follows the same recursive cycle. The harness assembles contex
 flowchart TD
     U["🎯 User Turn"]
     I["📖 Interpretation Context<br/>operator memory · guidance graph · tool hints<br/>derived procedures · recent turns · prior evidence"]
-    P["🧠 Action Selection Lane<br/>model chooses next bounded agent action"]
+    P["🧠 Action Selection Client<br/>model chooses next bounded agent action"]
     D{"What should<br/>happen next?"}
     W["🔧 Workspace Action<br/>search · list_files · read · inspect · shell · diff<br/>write_file · replace_in_file · apply_patch"]
     R["🔄 Refine / Branch<br/>sharpen the query · split into subqueries"]
     E["📋 Repository State + Evidence<br/>file edits · tool outputs · typed metadata"]
     T["✅ Completion Ready<br/>edit applied · answer grounded · budget or block reached"]
-    S["💬 Response Lane<br/>answer · edit summary · explicit block"]
+    S["💬 Final Rendering<br/>answer · edit summary · explicit block"]
     O["📺 Visible Output + Workspace State<br/>TUI transcript · plain CLI · modified files"]
 
     U --> I --> P --> D
@@ -58,7 +58,7 @@ flowchart TD
 This is the heart of Paddles: a bounded recursive agent loop where the model drives
 its own repository work within explicit harness guardrails. Each pass through
 the loop can add evidence, inspect runtime state, apply an edit, verify a
-change, or narrow the question. The response lane is the user-facing handoff
+change, or narrow the question. Final rendering is the user-facing handoff
 after that work; the harness should not collapse the planner's reasoning into
 generic controller-authored pseudo-plans.
 
@@ -110,8 +110,8 @@ controller still owns validation, execution, budgets, and fail-closed behavior.
 ### Model Routing
 
 Each phase of the turn flows to the smallest model capable of that workload. A
-more capable action-selection lane may drive recursive repository work. A
-lightweight response authoring lane turns the resulting trace into an answer,
+more capable action-selection client may drive recursive repository work. A
+lightweight final-rendering client turns the resulting trace into an answer,
 edit summary, or explicit block for the operator.
 
 ```mermaid
@@ -127,12 +127,12 @@ flowchart LR
     subgraph Plan ["Recursive Agent Loop"]
         Decide["Model selects<br/>next bounded action"]
         Local["Local HTTP model client<br/>ollama:&lt;model&gt;"]
-        Heavy["Specialized action-selection lane<br/>Context-1 boundary"]
+        Heavy["Specialized retrieval provider<br/>Context-1 boundary"]
         Evidence["Evidence bundle<br/>typed trace + metadata"]
     end
 
     subgraph Finish ["Completion / Report"]
-        Synth["Response lane<br/>answer · edit summary · block"]
+        Synth["Final rendering<br/>answer · edit summary · block"]
     end
 
     Turn --> Interpret --> Decide
@@ -166,7 +166,7 @@ flowchart TD
     L["Execute within validated loop<br/>controller enforces schema + budgets"]
     E["Observe result<br/>evidence · workspace state · stop reason"]
     Q{"Complete?"}
-    S["Response lane<br/>answer · edit summary · explicit block"]
+    S["Final rendering<br/>answer · edit summary · explicit block"]
 
     U --> I --> M --> C
     C --> A --> S
@@ -337,7 +337,7 @@ Every recursive step produces typed trace records alongside the visible transcri
 
 ```mermaid
 flowchart LR
-    Runtime["Runtime transitions<br/>planner · gatherer · tool · synth"]
+    Runtime["Runtime transitions<br/>action selection · retrieval · tool · final rendering"]
 
     subgraph Recording ["Durable Trace Path"]
         Contract["Trace contract<br/>task root · action · branch · checkpoint"]
@@ -387,7 +387,7 @@ The recursive harness runs as a bounded local-first runtime:
 - **Model-driven action selection** — the model chooses from terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, or `branch`
 - **Guidance-aware fallbacks** — fallback selection draws on command hints and decision procedures from foundational docs, and halts recursion when a procedure step has already resolved the request
 - **Bounded recursive loop** — workspace actions, refinements, and branches all feed back into the recursive agent loop until evidence is sufficient or budgets are met
-- **Separate response authoring** — a distinct response lane turns the accumulated trace into a grounded answer, edit summary, or explicit block
+- **Separate final rendering** — a distinct final-rendering step turns the accumulated trace into a grounded answer, edit summary, or explicit block
 - **Full-stream visibility** — a default TUI/event stream shows interpretation, first agent actions, retrieval, fallbacks, edits, and response authoring as they happen, while low-value direct-response bookkeeping stays behind higher verbosity
 - **Shared verbosity contract** — one resolved `0/1/2/3` verbosity level governs both the TUI transcript and the web event stream: `0` is the default operational view, `1` adds info-tier planner metadata, `2` adds debug-tier routing/capability detail, and `3` enables trace diagnostics
 - **Typed collaboration modes** — planning mode, execution, and review selection plus blocked-mutation clarification requests project through the same turn-event and durable-trace vocabulary instead of living only in prompts
@@ -457,11 +457,11 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 - The response model defaults to the configured HTTP model client. Local-first
   users should run a local HTTP model service and select it with
   `ollama:<model>`.
-- Authored `paddles.toml` can still define legacy `[shared]`, `[synthesizer]`, and `[planner]` model sections as compatibility input. Runtime state normalizes those selections into turn-runtime preferences for action selection, final rendering, and retrieval.
-- The action-selection model client defaults to the final-rendering provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable HTTP client.
+- Authored `paddles.toml` can still define legacy `[shared]`, `[synthesizer]`, and `[planner]` model sections as compatibility input. These are migration shims: `[planner]` maps to action selection, `[synthesizer]` maps to final rendering, and runtime state normalizes them into turn-runtime preferences for action selection, final rendering, and retrieval.
+- The action-selection model client defaults to the final-rendering provider/model unless `--action-selection-provider <provider>` and `--action-selection-model <id>` select a different action-selection-capable HTTP client. Legacy `--planner-provider` and `--planner-model` aliases are still accepted for migration.
 - Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect or switch the shared turn-runtime model client.
 - OpenAI-compatible remote action-selection clients now select bounded workspace actions through native tool calls, while Paddles still executes those actions locally inside the repository harness.
-- Remote provider behavior now resolves from one negotiated capability surface per provider/model pair: HTTP wire format, response render contract, planner tool-call shape, and transport support. Adding a future provider should extend that surface instead of forking controller logic by provider name.
+- Remote provider behavior now resolves from one negotiated capability surface per provider/model pair: HTTP wire format, response render contract, action-selection tool-call shape, and transport support. Adding a future provider should extend that surface instead of forking controller logic by provider name.
 - Successful `/model` changes persist to the machine-managed turn-runtime state file at `~/.local/state/paddles/turn-runtime.toml` so they survive restarts without rewriting authored `paddles.toml`; any existing `runtime-lanes.toml` is read only as migration input.
 - Local `sift` search artifacts now live under the machine-managed cache root at `~/.cache/paddles/sift/workspaces/<workspace-key>` instead of inside the repo workspace, so search does not index its own cache on restart.
 - That turn-runtime state overrides authored model-client config on startup, while non-model settings like `port` still come from layered config and CLI flags still win over everything.
@@ -473,9 +473,9 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
   remapped to another provider.
 - `sift-direct` is the default local retrieval backend used by `search` and `refine` agent actions.
 - `paddles` owns the recursive agent loop. `sift` executes direct retrieval only.
-- `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.
-- Gatherer progress now reflects direct retrieval stages such as initialization, indexing, retrieval, and ranking.
-- `context-1` remains an explicit experimental planner/gatherer boundary and stays fail-closed until its harness is real.
+- `search` and `refine` actions carry bounded retrieval mode and strategy into the retrieval boundary.
+- Retrieval progress now reflects direct retrieval stages such as initialization, indexing, retrieval, and ranking.
+- `context-1` remains an explicit experimental retrieval provider for action-selection searches and stays fail-closed until its harness is real.
 
 ## Search And Retrieval
 
@@ -572,7 +572,7 @@ Use a heavier action-selection model while keeping a lighter final-rendering
 model:
 
 ```bash
-paddles --model ollama:<model> --planner-provider openai --planner-model gpt-5.4
+paddles --model ollama:<model> --action-selection-provider openai --action-selection-model gpt-5.4
 ```
 
 One-shot prompt mode stays plain for scripts:

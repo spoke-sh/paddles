@@ -57,15 +57,15 @@ Paddles treats inference as a routing problem — each phase of the turn flows t
    schemas, enforces command allowlists, manages budgets, and executes
    deterministically with fail-closed behavior. It must not replace the model's
    reasoning with generic obligation language or synthetic checklists.
-5. **Recursive Agent Loop Before Synthesizer**: Resource-intensive turns recurse through bounded agent actions, accumulating typed evidence before handing the bundle to the synthesizer lane.
+5. **Recursive Agent Loop Before Final Rendering**: Resource-intensive turns recurse through bounded agent actions, accumulating typed evidence before handing the bundle to the final-rendering model client.
 6. **Grounded Repository Answers**: Repository-question answers cite source files by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
-7. **Visible Turn Stream**: TTY interactive sessions render a compact inline live tail above the boxed composer, showing interpretation, agent actions, gatherer work, tool calls, live background terminal output, fallback reasons, and synthesis readiness while preserving normal terminal scrollback.
-8. **Typed Final Answer Rendering**: Synthesizer answers use the constrained final-answer render envelope (`paragraph`, `bullet_list`, `code_block`, `citations`), with boot-resolved provider capabilities selecting native structured-output transports when available and prompt-enveloped JSON when they are not.
+7. **Visible Turn Stream**: TTY interactive sessions render a compact inline live tail above the boxed composer, showing interpretation, agent actions, retrieval work, tool calls, live background terminal output, fallback reasons, and final-rendering readiness while preserving normal terminal scrollback.
+8. **Typed Final Answer Rendering**: Final-rendered answers use the constrained final-answer render envelope (`paragraph`, `bullet_list`, `code_block`, `citations`), with boot-resolved provider capabilities selecting native structured-output transports when available and prompt-enveloped JSON when they are not.
 9. **Model-Driven Auto-Threading**: Steering prompts captured during an active turn become structured thread candidates, flowing through a constrained model-selected thread decision (`continue`, `open-child-thread`, or `merge/reconcile`) at a safe checkpoint.
 10. **Explicit Merge Outcomes**: Merge-back behavior is recorded as explicit lineage plus visible transcript output — full traceability for every thread transition.
 11. **Honest Sequential Execution**: Auto-threading is checkpoint-bounded and sequential today. Concurrent sibling generation ships when it is implemented.
 12. **Plain CLI For Scripts**: `--prompt` usage and non-TTY stdin/stdout flows remain plain CLI output paths for scripting and shell composition.
-13. **Context-1 As Experimental Boundary**: Chroma `context-1` is an opt-in experimental gatherer provider, selected explicitly and acknowledged with `--context1-harness-ready`. It fails closed when its harness is unavailable.
+13. **Context-1 As Experimental Boundary**: Chroma `context-1` is an opt-in experimental retrieval provider, selected explicitly and acknowledged with `--context1-harness-ready`. It fails closed when its harness is unavailable.
 14. **Docs Move With Behavior**: Whenever routing contracts, action schemas, provider boundaries, thread semantics, or turn-stream behavior change, the corresponding foundational docs ([ARCHITECTURE.md](ARCHITECTURE.md), [CONFIGURATION.md](CONFIGURATION.md), [AGENTS.md](AGENTS.md), [INSTRUCTIONS.md](INSTRUCTIONS.md)) update in the same change slice.
 
 ## Human Interaction & Pokes
@@ -120,7 +120,7 @@ Apply these checks to **every change** before finalizing work:
 9. **Mission Loop Discipline**: For mission-driven work, return to the mission steward loop after every completed story, planning unit, or bearing instead of continuing ad hoc from the last worker context.
 10. **Knowledge Quality Bar**: Prefer no new knowledge over low-signal knowledge. A new knowledge entry should be novel, reusable across stories, and materially reduce future drift; otherwise link existing knowledge or omit capture entirely.
 11. **Config Completeness**: Whenever introducing a new property to the configuration struct (`keel::infrastructure::config::Config`), you MUST immediately update `keel config show` expectations and any local configuration documentation so the new setting is visible to operators.
-12. **Routing Completeness**: Whenever you change model selection, gatherer capability states, or synthesizer/gatherer contracts, update the foundational runtime docs in the same slice so operators are not forced to reverse-engineer the behavior from code.
+12. **Routing Completeness**: Whenever you change model selection, retrieval capability states, or action-selection/final-rendering/retrieval contracts, update the foundational runtime docs in the same slice so operators are not forced to reverse-engineer the behavior from code.
 13. **Evidence Visibility Completeness**: Whenever you change turn events, repository-answer citation behavior, or grounded synthesis fallback rules, update operator docs and example transcripts in the same slice.
 
 ## Upgrading Keel

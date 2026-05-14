@@ -25,7 +25,7 @@ priorities, the project's conventions, and the tools at its disposal.
 
 ### Act 2: Recursive Agent-Loop Reasoning
 
-**`PlannerLane`** is the configurable action-selection lane inside the recursive
+**Action selection** is the configurable model-client role inside the recursive
 agent loop. The model evaluates the assembled context and selects its next
 bounded agent action: terminal `answer`/`stop`, a workspace action, a semantic
 action, `external_capability`, `refine`, or `branch`.
@@ -109,23 +109,23 @@ That gives TUI, web, and future API clients one shared runtime view instead of s
 
 > **Naming note.** Earlier drafts of this document referred to these phases as "chambers" wrapped by `*Chamber` types and to the runtime as `MechSuitService`. Mission VI2q5DKHe is migrating that vocabulary toward industry-standard agent terminology — `AgentRuntime` has landed; chamber wrappers and the `recursive_control` → `agent_loop` rename are planned. Treat any remaining "chamber" prose in this document as historical until that rename ships.
 
-### Act 3: Synthesis
+### Act 3: Final Rendering
 
-**`SynthesisLane`** takes the accumulated loop trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the recursive agent loop gathered. At boot, Paddles negotiates one shared provider capability surface from the selected provider/model pair and then uses that surface to resolve:
+**`FinalRenderingEngine`** takes the accumulated loop trace and evidence bundle and produces the final user-facing response. This is a separate model call optimized for answer quality, grounded in the concrete evidence the recursive agent loop gathered. At boot, Paddles negotiates one shared provider capability surface from the selected provider/model pair and then uses that surface to resolve:
 
-- the remote HTTP wire format when the lane is HTTP-backed
+- the remote HTTP wire format when the model client is HTTP-backed
 - the strictest supported final-answer render contract
-- the action-selection tool-call shape when the configured planner lane is remote
+- the action-selection tool-call shape when the configured action-selection client is remote
 - whether the selected model is transport-supported at all
 
 That keeps provider additions on one typed contract (`ModelCapabilitySurface`) instead of scattering provider-name branches across the controller, action-selection, and rendering paths.
 
-Action-selection and answer lanes now share one typed conversational handoff:
+Action selection and final rendering now share one typed conversational handoff:
 recent turns plus the active thread summary. That keeps follow-up turns coherent
 even when the model chooses a terminal answer action on one turn and a
-synthesizer-authored route on the next.
+final-rendered route on the next.
 
-That handoff now also carries the active instruction frame. The answer lane therefore sees whether the turn still owes the user an applied repository edit, instead of seeing only evidence and conversational context.
+That handoff now also carries the active instruction frame. The final renderer therefore sees whether the turn still owes the user an applied repository edit, instead of seeing only evidence and conversational context.
 
 Direct terminal answers no longer bypass this contract by leaking control
 rationale into the transcript. Both synthesizer answers and terminal
@@ -232,7 +232,7 @@ The internals path keeps raw record ids, trace ids, and payload content reachabl
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, agent action selection, gatherer work, tool calls, collaboration-mode changes, structured clarification pauses, context strain, fallback decisions, synthesis, and now typed harness/governor state — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI can now prefer the explicit harness chamber over guessed labels, so the operator sees real engine ownership rather than a best-effort inference.
+**`Renderer`** surfaces every step of this process — interpretation assembly, agent action selection, retrieval work, tool calls, collaboration-mode changes, structured clarification pauses, context strain, fallback decisions, final rendering, and now typed harness/governor state — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI can now prefer the explicit harness chamber over guessed labels, so the operator sees real engine ownership rather than a best-effort inference.
 
 **`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. Collaboration-mode declarations and structured clarification requests travel through that same recorder path, so transcript replay, web projection, and forensic drill-down all see one auditable source of truth. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
@@ -396,14 +396,14 @@ terminal execution, web routes, and persistence engines.
 
 ### Recursive Contract Preservation
 
-The boundary split must preserve the recursive agent-loop/synthesizer contract:
+The boundary split must preserve the recursive agent-loop/final-rendering contract:
 
 - the model sees the live harness capability surface, execution constraints,
   and completion contract before choosing actions
 - model reasoning is the planning inside the recursive agent loop
 - the harness owns validation, execution, budget boundaries, trace recording,
   and fail-closed safety
-- the synthesizer authors the final response from gathered evidence and trace
+- final rendering authors the final response from gathered evidence and trace
   state, rather than selecting workspace actions
 - controller-authored pseudo-plans, generic obligation prose, and synthetic
   checklists must not replace model-authored control artifacts
@@ -565,9 +565,9 @@ locators preserve reachability into transit and filesystem tiers.
 
 ### Harness Profiles
 
-Harness profiles make steering and recovery policy explicit and versionable instead of burying them in provider-shaped branches. Today the runtime resolves one requested profile, `recursive-structured-v1`, from the action-selection and synthesizer capability surfaces:
+Harness profiles make steering and recovery policy explicit and versionable instead of burying them in provider-shaped branches. Today the runtime resolves one requested profile, `recursive-structured-v1`, from the action-selection and final-rendering capability surfaces:
 
-- stay on `recursive-structured-v1` when the action-selection lane can return structured next actions and the synthesizer can return structured final answers
+- stay on `recursive-structured-v1` when the action-selection client can return structured next actions and the final renderer can return structured final answers
 - downgrade to `prompt-envelope-safe-v1` when prompt-envelope action recovery or prompt-envelope rendering is required
 
 The selected profile owns four bounded contracts:
@@ -660,7 +660,7 @@ bounded differences stay explicit in tests and docs.
 
 The model expresses its intentions through the same constrained action schema
 that `src/application/planner_action_schema.rs` renders into every
-action-selection lane. This vocabulary is not copied into individual adapters.
+action-selection prompt. This vocabulary is not copied into individual adapters.
 
 | Action | Purpose |
 |--------|---------|
@@ -692,9 +692,9 @@ capability manifest.
 Separating recursive action selection from response authoring unlocks three
 benefits:
 
-- **Independent optimization** — the best recursive investigator and the best answer composer are often different models, and each can be routed to its ideal lane
-- **Cleaner evidence flow** — loop traces are working artifacts that inform synthesis; the synthesizer transforms them into polished, grounded responses
-- **Flexible routing** — operators can mix a lightweight synthesizer with a heavier action-selection lane, or vice versa, matching each role to available hardware
+- **Independent optimization** — the best recursive investigator and the best answer composer are often different models, and each can be routed to its best model client
+- **Cleaner evidence flow** — loop traces are working artifacts that inform final rendering; the final renderer transforms them into polished, grounded responses
+- **Flexible routing** — operators can mix a lightweight final renderer with a heavier action-selection client, or vice versa, matching each role to available hardware
 
 ## Project Context as Evidence
 
@@ -715,9 +715,9 @@ The target architecture is implemented across these modules:
 |-------|--------|------|
 | **Runtime** | [src/application/mod.rs](/home/alex/workspace/spoke-sh/paddles/src/application/mod.rs) | Controller-owned service, session-scoped thread orchestration |
 | **Turn Events** | [src/domain/model/turns.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/turns.rs) | Typed turn and planner event definitions |
-| **Agent Action Contract** | [src/domain/ports/planning.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/planning.rs) | Bounded action schema and action-selection port |
+| **Agent Action Contract** | [src/domain/ports/action_selection.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/action_selection.rs) | Bounded action schema and action-selection port |
 | **HTTP Model Client Adapter** | [src/infrastructure/adapters/http_provider.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/http_provider.rs) | HTTP-backed action selection and final rendering |
-| **Gatherer** | [src/infrastructure/adapters/sift_direct_gatherer.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_direct_gatherer.rs) | Direct sift-backed retrieval backend |
+| **Retrieval** | [src/infrastructure/adapters/sift_direct_retrieval.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/sift_direct_retrieval.rs) | Direct sift-backed retrieval backend |
 | **Operator Memory** | [src/infrastructure/adapters/agent_memory.rs](/home/alex/workspace/spoke-sh/paddles/src/infrastructure/adapters/agent_memory.rs) | AGENTS.md hierarchy + tool hint extraction + procedure derivation |
 | **Trace Contract** | [src/domain/model/traces.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/model/traces.rs) | Stable task/turn/record/branch/checkpoint ids |
 | **Recorder Port** | [src/domain/ports/trace_recording.rs](/home/alex/workspace/spoke-sh/paddles/src/domain/ports/trace_recording.rs) | TraceRecorder boundary |
@@ -738,7 +738,7 @@ The target architecture is implemented across these modules:
 The runtime follows the backbone narrative from above:
 
 1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid initial replies get one constrained re-decision pass before the controller fails closed.
-2. **Action selection** — workspace actions stay inside the recursive agent loop. Search/refine actions carry model-selected retrieval mode, strategy, and optional structural fuzzy retriever overrides into the gatherer boundary. The `sift-direct` gatherer executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second action selector.
+2. **Action selection** — workspace actions stay inside the recursive agent loop. Search/refine actions carry model-selected retrieval mode, strategy, and optional structural fuzzy retriever overrides into the retrieval boundary. The `sift-direct` retrieval provider executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second action selector.
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
 4. **Context quality** — a `StrainTracker` accumulates truncation events during context assembly and emits `ContextStrain` as a turn event when strain is non-nominal.
 5. **Execution hands** — `MechSuitService` owns a session-scoped execution-hand registry so workspace, terminal, and transport surfaces can report one stable lifecycle/diagnostics contract before their concrete adapters are swapped or generalized. Those hands now also share one execution-governance vocabulary for permission requirements, escalation requests, and structured allow or deny outcomes. The terminal runner and workspace editor already execute through one shared permission gate that fails closed when no active posture is available.
@@ -870,7 +870,7 @@ The backbone contract is delivered for the primary interactive and `process_prom
 
 Two capabilities are still maturing:
 
-- **Resource graph breadth** — search/refine actions delegate through the configured gatherer backend today; a unified resource graph will broaden what the model can reach
+- **Resource graph breadth** — search/refine actions delegate through the configured retrieval backend today; a unified resource graph will broaden what the model can reach
 - **Concurrent threading** — auto-threading replays and merges explicit thread lineage at safe checkpoints; true simultaneous sibling generation on one local model session is a future capability
 
 ## Current Model Routing
@@ -880,18 +880,18 @@ Two capabilities are still maturing:
 > provider such as `ollama:<model>`. Sift remains documented here only as a
 > retrieval/indexing backend until a separate retrieval decision changes it.
 
-Current routing now uses explicit action-selection/synth roles:
+Current routing now uses explicit action-selection/final-rendering/retrieval roles:
 
-- synthesizer default: configured HTTP model client
-- action-selection default: synthesizer model unless `--planner-model` overrides it
+- final-rendering default: configured HTTP model client
+- action-selection default: final-rendering model unless `--action-selection-model` overrides it
 - local-first HTTP model form: `ollama:<model>`
-- local gatherer backend: `sift-direct`
-- current gatherer mode: model-selected bounded retrieval for `search` / `refine` requests
-- experimental action-selection/gatherer boundary: `context-1`
+- local retrieval backend: `sift-direct`
+- current retrieval mode: model-selected bounded retrieval for `search` / `refine` requests
+- experimental retrieval provider for action-selection searches: `context-1`
 
 ## Context-1 Fit
 
-`context-1` belongs on the action-selection side of the architecture — a candidate specialized action-selection/gatherer lane. The recursive loop is fundamentally about iterative retrieval, pruning, and refinement, which aligns with context-1's strengths. Final answers continue to come from the separate synthesizer contract.
+`context-1` belongs on the retrieval side of action selection as a candidate specialized retrieval provider. The recursive loop is fundamentally about iterative retrieval, pruning, and refinement, which aligns with context-1's strengths. Final answers continue to come from the separate final-rendering contract.
 
 ## Roadmap / Not Yet Shipped
 

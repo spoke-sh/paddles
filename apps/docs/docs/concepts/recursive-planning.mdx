@@ -1,34 +1,34 @@
 ---
-title: Recursive Planning
+title: Recursive Action Selection
 sidebar_position: 2
-description: How the planner loop drives iterative workspace investigation within bounded guardrails.
+description: How the turn loop drives iterative workspace investigation within bounded guardrails.
 ---
 
-# Recursive Planning
+# Recursive Action Selection
 
-The planner loop is the heart of Paddles. It gives a small model the ability to investigate a workspace iteratively instead of guessing from its training data.
+The recursive turn loop is the heart of Paddles. It gives a small model the ability to investigate a workspace iteratively instead of guessing from its training data.
 
 ## The Loop
 
 Each cycle follows a clear rhythm:
 
 1. Assemble interpretation context
-2. Planner selects next bounded action
+2. The model selects the next bounded action
 3. Controller validates against schema and budget
 4. Execute the action safely
 5. Append outputs into loop state
 6. Check: is evidence sufficient?
-7. If yes, synthesize. If no, loop back.
+7. If yes, render the final answer. If no, loop back.
 
 The model drives direction. The controller ensures safety.
 
 ## Action Vocabulary
 
-The planner expresses its intentions through a constrained action schema:
+The model expresses its intentions through a constrained action schema:
 
 | Action | Purpose |
 |--------|---------|
-| **answer** | Synthesize now — evidence is sufficient |
+| **answer** | Render an answer now because evidence is sufficient |
 | **search** | Find relevant files or content in the workspace |
 | **list_files** | Discover candidate files by pattern |
 | **read** | Read a specific file or artifact |
@@ -36,7 +36,7 @@ The planner expresses its intentions through a constrained action schema:
 | **shell** / **diff** / **edit** | Execute concrete workspace modifications |
 | **refine** | Sharpen a search query based on prior results |
 | **branch** | Split an investigation into parallel subqueries |
-| **stop** | Request synthesis with current evidence |
+| **stop** | Request final rendering with current evidence |
 
 These are not suggestions the model can ignore. Each action has a schema the controller validates before execution.
 
@@ -44,42 +44,42 @@ These are not suggestions the model can ignore. Each action has a schema the con
 
 `search` and `refine` actions are the retrieval contract boundary:
 
-- `search` starts a bounded workspace query using the configured gatherer backend.
-- `refine` reruns retrieval with a new query using the same gatherer contract and
+- `search` starts a bounded workspace query using the configured retrieval backend.
+- `refine` reruns retrieval with a new query using the same retrieval contract and
   current loop context.
 
-Both actions stream evidence through gatherer progress and summary events so the
-operator can observe query execution while the planner keeps looping.
+Both actions stream evidence through retrieval progress and summary events so the
+operator can observe query execution while the model keeps looping.
 
 Key retrieval constraints are documented in [Search and Retrieval](./search-retrieval.mdx).
 
 ## Budget Enforcement
 
-Every planner session runs within a bounded budget:
+Every recursive turn session runs within a bounded budget:
 
-- **Step limit** — maximum number of planner iterations
+- **Step limit** — maximum number of action-selection iterations
 - **Tool budget** — maximum number of tool executions
 - **Evidence budget** — maximum items in the evidence bundle
 
-When any budget is exhausted, the loop stops and synthesis proceeds with whatever evidence has been gathered. This prevents runaway investigation while still allowing deep multi-step reasoning.
+When any budget is exhausted, the loop stops and final rendering proceeds with whatever evidence has been gathered. This prevents runaway investigation while still allowing deep multi-step reasoning.
 
 ## Steering-Signal-Guided Decisions
 
-The planner is not left alone once evidence starts to accumulate. The controller applies steering signals that bias the loop toward more intelligent moves.
+The model is not left alone once evidence starts to accumulate. The controller applies steering signals that bias the loop toward more intelligent moves.
 
 | Signal | What it changes |
 |----------|-----------------|
-| **Action bias** | Adds a planner review note that biases edit-oriented turns toward likely file action instead of repeated broad retrieval |
-| **Premise challenge** | Adds a planner review note when sources start to outweigh the original premise, so the planner must refine, stop, or continue explicitly |
+| **Action bias** | Adds a review note that biases edit-oriented turns toward likely file action instead of repeated broad retrieval |
+| **Premise challenge** | Adds a review note when sources start to outweigh the original premise, so the model must refine, stop, or continue explicitly |
 | **Compaction cue** | Keeps retained context small enough to stay actionable |
 | **Budget boundary** | Terminates recursion when the hard caps are reached |
 
 Two premise-challenge cases matter most:
 
 1. **Quiet-step refinement**
-   If the loop has gathered evidence but several steps add nothing new, the controller refreshes interpretation context before asking the planner again.
+   If the loop has gathered evidence but several steps add nothing new, the controller refreshes interpretation context before asking the model again.
 2. **Premise judgement**
-   If the user says "CI is failing" but the gathered sources show only `success`, `cancelled`, or an unconfirmed `in_progress` run, repeating `gh run list --limit 20`, then `--limit 10`, then `--limit 5` is not intelligent work. The controller should stop and make synthesis judge those sources directly.
+   If the user says "CI is failing" but the gathered sources show only `success`, `cancelled`, or an unconfirmed `in_progress` run, repeating `gh run list --limit 20`, then `--limit 10`, then `--limit 5` is not intelligent work. The controller should stop and make final rendering judge those sources directly.
 
 ## Deterministic Edit Target Resolution
 
@@ -102,7 +102,7 @@ authored workspace paths and make misses explainable.
 
 ## Compaction Planning Today
 
-As the planner accumulates evidence across many steps, the working context can grow large. A compaction engine evaluates the planner's retained evidence and produces a structured compaction plan.
+As the turn loop accumulates evidence across many steps, the working context can grow large. A compaction engine evaluates the retained evidence and produces a structured compaction plan.
 
 That interface is shaped for recursive self-assessment, but the current adapters still rely mostly on bounded heuristics rather than a fully model-judged compaction pass.
 
@@ -112,4 +112,4 @@ Low-value artifacts are pruned from working context, but their content remains r
 
 - [Context Tiers](./context-tiers.mdx) — how pruned content stays reachable through locators
 - [Steering Signals](./context-pressure.mdx) — how controller steering signals shape the loop
-- [Search and Retrieval](./search-retrieval.mdx) — planner retrieval behavior, modes, and limits
+- [Search and Retrieval](./search-retrieval.mdx) — retrieval behavior, modes, and limits

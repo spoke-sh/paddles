@@ -524,7 +524,7 @@ mod tests {
                     parent_step_id: None,
                     decisions: vec![PlannerDecision {
                         action: "search".into(),
-                        query: Some("runtime lane architecture".into()),
+                        query: Some("turn runtime architecture".into()),
                         rationale: Some("start with the subsystem name".into()),
                         next_step_id: Some("step-2".into()),
                         turn_id: Some("turn-1".into()),

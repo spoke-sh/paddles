@@ -2590,7 +2590,7 @@ impl InteractiveApp {
         {
             self.push_error(
                 "Model selection busy",
-                "Another runtime lane activation is already in progress.",
+                "Another turn-runtime activation is already in progress.",
             );
             return false;
         }
@@ -3363,7 +3363,7 @@ impl InteractiveApp {
                             None => self.push_event(
                                 "Model selection updated",
                                 format!(
-                                    "{}\nSaved runtime lane preferences to `{}`.",
+                                    "{}\nSaved turn-runtime preferences to `{}`.",
                                     completion.summary,
                                     completion.preference_path.display()
                                 ),
@@ -3371,7 +3371,7 @@ impl InteractiveApp {
                             Some(err) => self.push_error(
                                 "Runtime preference save failed",
                                 format!(
-                                    "{}\nThe lane switch is active, but `{}` could not be updated: {}",
+                                    "{}\nThe model switch is active, but `{}` could not be updated: {}",
                                     completion.summary,
                                     completion.preference_path.display(),
                                     err
@@ -5388,7 +5388,8 @@ mod tests {
                 operation: ControlOperation::Turn(TurnControlOperation::Interrupt),
                 status: ControlResultStatus::Unavailable,
                 subject: ControlSubject::default(),
-                detail: "planner lane is reconfiguring and cannot honor interrupt yet".to_string(),
+                detail: "action-selection client is reconfiguring and cannot honor interrupt yet"
+                    .to_string(),
             },
         };
         let row = format_turn_event_row(event.clone(), 0);
@@ -5397,7 +5398,7 @@ mod tests {
         assert_eq!(row.header, "• Control: interrupt unavailable");
         assert_eq!(
             row.content,
-            "planner lane is reconfiguring and cannot honor interrupt yet"
+            "action-selection client is reconfiguring and cannot honor interrupt yet"
         );
         assert_eq!(row.runtime_items, event.runtime_items());
     }

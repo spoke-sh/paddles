@@ -646,10 +646,10 @@ fn ddd_hexagonal_boundary_map_is_documented_for_recursive_harness() {
         "ARCHITECTURE should name domain, application, infrastructure, and entrypoint responsibilities",
     );
     assert!(
-        architecture.contains("recursive agent-loop/synthesizer contract")
+        architecture.contains("recursive agent-loop/final-rendering contract")
             && architecture.contains("local-first")
             && architecture.contains("controller-authored pseudo-plans"),
-        "ARCHITECTURE should preserve recursive agent-loop/synthesizer semantics and local-first constraints in the boundary map",
+        "ARCHITECTURE should preserve recursive agent-loop/final-rendering semantics and local-first constraints in the boundary map",
     );
 }
 

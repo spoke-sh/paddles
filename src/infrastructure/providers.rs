@@ -3,7 +3,7 @@ use clap::ValueEnum;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ValueEnum)]
 pub enum ModelProvider {
-    /// Legacy Sift model-provider sentinel; retrieval uses dedicated gatherer providers.
+    /// Legacy Sift model-provider sentinel; retrieval uses dedicated providers.
     Sift,
     /// OpenAI chat completions API
     Openai,

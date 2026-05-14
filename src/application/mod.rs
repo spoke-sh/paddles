@@ -6812,7 +6812,7 @@ fn build_planner_evidence_bundle(
 ) -> EvidenceBundle {
     let latest_gatherer_trace = loop_state.latest_gatherer_trace.clone();
     let summary = format!(
-        "Planner lane `{}` executed {} step(s) for `{}` and collected {} evidence item(s); stop reason: {}.",
+        "Action-selection client `{}` executed {} step(s) for `{}` and collected {} evidence item(s); stop reason: {}.",
         prepared.planner.model_id,
         loop_state.steps.len(),
         prompt,
@@ -15922,7 +15922,7 @@ mod tests {
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
                 action: InitialAction::Answer,
-                rationale: "conversational request can go straight to the answer lane".to_string(),
+                rationale: "conversational request can go straight to final rendering".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
@@ -15981,7 +15981,7 @@ mod tests {
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
                 action: InitialAction::Answer,
-                rationale: "answer lane should handle this directly".to_string(),
+                rationale: "final rendering should handle this directly".to_string(),
                 answer: None,
                 edit: InitialEditInstruction::default(),
                 grounding: None,
@@ -16041,7 +16041,7 @@ mod tests {
                 .recent_thread_summary
                 .as_deref()
                 .is_some_and(|summary| summary.contains("Chevy C20 truck")),
-            "thread summary should carry the active conversational subject into the answer lane"
+            "thread summary should carry the active conversational subject into final rendering"
         );
     }
 
@@ -16875,7 +16875,7 @@ mod tests {
             }],
             evidence_items: vec![EvidenceItem {
                 source: "command: gh run list --limit 20".to_string(),
-                snippet: "in_progress\t\tTreat reported failures as verifiable hypotheses\tCI\tmain\tpush\t23912848177\t1m45s\t2026-04-02T17:18:06Z\ncompleted\tsuccess\tPersist runtime lane preferences over config\tCI\tmain\tpush\t23910509164\t16m4s\t2026-04-02T16:21:22Z\ncompleted\tcancelled\tAutocomplete TUI provider and model commands\tCI\tmain\tpush\t23902835068\t23m45s\t2026-04-02T13:29:15Z".to_string(),
+                snippet: "in_progress\t\tTreat reported failures as verifiable hypotheses\tCI\tmain\tpush\t23912848177\t1m45s\t2026-04-02T17:18:06Z\ncompleted\tsuccess\tPersist turn runtime preferences over config\tCI\tmain\tpush\t23910509164\t16m4s\t2026-04-02T16:21:22Z\ncompleted\tcancelled\tAutocomplete TUI provider and model commands\tCI\tmain\tpush\t23902835068\t23m45s\t2026-04-02T13:29:15Z".to_string(),
                 rationale: "recent CI table output".to_string(),
                 rank: 1,
             }],
@@ -17029,7 +17029,7 @@ mod tests {
         let gh_path = workspace.path().join("bin/gh");
         fs::write(
             &gh_path,
-            "#!/bin/sh\nif [ \"$1\" = \"run\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\nin_progress\t\tTreat reported failures as verifiable hypotheses\tCI\tmain\tpush\t23912848177\t1m45s\t2026-04-02T17:18:06Z\ncompleted\tsuccess\tPersist runtime lane preferences over config\tCI\tmain\tpush\t23910509164\t16m4s\t2026-04-02T16:21:22Z\ncompleted\tcancelled\tAutocomplete TUI provider and model commands\tCI\tmain\tpush\t23902835068\t23m45s\t2026-04-02T13:29:15Z\nEOF\nelse\n  echo \"unexpected gh invocation: $*\" >&2\n  exit 1\nfi\n",
+            "#!/bin/sh\nif [ \"$1\" = \"run\" ] && [ \"$2\" = \"list\" ]; then\ncat <<'EOF'\nin_progress\t\tTreat reported failures as verifiable hypotheses\tCI\tmain\tpush\t23912848177\t1m45s\t2026-04-02T17:18:06Z\ncompleted\tsuccess\tPersist turn runtime preferences over config\tCI\tmain\tpush\t23910509164\t16m4s\t2026-04-02T16:21:22Z\ncompleted\tcancelled\tAutocomplete TUI provider and model commands\tCI\tmain\tpush\t23902835068\t23m45s\t2026-04-02T13:29:15Z\nEOF\nelse\n  echo \"unexpected gh invocation: $*\" >&2\n  exit 1\nfi\n",
         )
         .expect("write fake gh");
         #[cfg(unix)]

@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-05-13T23:21:33.169470490-07:00
+command: sh -lc 'cd "$(git rev-parse --show-toplevel)" && cargo test --bin paddles cli_help_presents_turn_phase_flags_and_hides_legacy_lane_aliases && ! rg -n -i "planner lane|synthesizer lane|gatherer lane|runtime lanes|runtime lane|context-gathering lane|recursive planner lane" README.md ARCHITECTURE.md CONFIGURATION.md POLICY.md INSTRUCTIONS.md apps/docs src'
+---
+
+running 1 test
+test tests::cli_help_presents_turn_phase_flags_and_hides_legacy_lane_aliases ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/paddles/debug/deps/paddles-27b6d7d80142d941)

@@ -31,7 +31,7 @@ Model selection is an architectural decision that shapes every turn.
 - **Intent Before Size**: Models are chosen by workload shape first — recursive agent action selection, tool orchestration, retrieval, context gathering, or response authoring.
 - **Interpretation Before Action Selection**: Operator memory and foundational guidance are available before the model selects a bounded action.
 - **Model-Directed Action Selection**: Model reasoning is the planning inside the recursive agent loop. The model selects its next bounded agent action through a constrained response after interpretation context is assembled.
-- **Runtime Capability Disclosure Before Reasoning**: Action-selection and synthesizer
+- **Runtime Capability Disclosure Before Reasoning**: Action-selection and final-rendering
   lanes receive the live, dynamically discovered harness capability surface,
   execution posture, and completion contract as runtime data before they decide
   what to do next.
@@ -45,7 +45,7 @@ Model selection is an architectural decision that shapes every turn.
 ### Recursive Agent Loop and Synthesis
 - **Recursive Agent-Loop Reasoning Earns Better Answers**: Difficult workspace questions improve through bounded recursive resource use — each iteration adds real evidence.
 - **Agent Action Contract**: Turns flow through one constrained recursive action vocabulary: terminal `answer`/`stop`, workspace actions (`search`, `list_files`, `read`, `inspect`, `shell`, `diff`, `write_file`, `replace_in_file`, `apply_patch`), semantic actions, `external_capability`, `refine`, and `branch`.
-- **Shared Agent Action Schema Ownership**: Action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared action schema renderer. Adapter-local action schema lists are forbidden for HTTP, retry, redecision, or future action-selection lanes. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
+- **Shared Agent Action Schema Ownership**: Action names, JSON examples, required fields, and shared action-selection rules come from the application-layer shared action schema renderer. Adapter-local action schema lists are forbidden for HTTP, retry, redecision, or future action-selection clients. Adapters may describe transport mechanics, but they must embed the shared schema renderer output and the turn-specific capability manifest instead of duplicating action lists.
 - **First Action Is In The Loop**: The primary mech-suit runtime asks the model for its first bounded agent action as part of the recursive agent loop. A direct answer is a terminal action in that loop, not a separate route.
 - **Reasoning Budget Is For Reasoning**: Recursive budget exists to let the
   model think through the harness' dynamically available capabilities and
@@ -53,9 +53,9 @@ Model selection is an architectural decision that shapes every turn.
   pre-chew the model's plan into generic fallback language.
 - **Separate Action Selection From Response Authoring**: Recursive action selection and final response generation are distinct steps, each routed to the model best suited for that workload.
 - **Grounded Answers Cite Sources**: Repository-question answers include file citations by default and degrade to extractive evidence or explicit insufficiency when sources are unavailable.
-- **Final Answer Rendering Stays Typed**: Terminal `answer`/`stop` payloads and synthesizer answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
+- **Final Answer Rendering Stays Typed**: Terminal `answer`/`stop` payloads and final-rendered answers both normalize through the same canonical render AST (`heading`, `paragraph`, `bullet_list`, `code_block`, `citations`); operators see a normalized transcript projection instead of raw markdown conventions.
 - **Control Rationale Is Never The User Answer**: Action-selection rationale explains control decisions. User-facing answer text must travel through an explicit answer payload before it enters the render pipeline.
-- **Action-Selection And Answer Lanes Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into the answer lane, so follow-up turns remain coherent across direct terminal actions and synthesizer-authored replies.
+- **Action Selection And Final Rendering Share One Conversational Handoff**: Recent turns and active-thread summaries are carried through a typed handoff into final rendering, so follow-up turns remain coherent across direct terminal actions and final-rendered replies.
 - **Instruction Obligations Must Be Satisfied Before Completion**: When the model marks a turn as an edit turn, that creates an explicit instruction obligation. Advice-only prose does not satisfy an open `applied_edit` obligation; the turn must either apply a workspace write or surface a blocked reply that says the edit is still unsatisfied.
 - **Generative Authoring Stays Separate From Rendering**: Rich surface-aware expression belongs in a generative authoring layer that targets the canonical render AST and surface affordances. Renderers project that typed output; they do not invent or reinterpret content.
 - **The Harness Is An Engine With Typed Chambers**: Interpretation, action selection, gathering, tooling, threading, rendering, and governor ownership are first-class runtime states. Operator surfaces should project those states directly instead of guessing them from incidental event text.
@@ -72,8 +72,8 @@ Model selection is an architectural decision that shapes every turn.
 - **Influence Snapshots Stay Visible**: Steering signals must remain legible in transit traces with source-attributed contributions, so operators can inspect what shaped a turn.
 
 ### Evidence and Gathering
-- **Evidence-First Gatherers**: Context-gathering adapters return typed evidence bundles and capability state for downstream synthesis.
-- **Graph Retrieval Strengthens The Gatherer Path**: Richer graph/branching retrieval enhances the generic gatherer boundary and typed evidence contract, keeping the harness general-purpose.
+- **Evidence-First Retrieval**: Retrieval providers return typed evidence bundles and capability state for downstream final rendering.
+- **Graph Retrieval Strengthens The Retrieval Path**: Richer graph/branching retrieval enhances the generic retrieval boundary and typed evidence contract, keeping the harness general-purpose.
 - **Action-Selection Metadata Stays Observable**: Strategy, stop reason, and retained-evidence summaries remain visible once the operator asks for verbose output and in evidence digests.
 - **Graph Lineage Stays Typed**: Branch ids, frontier ids, node ids, edge kinds, and graph stop state live in `paddles`-owned structured metadata, ready for embedded recorders and replay.
 

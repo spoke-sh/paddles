@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T23:20:06.124105586-07:00
+mode: manual
+---
+Documented retained legacy aliases as migration shims: runtime-lanes.toml is read-only input normalized into turn-runtime.toml; [planner] maps to action selection; [synthesizer] maps to final rendering; gatherer_* config and --gatherer-* CLI aliases map to retrieval. New docs and CLI help use action-selection, final-rendering, retrieval, and turn-runtime terminology.

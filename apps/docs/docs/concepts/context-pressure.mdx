@@ -13,7 +13,7 @@ prompt prior
    ↓
 interpretation context
    ↓
-planner proposes next action
+model proposes next action
    ↓
 controller steering layer
    ├─ context strain: context degraded
@@ -22,7 +22,7 @@ controller steering layer
    ├─ compaction cue: tighten active context
    └─ budget boundary: terminate bounded recursion
    ↓
-next action or grounded synthesis
+next action or grounded final rendering
 ```
 
 The key rule is simple: the user can supply the starting premise, but gathered sources get to revise it.
@@ -32,8 +32,8 @@ The key rule is simple: the user can supply the starting premise, but gathered s
 | System | Trigger | Effect |
 |-------|---------|--------|
 | **Context strain** | Truncation during context assembly | Surfaces degraded context quality |
-| **Action bias** | Mutation turn is still avoiding file action | Adds a planner review note that biases the next move toward a likely target file |
-| **Premise challenge** | Quiet steps or evidence weakens the original premise | Adds a planner review note or refinement trigger so the model must judge the sources explicitly |
+| **Action bias** | Mutation turn is still avoiding file action | Adds a review note that biases the next move toward a likely target file |
+| **Premise challenge** | Quiet steps or evidence weakens the original premise | Adds a review note or refinement trigger so the model must judge the sources explicitly |
 | **Compaction cue** | Active context is getting noisy | Summarizes/prunes low-value artifacts while preserving locators; today this is still mostly heuristic |
 | **Budget boundary** | Hard recursion caps are reached | Stops the loop and forces an honest answer |
 
@@ -60,7 +60,7 @@ When strain is non-nominal, the system emits a `ContextStrain` turn event. This 
 
 Action bias encodes the principle that action produces information.
 
-On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller now adds an action-bias review note back into the planner loop, and the planner must judge whether the proposed move should stand or be replaced by a file-targeting action.
+On edit-oriented turns, once the harness already has plausible file evidence, repeated non-file work becomes lower value than reading or editing the likely target. The controller now adds an action-bias review note back into the turn loop, and the model must judge whether the proposed move should stand or be replaced by a file-targeting action.
 
 ## Premise Challenge
 
@@ -69,7 +69,7 @@ Premise challenge is what makes the harness intellectually honest.
 It operates in two modes:
 
 - **Quiet-step refinement** — if the loop has real evidence but several steps add nothing new, the controller derives a refined interpretation context.
-- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller adds a premise-challenge review note and asks the planner to judge the sources before spending more budget.
+- **Premise judgement** — if the prompt asserts a failure but the gathered sources weaken or contradict that claim, the controller adds a premise-challenge review note and asks the model to judge the sources before spending more budget.
 
 This is how Paddles avoids blindly trusting the operator once the evidence says otherwise.
 
@@ -81,7 +81,7 @@ Today that compaction path is still mostly heuristic. The interface is designed 
 
 ## Budget Boundary
 
-Budget boundary is the hard outer wall. Step, search, inspect, and read limits are all explicit. When they are exhausted, the loop stops and synthesis proceeds from the evidence actually gathered.
+Budget boundary is the hard outer wall. Step, search, inspect, and read limits are all explicit. When they are exhausted, the loop stops and final rendering proceeds from the evidence actually gathered.
 
 ## What Operators See
 
@@ -127,5 +127,5 @@ The route also stays local-first. It is rendered from the same locally served we
 ## What To Read Next
 
 - [Turn Loop](./turn-loop.mdx) — where the steering layer sits in the full cycle
-- [Recursive Planning](./recursive-planning.mdx) — how steering signals change planner behavior
+- [Recursive Planning](./recursive-planning.mdx) — how steering signals change action-selection behavior
 - [Context Tiers](./context-tiers.mdx) — how content moves between tiers and gets truncated

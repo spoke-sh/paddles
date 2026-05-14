@@ -37,12 +37,12 @@ just quality
 paddles --help
 ```
 
-You should see the CLI help with options for `--model`, `--planner-model`, `--prompt`, `--cuda`, and `--verbose`.
+You should see the CLI help with options for `--model`, `--action-selection-model`, `--prompt`, `--cuda`, and `--verbose`.
 
 `--verbose` is cumulative:
 
 - no flag => level `0`, the default operational stream
-- `-v` => level `1`, adds info-tier planner and synthesis metadata
+- `-v` => level `1`, adds info-tier action-selection and final-rendering metadata
 - `-vv` => level `2`, adds debug-tier routing and capability detail
 - `-vvv` => level `3`, enables trace diagnostics
 

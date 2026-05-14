@@ -46,11 +46,11 @@ pub struct TurnRuntimeRetrievalPreference {
     pub model: Option<String>,
 }
 
-/// Legacy compatibility alias for callers that still name the old runtime-lane
+/// Legacy compatibility alias for callers that still name the old lane-shaped
 /// preference document during migration. New code should use
 /// `TurnRuntimePreferences`.
 pub type RuntimeLanePreferences = TurnRuntimePreferences;
-/// Legacy compatibility alias for callers that still name the old runtime-lane
+/// Legacy compatibility alias for callers that still name the old lane-shaped
 /// preference store during migration. New code should use
 /// `TurnRuntimePreferenceStore`.
 pub type RuntimeLanePreferenceStore = TurnRuntimePreferenceStore;
@@ -326,13 +326,13 @@ struct LegacyTurnRuntimePreferences {
 fn load_legacy_runtime_lane_preferences(path: &Path) -> Result<TurnRuntimePreferences> {
     let contents = fs::read_to_string(path).with_context(|| {
         format!(
-            "read legacy runtime lane preferences from {}",
+            "read legacy runtime-lanes.toml migration input from {}",
             path.display()
         )
     })?;
     let legacy = toml::from_str::<LegacyTurnRuntimePreferences>(&contents).with_context(|| {
         format!(
-            "parse legacy runtime lane preferences from {}",
+            "parse legacy runtime-lanes.toml migration input from {}",
             path.display()
         )
     })?;

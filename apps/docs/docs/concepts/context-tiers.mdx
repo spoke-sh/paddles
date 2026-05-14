@@ -14,7 +14,7 @@ Paddles has access to effectively unlimited context, but it cannot hold everythi
 |------|----------------|--------|
 | **Inline** | Character-limited excerpts in working memory | Direct read, zero cost |
 | **Transit** | Full trace records in durable streams | Replay by task and record id |
-| **Sift** | Indexed evidence returned by search/refine | Search and refinement retrieval in the planner loop |
+| **Sift** | Indexed evidence returned by search/refine | Search and refinement retrieval in the turn loop |
 | **Filesystem** | Workspace files on disk | Path-based file read |
 
 Think of these as concentric rings. Inline is the hottest, smallest cache. Transit holds the full history. Filesystem holds the authoritative source.

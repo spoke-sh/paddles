@@ -721,7 +721,7 @@ mod tests {
                             turn_id: Some(turn_id.clone()),
                             thread: None,
                         },
-                        detail: "planner lane is reconfiguring and cannot honor interrupt yet"
+                        detail: "action-selection client is reconfiguring and cannot honor interrupt yet"
                             .to_string(),
                     }),
                 },
@@ -740,9 +740,9 @@ mod tests {
                 .contains("interrupt unavailable")
         );
         assert!(
-            transcript.entries[1]
-                .content
-                .contains("planner lane is reconfiguring and cannot honor interrupt yet")
+            transcript.entries[1].content.contains(
+                "action-selection client is reconfiguring and cannot honor interrupt yet"
+            )
         );
         assert!(transcript.entries[1].content.contains(turn_id.as_str()));
     }

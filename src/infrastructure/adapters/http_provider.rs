@@ -4229,7 +4229,11 @@ mod tests {
             "recursive next-action decision",
             "separate planner phase",
             "choosing whether to enter",
-            "recursive planner lane",
+            concat!("recursive planner", " lane"),
+            concat!("planner", " lane"),
+            concat!("synthesizer", " lane"),
+            concat!("gatherer", " lane"),
+            concat!("runtime", " lanes"),
             "workspace resource action",
             "constrained routing decision",
         ];
@@ -7568,7 +7572,7 @@ mod tests {
             vec![
                 EvidenceItem {
                     source: "command: gh run list --limit 10".to_string(),
-                    snippet: "completed\tsuccess\tPersist runtime lane preferences over config\tCI\tmain\tpush\t23910509164".to_string(),
+                    snippet: "completed\tsuccess\tPersist turn runtime preferences over config\tCI\tmain\tpush\t23910509164".to_string(),
                     rationale: "recent successful CI run".to_string(),
                     rank: 0,
                 },
