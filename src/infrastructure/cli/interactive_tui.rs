@@ -483,10 +483,19 @@ fn handle_key_event(app: &mut InteractiveApp, key: KeyEvent) -> bool {
                 false
             } else {
                 if app.busy {
+                    if app.active_prompt_interrupt_requested() {
+                        if app.abort_active_work() {
+                            app.clear_queued_prompts();
+                        } else if app.input.is_empty() {
+                            app.cancel_latest_queued_steering_prompt();
+                        }
+                        return false;
+                    }
                     if app.session.request_turn_interrupt().is_ok() {
+                        app.mark_active_prompt_interrupt_requested();
                         app.push_event(
                             "Requested turn interrupt",
-                            "The active turn will stop at the next safe checkpoint.",
+                            "The active turn will stop at the next safe checkpoint. Press Esc again to hard-cancel the active work.",
                         );
                         return false;
                     }
@@ -748,6 +757,7 @@ struct InFlightWork {
     id: u64,
     kind: InFlightWorkKind,
     handle: JoinHandle<()>,
+    turn_interrupt_requested: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1847,7 +1857,22 @@ impl InteractiveApp {
             id: work_id,
             kind,
             handle,
+            turn_interrupt_requested: false,
         });
+    }
+
+    fn active_prompt_interrupt_requested(&self) -> bool {
+        self.active_work.as_ref().is_some_and(|work| {
+            matches!(work.kind, InFlightWorkKind::Prompt) && work.turn_interrupt_requested
+        })
+    }
+
+    fn mark_active_prompt_interrupt_requested(&mut self) {
+        if let Some(work) = self.active_work.as_mut()
+            && matches!(work.kind, InFlightWorkKind::Prompt)
+        {
+            work.turn_interrupt_requested = true;
+        }
     }
 
     fn clear_active_work_if_current(&mut self, work_id: Option<u64>) {
@@ -1892,6 +1917,13 @@ impl InteractiveApp {
         let Some(work) = self.active_work.take() else {
             return false;
         };
+
+        if matches!(work.kind, InFlightWorkKind::Prompt)
+            && let Some(turn_id) = self.session.active_turn_id()
+        {
+            let _ = self.session.take_turn_control_requests(&turn_id);
+            self.session.clear_turn_if_active(&turn_id);
+        }
 
         work.handle.abort();
         self.busy = false;
@@ -7249,6 +7281,50 @@ mod tests {
                 .iter()
                 .any(|row| row.header == "• Requested turn interrupt")
         );
+    }
+
+    #[tokio::test]
+    async fn second_escape_after_interrupt_request_hard_cancels_active_prompt() {
+        let palette = detect_palette();
+        let mut app = InteractiveApp::new(
+            "qwen-1.5b".to_string(),
+            palette,
+            session(),
+            "sift".to_string(),
+            None,
+            "Provider: `sift` (local-first). Auth: not required.".to_string(),
+            2,
+        );
+
+        app.input = "first".to_string();
+        app.submit_prompt();
+        assert_eq!(
+            app.dispatch_next_prompt(),
+            Some(QueuedPrompt::Prompt("first".to_string()))
+        );
+        let turn_id = app.session.allocate_turn_id();
+        app.session.mark_turn_active(turn_id.clone());
+
+        let work_id = app.next_work_id();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        app.set_active_work(InFlightWorkKind::Prompt, work_id, handle);
+
+        let first_escape =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let second_escape =
+            super::handle_key_event(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!first_escape);
+        assert!(!second_escape);
+        assert!(!app.busy);
+        assert!(app.active_work.is_none());
+        assert_eq!(app.session.active_turn_id(), None);
+        assert!(app.session.take_turn_control_requests(&turn_id).is_empty());
+        assert!(app.rows.iter().any(|row| row.header == "• Work cancelled"));
     }
 
     #[test]
