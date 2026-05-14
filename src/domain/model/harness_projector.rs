@@ -33,7 +33,7 @@ pub fn derive_harness_snapshot(event: &TurnEvent) -> Option<HarnessSnapshot> {
             HarnessSnapshot::active(HarnessChamber::Planning)
                 .with_detail(format!("{provider}: {capability}")),
         ),
-        TurnEvent::GathererCapability {
+        TurnEvent::RetrievalCapability {
             provider,
             capability,
         } => Some(

@@ -1251,10 +1251,12 @@ mod tests {
         TraceSignalSnapshot, TranscriptUpdateSink, TurnControlOperation, TurnEventSink,
     };
     use crate::domain::ports::{
-        ModelPaths, ModelRegistry, RecursivePlanner, SynthesizerEngine, TraceRecorder,
+        ActionSelectionEngine, FinalRenderingEngine, ModelPaths, ModelRegistry, TraceRecorder,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
-    use crate::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
+    use crate::infrastructure::adapters::http_provider::{
+        HttpActionSelectionAdapter, HttpProviderAdapter,
+    };
     use crate::infrastructure::adapters::trace_recorders::{
         InMemoryTraceRecorder, TransitTraceRecorder,
     };
@@ -1609,7 +1611,7 @@ mod tests {
         let operator_memory = Arc::new(AgentMemory::load(workspace));
 
         let synth_base_url = base_url.clone();
-        let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
+        let final_renderer_factory: Box<crate::application::FinalRendererFactory> = Box::new(
             move |workspace: &FsPath, lane: &crate::application::PreparedModelClient| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
@@ -1619,12 +1621,12 @@ mod tests {
                     synth_base_url.clone(),
                     ApiFormat::OpenAi,
                     RenderCapability::OpenAiJsonSchema,
-                )) as Arc<dyn SynthesizerEngine>)
+                )) as Arc<dyn FinalRenderingEngine>)
             },
         );
 
         let planner_base_url = base_url;
-        let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
+        let action_selector_factory: Box<crate::application::ActionSelectorFactory> = Box::new(
             move |workspace: &FsPath, lane: &crate::application::PreparedModelClient| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
@@ -1635,7 +1637,8 @@ mod tests {
                     ApiFormat::OpenAi,
                     RenderCapability::OpenAiJsonSchema,
                 ));
-                Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
+                Ok(Arc::new(HttpActionSelectionAdapter::new(engine))
+                    as Arc<dyn ActionSelectionEngine>)
             },
         );
 
@@ -1643,8 +1646,8 @@ mod tests {
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
-            synthesizer_factory,
-            planner_factory,
+            final_renderer_factory,
+            action_selector_factory,
             Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None)),
             recorder,
         ))

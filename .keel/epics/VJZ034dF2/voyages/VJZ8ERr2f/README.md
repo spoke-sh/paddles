@@ -27,11 +27,11 @@ started_at: 2026-05-13T22:50:18
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Rename Internal Lane Types To Turn Runtime Concepts](../../../../stories/VJZ8OmnUP/README.md) | refactor | done |
-| [Rename Planner Synthesizer Gatherer Ports To Turn Phases](../../../../stories/VJZ8PstqT/README.md) | refactor | icebox |
+| [Rename Planner Synthesizer Gatherer Ports To Turn Phases](../../../../stories/VJZ8PstqT/README.md) | refactor | done |
 | [Retire Runtime Lane Language From Public Surfaces](../../../../stories/VJZ8QTY4i/README.md) | refactor | icebox |
 <!-- END GENERATED -->

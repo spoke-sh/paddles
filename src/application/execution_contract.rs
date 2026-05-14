@@ -3,8 +3,8 @@ use crate::domain::model::{
     ExecutionHandDiagnostic, ExternalCapabilityDescriptor, InstructionFrame,
 };
 use crate::domain::ports::{
-    ContextGatherer, GathererCapability, GroundingDomain, GroundingRequirement, PlannerConfig,
-    PlannerExecutionContract, RetrievalStrategy, WorkspaceActionCapability,
+    GroundingDomain, GroundingRequirement, PlannerConfig, PlannerExecutionContract,
+    RetrievalCapability, RetrievalProvider, RetrievalStrategy, WorkspaceActionCapability,
     WorkspaceCapabilitySurface, WorkspaceToolCapability,
 };
 
@@ -22,7 +22,7 @@ impl ExecutionContractService {
             execution_hands,
             governance_profile,
             external_capabilities,
-            gatherer,
+            retrieval_provider,
             collaboration,
             instruction_frame,
             grounding,
@@ -49,7 +49,7 @@ impl ExecutionContractService {
                 .iter()
                 .map(format_execution_hand_capability_line),
         );
-        capability_manifest.extend(retrieval_capability_lines(gatherer));
+        capability_manifest.extend(retrieval_capability_lines(retrieval_provider));
         capability_manifest.extend(external_capabilities.iter().map(|descriptor| {
             format!(
                 "external capability {}: {}",
@@ -139,29 +139,29 @@ pub(super) struct ExecutionContractContext<'a> {
     pub(super) execution_hands: &'a [ExecutionHandDiagnostic],
     pub(super) governance_profile: Option<&'a ExecutionGovernanceProfile>,
     pub(super) external_capabilities: &'a [ExternalCapabilityDescriptor],
-    pub(super) gatherer: Option<&'a dyn ContextGatherer>,
+    pub(super) retrieval_provider: Option<&'a dyn RetrievalProvider>,
     pub(super) collaboration: &'a CollaborationModeResult,
     pub(super) instruction_frame: Option<&'a InstructionFrame>,
     pub(super) grounding: Option<&'a GroundingRequirement>,
 }
 
-pub(super) fn format_gatherer_capability(capability: &GathererCapability) -> String {
+pub(super) fn format_retrieval_capability(capability: &RetrievalCapability) -> String {
     match capability {
-        GathererCapability::Available => "available".to_string(),
-        GathererCapability::Warming { reason } => format!("warming: {reason}"),
-        GathererCapability::Unsupported { reason } => format!("unsupported: {reason}"),
-        GathererCapability::HarnessRequired { reason } => {
+        RetrievalCapability::Available => "available".to_string(),
+        RetrievalCapability::Warming { reason } => format!("warming: {reason}"),
+        RetrievalCapability::Unsupported { reason } => format!("unsupported: {reason}"),
+        RetrievalCapability::HarnessRequired { reason } => {
             format!("harness-required: {reason}")
         }
     }
 }
 
-pub(super) fn gatherer_readiness_label(capability: &GathererCapability) -> &'static str {
+pub(super) fn retrieval_readiness_label(capability: &RetrievalCapability) -> &'static str {
     match capability {
-        GathererCapability::Available => "available",
-        GathererCapability::Warming { .. } => "warming",
-        GathererCapability::Unsupported { .. } => "unsupported",
-        GathererCapability::HarnessRequired { .. } => "harness-required",
+        RetrievalCapability::Available => "available",
+        RetrievalCapability::Warming { .. } => "warming",
+        RetrievalCapability::Unsupported { .. } => "unsupported",
+        RetrievalCapability::HarnessRequired { .. } => "harness-required",
     }
 }
 
@@ -237,29 +237,31 @@ fn format_execution_hand_capability_line(diagnostic: &ExecutionHandDiagnostic) -
     )
 }
 
-fn retrieval_capability_lines(gatherer: Option<&dyn ContextGatherer>) -> Vec<String> {
-    let Some(gatherer) = gatherer else {
+fn retrieval_capability_lines(retrieval_provider: Option<&dyn RetrievalProvider>) -> Vec<String> {
+    let Some(retrieval_provider) = retrieval_provider else {
         return vec![
-            "search/refine via bm25: unavailable \u{2014} no gatherer is configured".to_string(),
-            "search/refine via vector: unavailable \u{2014} no gatherer is configured".to_string(),
+            "search/refine via bm25: unavailable \u{2014} no retrieval provider is configured"
+                .to_string(),
+            "search/refine via vector: unavailable \u{2014} no retrieval provider is configured"
+                .to_string(),
         ];
     };
 
-    let lexical = gatherer.capability_for_planning(
+    let lexical = retrieval_provider.capability_for_planning(
         &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Lexical),
     );
-    let vector = gatherer.capability_for_planning(
+    let vector = retrieval_provider.capability_for_planning(
         &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Vector),
     );
 
     vec![
         format!(
             "search/refine via bm25: {}",
-            format_gatherer_capability(&lexical)
+            format_retrieval_capability(&lexical)
         ),
         format!(
             "search/refine via vector: {}",
-            format_gatherer_capability(&vector)
+            format_retrieval_capability(&vector)
         ),
     ]
 }
@@ -319,7 +321,7 @@ mod tests {
             execution_hands: &[],
             governance_profile: None,
             external_capabilities: &external_capabilities,
-            gatherer: None,
+            retrieval_provider: None,
             collaboration: &collaboration,
             instruction_frame: Some(&instruction_frame),
             grounding: Some(&grounding),
@@ -344,7 +346,7 @@ mod tests {
         );
         assert!(contract.capability_manifest.iter().any(|line| {
             line.contains("search/refine via bm25: unavailable")
-                && line.contains("no gatherer is configured")
+                && line.contains("no retrieval provider is configured")
         }));
         assert!(
             contract

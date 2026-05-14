@@ -144,7 +144,7 @@ pub enum TurnEvent {
         provider: String,
         capability: String,
     },
-    GathererCapability {
+    RetrievalCapability {
         provider: String,
         capability: String,
     },
@@ -288,7 +288,7 @@ impl TurnEvent {
             Self::GuidanceGraphExpanded { .. } => "guidance_graph_expanded",
             Self::RouteSelected { .. } => "route_selected",
             Self::PlannerCapability { .. } => "planner_capability",
-            Self::GathererCapability { .. } => "gatherer_capability",
+            Self::RetrievalCapability { .. } => "gatherer_capability",
             Self::PlannerActionSelected { .. } => "planner_action_selected",
             Self::PlanUpdated { .. } => "plan_updated",
             Self::ThreadCandidateCaptured { .. } => "thread_candidate_captured",
@@ -360,7 +360,7 @@ impl TurnEvent {
             | Self::InterpretationContext { .. }
             | Self::RouteSelected { .. }
             | Self::PlannerCapability { .. }
-            | Self::GathererCapability { .. }
+            | Self::RetrievalCapability { .. }
             | Self::ThreadCandidateCaptured { .. } => 2,
         }
     }
@@ -390,7 +390,7 @@ impl TurnEvent {
                 super::harness::HarnessChamber::Governor => "Intervening",
             },
             Self::PlannerCapability { .. } => "Planning",
-            Self::GathererCapability { .. } => "Gathering evidence",
+            Self::RetrievalCapability { .. } => "Gathering evidence",
             Self::CollaborationModeChanged { .. } => "Routing",
             Self::StructuredClarificationChanged { .. } => "Intervening",
             Self::ExecutionGovernanceProfileApplied { .. }

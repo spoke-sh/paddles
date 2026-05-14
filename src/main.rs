@@ -14,12 +14,14 @@ use paddles::application::{
     RuntimeHarnessCapabilityPostureService, TurnRuntimeConfig,
     ensure_supported_model_inference_provider,
 };
-use paddles::domain::ports::{ContextGatherer, ModelPaths, ModelRegistry, SynthesizerEngine};
+use paddles::domain::ports::{FinalRenderingEngine, ModelPaths, ModelRegistry, RetrievalProvider};
 use paddles::infrastructure::adapters::agent_memory::AgentMemory;
-use paddles::infrastructure::adapters::context1_gatherer::Context1GathererAdapter;
-use paddles::infrastructure::adapters::http_provider::{HttpPlannerAdapter, HttpProviderAdapter};
-use paddles::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
-use paddles::infrastructure::adapters::sift_direct_gatherer::SiftDirectGathererAdapter;
+use paddles::infrastructure::adapters::context1_retrieval::Context1RetrievalAdapter;
+use paddles::infrastructure::adapters::http_provider::{
+    HttpActionSelectionAdapter, HttpProviderAdapter,
+};
+use paddles::infrastructure::adapters::sift_context_retrieval::SiftContextRetrievalAdapter;
+use paddles::infrastructure::adapters::sift_direct_retrieval::SiftDirectRetrievalAdapter;
 use paddles::infrastructure::adapters::trace_recorders::HostedTransitTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
 use paddles::infrastructure::adapters::trace_recorders::default_trace_recorder_for_workspace;
@@ -85,11 +87,11 @@ struct Cli {
     #[arg(long, value_enum)]
     planner_provider: Option<ModelProvider>,
 
-    /// Optional model ID for the legacy static local context-gathering lane.
+    /// Optional model ID for the legacy static local retrieval provider.
     #[arg(long)]
     gatherer_model: Option<String>,
 
-    /// Provider to use for the default gatherer lane.
+    /// Provider to use for retrieval.
     #[arg(long, value_enum)]
     gatherer_provider: Option<GathererProvider>,
 
@@ -170,13 +172,13 @@ fn resolve_remote_provider_config(
     Ok((api_format, base_url, api_key, capability_surface))
 }
 
-fn build_synthesizer_engine(
+fn build_final_renderer(
     workspace: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
     lane: &PreparedModelClient,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
-) -> Result<Arc<dyn SynthesizerEngine>> {
+) -> Result<Arc<dyn FinalRenderingEngine>> {
     ensure_supported_model_inference_provider(lane.provider, "synthesizer.provider")?;
     if lane.paths.is_some() {
         bail!("final-rendering HTTP model client must not receive local ModelPaths");
@@ -197,16 +199,16 @@ fn build_synthesizer_engine(
         base_url,
         format,
         capabilities.render_capability,
-    )) as Arc<dyn SynthesizerEngine>)
+    )) as Arc<dyn FinalRenderingEngine>)
 }
 
-fn build_planner_engine(
+fn build_action_selector(
     workspace: &Path,
     execution_hand_registry: Arc<ExecutionHandRegistry>,
     transport_mediator: Arc<TransportToolMediator>,
     lane: &PreparedModelClient,
     provider_url_overrides: &std::collections::BTreeMap<ModelProvider, String>,
-) -> Result<Arc<dyn paddles::domain::ports::RecursivePlanner>> {
+) -> Result<Arc<dyn paddles::domain::ports::ActionSelectionEngine>> {
     ensure_supported_model_inference_provider(lane.provider, "planner_provider")?;
     if lane.paths.is_some() {
         bail!("action-selection HTTP model client must not receive local ModelPaths");
@@ -228,8 +230,8 @@ fn build_planner_engine(
         format,
         capabilities.render_capability,
     ));
-    Ok(Arc::new(HttpPlannerAdapter::new(engine))
-        as Arc<dyn paddles::domain::ports::RecursivePlanner>)
+    Ok(Arc::new(HttpActionSelectionAdapter::new(engine))
+        as Arc<dyn paddles::domain::ports::ActionSelectionEngine>)
 }
 
 fn build_trace_recorder_from_config(
@@ -543,9 +545,9 @@ async fn main() -> Result<()> {
     ));
     let synth_execution_hands = Arc::clone(&execution_hand_registry);
     let synth_transport_mediator = Arc::clone(&transport_mediator);
-    let synthesizer_factory: Box<paddles::application::SynthesizerFactory> =
+    let final_renderer_factory: Box<paddles::application::FinalRendererFactory> =
         Box::new(move |workspace: &Path, lane: &PreparedModelClient| {
-            build_synthesizer_engine(
+            build_final_renderer(
                 workspace,
                 Arc::clone(&synth_execution_hands),
                 Arc::clone(&synth_transport_mediator),
@@ -557,9 +559,9 @@ async fn main() -> Result<()> {
     let planner_overrides = Arc::clone(&provider_url_overrides);
     let planner_execution_hands = Arc::clone(&execution_hand_registry);
     let planner_transport_mediator = Arc::clone(&transport_mediator);
-    let planner_factory: Box<paddles::application::PlannerFactory> =
+    let action_selector_factory: Box<paddles::application::ActionSelectorFactory> =
         Box::new(move |workspace: &Path, lane: &PreparedModelClient| {
-            build_planner_engine(
+            build_action_selector(
                 workspace,
                 Arc::clone(&planner_execution_hands),
                 Arc::clone(&planner_transport_mediator),
@@ -567,12 +569,12 @@ async fn main() -> Result<()> {
                 planner_overrides.as_ref(),
             )
         });
-    let gatherer_factory: Box<paddles::application::GathererFactory> = Box::new(
+    let retrieval_provider_factory: Box<paddles::application::RetrievalProviderFactory> = Box::new(
         |config: &TurnRuntimeConfig,
          workspace: &Path,
          verbose: u8,
          gatherer_model_paths: Option<paddles::domain::ports::ModelPaths>|
-         -> Result<Option<(PreparedRetrievalProvider, Arc<dyn ContextGatherer>)>> {
+         -> Result<Option<(PreparedRetrievalProvider, Arc<dyn RetrievalProvider>)>> {
             match config.gatherer_provider() {
                 GathererProvider::Local => match config.gatherer_model_id() {
                     Some(model_id) => {
@@ -583,9 +585,9 @@ async fn main() -> Result<()> {
                             paths: gatherer_model_paths,
                         };
                         let adapter =
-                            SiftContextGathererAdapter::new(workspace.to_path_buf(), model_id);
+                            SiftContextRetrievalAdapter::new(workspace.to_path_buf(), model_id);
                         adapter.set_verbose(verbose);
-                        Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
+                        Ok(Some((lane, Arc::new(adapter) as Arc<dyn RetrievalProvider>)))
                     }
                     None => Ok(None),
                 },
@@ -596,9 +598,9 @@ async fn main() -> Result<()> {
                         model_id: None,
                         paths: None,
                     };
-                    let adapter = SiftDirectGathererAdapter::new(workspace.to_path_buf());
+                    let adapter = SiftDirectRetrievalAdapter::new(workspace.to_path_buf());
                     adapter.set_verbose(verbose);
-                    Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
+                    Ok(Some((lane, Arc::new(adapter) as Arc<dyn RetrievalProvider>)))
                 }
                 GathererProvider::Context1 => {
                     let lane = PreparedRetrievalProvider {
@@ -607,8 +609,8 @@ async fn main() -> Result<()> {
                         model_id: None,
                         paths: None,
                     };
-                    let adapter = Context1GathererAdapter::new(config.context1_harness_ready());
-                    Ok(Some((lane, Arc::new(adapter) as Arc<dyn ContextGatherer>)))
+                    let adapter = Context1RetrievalAdapter::new(config.context1_harness_ready());
+                    Ok(Some((lane, Arc::new(adapter) as Arc<dyn RetrievalProvider>)))
                 }
             }
         },
@@ -618,9 +620,9 @@ async fn main() -> Result<()> {
         root_path,
         registry,
         operator_memory,
-        synthesizer_factory,
-        planner_factory,
-        gatherer_factory,
+        final_renderer_factory,
+        action_selector_factory,
+        retrieval_provider_factory,
         trace_recorder.clone(),
     ));
     service.set_execution_hand_registry(Arc::clone(&execution_hand_registry));
@@ -932,7 +934,7 @@ async fn run_plain_interactive_loop(service: Arc<AgentRuntime>) -> Result<()> {
 mod tests {
     use super::{
         OperatorSurfaceBootstrap, OperatorSurfaceRuntimeStatus, ServiceRuntimeState,
-        build_planner_engine, build_synthesizer_engine, build_trace_recorder_from_config,
+        build_action_selector, build_final_renderer, build_trace_recorder_from_config,
         ensure_remote_provider_transport_support, resolve_operator_surface_bootstrap,
         resolve_provider_from_name, service_runtime_failure_status, service_runtime_ready_status,
     };
@@ -1050,7 +1052,7 @@ mod tests {
             paths: Some(sample_model_paths("planner")),
         };
 
-        let error = match build_planner_engine(
+        let error = match build_action_selector(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1080,7 +1082,7 @@ mod tests {
             paths: None,
         };
 
-        build_planner_engine(
+        build_action_selector(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1101,7 +1103,7 @@ mod tests {
             paths: None,
         };
 
-        let error = match build_planner_engine(
+        let error = match build_action_selector(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1131,7 +1133,7 @@ mod tests {
             paths: Some(sample_model_paths("synthesizer")),
         };
 
-        let error = match build_synthesizer_engine(
+        let error = match build_final_renderer(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1160,7 +1162,7 @@ mod tests {
             paths: None,
         };
 
-        build_synthesizer_engine(
+        build_final_renderer(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1183,7 +1185,7 @@ mod tests {
             paths: None,
         };
 
-        build_planner_engine(
+        build_action_selector(
             workspace.path(),
             Arc::clone(&execution_hand_registry),
             Arc::clone(&transport_mediator),
@@ -1211,7 +1213,7 @@ mod tests {
             paths: None,
         };
 
-        build_synthesizer_engine(
+        build_final_renderer(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1262,7 +1264,7 @@ model = "gpt-5.4"
         let (execution_hand_registry, transport_mediator) =
             transport_mediator_with_empty_credentials_for_test(credentials.path());
 
-        let error = match build_synthesizer_engine(
+        let error = match build_final_renderer(
             workspace.path(),
             Arc::clone(&execution_hand_registry),
             transport_mediator,
@@ -1302,7 +1304,7 @@ model = "gpt-5.4"
             paths: None,
         };
 
-        let error = match build_synthesizer_engine(
+        let error = match build_final_renderer(
             workspace.path(),
             execution_hand_registry,
             transport_mediator,
@@ -1409,7 +1411,7 @@ model = "gpt-5.4"
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let external_capabilities = ExternalCapabilityCatalog::from_local_configuration(
             &ExternalCapabilityCatalogConfig::default().enable("web.search"),

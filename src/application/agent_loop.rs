@@ -10,7 +10,7 @@ pub(super) async fn execute_recursive_planner_loop(
     service: &AgentRuntime,
     prompt: &str,
     context: PlannerLoopContext,
-    initial_decision: Option<RecursivePlannerDecision>,
+    initial_decision: Option<ActionSelectionEngineDecision>,
     trace: Arc<StructuredTurnTrace>,
 ) -> Result<PlannerLoopOutcome> {
     let mut context = context;
@@ -40,7 +40,7 @@ pub(super) async fn execute_recursive_planner_loop(
     };
     let gatherer_provider = context
         .prepared
-        .gatherer
+        .retrieval_provider
         .as_ref()
         .map(|lane| lane.label.clone())
         .unwrap_or_else(|| "workspace".to_string());
@@ -92,7 +92,7 @@ pub(super) async fn execute_recursive_planner_loop(
             .with_recent_turns(context.recent_turns.clone())
             .with_recent_thread_summary(context.recent_thread_summary.clone())
             .with_runtime_notes(planner_runtime_notes(
-                context.gatherer.as_ref(),
+                context.retrieval_provider.as_ref(),
                 &context.specialist_runtime_notes,
                 &context.collaboration,
             ))
@@ -101,7 +101,7 @@ pub(super) async fn execute_recursive_planner_loop(
                 execution_hands: &context.execution_hands,
                 governance_profile: context.governance_profile.as_ref(),
                 external_capabilities: &context.external_capabilities,
-                gatherer: context.gatherer.as_deref(),
+                retrieval_provider: context.retrieval_provider.as_deref(),
                 collaboration: &context.collaboration,
                 instruction_frame: instruction_frame.as_ref(),
                 grounding: context.grounding.as_ref(),
@@ -110,7 +110,7 @@ pub(super) async fn execute_recursive_planner_loop(
             .with_resolver(context.resolver.clone())
             .with_entity_resolver(context.entity_resolver.clone());
             context
-                .planner_engine
+                .action_selector
                 .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
                 .await?
         };
@@ -220,7 +220,7 @@ pub(super) async fn execute_recursive_planner_loop(
                                     failure_label: "planner search failed",
                                     unavailable_label: "planner search backend unavailable",
                                     missing_backend_message:
-                                        "no gatherer backend is configured for planner search",
+                                        "no retrieval provider backend is configured for planner search",
                                 },
                                 &mut used_workspace_resources,
                             )
@@ -599,7 +599,7 @@ pub(super) async fn execute_recursive_planner_loop(
                                 failure_label: "planner refine failed",
                                 unavailable_label: "planner refine backend unavailable",
                                 missing_backend_message:
-                                    "no gatherer backend is configured for refined planner search",
+                                    "no retrieval provider backend is configured for refined planner search",
                             },
                             &mut used_workspace_resources,
                         )

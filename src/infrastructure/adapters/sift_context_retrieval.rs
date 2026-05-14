@@ -1,6 +1,6 @@
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-    GathererCapability,
+    ContextGatherRequest, ContextGatherResult, EvidenceBundle, EvidenceItem, RetrievalCapability,
+    RetrievalProvider,
 };
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
 use crate::infrastructure::sift_cache::{
@@ -15,14 +15,14 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 const DEFAULT_RETAINED_LIMIT: usize = 5;
 
-pub struct SiftContextGathererAdapter {
+pub struct SiftContextRetrievalAdapter {
     workspace_root: PathBuf,
     model_id: String,
     sift: Sift,
     verbose: AtomicU8,
 }
 
-impl SiftContextGathererAdapter {
+impl SiftContextRetrievalAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>, model_id: impl Into<String>) -> Self {
         let workspace_root = workspace_root.into();
         ensure_sift_process_cache_dirs();
@@ -51,9 +51,9 @@ impl SiftContextGathererAdapter {
 }
 
 #[async_trait]
-impl ContextGatherer for SiftContextGathererAdapter {
-    fn capability(&self) -> GathererCapability {
-        GathererCapability::Available
+impl RetrievalProvider for SiftContextRetrievalAdapter {
+    fn capability(&self) -> RetrievalCapability {
+        RetrievalCapability::Available
     }
 
     async fn gather_context(
@@ -98,7 +98,7 @@ impl ContextGatherer for SiftContextGathererAdapter {
             )
         } else if ignored_hits > 0 {
             format!(
-                "Gathered {} ranked evidence item(s) for `{}` using the `{}` gatherer lane after pruning {} ignored path(s).",
+                "Gathered {} ranked evidence item(s) for `{}` using retrieval provider `{}` after pruning {} ignored path(s).",
                 items.len(),
                 request.user_query,
                 self.model_id,
@@ -106,7 +106,7 @@ impl ContextGatherer for SiftContextGathererAdapter {
             )
         } else {
             format!(
-                "Gathered {} ranked evidence item(s) for `{}` using the `{}` gatherer lane.",
+                "Gathered {} ranked evidence item(s) for `{}` using retrieval provider `{}`.",
                 items.len(),
                 request.user_query,
                 self.model_id,

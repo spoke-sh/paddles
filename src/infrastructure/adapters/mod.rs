@@ -3,10 +3,10 @@ pub mod http_provider;
 pub(crate) mod local_workspace_action_executor;
 pub(crate) mod local_workspace_editor;
 
-pub mod context1_gatherer;
-pub mod sift_autonomous_gatherer;
-pub mod sift_context_gatherer;
-pub mod sift_direct_gatherer;
+pub mod context1_retrieval;
+pub mod sift_autonomous_retrieval;
+pub mod sift_context_retrieval;
+pub mod sift_direct_retrieval;
 pub(crate) mod sift_progress;
 pub(crate) mod sift_request_factory;
 pub mod trace_recorders;

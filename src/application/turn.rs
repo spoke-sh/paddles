@@ -61,15 +61,15 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                 .active_execution_governance()
                 .clone(),
         );
-        let planner_engine = Arc::clone(&runtime.planner_engine);
-        let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
-        let gatherer = runtime.gatherer.clone();
+        let action_selector = Arc::clone(&runtime.action_selector);
+        let final_renderer = Arc::clone(&runtime.final_renderer);
+        let retrieval_provider = runtime.retrieval_provider.clone();
         drop(runtime_guard);
 
         let interpretation = context_assembly::derive_interpretation_context(
             service,
             &current_prompt,
-            planner_engine.as_ref(),
+            action_selector.as_ref(),
             event_sink.clone(),
         )
         .await;
@@ -101,16 +101,20 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             context: interpretation.clone(),
         });
 
-        let planner_capability = planner_engine.capability();
+        let planner_capability = action_selector.capability();
         trace.emit(TurnEvent::PlannerCapability {
             provider: prepared.planner.model_id.clone(),
             capability: format_planner_capability(&planner_capability),
         });
 
         let recent_turns =
-            synthesis::recent_turn_summaries(service, &session, synthesizer_engine.as_ref())?;
-        let specialist_runtime_notes =
-            synthesis::specialist_runtime_notes(service, &current_prompt, &session, &prepared);
+            final_rendering::recent_turn_summaries(service, &session, final_renderer.as_ref())?;
+        let specialist_runtime_notes = final_rendering::specialist_runtime_notes(
+            service,
+            &current_prompt,
+            &session,
+            &prepared,
+        );
         let recent_thread_summary = session.recent_thread_summary(&active_thread);
         let controller_edit =
             controller_prompt_edit_instruction(&service.workspace_root, &current_prompt);
@@ -134,12 +138,12 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         .with_recent_turns(recent_turns.clone())
         .with_recent_thread_summary(recent_thread_summary.clone())
         .with_runtime_notes(planner_runtime_notes(
-            gatherer.as_ref(),
+            retrieval_provider.as_ref(),
             &specialist_runtime_notes,
             &collaboration,
         ))
         .with_execution_contract(service.planner_execution_contract(
-            gatherer.as_ref(),
+            retrieval_provider.as_ref(),
             &collaboration,
             request_instruction_frame.as_ref(),
             None,
@@ -148,7 +152,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
 
         let execution_plan = match planner_capability {
             PlannerCapability::Available => {
-                let mut decision = planner_engine
+                let mut decision = action_selector
                     .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
                     .await?;
                 let provider_edit_missing = !decision.edit.known_edit && controller_edit.known_edit;
@@ -189,7 +193,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                     &current_prompt,
                     &interpretation,
                     &recent_turns,
-                    gatherer.as_ref(),
+                    retrieval_provider.as_ref(),
                     &decision,
                     trace.as_ref(),
                 )
@@ -287,10 +291,10 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
 
         let planner_outcome = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
-                let recent_turns = synthesis::recent_turn_summaries(
+                let recent_turns = final_rendering::recent_turn_summaries(
                     service,
                     &session,
-                    synthesizer_engine.as_ref(),
+                    final_renderer.as_ref(),
                 )?;
 
                 let resolver: Arc<dyn ContextResolver> = Arc::new(TransitContextResolver::new(
@@ -302,8 +306,8 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                     &current_prompt,
                     PlannerLoopContext {
                         prepared: prepared.clone(),
-                        planner_engine,
-                        gatherer,
+                        action_selector,
+                        retrieval_provider,
                         resolver,
                         entity_resolver: Arc::clone(&service.entity_resolver),
                         workspace_capability_surface: service
@@ -368,7 +372,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
-            let reply = synthesis::finalize_turn_response(
+            let reply = final_rendering::finalize_turn_response(
                 service,
                 &trace,
                 &session,
@@ -380,13 +384,13 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         }
 
         let intent = execution_plan.intent;
-        let engine = synthesizer_engine;
+        let engine = final_renderer;
         let trace_for_reply = Arc::clone(&trace);
         let event_sink = trace.as_event_sink();
         let session_for_reply = session.clone();
         let thread_for_reply = active_thread;
         let prompt_for_model = current_prompt.clone();
-        let handoff = SynthesisHandoff {
+        let handoff = FinalRenderingHandoff {
             recent_turns,
             recent_thread_summary,
             collaboration: collaboration.clone(),
@@ -404,7 +408,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                 citations: Vec::new(),
                 insufficient_evidence: false,
             });
-            let reply = synthesis::finalize_turn_response(
+            let reply = final_rendering::finalize_turn_response(
                 service,
                 &trace_for_reply,
                 &session_for_reply,
@@ -430,7 +434,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                 .completion_response_mode_for_synthesis(planner_outcome.instruction_frame.as_ref()),
             &reply,
         );
-        let reply = synthesis::finalize_turn_response(
+        let reply = final_rendering::finalize_turn_response(
             service,
             &trace_for_reply,
             &session_for_reply,
@@ -453,14 +457,14 @@ pub(super) async fn process_thread_candidate_in_session_with_sink(
     let runtime = runtime_guard
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Turn runtime not initialized"))?;
-    let planner_engine = Arc::clone(&runtime.planner_engine);
-    let synthesizer_engine = Arc::clone(&runtime.synthesizer_engine);
+    let action_selector = Arc::clone(&runtime.action_selector);
+    let final_renderer = Arc::clone(&runtime.final_renderer);
     drop(runtime_guard);
 
     let interpretation = context_assembly::derive_interpretation_context(
         service,
         &candidate.prompt,
-        planner_engine.as_ref(),
+        action_selector.as_ref(),
         event_sink.clone(),
     )
     .await;
@@ -482,7 +486,7 @@ pub(super) async fn process_thread_candidate_in_session_with_sink(
     trace.record_thread_candidate(&candidate);
 
     let recent_turns =
-        synthesis::recent_turn_summaries(service, &session, synthesizer_engine.as_ref())?;
+        final_rendering::recent_turn_summaries(service, &session, final_renderer.as_ref())?;
     let active_thread = session.active_thread();
     let thread_request = ThreadDecisionRequest::new(
         service.workspace_root.clone(),
@@ -494,7 +498,7 @@ pub(super) async fn process_thread_candidate_in_session_with_sink(
     .with_known_threads(session.known_threads())
     .with_recent_thread_summary(session.recent_thread_summary(&active_thread.thread_ref));
 
-    let decision = planner_engine
+    let decision = action_selector
         .select_thread_decision(&thread_request, trace.clone() as Arc<dyn TurnEventSink>)
         .await?;
     trace.emit(TurnEvent::ThreadDecisionApplied {

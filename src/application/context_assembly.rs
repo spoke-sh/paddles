@@ -9,7 +9,7 @@ use super::*;
 pub(super) async fn derive_interpretation_context(
     service: &AgentRuntime,
     prompt: &str,
-    planner: &dyn RecursivePlanner,
+    planner: &dyn ActionSelectionEngine,
     event_sink: Arc<dyn TurnEventSink>,
 ) -> InterpretationContext {
     service
@@ -22,7 +22,7 @@ pub(super) async fn bootstrap_known_edit_initial_action(
     prompt: &str,
     interpretation: &InterpretationContext,
     recent_turns: &[String],
-    gatherer: Option<&Arc<dyn ContextGatherer>>,
+    retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
     decision: &InitialActionDecision,
     trace: &StructuredTurnTrace,
 ) -> Result<Option<InitialActionDecision>> {
@@ -31,7 +31,7 @@ pub(super) async fn bootstrap_known_edit_initial_action(
             prompt,
             interpretation,
             recent_turns,
-            gatherer,
+            retrieval_provider,
             decision,
             trace,
         )

@@ -1,10 +1,10 @@
 use crate::domain::model::{TurnEvent, TurnEventSink};
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-    GathererCapability, PlannerDecision, PlannerGraphBranch, PlannerGraphBranchStatus,
-    PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode, PlannerGraphFrontierEntry,
-    PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RetainedEvidence, RetrievalMode,
+    ContextGatherRequest, ContextGatherResult, EvidenceBundle, EvidenceItem, PlannerDecision,
+    PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEdge, PlannerGraphEdgeKind,
+    PlannerGraphEpisode, PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind,
+    PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalCapability, RetrievalMode,
+    RetrievalProvider,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-pub struct SiftAutonomousGathererAdapter {
+pub struct SiftAutonomousRetrievalAdapter {
     workspace_root: PathBuf,
     sift: Arc<Sift>,
     verbose: AtomicU8,
@@ -34,7 +34,7 @@ pub struct SiftAutonomousGathererAdapter {
     event_sink: std::sync::Mutex<Option<Arc<dyn TurnEventSink>>>,
 }
 
-impl SiftAutonomousGathererAdapter {
+impl SiftAutonomousRetrievalAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = workspace_root.into();
         ensure_sift_process_cache_dirs();
@@ -90,9 +90,9 @@ impl SiftAutonomousGathererAdapter {
 }
 
 #[async_trait]
-impl ContextGatherer for SiftAutonomousGathererAdapter {
-    fn capability(&self) -> GathererCapability {
-        GathererCapability::Available
+impl RetrievalProvider for SiftAutonomousRetrievalAdapter {
+    fn capability(&self) -> RetrievalCapability {
+        RetrievalCapability::Available
     }
 
     fn set_event_sink(&self, sink: Option<Arc<dyn TurnEventSink>>) {
@@ -616,13 +616,13 @@ fn strip_ansi_sequences(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::SiftAutonomousGathererAdapter;
+    use super::SiftAutonomousRetrievalAdapter;
     use crate::domain::ports::{
-        ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability,
-        PlannerGraphBranchStatus, PlannerGraphEdgeKind, PlannerStrategyKind, RetainedEvidence,
-        RetrievalMode,
+        ContextGatherRequest, EvidenceBudget, PlannerGraphBranchStatus, PlannerGraphEdgeKind,
+        PlannerStrategyKind, RetainedEvidence, RetrievalCapability, RetrievalMode,
+        RetrievalProvider,
     };
-    use crate::infrastructure::adapters::sift_context_gatherer::SiftContextGathererAdapter;
+    use crate::infrastructure::adapters::sift_context_retrieval::SiftContextRetrievalAdapter;
     use tempfile::tempdir;
 
     fn retained_artifact(
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn autonomous_gatherer_reports_available_capability() {
-        let adapter = SiftAutonomousGathererAdapter::new(".");
+        let adapter = SiftAutonomousRetrievalAdapter::new(".");
         let request = ContextGatherRequest::new(
             "Summarize the runtime path",
             ".",
@@ -660,7 +660,7 @@ mod tests {
             EvidenceBudget::default(),
         );
 
-        assert_eq!(adapter.capability(), GathererCapability::Available);
+        assert_eq!(adapter.capability(), RetrievalCapability::Available);
         assert_eq!(
             adapter.planner_strategy(&request).kind,
             sift::AutonomousPlannerStrategyKind::Heuristic
@@ -670,7 +670,7 @@ mod tests {
     #[test]
     fn autonomous_gatherer_supports_optional_model_driven_profile_configuration() {
         let adapter =
-            SiftAutonomousGathererAdapter::new(".").with_model_driven_profile("local-planner-v1");
+            SiftAutonomousRetrievalAdapter::new(".").with_model_driven_profile("local-planner-v1");
         let request = ContextGatherRequest::new(
             "Summarize the runtime path",
             ".",
@@ -855,7 +855,7 @@ mod tests {
         )
         .expect("write alpha");
 
-        let adapter = SiftAutonomousGathererAdapter::new(workspace.path());
+        let adapter = SiftAutonomousRetrievalAdapter::new(workspace.path());
         let result = adapter
             .gather_context(&ContextGatherRequest::new(
                 "find alpha runtime details",
@@ -894,8 +894,8 @@ mod tests {
             "repo investigation",
             EvidenceBudget::default(),
         );
-        let autonomous = SiftAutonomousGathererAdapter::new(workspace.path());
-        let static_gatherer = SiftContextGathererAdapter::new(workspace.path(), "qwen-1.5b");
+        let autonomous = SiftAutonomousRetrievalAdapter::new(workspace.path());
+        let static_gatherer = SiftContextRetrievalAdapter::new(workspace.path(), "qwen-1.5b");
 
         let autonomous_bundle = autonomous
             .gather_context(&request)

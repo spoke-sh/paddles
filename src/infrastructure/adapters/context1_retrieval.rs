@@ -1,27 +1,27 @@
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherResult, ContextGatherer, GathererCapability,
+    ContextGatherRequest, ContextGatherResult, RetrievalCapability, RetrievalProvider,
 };
 use async_trait::async_trait;
 
-pub struct Context1GathererAdapter {
+pub struct Context1RetrievalAdapter {
     harness_ready: bool,
 }
 
-impl Context1GathererAdapter {
+impl Context1RetrievalAdapter {
     pub fn new(harness_ready: bool) -> Self {
         Self { harness_ready }
     }
 }
 
 #[async_trait]
-impl ContextGatherer for Context1GathererAdapter {
-    fn capability(&self) -> GathererCapability {
+impl RetrievalProvider for Context1RetrievalAdapter {
+    fn capability(&self) -> RetrievalCapability {
         if self.harness_ready {
-            GathererCapability::Unsupported {
+            RetrievalCapability::Unsupported {
                 reason: "Context-1 is explicitly selected, but Paddles does not yet ship the dedicated harness-backed provider implementation required to execute it honestly.".to_string(),
             }
         } else {
-            GathererCapability::HarnessRequired {
+            RetrievalCapability::HarnessRequired {
                 reason: "Context-1 requires a dedicated search harness. Re-run with --context1-harness-ready only when that external harness is actually available.".to_string(),
             }
         }
@@ -32,12 +32,12 @@ impl ContextGatherer for Context1GathererAdapter {
         _request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
         Ok(match self.capability() {
-            GathererCapability::Available => ContextGatherResult::unsupported(
+            RetrievalCapability::Available => ContextGatherResult::unsupported(
                 "Context-1 capability probing reported available without a provider implementation.",
             ),
-            GathererCapability::Warming { reason } => ContextGatherResult::unsupported(reason),
-            GathererCapability::Unsupported { reason } => ContextGatherResult::unsupported(reason),
-            GathererCapability::HarnessRequired { reason } => {
+            RetrievalCapability::Warming { reason } => ContextGatherResult::unsupported(reason),
+            RetrievalCapability::Unsupported { reason } => ContextGatherResult::unsupported(reason),
+            RetrievalCapability::HarnessRequired { reason } => {
                 ContextGatherResult::harness_required(reason)
             }
         })
@@ -46,24 +46,24 @@ impl ContextGatherer for Context1GathererAdapter {
 
 #[cfg(test)]
 mod tests {
-    use super::Context1GathererAdapter;
+    use super::Context1RetrievalAdapter;
     use crate::domain::ports::{
-        ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability,
+        ContextGatherRequest, EvidenceBudget, RetrievalCapability, RetrievalProvider,
     };
     use std::path::PathBuf;
 
     #[test]
     fn context1_without_harness_reports_harness_required() {
-        let adapter = Context1GathererAdapter::new(false);
+        let adapter = Context1RetrievalAdapter::new(false);
         assert!(matches!(
             adapter.capability(),
-            GathererCapability::HarnessRequired { .. }
+            RetrievalCapability::HarnessRequired { .. }
         ));
     }
 
     #[tokio::test]
     async fn context1_with_harness_flag_but_no_provider_reports_unsupported() {
-        let adapter = Context1GathererAdapter::new(true);
+        let adapter = Context1RetrievalAdapter::new(true);
         let result = adapter
             .gather_context(&ContextGatherRequest::new(
                 "Summarize the repo",
@@ -76,7 +76,7 @@ mod tests {
 
         assert!(matches!(
             result.capability,
-            GathererCapability::Unsupported { .. }
+            RetrievalCapability::Unsupported { .. }
         ));
         assert!(result.evidence_bundle.is_none());
     }

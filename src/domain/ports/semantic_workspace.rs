@@ -1,4 +1,4 @@
-use super::context_gathering::{RetrievalMode, RetrievalStrategy, RetrieverOption};
+use super::retrieval::{RetrievalMode, RetrievalStrategy, RetrieverOption};
 use crate::domain::model::{WorkspaceAction, WorkspaceTextPosition};
 use std::fmt;
 

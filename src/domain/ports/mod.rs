@@ -1,25 +1,29 @@
-mod context_gathering;
+mod action_selection;
 mod context_resolution;
 mod entity_resolution;
 mod execution_hands;
 mod external_capabilities;
+mod final_rendering;
 mod model_registry;
 mod operator_memory;
-mod planning;
+mod retrieval;
 mod semantic_workspace;
 mod session_store;
 mod specialist_brains;
-mod synthesis;
 mod trace_recording;
 mod workspace_action_execution;
 mod workspace_editing;
 
-pub use context_gathering::{
-    ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBudget, EvidenceBundle,
-    EvidenceItem, GathererCapability, PlannerConfig, PlannerDecision, PlannerGraphBranch,
-    PlannerGraphBranchStatus, PlannerGraphEdge, PlannerGraphEdgeKind, PlannerGraphEpisode,
-    PlannerGraphFrontierEntry, PlannerGraphNode, PlannerStrategyKind, PlannerTraceMetadata,
-    PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption,
+pub use action_selection::{
+    ActionSelectionEngine, AgentAction, AgentDecision, CompactionPlan, CompactionRequest,
+    GroundingDomain, GroundingRequirement, GuidanceCategory, InitialAction, InitialActionDecision,
+    InitialEditInstruction, InterpretationConflict, InterpretationContext,
+    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerBudget,
+    PlannerCapability, PlannerDecision as ActionSelectionEngineDecision, PlannerExecutionContract,
+    PlannerLoopState, PlannerRequest, PlannerStepRecord, RefinementPolicy, RefinementTrigger,
+    RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use context_resolution::ContextResolver;
 pub use entity_resolution::{
@@ -28,21 +32,18 @@ pub use entity_resolution::{
 };
 pub use execution_hands::ExecutionHand;
 pub use external_capabilities::ExternalCapabilityBroker;
+pub use final_rendering::{FinalRenderingEngine, FinalRenderingHandoff};
 pub use model_registry::{
     ModelPaths, ModelRegistry, ProviderModelPostureEntry, ProviderModelPostureStatus,
     ProviderRegistryPosture, ProviderRegistryPostureRequest,
 };
 pub use operator_memory::OperatorMemory;
-pub use planning::{
-    AgentAction, AgentDecision, CompactionPlan, CompactionRequest, GroundingDomain,
-    GroundingRequirement, GuidanceCategory, InitialAction, InitialActionDecision,
-    InitialEditInstruction, InterpretationConflict, InterpretationContext,
-    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerBudget,
-    PlannerCapability, PlannerDecision as RecursivePlannerDecision, PlannerExecutionContract,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, RecursivePlanner, RefinementPolicy,
-    RefinementTrigger, RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
+pub use retrieval::{
+    ContextGatherRequest, ContextGatherResult, EvidenceBudget, EvidenceBundle, EvidenceItem,
+    PlannerConfig, PlannerDecision, PlannerGraphBranch, PlannerGraphBranchStatus, PlannerGraphEdge,
+    PlannerGraphEdgeKind, PlannerGraphEpisode, PlannerGraphFrontierEntry, PlannerGraphNode,
+    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+    RetrievalCapability, RetrievalMode, RetrievalProvider, RetrievalStrategy, RetrieverOption,
 };
 pub use semantic_workspace::{
     SemanticWorkspaceOperation, SemanticWorkspacePort, SemanticWorkspaceQuery,
@@ -59,7 +60,6 @@ pub use session_store::{
 pub use specialist_brains::{
     SpecialistBrain, SpecialistBrainCapability, SpecialistBrainNote, SpecialistBrainRequest,
 };
-pub use synthesis::{SynthesisHandoff, SynthesizerEngine};
 pub use trace_recording::{
     NoopTraceRecorder, TraceRecorder, TraceRecorderCapability, TraceReplaySlice,
     TraceReplaySliceAnchor, TraceReplaySliceDirection, TraceReplaySliceRequest,

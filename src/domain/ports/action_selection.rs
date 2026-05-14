@@ -1,8 +1,8 @@
-use super::context_gathering::{
-    EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy, RetrieverOption,
-};
 use super::context_resolution::ContextResolver;
 use super::entity_resolution::{EntityResolutionOutcome, EntityResolver};
+use super::retrieval::{
+    EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy, RetrieverOption,
+};
 pub use crate::domain::model::{
     CollaborationModeResult, CompactionPlan, CompactionRequest, ConversationThread,
     GuidanceCategory, InterpretationConflict, InterpretationContext,
@@ -18,7 +18,7 @@ use crate::domain::model::{DeliberationState, TurnEventSink};
 use std::sync::Arc;
 
 #[async_trait]
-pub trait RecursivePlanner: Send + Sync {
+pub trait ActionSelectionEngine: Send + Sync {
     fn capability(&self) -> PlannerCapability;
 
     async fn derive_interpretation_context(

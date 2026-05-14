@@ -72,7 +72,7 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
                 text: detail,
             }
         }
-        TurnEvent::GathererCapability {
+        TurnEvent::RetrievalCapability {
             provider,
             capability,
         } => {
@@ -80,7 +80,7 @@ pub fn project_runtime_event(event: &TurnEvent) -> RuntimeEventPresentation {
             RuntimeEventPresentation {
                 badge: "cap".to_string(),
                 badge_class: "route".to_string(),
-                title: "• Checked gatherer capability".to_string(),
+                title: "• Checked retrieval capability".to_string(),
                 detail: detail.clone(),
                 text: detail,
             }

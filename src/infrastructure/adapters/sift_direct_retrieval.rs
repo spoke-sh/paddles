@@ -1,8 +1,8 @@
 use crate::domain::model::{TurnEvent, TurnEventSink};
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherResult, ContextGatherer, EvidenceBundle, EvidenceItem,
-    GathererCapability, PlannerConfig, PlannerDecision, PlannerTraceMetadata, PlannerTraceStep,
-    RetainedEvidence, RetrievalStrategy,
+    ContextGatherRequest, ContextGatherResult, EvidenceBundle, EvidenceItem, PlannerConfig,
+    PlannerDecision, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalCapability,
+    RetrievalProvider, RetrievalStrategy,
 };
 use crate::infrastructure::adapters::sift_progress::{SiftProgressDisplay, describe_sift_progress};
 use crate::infrastructure::adapters::sift_request_factory::SiftRequestFactory;
@@ -39,7 +39,7 @@ impl WarmupReadiness {
         }
     }
 
-    fn capability_for_strategy(&self, strategy: RetrievalStrategy) -> GathererCapability {
+    fn capability_for_strategy(&self, strategy: RetrievalStrategy) -> RetrievalCapability {
         let (state, reason) = match strategy {
             RetrievalStrategy::Lexical => (
                 self.lexical_state.load(Ordering::Relaxed),
@@ -58,9 +58,9 @@ impl WarmupReadiness {
         };
 
         match state {
-            WARMUP_READY => GathererCapability::Available,
-            WARMUP_FAILED => GathererCapability::Unsupported { reason },
-            _ => GathererCapability::Warming { reason },
+            WARMUP_READY => RetrievalCapability::Available,
+            WARMUP_FAILED => RetrievalCapability::Unsupported { reason },
+            _ => RetrievalCapability::Warming { reason },
         }
     }
 
@@ -93,7 +93,7 @@ impl WarmupReadiness {
     }
 }
 
-pub struct SiftDirectGathererAdapter {
+pub struct SiftDirectRetrievalAdapter {
     workspace_root: PathBuf,
     sift: Arc<Sift>,
     verbose: AtomicU8,
@@ -101,7 +101,7 @@ pub struct SiftDirectGathererAdapter {
     warmup: Arc<WarmupReadiness>,
 }
 
-impl SiftDirectGathererAdapter {
+impl SiftDirectRetrievalAdapter {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         let workspace_root = workspace_root.into();
         ensure_sift_process_cache_dirs();
@@ -192,13 +192,13 @@ impl SiftDirectGathererAdapter {
 }
 
 #[async_trait]
-impl ContextGatherer for SiftDirectGathererAdapter {
-    fn capability(&self) -> GathererCapability {
+impl RetrievalProvider for SiftDirectRetrievalAdapter {
+    fn capability(&self) -> RetrievalCapability {
         self.warmup
             .capability_for_strategy(RetrievalStrategy::Lexical)
     }
 
-    fn capability_for_planning(&self, planning: &PlannerConfig) -> GathererCapability {
+    fn capability_for_planning(&self, planning: &PlannerConfig) -> RetrievalCapability {
         let plan =
             SiftRequestFactory::search_plan_for(planning.retrieval_strategy, &planning.retrievers);
         let strategy = if plan.retrievers.contains(&sift::RetrieverPolicy::Vector) {
@@ -218,10 +218,10 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         request: &ContextGatherRequest,
     ) -> Result<ContextGatherResult, anyhow::Error> {
         match self.capability_for_planning(&request.planning) {
-            GathererCapability::Available => {}
-            GathererCapability::Warming { reason }
-            | GathererCapability::Unsupported { reason }
-            | GathererCapability::HarnessRequired { reason } => {
+            RetrievalCapability::Available => {}
+            RetrievalCapability::Warming { reason }
+            | RetrievalCapability::Unsupported { reason }
+            | RetrievalCapability::HarnessRequired { reason } => {
                 return Err(anyhow!(
                     "{} retrieval unavailable: {reason}",
                     request.planning.retrieval_strategy.label()
@@ -272,7 +272,7 @@ impl ContextGatherer for SiftDirectGathererAdapter {
         let latest_progress_for_task = Arc::clone(&latest_progress);
         let search_handle = tokio::task::spawn_blocking(move || {
             let started_at = Instant::now();
-            let adapter = SiftDirectGathererAdapter {
+            let adapter = SiftDirectRetrievalAdapter {
                 workspace_root,
                 sift,
                 verbose: AtomicU8::new(verbose),
@@ -469,11 +469,11 @@ fn strip_ansi_sequences(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::SiftDirectGathererAdapter;
+    use super::SiftDirectRetrievalAdapter;
     use crate::domain::model::{TurnEvent, TurnEventSink};
     use crate::domain::ports::{
-        ContextGatherRequest, ContextGatherer, EvidenceBudget, GathererCapability, PlannerConfig,
-        RetrievalMode, RetrievalStrategy,
+        ContextGatherRequest, EvidenceBudget, PlannerConfig, RetrievalCapability, RetrievalMode,
+        RetrievalProvider, RetrievalStrategy,
     };
     use crate::infrastructure::sift_cache::TEST_SIFT_ENV_LOCK;
     use std::sync::{Arc, Mutex};
@@ -497,22 +497,22 @@ mod tests {
         }
     }
 
-    fn wait_for_strategy_ready(adapter: &SiftDirectGathererAdapter, strategy: RetrievalStrategy) {
+    fn wait_for_strategy_ready(adapter: &SiftDirectRetrievalAdapter, strategy: RetrievalStrategy) {
         let planning = PlannerConfig::default().with_retrieval_strategy(strategy);
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match adapter.capability_for_planning(&planning) {
-                GathererCapability::Available => return,
-                GathererCapability::Warming { .. } if Instant::now() < deadline => {
+                RetrievalCapability::Available => return,
+                RetrievalCapability::Warming { .. } if Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(25));
                 }
-                GathererCapability::Unsupported { reason } => {
+                RetrievalCapability::Unsupported { reason } => {
                     panic!("direct gatherer warmup failed: {reason}");
                 }
-                GathererCapability::HarnessRequired { reason } => {
+                RetrievalCapability::HarnessRequired { reason } => {
                     panic!("unexpected harness requirement during warmup: {reason}");
                 }
-                GathererCapability::Warming { reason } => {
+                RetrievalCapability::Warming { reason } => {
                     panic!("direct gatherer warmup timed out: {reason}");
                 }
             }
@@ -529,7 +529,7 @@ mod tests {
         )
         .expect("write alpha");
 
-        let adapter = SiftDirectGathererAdapter::new(workspace.path());
+        let adapter = SiftDirectRetrievalAdapter::new(workspace.path());
         wait_for_strategy_ready(&adapter, RetrievalStrategy::Lexical);
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let result = runtime
@@ -541,7 +541,7 @@ mod tests {
             )))
             .expect("gather result");
 
-        assert_eq!(adapter.capability(), GathererCapability::Available);
+        assert_eq!(adapter.capability(), RetrievalCapability::Available);
         let bundle = result.evidence_bundle.expect("bundle");
         let planner = bundle.planner.expect("planner metadata");
         assert_eq!(planner.mode, RetrievalMode::Linear);
@@ -566,7 +566,7 @@ mod tests {
         )
         .expect("write beta");
 
-        let adapter = SiftDirectGathererAdapter::new(workspace.path());
+        let adapter = SiftDirectRetrievalAdapter::new(workspace.path());
         wait_for_strategy_ready(&adapter, RetrievalStrategy::Vector);
         let request = ContextGatherRequest::new(
             "runtime details",
@@ -609,7 +609,7 @@ mod tests {
         )
         .expect("write alpha");
 
-        let adapter = SiftDirectGathererAdapter::new(workspace.path());
+        let adapter = SiftDirectRetrievalAdapter::new(workspace.path());
         wait_for_strategy_ready(&adapter, RetrievalStrategy::Lexical);
         let sink = Arc::new(RecordingSink::default());
         adapter.set_event_sink(Some(sink.clone() as Arc<dyn TurnEventSink>));

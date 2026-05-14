@@ -7,13 +7,13 @@ mod execution_contract;
 mod execution_policy;
 mod external_capability;
 mod external_capability_execution;
+mod final_rendering;
 mod harness_capability_posture;
 mod planner_action_execution;
 pub mod planner_action_schema;
 mod planner_loop;
 pub mod read_model;
 mod runtime_posture_projection;
-mod synthesis;
 mod turn;
 mod worker_runtime;
 
@@ -24,7 +24,7 @@ pub use self::deliberation::{
 pub use self::evals::{EvalRunner, recursive_harness_eval_corpus};
 use self::execution_contract::{
     ExecutionContractContext, ExecutionContractService, format_external_capability_catalog_entry,
-    format_gatherer_capability, gatherer_readiness_label,
+    format_retrieval_capability, retrieval_readiness_label,
 };
 pub use self::execution_policy::{
     ExecutionPolicyDecisionFixture, ExecutionPolicyEvaluator,
@@ -104,20 +104,20 @@ use crate::domain::model::{
     WorkerArtifactRecord, WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleResult,
 };
 use crate::domain::ports::{
-    ContextGatherRequest, ContextGatherer, ContextResolver, EntityLookupMode,
-    EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest, EntityResolver,
-    EvidenceBudget, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker, GathererCapability,
-    GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
-    InitialEditInstruction, InterpretationContext, InterpretationProcedure,
-    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
-    ModelRegistry, NormalizedEntityHint, OperatorMemory, OperatorMemoryDocument, PlannerAction,
-    PlannerBudget, PlannerCapability, PlannerConfig, PlannerExecutionContract, PlannerLoopState,
-    PlannerRequest, PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
-    RecursivePlanner, RecursivePlannerDecision, RetainedEvidence, RetrievalMode, RetrievalStrategy,
-    RetrieverOption, SpecialistBrainRequest, SynthesisHandoff, SynthesizerEngine,
-    ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability, TraceSessionContextQuery,
-    WorkspaceAction, WorkspaceActionExecutionFrame, WorkspaceActionExecutor,
-    WorkspaceCapabilitySurface,
+    ActionSelectionEngine, ActionSelectionEngineDecision, ContextGatherRequest, ContextResolver,
+    EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
+    EntityResolver, EvidenceBudget, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker,
+    FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain, GroundingRequirement,
+    InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
+    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
+    InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint, OperatorMemory,
+    OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
+    PlannerExecutionContract, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
+    RetrievalCapability, RetrievalMode, RetrievalProvider, RetrievalStrategy, RetrieverOption,
+    SpecialistBrainRequest, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
+    TraceSessionContextQuery, WorkspaceAction, WorkspaceActionExecutionFrame,
+    WorkspaceActionExecutor, WorkspaceCapabilitySurface,
 };
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
@@ -130,25 +130,25 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
-/// Factory that constructs a synthesizer engine for a given model ID.
-pub type SynthesizerFactory =
-    dyn Fn(&Path, &PreparedModelClient) -> Result<Arc<dyn SynthesizerEngine>> + Send + Sync;
+/// Factory that constructs a final-rendering engine for a given model ID.
+pub type FinalRendererFactory =
+    dyn Fn(&Path, &PreparedModelClient) -> Result<Arc<dyn FinalRenderingEngine>> + Send + Sync;
 
-/// Factory that constructs a recursive planner for a given model ID.
-pub type PlannerFactory =
-    dyn Fn(&Path, &PreparedModelClient) -> Result<Arc<dyn RecursivePlanner>> + Send + Sync;
+/// Factory that constructs an action-selection engine for a given model ID.
+pub type ActionSelectorFactory =
+    dyn Fn(&Path, &PreparedModelClient) -> Result<Arc<dyn ActionSelectionEngine>> + Send + Sync;
 
-/// Factory that constructs an optional gatherer from runtime configuration.
+/// Factory that constructs an optional retrieval provider from runtime configuration.
 ///
 /// Arguments: `(config, workspace_root, verbose, gatherer_model_paths)`.
 /// `gatherer_model_paths` is retained for adapter compatibility and is no
 /// longer populated by the turn runtime.
-pub type GathererFactory = dyn Fn(
+pub type RetrievalProviderFactory = dyn Fn(
         &TurnRuntimeConfig,
         &Path,
         u8,
         Option<ModelPaths>,
-    ) -> Result<Option<(PreparedRetrievalProvider, Arc<dyn ContextGatherer>)>>
+    ) -> Result<Option<(PreparedRetrievalProvider, Arc<dyn RetrievalProvider>)>>
     + Send
     + Sync;
 
@@ -156,9 +156,9 @@ pub type GathererFactory = dyn Fn(
 pub struct AgentRuntime {
     workspace_root: PathBuf,
     operator_memory: Arc<dyn OperatorMemory>,
-    synthesizer_factory: Box<SynthesizerFactory>,
-    planner_factory: Box<PlannerFactory>,
-    gatherer_factory: Box<GathererFactory>,
+    final_renderer_factory: Box<FinalRendererFactory>,
+    action_selector_factory: Box<ActionSelectorFactory>,
+    retrieval_provider_factory: Box<RetrievalProviderFactory>,
     entity_resolver: Arc<dyn EntityResolver>,
     runtime: RwLock<Option<ActiveRuntimeState>>,
     verbose: AtomicU8,
@@ -335,7 +335,7 @@ pub struct PreparedRetrievalProvider {
 pub struct PreparedTurnRuntime {
     pub planner: PreparedModelClient,
     pub synthesizer: PreparedModelClient,
-    pub gatherer: Option<PreparedRetrievalProvider>,
+    pub retrieval_provider: Option<PreparedRetrievalProvider>,
 }
 
 impl PreparedTurnRuntime {
@@ -359,9 +359,9 @@ impl PreparedTurnRuntime {
 
 struct ActiveRuntimeState {
     prepared: PreparedTurnRuntime,
-    planner_engine: Arc<dyn RecursivePlanner>,
-    synthesizer_engine: Arc<dyn SynthesizerEngine>,
-    gatherer: Option<Arc<dyn ContextGatherer>>,
+    action_selector: Arc<dyn ActionSelectionEngine>,
+    final_renderer: Arc<dyn FinalRenderingEngine>,
+    retrieval_provider: Option<Arc<dyn RetrievalProvider>>,
 }
 
 struct ActiveTurnGuard {
@@ -384,8 +384,8 @@ impl Drop for ActiveTurnGuard {
 
 struct PlannerLoopContext {
     prepared: PreparedTurnRuntime,
-    planner_engine: Arc<dyn RecursivePlanner>,
-    gatherer: Option<Arc<dyn ContextGatherer>>,
+    action_selector: Arc<dyn ActionSelectionEngine>,
+    retrieval_provider: Option<Arc<dyn RetrievalProvider>>,
     resolver: Arc<dyn ContextResolver>,
     entity_resolver: Arc<dyn EntityResolver>,
     workspace_capability_surface: WorkspaceCapabilitySurface,
@@ -1677,8 +1677,8 @@ fn fallback_signal_details(
 }
 
 fn format_steering_review_fallback_reason(
-    decision: &RecursivePlannerDecision,
-    reviewed: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
+    reviewed: &ActionSelectionEngineDecision,
 ) -> String {
     let original_summary = decision.action.summary();
     let reviewed_summary = reviewed.action.summary();
@@ -1967,11 +1967,11 @@ fn render_turn_event(event: &TurnEvent) -> String {
         } => {
             format!("• Checked planner capability\n  └ {provider}: {capability}")
         }
-        TurnEvent::GathererCapability {
+        TurnEvent::RetrievalCapability {
             provider,
             capability,
         } => {
-            format!("• Checked gatherer capability\n  └ {provider}: {capability}")
+            format!("• Checked retrieval provider capability\n  └ {provider}: {capability}")
         }
         TurnEvent::PlannerActionSelected {
             sequence,
@@ -2307,18 +2307,18 @@ impl AgentRuntime {
         workspace_root: impl Into<PathBuf>,
         registry: Arc<dyn ModelRegistry>,
         operator_memory: Arc<dyn OperatorMemory>,
-        synthesizer_factory: Box<SynthesizerFactory>,
-        planner_factory: Box<PlannerFactory>,
-        gatherer_factory: Box<GathererFactory>,
+        final_renderer_factory: Box<FinalRendererFactory>,
+        action_selector_factory: Box<ActionSelectorFactory>,
+        retrieval_provider_factory: Box<RetrievalProviderFactory>,
     ) -> Self {
         let workspace_root = workspace_root.into();
         Self::with_trace_recorder(
             workspace_root.clone(),
             registry,
             operator_memory,
-            synthesizer_factory,
-            planner_factory,
-            gatherer_factory,
+            final_renderer_factory,
+            action_selector_factory,
+            retrieval_provider_factory,
             default_trace_recorder_for_workspace(&workspace_root),
         )
     }
@@ -2327,9 +2327,9 @@ impl AgentRuntime {
         workspace_root: impl Into<PathBuf>,
         _registry: Arc<dyn ModelRegistry>,
         operator_memory: Arc<dyn OperatorMemory>,
-        synthesizer_factory: Box<SynthesizerFactory>,
-        planner_factory: Box<PlannerFactory>,
-        gatherer_factory: Box<GathererFactory>,
+        final_renderer_factory: Box<FinalRendererFactory>,
+        action_selector_factory: Box<ActionSelectorFactory>,
+        retrieval_provider_factory: Box<RetrievalProviderFactory>,
         trace_recorder: Arc<dyn TraceRecorder>,
     ) -> Self {
         let workspace_root = workspace_root.into();
@@ -2343,9 +2343,9 @@ impl AgentRuntime {
         Self {
             workspace_root,
             operator_memory,
-            synthesizer_factory,
-            planner_factory,
-            gatherer_factory,
+            final_renderer_factory,
+            action_selector_factory,
+            retrieval_provider_factory,
             entity_resolver: Arc::new(WorkspaceEntityResolver::new()),
             runtime: RwLock::new(None),
             verbose: AtomicU8::new(0),
@@ -2445,7 +2445,7 @@ impl AgentRuntime {
 
     pub fn planner_execution_contract(
         &self,
-        gatherer: Option<&Arc<dyn ContextGatherer>>,
+        retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
         collaboration: &CollaborationModeResult,
         instruction_frame: Option<&InstructionFrame>,
         grounding: Option<&GroundingRequirement>,
@@ -2461,7 +2461,8 @@ impl AgentRuntime {
                 execution_hands: &execution_hands,
                 governance_profile: governance_profile.as_ref(),
                 external_capabilities: &external_capabilities,
-                gatherer: gatherer.map(|gatherer| gatherer.as_ref()),
+                retrieval_provider: retrieval_provider
+                    .map(|retrieval_provider| retrieval_provider.as_ref()),
                 collaboration,
                 instruction_frame,
                 grounding,
@@ -2629,9 +2630,9 @@ impl AgentRuntime {
     fn recent_turn_summaries(
         &self,
         session: &ConversationSession,
-        synthesizer_engine: &dyn SynthesizerEngine,
+        final_renderer: &dyn FinalRenderingEngine,
     ) -> Result<Vec<String>> {
-        synthesis::recent_turn_summaries(self, session, synthesizer_engine)
+        final_rendering::recent_turn_summaries(self, session, final_renderer)
     }
 
     fn persist_prompt_history(&self, prompt: &str) {
@@ -2663,7 +2664,14 @@ impl AgentRuntime {
         prompt: &str,
         response: &AuthoredResponse,
     ) -> String {
-        synthesis::finalize_turn_response(self, trace, session, active_thread, prompt, response)
+        final_rendering::finalize_turn_response(
+            self,
+            trace,
+            session,
+            active_thread,
+            prompt,
+            response,
+        )
     }
 
     async fn execute_planner_gather_step(
@@ -2688,7 +2696,7 @@ impl AgentRuntime {
             unavailable_label,
             missing_backend_message,
         } = spec;
-        let Some(gatherer) = context.gatherer.as_ref() else {
+        let Some(retrieval_provider) = context.retrieval_provider.as_ref() else {
             return missing_backend_message.to_string();
         };
         let planning = PlannerConfig::default()
@@ -2697,15 +2705,15 @@ impl AgentRuntime {
             .with_retrievers(retrievers)
             .with_profile(context.prepared.harness_profile().active_profile_id())
             .with_step_limit(1);
-        let capability = gatherer.capability_for_planning(&planning);
+        let capability = retrieval_provider.capability_for_planning(&planning);
 
-        trace.emit(TurnEvent::GathererCapability {
+        trace.emit(TurnEvent::RetrievalCapability {
             provider: gatherer_provider.to_string(),
-            capability: format_gatherer_capability(&capability),
+            capability: format_retrieval_capability(&capability),
         });
 
         match capability {
-            GathererCapability::Available => {
+            RetrievalCapability::Available => {
                 let request = ContextGatherRequest::new(
                     query.clone(),
                     self.workspace_root.clone(),
@@ -2722,8 +2730,8 @@ impl AgentRuntime {
                     )
                     .await,
                 );
-                gatherer.set_event_sink(Some(trace.clone() as Arc<dyn TurnEventSink>));
-                match gatherer.gather_context(&request).await {
+                retrieval_provider.set_event_sink(Some(trace.clone() as Arc<dyn TurnEventSink>));
+                match retrieval_provider.gather_context(&request).await {
                     Ok(result) => {
                         let bundle = result.evidence_bundle;
                         if let Some(bundle) = bundle.as_ref() {
@@ -2765,9 +2773,9 @@ impl AgentRuntime {
                     Err(err) => format!("{failure_label}: {err:#}"),
                 }
             }
-            GathererCapability::Warming { reason }
-            | GathererCapability::Unsupported { reason }
-            | GathererCapability::HarnessRequired { reason } => {
+            RetrievalCapability::Warming { reason }
+            | RetrievalCapability::Unsupported { reason }
+            | RetrievalCapability::HarnessRequired { reason } => {
                 format!("{unavailable_label}: {reason}")
             }
         }
@@ -3018,7 +3026,7 @@ impl AgentRuntime {
         );
 
         let gatherer_model_paths = None;
-        let (prepared_gatherer, gatherer) = match (self.gatherer_factory)(
+        let (prepared_gatherer, retrieval_provider) = match (self.retrieval_provider_factory)(
             config,
             &self.workspace_root,
             self.verbose.load(Ordering::Relaxed),
@@ -3031,7 +3039,7 @@ impl AgentRuntime {
         let prepared = PreparedTurnRuntime {
             planner,
             synthesizer,
-            gatherer: prepared_gatherer,
+            retrieval_provider: prepared_gatherer,
         };
         self.execution_hand_registry().set_governance_profile(
             prepared
@@ -3041,21 +3049,22 @@ impl AgentRuntime {
         );
 
         let verbose = self.verbose.load(Ordering::Relaxed);
-        let engine = (self.synthesizer_factory)(&self.workspace_root, &prepared.synthesizer)?;
+        let engine = (self.final_renderer_factory)(&self.workspace_root, &prepared.synthesizer)?;
         engine.set_verbose(verbose);
-        let planner_engine = (self.planner_factory)(&self.workspace_root, &prepared.planner)?;
+        let action_selector =
+            (self.action_selector_factory)(&self.workspace_root, &prepared.planner)?;
 
         *self.runtime.write().await = Some(ActiveRuntimeState {
             prepared: prepared.clone(),
-            planner_engine,
-            synthesizer_engine: engine,
-            gatherer,
+            action_selector,
+            final_renderer: engine,
+            retrieval_provider,
         });
 
         Ok(prepared)
     }
 
-    /// Process a single prompt using the prepared synthesizer lane.
+    /// Process a single prompt using the prepared turn runtime.
     pub async fn process_prompt(&self, prompt: &str) -> Result<String> {
         turn::process_prompt(self, prompt).await
     }
@@ -3099,7 +3108,7 @@ impl AgentRuntime {
         prompt: &str,
         interpretation: &InterpretationContext,
         recent_turns: &[String],
-        gatherer: Option<&Arc<dyn ContextGatherer>>,
+        retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
         decision: &InitialActionDecision,
         trace: &StructuredTurnTrace,
     ) -> Result<Option<InitialActionDecision>> {
@@ -3139,9 +3148,9 @@ impl AgentRuntime {
             Some(EntityResolutionOutcome::Resolved { .. })
         ) {
             seeded_candidates.clone()
-        } else if let Some(gatherer) = gatherer {
+        } else if let Some(retrieval_provider) = retrieval_provider {
             rerank_known_edit_candidates_with_vector_lookup(
-                gatherer,
+                retrieval_provider,
                 &self.workspace_root,
                 prompt,
                 interpretation,
@@ -3260,7 +3269,7 @@ impl AgentRuntime {
                 let interpretation = self
                     .derive_interpretation_context(
                         &candidate.prompt,
-                        context.planner_engine.as_ref(),
+                        context.action_selector.as_ref(),
                         trace.clone() as Arc<dyn TurnEventSink>,
                     )
                     .await;
@@ -3280,7 +3289,7 @@ impl AgentRuntime {
                 );
 
                 let decision = context
-                    .planner_engine
+                    .action_selector
                     .select_thread_decision(
                         &thread_request,
                         trace.clone() as Arc<dyn TurnEventSink>,
@@ -3382,7 +3391,7 @@ impl AgentRuntime {
     async fn derive_interpretation_context(
         &self,
         prompt: &str,
-        planner: &dyn RecursivePlanner,
+        planner: &dyn ActionSelectionEngine,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> InterpretationContext {
         let request = InterpretationRequest::new(
@@ -3534,7 +3543,7 @@ impl AgentRuntime {
 
         let request = InterpretationRequest::new(prompt, self.workspace_root.clone(), documents);
         match context
-            .planner_engine
+            .action_selector
             .derive_interpretation_context(&request, trace.clone() as Arc<dyn TurnEventSink>)
             .await
         {
@@ -3556,7 +3565,7 @@ struct PromptExecutionPlan {
     intent: TurnIntent,
     path: PromptExecutionPath,
     route_summary: String,
-    initial_planner_decision: Option<RecursivePlannerDecision>,
+    initial_planner_decision: Option<ActionSelectionEngineDecision>,
     direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
@@ -3615,7 +3624,7 @@ fn fallback_execution_plan(prepared: &PreparedTurnRuntime) -> PromptExecutionPla
         intent: TurnIntent::DirectResponse,
         path: PromptExecutionPath::SynthesizerOnly,
         route_summary: format!(
-            "planner lane '{}' is unavailable, so the turn will fall back to synthesizer lane '{}' for a direct response",
+            "action-selection client '{}' is unavailable, so the turn will fall back to final-rendering client '{}' for a direct response",
             prepared.planner.model_id, prepared.synthesizer.model_id
         ),
         initial_planner_decision: None,
@@ -4161,7 +4170,7 @@ fn execution_plan_from_initial_action(
                     .to_string()
             } else {
                 format!(
-                    "model selected a direct response; recursive agent loop will terminate at step zero before synthesizer lane '{}'",
+                    "model selected a direct response; recursive agent loop will terminate at step zero before final-rendering client '{}'",
                     prepared.synthesizer.model_id
                 )
             };
@@ -4170,7 +4179,7 @@ fn execution_plan_from_initial_action(
                 intent: TurnIntent::DirectResponse,
                 path: PromptExecutionPath::PlannerThenSynthesize,
                 route_summary,
-                initial_planner_decision: Some(RecursivePlannerDecision {
+                initial_planner_decision: Some(ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "answer".to_string(),
                     },
@@ -4194,7 +4203,7 @@ fn execution_plan_from_initial_action(
                 )
             } else {
                 format!(
-                    "model selected stop ({reason}); recursive agent loop will terminate at step zero before synthesizer lane '{}'",
+                    "model selected stop ({reason}); recursive agent loop will terminate at step zero before final-rendering client '{}'",
                     prepared.synthesizer.model_id
                 )
             };
@@ -4203,7 +4212,7 @@ fn execution_plan_from_initial_action(
                 intent: TurnIntent::DirectResponse,
                 path: PromptExecutionPath::PlannerThenSynthesize,
                 route_summary,
-                initial_planner_decision: Some(RecursivePlannerDecision {
+                initial_planner_decision: Some(ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: reason.clone(),
                     },
@@ -4223,18 +4232,18 @@ fn execution_plan_from_initial_action(
             let planner_action = resource_action
                 .as_planner_action()
                 .expect("resource action must map to planner action");
-            let route_summary = if let Some(gatherer_lane) = &prepared.gatherer {
+            let route_summary = if let Some(retrieval_provider) = &prepared.retrieval_provider {
                 format!(
-                    "model selected initial planner action {}; turn will use planner lane '{}' with gatherer backend '{}' ({:?}) before synthesizer lane '{}'",
+                    "model selected initial planner action {}; turn will use action-selection client '{}' with retrieval provider '{}' ({:?}) before final-rendering client '{}'",
                     planner_action.summary(),
                     prepared.planner.model_id,
-                    gatherer_lane.label,
-                    gatherer_lane.provider,
+                    retrieval_provider.label,
+                    retrieval_provider.provider,
                     prepared.synthesizer.model_id
                 )
             } else {
                 format!(
-                    "model selected initial planner action {}; turn will use planner lane '{}' and synthesizer lane '{}' with no dedicated gatherer backend configured",
+                    "model selected initial planner action {}; turn will use action-selection client '{}' and final-rendering client '{}' with no dedicated retrieval provider configured",
                     planner_action.summary(),
                     prepared.planner.model_id,
                     prepared.synthesizer.model_id
@@ -4245,7 +4254,7 @@ fn execution_plan_from_initial_action(
                 intent: TurnIntent::Planned,
                 path: PromptExecutionPath::PlannerThenSynthesize,
                 route_summary,
-                initial_planner_decision: Some(RecursivePlannerDecision {
+                initial_planner_decision: Some(ActionSelectionEngineDecision {
                     action: planner_action,
                     rationale,
                     answer: None,
@@ -4338,8 +4347,8 @@ fn sanitize_initial_action_decision_for_collaboration(
 
 fn sanitize_recursive_planner_decision_for_collaboration(
     collaboration: &CollaborationModeResult,
-    mut decision: RecursivePlannerDecision,
-) -> RecursivePlannerDecision {
+    mut decision: ActionSelectionEngineDecision,
+) -> ActionSelectionEngineDecision {
     decision.edit =
         sanitize_initial_edit_instruction_for_collaboration(collaboration, decision.edit);
     decision
@@ -4480,39 +4489,39 @@ fn render_structured_clarification_request(
 }
 
 fn planner_runtime_notes(
-    gatherer: Option<&Arc<dyn ContextGatherer>>,
+    retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
     specialist_notes: &[String],
     collaboration: &CollaborationModeResult,
 ) -> Vec<String> {
     let mut notes = collaboration_runtime_notes(collaboration);
     notes.extend(specialist_notes.iter().cloned());
-    let Some(gatherer) = gatherer else {
+    let Some(retrieval_provider) = retrieval_provider else {
         return notes;
     };
 
-    let lexical = gatherer.capability_for_planning(
+    let lexical = retrieval_provider.capability_for_planning(
         &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Lexical),
     );
-    let vector = gatherer.capability_for_planning(
+    let vector = retrieval_provider.capability_for_planning(
         &PlannerConfig::default().with_retrieval_strategy(RetrievalStrategy::Vector),
     );
 
-    if matches!(lexical, GathererCapability::Available)
-        && matches!(vector, GathererCapability::Available)
+    if matches!(lexical, RetrievalCapability::Available)
+        && matches!(vector, RetrievalCapability::Available)
     {
         return notes;
     }
 
     let guidance = match (&lexical, &vector) {
-        (GathererCapability::Available, GathererCapability::Warming { .. }) => {
+        (RetrievalCapability::Available, RetrievalCapability::Warming { .. }) => {
             "Prefer bm25 if search is needed immediately; avoid vector until warmup completes."
                 .to_string()
         }
-        (GathererCapability::Warming { .. }, GathererCapability::Available) => {
+        (RetrievalCapability::Warming { .. }, RetrievalCapability::Available) => {
             "Prefer vector if semantic retrieval is already warm; avoid bm25 until warmup completes."
                 .to_string()
         }
-        (GathererCapability::Warming { .. }, GathererCapability::Warming { .. }) => {
+        (RetrievalCapability::Warming { .. }, RetrievalCapability::Warming { .. }) => {
             "Avoid `search` or `refine` until the requested strategy is ready. Prefer `list_files`, `read`, or `inspect` for now."
                 .to_string()
         }
@@ -4524,8 +4533,8 @@ fn planner_runtime_notes(
 
     notes.push(format!(
         "Workspace retrieval readiness: bm25={}, vector={}. {}",
-        gatherer_readiness_label(&lexical),
-        gatherer_readiness_label(&vector),
+        retrieval_readiness_label(&lexical),
+        retrieval_readiness_label(&vector),
         guidance
     ));
     notes
@@ -4948,7 +4957,7 @@ fn known_edit_bootstrap_candidates(
 }
 
 async fn rerank_known_edit_candidates_with_vector_lookup(
-    gatherer: &Arc<dyn ContextGatherer>,
+    retrieval_provider: &Arc<dyn RetrievalProvider>,
     workspace_root: &Path,
     prompt: &str,
     interpretation: &InterpretationContext,
@@ -4961,8 +4970,8 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
         .with_retrieval_strategy(RetrievalStrategy::Vector)
         .with_step_limit(1);
     if !matches!(
-        gatherer.capability_for_planning(&planning),
-        GathererCapability::Available
+        retrieval_provider.capability_for_planning(&planning),
+        RetrievalCapability::Available
     ) {
         return candidates.to_vec();
     }
@@ -4986,7 +4995,7 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
     .with_planning(planning)
     .with_prior_context(prior_context);
 
-    let Ok(result) = gatherer.gather_context(&request).await else {
+    let Ok(result) = retrieval_provider.gather_context(&request).await else {
         return candidates.to_vec();
     };
 
@@ -5093,9 +5102,9 @@ async fn review_decision_under_signals(
     context: &PlannerLoopContext,
     budget: &PlannerBudget,
     loop_state: &PlannerLoopState,
-    decision: RecursivePlannerDecision,
+    decision: ActionSelectionEngineDecision,
     frame: DecisionReviewFrame<'_>,
-) -> Result<RecursivePlannerDecision> {
+) -> Result<ActionSelectionEngineDecision> {
     let mut review_loop_state = loop_state.clone();
     sync_deliberation_signal_note(&mut review_loop_state, frame.deliberation_signals);
     if context.initial_edit.known_edit {
@@ -5144,7 +5153,7 @@ async fn review_decision_under_signals(
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
     .with_runtime_notes(planner_runtime_notes(
-        context.gatherer.as_ref(),
+        context.retrieval_provider.as_ref(),
         &context.specialist_runtime_notes,
         &context.collaboration,
     ))
@@ -5154,7 +5163,7 @@ async fn review_decision_under_signals(
             execution_hands: &context.execution_hands,
             governance_profile: context.governance_profile.as_ref(),
             external_capabilities: &context.external_capabilities,
-            gatherer: context.gatherer.as_deref(),
+            retrieval_provider: context.retrieval_provider.as_deref(),
             collaboration: &context.collaboration,
             instruction_frame: context.instruction_frame.as_ref(),
             grounding: context.grounding.as_ref(),
@@ -5165,7 +5174,7 @@ async fn review_decision_under_signals(
     .with_entity_resolver(context.entity_resolver.clone());
 
     let reviewed = context
-        .planner_engine
+        .action_selector
         .select_next_action(&request, frame.trace.clone() as Arc<dyn TurnEventSink>)
         .await?;
 
@@ -5187,7 +5196,7 @@ async fn review_decision_under_signals(
 fn collect_steering_review_notes(
     context: &PlannerLoopContext,
     loop_state: &PlannerLoopState,
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     workspace_root: &Path,
     deliberation_signals: &DeliberationSignals,
 ) -> Vec<SteeringReviewNote> {
@@ -5475,7 +5484,7 @@ fn sync_deliberation_signal_note(
 
 fn should_apply_deliberation_review(
     deliberation_signals: &DeliberationSignals,
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
 ) -> bool {
     if continuation_requires_tool_follow_up(deliberation_signals)
         && matches!(
@@ -5492,7 +5501,7 @@ fn should_apply_deliberation_review(
 }
 
 fn format_deliberation_review_note(
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     deliberation_signals: &DeliberationSignals,
 ) -> String {
     let mut lines = vec![
@@ -5524,7 +5533,7 @@ fn format_deliberation_review_note(
 
 fn should_apply_execution_review(
     loop_state: &PlannerLoopState,
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     likely_targets: &[String],
 ) -> bool {
     if decision_is_exact_edit(&decision.action) {
@@ -5566,7 +5575,7 @@ fn normalize_candidate_files(
 }
 
 fn format_premise_challenge_review_note(
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     loop_state: &PlannerLoopState,
 ) -> String {
     let mut lines = vec![
@@ -5596,7 +5605,7 @@ struct WorkspaceEditorPressure {
 
 fn workspace_editor_pressure(
     loop_state: &PlannerLoopState,
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     likely_targets: &[String],
 ) -> WorkspaceEditorPressure {
     let read_counts = prior_read_counts(loop_state);
@@ -5670,7 +5679,7 @@ fn git_commit_pressure(loop_state: &PlannerLoopState) -> GitCommitPressure {
 
 fn should_apply_commit_review(
     loop_state: &PlannerLoopState,
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
 ) -> bool {
     if decision_is_git_commit(&decision.action) {
         return false;
@@ -5690,7 +5699,7 @@ fn should_apply_commit_review(
 }
 
 fn format_commit_bias_review_note(
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     pressure: GitCommitPressure,
 ) -> String {
     let mut lines = vec![
@@ -5866,7 +5875,7 @@ fn unresolved_target_mutation_boundary(
 }
 
 fn format_action_bias_review_note(
-    decision: &RecursivePlannerDecision,
+    decision: &ActionSelectionEngineDecision,
     likely_targets: &[String],
     pressure: WorkspaceEditorPressure,
     resolution: Option<&EntityResolutionOutcome>,
@@ -5922,7 +5931,7 @@ fn format_action_bias_review_note(
     lines.join("\n")
 }
 
-fn steering_review_failed_closed(decision: &RecursivePlannerDecision) -> bool {
+fn steering_review_failed_closed(decision: &ActionSelectionEngineDecision) -> bool {
     matches!(
         decision.action,
         PlannerAction::Stop { ref reason }
@@ -5932,7 +5941,7 @@ fn steering_review_failed_closed(decision: &RecursivePlannerDecision) -> bool {
 
 fn steering_review_stage(
     notes: &[SteeringReviewNote],
-    reviewed: &RecursivePlannerDecision,
+    reviewed: &ActionSelectionEngineDecision,
 ) -> &'static str {
     if decision_targets_file(&reviewed.action)
         && notes
@@ -6987,18 +6996,19 @@ mod tests {
         TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
-        ContextGatherRequest, ContextGatherResult, ContextGatherer, EntityLookupMode,
-        EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
-        EntityResolver, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker, GroundingDomain,
+        ActionSelectionEngine, ActionSelectionEngineDecision, ContextGatherRequest,
+        ContextGatherResult, EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome,
+        EntityResolutionRequest, EntityResolver, EvidenceBundle, EvidenceItem,
+        ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain,
         GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
         InterpretationContext, InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction,
         PlannerBudget, PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus,
         PlannerGraphEpisode, PlannerLoopState, PlannerRequest, PlannerStepRecord,
-        PlannerStrategyKind, PlannerTraceMetadata, RecursivePlanner, RecursivePlannerDecision,
-        RetainedEvidence, RetrievalMode, RetrievalStrategy, RetrieverOption, SynthesisHandoff,
-        SynthesizerEngine, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
-        WorkspaceAction, WorkspaceActionCapability, WorkspaceActionExecutionFrame,
-        WorkspaceActionExecutor, WorkspaceCapabilitySurface, WorkspaceToolCapability,
+        PlannerStrategyKind, PlannerTraceMetadata, RetainedEvidence, RetrievalMode,
+        RetrievalProvider, RetrievalStrategy, RetrieverOption, ThreadDecisionRequest,
+        TraceRecorder, TraceRecorderCapability, WorkspaceAction, WorkspaceActionCapability,
+        WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceCapabilitySurface,
+        WorkspaceToolCapability,
     };
     use crate::infrastructure::adapters::NoopContextResolver;
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
@@ -7024,7 +7034,7 @@ mod tests {
             operator_memory,
             Box::new(|_, _| Err(anyhow!("synthesizer factory not used in this test"))),
             Box::new(|_, _| Err(anyhow!("planner factory not used in this test"))),
-            Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
+            Box::new(|_, _, _, _| Err(anyhow!("retrieval_provider factory not used in this test"))),
         )
     }
 
@@ -7039,7 +7049,7 @@ mod tests {
             operator_memory,
             Box::new(|_, _| Err(anyhow!("synthesizer factory not used in this test"))),
             Box::new(|_, _| Err(anyhow!("planner factory not used in this test"))),
-            Box::new(|_, _, _, _| Err(anyhow!("gatherer factory not used in this test"))),
+            Box::new(|_, _, _, _| Err(anyhow!("retrieval_provider factory not used in this test"))),
             recorder,
         )
     }
@@ -7066,15 +7076,15 @@ mod tests {
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
                 },
-                gatherer: None,
+                retrieval_provider: None,
             },
-            planner_engine: Arc::new(TestPlanner::new(
+            action_selector: Arc::new(TestPlanner::new(
                 initial_action_decision(InitialAction::Answer, "answer directly"),
                 Vec::new(),
                 Arc::new(Mutex::new(Vec::new())),
             )),
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
     }
 
@@ -7170,14 +7180,14 @@ mod tests {
 
     struct TestPlanner {
         initial_decision: InitialActionDecision,
-        next_decisions: Mutex<VecDeque<RecursivePlannerDecision>>,
+        next_decisions: Mutex<VecDeque<ActionSelectionEngineDecision>>,
         recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
     }
 
     impl TestPlanner {
         fn new(
             initial_decision: InitialActionDecision,
-            next_decisions: Vec<RecursivePlannerDecision>,
+            next_decisions: Vec<ActionSelectionEngineDecision>,
             recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
         ) -> Self {
             Self {
@@ -7189,7 +7199,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl RecursivePlanner for TestPlanner {
+    impl ActionSelectionEngine for TestPlanner {
         fn capability(&self) -> PlannerCapability {
             PlannerCapability::Available
         }
@@ -7235,7 +7245,7 @@ mod tests {
             &self,
             request: &PlannerRequest,
             _event_sink: Arc<dyn TurnEventSink>,
-        ) -> Result<RecursivePlannerDecision> {
+        ) -> Result<ActionSelectionEngineDecision> {
             self.recorded_requests
                 .lock()
                 .expect("recorded requests lock")
@@ -7313,7 +7323,7 @@ mod tests {
 
     struct BlockingTurnControlPlanner {
         initial_decision: InitialActionDecision,
-        next_decisions: Mutex<VecDeque<RecursivePlannerDecision>>,
+        next_decisions: Mutex<VecDeque<ActionSelectionEngineDecision>>,
         recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
         thread_decision: ThreadDecisionPlan,
         release_initial_once: Mutex<Option<Arc<tokio::sync::Notify>>>,
@@ -7322,7 +7332,7 @@ mod tests {
     impl BlockingTurnControlPlanner {
         fn new(
             initial_decision: InitialActionDecision,
-            next_decisions: Vec<RecursivePlannerDecision>,
+            next_decisions: Vec<ActionSelectionEngineDecision>,
             recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
             thread_decision: ThreadDecisionPlan,
             release_initial_once: Arc<tokio::sync::Notify>,
@@ -7338,7 +7348,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl RecursivePlanner for BlockingTurnControlPlanner {
+    impl ActionSelectionEngine for BlockingTurnControlPlanner {
         fn capability(&self) -> PlannerCapability {
             PlannerCapability::Available
         }
@@ -7392,7 +7402,7 @@ mod tests {
             &self,
             request: &PlannerRequest,
             _event_sink: Arc<dyn TurnEventSink>,
-        ) -> Result<RecursivePlannerDecision> {
+        ) -> Result<ActionSelectionEngineDecision> {
             self.recorded_requests
                 .lock()
                 .expect("recorded requests lock")
@@ -7495,9 +7505,9 @@ mod tests {
     }
 
     #[async_trait]
-    impl ContextGatherer for RecordingGatherer {
-        fn capability(&self) -> crate::domain::ports::GathererCapability {
-            crate::domain::ports::GathererCapability::Available
+    impl RetrievalProvider for RecordingGatherer {
+        fn capability(&self) -> crate::domain::ports::RetrievalCapability {
+            crate::domain::ports::RetrievalCapability::Available
         }
 
         async fn gather_context(
@@ -7506,7 +7516,7 @@ mod tests {
         ) -> Result<ContextGatherResult> {
             self.recorded_requests
                 .lock()
-                .expect("gatherer requests lock")
+                .expect("retrieval provider requests lock")
                 .push(request.clone());
             Ok(ContextGatherResult::available(self.bundle.clone()))
         }
@@ -7594,7 +7604,7 @@ mod tests {
         }
     }
 
-    impl SynthesizerEngine for StaticSynthesizer {
+    impl FinalRenderingEngine for StaticSynthesizer {
         fn set_verbose(&self, _level: u8) {}
 
         fn respond_for_turn(
@@ -7602,7 +7612,7 @@ mod tests {
             _prompt: &str,
             _turn_intent: TurnIntent,
             gathered_evidence: Option<&EvidenceBundle>,
-            _handoff: &SynthesisHandoff,
+            _handoff: &FinalRenderingHandoff,
             event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<String> {
             event_sink.emit(TurnEvent::SynthesisReady {
@@ -7636,10 +7646,10 @@ mod tests {
         executed_actions: Mutex<Vec<WorkspaceAction>>,
         gathered_summaries: Mutex<Vec<String>>,
         gathered_bundles: Mutex<Vec<EvidenceBundle>>,
-        handoffs: Mutex<Vec<SynthesisHandoff>>,
+        handoffs: Mutex<Vec<FinalRenderingHandoff>>,
     }
 
-    impl SynthesizerEngine for RecordingSynthesizer {
+    impl FinalRenderingEngine for RecordingSynthesizer {
         fn set_verbose(&self, _level: u8) {}
 
         fn respond_for_turn(
@@ -7647,7 +7657,7 @@ mod tests {
             _prompt: &str,
             _turn_intent: TurnIntent,
             gathered_evidence: Option<&EvidenceBundle>,
-            handoff: &SynthesisHandoff,
+            handoff: &FinalRenderingHandoff,
             _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<String> {
             if let Some(bundle) = gathered_evidence {
@@ -7750,8 +7760,8 @@ mod tests {
         }
     }
 
-    fn planner_decision(action: PlannerAction, rationale: &str) -> RecursivePlannerDecision {
-        RecursivePlannerDecision {
+    fn planner_decision(action: PlannerAction, rationale: &str) -> ActionSelectionEngineDecision {
+        ActionSelectionEngineDecision {
             action,
             rationale: rationale.to_string(),
             answer: None,
@@ -7775,7 +7785,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         }
     }
 
@@ -7820,14 +7830,14 @@ mod tests {
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
                 },
-                gatherer: None,
+                retrieval_provider: None,
             },
-            planner_engine: Arc::new(TestPlanner::new(
+            action_selector: Arc::new(TestPlanner::new(
                 initial_action_decision(InitialAction::Answer, "unused"),
                 Vec::new(),
                 Arc::new(Mutex::new(Vec::new())),
             )),
-            gatherer: None,
+            retrieval_provider: None,
             resolver: Arc::new(NoopContextResolver),
             entity_resolver: Arc::new(WorkspaceEntityResolver::new()),
             workspace_capability_surface: WorkspaceCapabilitySurface::default(),
@@ -7879,7 +7889,7 @@ mod tests {
                 *synthesizer_calls
                     .lock()
                     .expect("synthesizer factory calls lock") += 1;
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(move |_, lane| {
                 let _ = lane;
@@ -7888,7 +7898,7 @@ mod tests {
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::clone(&recorded_requests),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
@@ -7939,7 +7949,7 @@ mod tests {
                 *synthesizer_calls
                     .lock()
                     .expect("synthesizer factory calls lock") += 1;
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(move |_, lane| {
                 let _ = lane;
@@ -7948,7 +7958,7 @@ mod tests {
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::clone(&recorded_requests),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
@@ -7988,24 +7998,24 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelClient>));
-        let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
+        let captured_final_rendering_client = Arc::new(Mutex::new(None::<PreparedModelClient>));
+        let final_rendering_capture = Arc::clone(&captured_final_rendering_client);
         let service = AgentRuntime::new(
             workspace.path(),
             registry.clone(),
             operator_memory,
             Box::new(move |_, lane| {
-                *synthesizer_capture
+                *final_rendering_capture
                     .lock()
-                    .expect("captured synthesizer lane lock") = Some(lane.clone());
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                    .expect("captured final-rendering client lock") = Some(lane.clone());
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(move |_, _lane| {
                 Ok(Arc::new(TestPlanner::new(
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::new(Mutex::new(Vec::new())),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
@@ -8028,11 +8038,11 @@ mod tests {
             "remote providers should not resolve sift model paths"
         );
         assert_eq!(
-            captured_synthesizer_lane
+            captured_final_rendering_client
                 .lock()
-                .expect("captured synthesizer lane lock")
+                .expect("captured final-rendering client lock")
                 .clone()
-                .expect("synthesizer lane")
+                .expect("final-rendering client")
                 .provider,
             ModelProvider::Inception
         );
@@ -8043,35 +8053,37 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let registry = Arc::new(RecordingRegistry::default());
         let operator_memory = Arc::new(AgentMemory::load(workspace.path()));
-        let captured_synthesizer_lane = Arc::new(Mutex::new(None::<PreparedModelClient>));
-        let captured_planner_lane = Arc::new(Mutex::new(None::<PreparedModelClient>));
+        let captured_final_rendering_client = Arc::new(Mutex::new(None::<PreparedModelClient>));
+        let captured_action_selection_client = Arc::new(Mutex::new(None::<PreparedModelClient>));
         let captured_gatherer_input =
             Arc::new(Mutex::new(None::<(GathererProvider, Option<ModelPaths>)>));
-        let synthesizer_capture = Arc::clone(&captured_synthesizer_lane);
-        let planner_capture = Arc::clone(&captured_planner_lane);
+        let final_rendering_capture = Arc::clone(&captured_final_rendering_client);
+        let action_selection_capture = Arc::clone(&captured_action_selection_client);
         let gatherer_capture = Arc::clone(&captured_gatherer_input);
         let service = AgentRuntime::new(
             workspace.path(),
             registry.clone(),
             operator_memory,
             Box::new(move |_, lane| {
-                *synthesizer_capture
+                *final_rendering_capture
                     .lock()
-                    .expect("captured synthesizer lane lock") = Some(lane.clone());
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                    .expect("captured final-rendering client lock") = Some(lane.clone());
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(move |_, lane| {
-                *planner_capture.lock().expect("captured planner lane lock") = Some(lane.clone());
+                *action_selection_capture
+                    .lock()
+                    .expect("captured action-selection client lock") = Some(lane.clone());
                 Ok(Arc::new(TestPlanner::new(
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::new(Mutex::new(Vec::new())),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(move |config, _, _, gatherer_model_paths| {
                 *gatherer_capture
                     .lock()
-                    .expect("captured gatherer input lock") =
+                    .expect("captured retrieval provider input lock") =
                     Some((config.gatherer_provider(), gatherer_model_paths));
                 Ok(Some((
                     PreparedRetrievalProvider {
@@ -8083,7 +8095,7 @@ mod tests {
                     Arc::new(RecordingGatherer {
                         recorded_requests: Arc::new(Mutex::new(Vec::new())),
                         bundle: EvidenceBundle::new("no evidence", Vec::new()),
-                    }) as Arc<dyn ContextGatherer>,
+                    }) as Arc<dyn RetrievalProvider>,
                 )))
             }),
         );
@@ -8103,39 +8115,42 @@ mod tests {
         assert_eq!(prepared.planner.provider, ModelProvider::Openai);
         assert_eq!(prepared.planner.paths, None);
         assert_eq!(
-            prepared.gatherer.as_ref().map(|lane| lane.provider),
+            prepared
+                .retrieval_provider
+                .as_ref()
+                .map(|lane| lane.provider),
             Some(GathererProvider::SiftDirect)
         );
         assert_eq!(
             prepared
-                .gatherer
+                .retrieval_provider
                 .as_ref()
                 .and_then(|lane| lane.paths.clone()),
             None
         );
         assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
         assert_eq!(
-            captured_synthesizer_lane
+            captured_final_rendering_client
                 .lock()
-                .expect("captured synthesizer lane lock")
+                .expect("captured final-rendering client lock")
                 .as_ref()
-                .expect("synthesizer lane")
+                .expect("final-rendering client")
                 .paths,
             None
         );
         assert_eq!(
-            captured_planner_lane
+            captured_action_selection_client
                 .lock()
-                .expect("captured planner lane lock")
+                .expect("captured action-selection client lock")
                 .as_ref()
-                .expect("planner lane")
+                .expect("action-selection client")
                 .paths,
             None
         );
         assert_eq!(
             *captured_gatherer_input
                 .lock()
-                .expect("captured gatherer input lock"),
+                .expect("captured retrieval provider input lock"),
             Some((GathererProvider::SiftDirect, None))
         );
     }
@@ -8155,7 +8170,7 @@ mod tests {
             Box::new(|_, lane| {
                 assert_eq!(lane.provider, ModelProvider::Ollama);
                 assert_eq!(lane.paths, None);
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(|_, lane| {
                 assert_eq!(lane.provider, ModelProvider::Anthropic);
@@ -8164,12 +8179,12 @@ mod tests {
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::new(Mutex::new(Vec::new())),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(move |config, _, _, gatherer_model_paths| {
                 *gatherer_capture
                     .lock()
-                    .expect("captured gatherer input lock") =
+                    .expect("captured retrieval provider input lock") =
                     Some((config.gatherer_provider(), gatherer_model_paths.clone()));
                 Ok(Some((
                     PreparedRetrievalProvider {
@@ -8181,7 +8196,7 @@ mod tests {
                     Arc::new(RecordingGatherer {
                         recorded_requests: Arc::new(Mutex::new(Vec::new())),
                         bundle: EvidenceBundle::new("no evidence", Vec::new()),
-                    }) as Arc<dyn ContextGatherer>,
+                    }) as Arc<dyn RetrievalProvider>,
                 )))
             }),
         );
@@ -8199,12 +8214,15 @@ mod tests {
 
         assert_eq!(registry.requested_model_ids(), Vec::<String>::new());
         assert_eq!(
-            prepared.gatherer.as_ref().map(|lane| lane.provider),
+            prepared
+                .retrieval_provider
+                .as_ref()
+                .map(|lane| lane.provider),
             Some(GathererProvider::Local)
         );
         assert_eq!(
             prepared
-                .gatherer
+                .retrieval_provider
                 .as_ref()
                 .and_then(|lane| lane.paths.clone()),
             None
@@ -8212,7 +8230,7 @@ mod tests {
         assert_eq!(
             *captured_gatherer_input
                 .lock()
-                .expect("captured gatherer input lock"),
+                .expect("captured retrieval provider input lock"),
             Some((GathererProvider::Local, None))
         );
     }
@@ -8227,14 +8245,14 @@ mod tests {
             registry,
             operator_memory,
             Box::new(|_, _lane| {
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(|_, _lane| {
                 Ok(Arc::new(TestPlanner::new(
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::new(Mutex::new(Vec::new())),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
@@ -8264,14 +8282,14 @@ mod tests {
             registry,
             operator_memory,
             Box::new(|_, _lane| {
-                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn SynthesizerEngine>)
+                Ok(Arc::new(RecordingSynthesizer::default()) as Arc<dyn FinalRenderingEngine>)
             }),
             Box::new(|_, _lane| {
                 Ok(Arc::new(TestPlanner::new(
                     initial_action_decision(InitialAction::Answer, "not used"),
                     Vec::new(),
                     Arc::new(Mutex::new(Vec::new())),
-                )) as Arc<dyn RecursivePlanner>)
+                )) as Arc<dyn ActionSelectionEngine>)
             }),
             Box::new(|_, _, _, _| Ok(None)),
         );
@@ -8308,7 +8326,7 @@ mod tests {
             "qwen-1.5b",
             Some(sample_model_paths("synth")),
         );
-        let gatherer = PreparedRetrievalProvider {
+        let retrieval_provider = PreparedRetrievalProvider {
             provider: GathererProvider::Local,
             label: "qwen-7b".to_string(),
             model_id: Some("qwen-7b".to_string()),
@@ -8317,41 +8335,41 @@ mod tests {
         let lanes = PreparedTurnRuntime {
             planner,
             synthesizer: synthesizer.clone(),
-            gatherer: Some(gatherer.clone()),
+            retrieval_provider: Some(retrieval_provider.clone()),
         };
 
         assert_eq!(lanes.default_response_client(), &synthesizer);
-        assert_eq!(lanes.gatherer.as_ref(), Some(&gatherer));
+        assert_eq!(lanes.retrieval_provider.as_ref(), Some(&retrieval_provider));
     }
 
     #[test]
     fn context1_boundary_can_be_prepared_without_local_model_paths() {
-        let gatherer = PreparedRetrievalProvider {
+        let retrieval_provider = PreparedRetrievalProvider {
             provider: GathererProvider::Context1,
             label: "context-1".to_string(),
             model_id: None,
             paths: None,
         };
 
-        assert_eq!(gatherer.provider, GathererProvider::Context1);
-        assert_eq!(gatherer.label, "context-1");
-        assert_eq!(gatherer.model_id, None);
-        assert_eq!(gatherer.paths, None);
+        assert_eq!(retrieval_provider.provider, GathererProvider::Context1);
+        assert_eq!(retrieval_provider.label, "context-1");
+        assert_eq!(retrieval_provider.model_id, None);
+        assert_eq!(retrieval_provider.paths, None);
     }
 
     #[test]
     fn sift_direct_boundary_can_be_prepared_without_local_model_paths() {
-        let gatherer = PreparedRetrievalProvider {
+        let retrieval_provider = PreparedRetrievalProvider {
             provider: GathererProvider::SiftDirect,
             label: "sift-direct".to_string(),
             model_id: None,
             paths: None,
         };
 
-        assert_eq!(gatherer.provider, GathererProvider::SiftDirect);
-        assert_eq!(gatherer.label, "sift-direct");
-        assert_eq!(gatherer.model_id, None);
-        assert_eq!(gatherer.paths, None);
+        assert_eq!(retrieval_provider.provider, GathererProvider::SiftDirect);
+        assert_eq!(retrieval_provider.label, "sift-direct");
+        assert_eq!(retrieval_provider.model_id, None);
+        assert_eq!(retrieval_provider.paths, None);
     }
 
     #[test]
@@ -8369,7 +8387,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         let plan = super::execution_plan_from_initial_action(
@@ -8407,7 +8425,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         let plan = super::execution_plan_from_initial_action(
@@ -8442,7 +8460,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedRetrievalProvider {
+            retrieval_provider: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -8483,7 +8501,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         let plan = super::execution_plan_from_initial_action(
@@ -8516,7 +8534,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         for action in [
@@ -8573,7 +8591,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         let answer_plan = super::execution_plan_from_initial_action(
@@ -8677,7 +8695,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         for action in [
@@ -8727,7 +8745,7 @@ mod tests {
             session.active_thread().thread_ref,
         ));
         let mut context = test_planner_loop_context(InitialEditInstruction::default());
-        context.planner_engine = Arc::new(TestPlanner::new(
+        context.action_selector = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
             vec![planner_decision(
                 PlannerAction::Stop {
@@ -8737,7 +8755,7 @@ mod tests {
             )],
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let initial_step = RecursivePlannerDecision {
+        let initial_step = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Read {
                     path: "src/application/mod.rs".to_string(),
@@ -8890,7 +8908,7 @@ mod tests {
         let prepared = prepared_turn_runtime_for_tests();
         let fallback = super::fallback_execution_plan(&prepared);
         assert_eq!(fallback.path, super::PromptExecutionPath::SynthesizerOnly);
-        assert!(fallback.route_summary.contains("planner lane"));
+        assert!(fallback.route_summary.contains("action-selection client"));
 
         let planning =
             super::resolve_collaboration_mode_request(Some(CollaborationModeRequest::new(
@@ -8949,7 +8967,7 @@ mod tests {
             session.active_thread().thread_ref,
         ));
         let mut context = test_planner_loop_context(InitialEditInstruction::default());
-        context.planner_engine = Arc::new(TestPlanner::new(
+        context.action_selector = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
             vec![planner_decision(
                 PlannerAction::Stop {
@@ -8966,7 +8984,7 @@ mod tests {
                 &service,
                 "Observe the loop.",
                 context,
-                Some(RecursivePlannerDecision {
+                Some(ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "src/lib.rs".to_string(),
@@ -9006,7 +9024,7 @@ mod tests {
         let notes = super::collect_steering_review_notes(
             &test_planner_loop_context(InitialEditInstruction::default()),
             &PlannerLoopState::default(),
-            &RecursivePlannerDecision {
+            &ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "answer now".to_string(),
                 },
@@ -9242,7 +9260,7 @@ mod tests {
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let invocation = ExternalCapabilityInvocation::new(
             "web.search",
@@ -9293,7 +9311,7 @@ mod tests {
                 },
                 "use the external evidence lane before answering",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "external evidence captured the answer".to_string(),
                 },
@@ -9319,9 +9337,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("look up the latest docs", sink.clone())
@@ -9413,7 +9431,7 @@ mod tests {
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let invocation = ExternalCapabilityInvocation::new(
             "web.search",
@@ -9447,7 +9465,7 @@ mod tests {
                 },
                 "use web search before answering",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "governance outcome was recorded".to_string(),
                 },
@@ -9480,9 +9498,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("look up the latest release notes", sink.clone())
@@ -9608,7 +9626,7 @@ mod tests {
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let invocation = ExternalCapabilityInvocation::new(
             "connector.app_action",
@@ -9642,7 +9660,7 @@ mod tests {
                 },
                 "probe the connector fabric before answering",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "the degraded connector state is enough evidence".to_string(),
                 },
@@ -9672,9 +9690,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -9727,7 +9745,7 @@ mod tests {
                 model_id: "gpt-5.4".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let invocation = ExternalCapabilityInvocation::new(
             "web.search",
@@ -9777,7 +9795,7 @@ mod tests {
                 },
                 "ground the answer with the external capability lane first",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "degraded external result recorded".to_string(),
                 },
@@ -9804,9 +9822,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -9893,7 +9911,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let request_log = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -9904,7 +9922,7 @@ mod tests {
             Vec::new(),
             Arc::clone(&request_log),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Hello from the planner path.".to_string(),
         ]));
         let service = test_service(workspace.path());
@@ -9914,9 +9932,9 @@ mod tests {
         let response = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Howdy", sink.clone())
@@ -9989,14 +10007,14 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Recorded response.".to_string(),
         ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -10007,9 +10025,9 @@ mod tests {
         let _reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Record this turn", sink.clone())
@@ -10092,7 +10110,7 @@ mod tests {
                 "claude-sonnet-4-20250514",
                 None,
             ),
-            gatherer: None,
+            retrieval_provider: None,
         };
         let trace = StructuredTurnTrace::new(
             Arc::new(NullTurnEventSink),
@@ -10183,7 +10201,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         trace.record_turn_start(
@@ -10365,7 +10383,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
 
         trace.record_turn_start(
@@ -10549,7 +10567,7 @@ mod tests {
 
     #[test]
     fn premise_challenge_fallback_reason_keeps_noop_review_readable() {
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "gh run list --limit 10".to_string(),
@@ -10696,15 +10714,15 @@ mod tests {
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
                 },
-                gatherer: None,
+                retrieval_provider: None,
             },
-            planner_engine: Arc::new(TestPlanner::new(
+            action_selector: Arc::new(TestPlanner::new(
                 initial_action_decision(InitialAction::Answer, "answer directly"),
                 Vec::new(),
                 Arc::clone(&planner_requests_one),
             )),
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
 
         service_one
@@ -10733,15 +10751,15 @@ mod tests {
                     model_id: "synth".to_string(),
                     paths: Some(sample_model_paths("synth")),
                 },
-                gatherer: None,
+                retrieval_provider: None,
             },
-            planner_engine: Arc::new(TestPlanner::new(
+            action_selector: Arc::new(TestPlanner::new(
                 initial_action_decision(InitialAction::Answer, "answer directly"),
                 Vec::new(),
                 Arc::clone(&planner_requests_two),
             )),
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
 
         service_two
@@ -10788,14 +10806,14 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Chamber response.".to_string(),
         ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -10806,9 +10824,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             super::turn::process_prompt_in_session_with_mode_request_and_sink(
                 &service,
@@ -10873,14 +10891,14 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Transcript response.".to_string(),
         ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -10891,9 +10909,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -10956,14 +10974,14 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Projection response.".to_string(),
         ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -10974,9 +10992,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -11144,14 +11162,14 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Projection update response.".to_string(),
         ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -11166,9 +11184,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -11255,14 +11273,14 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> =
+        let synthesizer: Arc<dyn FinalRenderingEngine> =
             Arc::new(StaticSynthesizer::new(vec!["Update response.".to_string()]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
         let service = test_service_with_recorder(workspace.path(), recorder);
@@ -11274,9 +11292,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -11304,7 +11322,7 @@ mod tests {
             citations: Vec<String>,
         }
 
-        impl SynthesizerEngine for ConvergenceSynthesizer {
+        impl FinalRenderingEngine for ConvergenceSynthesizer {
             fn set_verbose(&self, _level: u8) {}
 
             fn respond_for_turn(
@@ -11312,7 +11330,7 @@ mod tests {
                 _prompt: &str,
                 _turn_intent: TurnIntent,
                 _gathered_evidence: Option<&EvidenceBundle>,
-                _handoff: &SynthesisHandoff,
+                _handoff: &FinalRenderingHandoff,
                 event_sink: Arc<dyn TurnEventSink>,
             ) -> Result<String> {
                 event_sink.emit(TurnEvent::SynthesisReady {
@@ -11348,7 +11366,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
@@ -11358,7 +11376,7 @@ mod tests {
         let reply =
             "**Summary**\n\nProjection and replay stay aligned.\n\nSources: README.md".to_string();
         let expected = AuthoredResponse::from_plain_text(ResponseMode::GroundedAnswer, &reply);
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(ConvergenceSynthesizer {
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(ConvergenceSynthesizer {
             reply,
             citations: vec!["README.md".to_string()],
         });
@@ -11372,9 +11390,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -11451,7 +11469,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -11471,7 +11489,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::ApplyPatch {
                             patch: "*** Begin Patch\n*** Add File: src/lib.rs\n+pub fn plan_mode() {}\n*** End Patch\n"
@@ -11488,7 +11506,7 @@ mod tests {
                     grounding: None,
 
                     deliberation_state: None,                },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "change applied and verified".to_string(),
                     },
@@ -11515,9 +11533,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer as Arc<dyn SynthesizerEngine>,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer as Arc<dyn FinalRenderingEngine>,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Fix src/lib.rs and verify the result", sink.clone())
@@ -11575,7 +11593,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let release_initial = Arc::new(tokio::sync::Notify::new());
@@ -11588,7 +11606,7 @@ mod tests {
                 },
                 "read the operator contract before replying",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "steered path complete".to_string(),
                 },
@@ -11610,9 +11628,9 @@ mod tests {
 
         *service.runtime.write().await = Some(ActiveRuntimeState {
             prepared,
-            planner_engine: planner,
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            action_selector: planner,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
 
         let process = service.process_prompt_in_session_with_sink(
@@ -11710,7 +11728,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let release_initial = Arc::new(tokio::sync::Notify::new());
@@ -11734,9 +11752,9 @@ mod tests {
 
         *service.runtime.write().await = Some(ActiveRuntimeState {
             prepared,
-            planner_engine: planner,
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            action_selector: planner,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
 
         let process = service.process_prompt_in_session_with_sink(
@@ -11817,7 +11835,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let release_initial = Arc::new(tokio::sync::Notify::new());
         let planner = Arc::new(BlockingTurnControlPlanner::new(
@@ -11840,9 +11858,9 @@ mod tests {
 
         *service.runtime.write().await = Some(ActiveRuntimeState {
             prepared,
-            planner_engine: planner,
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            action_selector: planner,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
 
         let process = service.process_prompt_in_session_with_sink(
@@ -11916,7 +11934,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let release_initial = Arc::new(tokio::sync::Notify::new());
         let planner = Arc::new(BlockingTurnControlPlanner::new(
@@ -11928,7 +11946,7 @@ mod tests {
                 },
                 "read the operator contract before replying",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "child thread complete".to_string(),
                 },
@@ -11949,9 +11967,9 @@ mod tests {
 
         *service.runtime.write().await = Some(ActiveRuntimeState {
             prepared,
-            planner_engine: planner,
-            synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-            gatherer: None,
+            action_selector: planner,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
         });
 
         let process = service.process_prompt_in_session_with_sink(
@@ -12267,14 +12285,14 @@ mod tests {
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "answer directly"),
             Vec::new(),
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Forensic update response.".to_string(),
         ]));
         let recorder = Arc::new(InMemoryTraceRecorder::default());
@@ -12287,9 +12305,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -12338,7 +12356,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedRetrievalProvider {
+            retrieval_provider: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -12349,7 +12367,7 @@ mod tests {
             initial_action_decision(
                 InitialAction::Workspace {
                     action: WorkspaceAction::Search {
-                        query: "what should the recursive gatherer inspect".to_string(),
+                        query: "what should the recursive retrieval provider inspect".to_string(),
                         mode: RetrievalMode::Graph,
                         strategy: crate::domain::ports::RetrievalStrategy::Vector,
                         retrievers: Vec::new(),
@@ -12358,7 +12376,7 @@ mod tests {
                 },
                 "start with bounded recursive retrieval",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "enough graph evidence".to_string(),
                 },
@@ -12371,12 +12389,12 @@ mod tests {
             }],
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let synthesizer: Arc<dyn SynthesizerEngine> = Arc::new(StaticSynthesizer::new(vec![
+        let synthesizer: Arc<dyn FinalRenderingEngine> = Arc::new(StaticSynthesizer::new(vec![
             "Graph-backed answer from src/application/mod.rs.".to_string(),
         ]));
         let gatherer_requests = Arc::new(Mutex::new(Vec::new()));
         let gatherer_bundle = EvidenceBundle::new(
-            "Autonomous `heuristic` graph gatherer collected 2 evidence item(s) for `what should the recursive gatherer inspect` across 1 turn(s); stop reason: goal-satisfied. branches: 2, frontier: 1, active branch: branch-root.".to_string(),
+            "Autonomous `heuristic` graph retrieval provider collected 2 evidence item(s) for `what should the recursive retrieval provider inspect` across 1 turn(s); stop reason: goal-satisfied. branches: 2, frontier: 1, active branch: branch-root.".to_string(),
             vec![EvidenceItem {
                 source: "src/application/mod.rs".to_string(),
                 snippet: "Graph-mode gatherers feed the recursive harness.".to_string(),
@@ -12436,7 +12454,7 @@ mod tests {
             }),
             trace_artifact_ref: None,
         });
-        let gatherer = Arc::new(RecordingGatherer {
+        let retrieval_provider = Arc::new(RecordingGatherer {
             recorded_requests: Arc::clone(&gatherer_requests),
             bundle: gatherer_bundle,
         });
@@ -12447,9 +12465,9 @@ mod tests {
         let response = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: Some(gatherer),
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: Some(retrieval_provider),
             });
             service
                 .process_prompt_with_sink("What's next in the recursive graph?", sink.clone())
@@ -12459,7 +12477,9 @@ mod tests {
 
         assert!(!response.trim().is_empty());
         assert!(response.contains("src/application/mod.rs"));
-        let recorded_requests = gatherer_requests.lock().expect("gatherer requests");
+        let recorded_requests = gatherer_requests
+            .lock()
+            .expect("retrieval provider requests");
         assert_eq!(recorded_requests.len(), 1);
         assert_eq!(recorded_requests[0].planning.mode, RetrievalMode::Graph);
         assert_eq!(recorded_requests[0].planning.step_limit, 1);
@@ -12592,7 +12612,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "cargo test".to_string(),
@@ -12647,7 +12667,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::ListFiles {
                     pattern: Some("*openai*".to_string()),
@@ -12703,7 +12723,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Read {
                     path: "apps/web/src/runtime-shell.css".to_string(),
@@ -12763,7 +12783,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedRetrievalProvider {
+            retrieval_provider: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -12792,7 +12812,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Search {
                             query: "keep searching broadly".to_string(),
@@ -12809,7 +12829,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "src/application/mod.rs".to_string(),
@@ -12822,7 +12842,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "enough information".to_string(),
                     },
@@ -12833,7 +12853,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "enough information".to_string(),
                     },
@@ -12844,7 +12864,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "enough information".to_string(),
                     },
@@ -12855,7 +12875,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "enough information".to_string(),
                     },
@@ -12871,7 +12891,7 @@ mod tests {
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let gatherer_requests = Arc::new(Mutex::new(Vec::new()));
-        let gatherer = Arc::new(RecordingGatherer {
+        let retrieval_provider = Arc::new(RecordingGatherer {
             recorded_requests: Arc::clone(&gatherer_requests),
             bundle: EvidenceBundle::new(
                 "Found likely implementation targets.",
@@ -12898,9 +12918,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: Some(gatherer),
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: Some(retrieval_provider),
             });
             service
                 .process_prompt("Fix the action-bias behavior")
@@ -12908,7 +12928,9 @@ mod tests {
                 .expect("process prompt")
         });
 
-        let gatherer_requests = gatherer_requests.lock().expect("gatherer requests");
+        let gatherer_requests = gatherer_requests
+            .lock()
+            .expect("retrieval provider requests");
         assert_eq!(gatherer_requests.len(), 1);
         let planner_requests = request_log.lock().expect("planner request log");
         let review_request = planner_requests
@@ -12971,7 +12993,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -12989,7 +13011,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13000,7 +13022,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13011,7 +13033,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13022,7 +13044,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13044,9 +13066,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("edit the planner loop")
@@ -13158,12 +13180,12 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "provider omitted the edit envelope"),
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13174,7 +13196,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13185,7 +13207,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13196,7 +13218,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "the file was enough".to_string(),
                     },
@@ -13218,9 +13240,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt(
@@ -13295,7 +13317,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedRetrievalProvider {
+            retrieval_provider: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -13323,7 +13345,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "done".to_string(),
                     },
@@ -13334,7 +13356,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "done".to_string(),
                     },
@@ -13345,7 +13367,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "done".to_string(),
                     },
@@ -13356,7 +13378,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "done".to_string(),
                     },
@@ -13371,7 +13393,7 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
-        let gatherer = Arc::new(RecordingGatherer {
+        let retrieval_provider = Arc::new(RecordingGatherer {
             recorded_requests: Arc::new(Mutex::new(Vec::new())),
             bundle: EvidenceBundle::new(
                 "vector bootstrap ranked the file candidates".to_string(),
@@ -13390,9 +13412,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: Some(gatherer),
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: Some(retrieval_provider),
             });
             service
                 .process_prompt("edit the second implementation")
@@ -13518,7 +13540,7 @@ mod tests {
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Read {
                         path: "src/application/mod.rs".to_string(),
@@ -13538,7 +13560,7 @@ mod tests {
             candidate_files: vec!["src/application/mod.rs".to_string()],
             resolution: Some(resolution.clone()),
         });
-        context.planner_engine = planner;
+        context.action_selector = planner;
 
         let reviewed = super::review_decision_under_signals(
             "Fix the planner stream text in src/application/mod.rs",
@@ -13553,7 +13575,7 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Inspect {
                         command: "cargo test".to_string(),
@@ -13649,7 +13671,7 @@ mod tests {
                 &service,
                 "Update the planner stream text",
                 context,
-                Some(RecursivePlannerDecision {
+                Some(ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::ReplaceInFile {
                             path: "src/application/mod.rs".to_string(),
@@ -13758,7 +13780,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
@@ -13769,7 +13791,7 @@ mod tests {
                 },
                 "inspect the local file before answering",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "inspection was enough".to_string(),
                 },
@@ -13791,9 +13813,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("inspect the workspace", sink.clone())
@@ -13842,7 +13864,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
@@ -13853,7 +13875,7 @@ mod tests {
                 },
                 "stream the terminal output before stopping",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "inspection was enough".to_string(),
                 },
@@ -13874,9 +13896,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("run the shell command", sink.clone())
@@ -13958,7 +13980,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer =
             "The shell command failed; inspect the hook output and adjust the commit step instead of ending the turn."
@@ -13973,7 +13995,7 @@ mod tests {
                 },
                 "run the shell command first so the harness can reason from the exact failure",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "failure captured and next steps are clear".to_string(),
                 },
@@ -13995,9 +14017,9 @@ mod tests {
         let _reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -14058,7 +14080,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
@@ -14070,7 +14092,7 @@ mod tests {
                 },
                 "apply the requested edit",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "edit complete".to_string(),
                 },
@@ -14091,9 +14113,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("write the local file", sink.clone())
@@ -14120,7 +14142,7 @@ mod tests {
         #[derive(Default)]
         struct GovernedWriteSynthesizer;
 
-        impl SynthesizerEngine for GovernedWriteSynthesizer {
+        impl FinalRenderingEngine for GovernedWriteSynthesizer {
             fn set_verbose(&self, _level: u8) {}
 
             fn respond_for_turn(
@@ -14128,7 +14150,7 @@ mod tests {
                 _prompt: &str,
                 _turn_intent: TurnIntent,
                 _gathered_evidence: Option<&EvidenceBundle>,
-                _handoff: &SynthesisHandoff,
+                _handoff: &FinalRenderingHandoff,
                 _event_sink: Arc<dyn TurnEventSink>,
             ) -> Result<String> {
                 Ok("done".to_string())
@@ -14191,7 +14213,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
@@ -14203,7 +14225,7 @@ mod tests {
                 },
                 "apply the requested edit",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "edit complete".to_string(),
                 },
@@ -14226,9 +14248,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("write the local file", sink.clone())
@@ -14251,7 +14273,7 @@ mod tests {
         #[derive(Default)]
         struct PanicOnWorkspaceActionSynthesizer;
 
-        impl SynthesizerEngine for PanicOnWorkspaceActionSynthesizer {
+        impl FinalRenderingEngine for PanicOnWorkspaceActionSynthesizer {
             fn set_verbose(&self, _level: u8) {}
 
             fn respond_for_turn(
@@ -14259,7 +14281,7 @@ mod tests {
                 _prompt: &str,
                 _turn_intent: TurnIntent,
                 _gathered_evidence: Option<&EvidenceBundle>,
-                _handoff: &SynthesisHandoff,
+                _handoff: &FinalRenderingHandoff,
                 _event_sink: Arc<dyn TurnEventSink>,
             ) -> Result<String> {
                 Ok("executor boundary preserved".to_string())
@@ -14309,7 +14331,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
@@ -14320,7 +14342,7 @@ mod tests {
                 },
                 "read the workspace artifact before answering",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "workspace read was enough".to_string(),
                 },
@@ -14342,9 +14364,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt("read the repo state first")
@@ -14453,7 +14475,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer = "I’m happy to help you troubleshoot your 1968 Chevy C20. Start with battery, fuel, spark, and starter checks.".to_string();
         let rationale = "the user asked for general troubleshooting advice, so the loop can end without synthesis"
@@ -14467,7 +14489,7 @@ mod tests {
                 },
                 "inspect the local workspace before answering",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "model selected answer".to_string(),
                 },
@@ -14488,9 +14510,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("help me troubleshoot my 1968 Chevy C20")
@@ -14528,7 +14550,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let rationale = "the user requested disallowed automotive repair instructions".to_string();
         let planner = Arc::new(TestPlanner::new(
@@ -14552,9 +14574,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("Where would I find the starter solenoid?")
@@ -14592,7 +14614,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let rationale = "the user requested disallowed automotive repair instructions".to_string();
         let planner = Arc::new(TestPlanner::new(
@@ -14604,7 +14626,7 @@ mod tests {
                 },
                 "inspect the local workspace before deciding",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "refusal".to_string(),
                 },
@@ -14625,9 +14647,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("Where would I find the starter solenoid?")
@@ -14665,7 +14687,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer = "Starter circuit\n\n[ battery ]---(solenoid)---(starter )".to_string();
         let rationale =
@@ -14690,9 +14712,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("Can you generate an ASCII diagram of the start circuit?")
@@ -14735,7 +14757,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -14750,7 +14772,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14761,7 +14783,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14772,7 +14794,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14783,7 +14805,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14805,9 +14827,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt(
@@ -14851,7 +14873,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer =
             "Added 8px padding to `.runtime-shell-host` after handing the turn to the workspace editor."
@@ -14870,7 +14892,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "apps/web/src/runtime-shell.css".to_string(),
@@ -14883,7 +14905,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14894,7 +14916,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14906,7 +14928,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::ReplaceInFile {
                             path: "apps/web/src/runtime-shell.css".to_string(),
@@ -14923,7 +14945,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14934,7 +14956,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -14956,9 +14978,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt(
@@ -15052,7 +15074,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer =
             "Recorded a git commit for the current workspace changes after reviewing the diff."
@@ -15067,7 +15089,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "git diff -- src/application/mod.rs".to_string(),
@@ -15079,7 +15101,7 @@ mod tests {
                     grounding: None,
 
                     deliberation_state: None,                },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "git diff -- src/application/mod.rs".to_string(),
@@ -15093,7 +15115,7 @@ mod tests {
                     grounding: None,
 
                     deliberation_state: None,                },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15106,7 +15128,7 @@ mod tests {
                     grounding: None,
 
                     deliberation_state: None,                },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Shell {
                             command: "git commit -am \"Clarify premise challenge containment signals\""
@@ -15121,7 +15143,7 @@ mod tests {
                     grounding: None,
 
                     deliberation_state: None,                },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15142,9 +15164,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt("Make a git commit")
@@ -15201,7 +15223,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -15216,7 +15238,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15231,7 +15253,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15246,7 +15268,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15261,7 +15283,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15287,9 +15309,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt(
@@ -15333,7 +15355,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer = "Added 8px padding to `.runtime-shell-host`.".to_string();
         let planner = Arc::new(TestPlanner::new(
@@ -15349,7 +15371,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::ReplaceInFile {
                             path: "apps/web/src/runtime-shell.css".to_string(),
@@ -15365,7 +15387,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15376,7 +15398,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15398,9 +15420,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt(
@@ -15452,7 +15474,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer =
             "Added 8px padding to `.runtime-shell-host` after checking the related runtime files."
@@ -15474,7 +15496,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "apps/web/src/runtime-app.tsx".to_string(),
@@ -15487,7 +15509,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "apps/web/src/runtime-app.tsx".to_string(),
@@ -15501,7 +15523,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "apps/web/src/runtime-store.tsx".to_string(),
@@ -15514,7 +15536,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "apps/web/src/runtime-store.tsx".to_string(),
@@ -15528,7 +15550,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::ReplaceInFile {
                             path: "apps/web/src/runtime-shell.css".to_string(),
@@ -15544,7 +15566,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15555,7 +15577,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15577,9 +15599,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt(
@@ -15645,7 +15667,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let answer = "Replanned after exhausting inspect budget, then applied 8px padding to `.runtime-shell-host`.".to_string();
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
@@ -15665,7 +15687,7 @@ mod tests {
                 grounding: None,
             },
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15678,7 +15700,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15691,7 +15713,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15704,7 +15726,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15717,7 +15739,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15730,7 +15752,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15743,7 +15765,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15757,7 +15779,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "pwd".to_string(),
@@ -15770,7 +15792,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::ReplaceInFile {
                             path: "apps/web/src/runtime-shell.css".to_string(),
@@ -15786,7 +15808,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15797,7 +15819,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -15820,9 +15842,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -15895,7 +15917,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -15916,9 +15938,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -15954,7 +15976,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -15979,9 +16001,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_sink(
@@ -16041,7 +16063,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
@@ -16064,9 +16086,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -16106,7 +16128,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -16118,7 +16140,7 @@ mod tests {
                 },
                 "inspect the target file before changing it",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::WriteFile {
                         path: "README.md".to_string(),
@@ -16148,9 +16170,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_mode_request_and_sink(
@@ -16221,12 +16243,12 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "reply directly"),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "local diff evidence is sufficient for review synthesis".to_string(),
                 },
@@ -16249,9 +16271,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_mode_request_and_sink(
@@ -16314,7 +16336,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -16326,7 +16348,7 @@ mod tests {
                 },
                 "inspect the target file before changing it",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::WriteFile {
                         path: "README.md".to_string(),
@@ -16355,9 +16377,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_mode_request_and_sink(
@@ -16420,11 +16442,11 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "reply directly"),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "no recursion needed".to_string(),
                 },
@@ -16446,9 +16468,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_in_session_with_mode_request_and_sink(
@@ -16500,7 +16522,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -16513,7 +16535,7 @@ mod tests {
                 },
                 "apply the requested edit",
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "the edit is complete".to_string(),
                 },
@@ -16534,9 +16556,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -16599,7 +16621,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -16610,7 +16632,7 @@ mod tests {
                 edit: InitialEditInstruction::default(),
                 grounding: None,
             },
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "local grounding probe captured the relevant repository evidence"
                         .to_string(),
@@ -16632,9 +16654,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer.clone(),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -16692,7 +16714,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "gh run list --limit 10 --json databaseId,status,conclusion,name,headBranch,workflowName,url"
@@ -16743,7 +16765,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let inspect_command = r#"printf '%s' '[{"conclusion":"success","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23910509164","workflowName":"CI"},{"conclusion":"cancelled","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23902835068","workflowName":"CI"}]'"#.to_string();
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
@@ -16757,7 +16779,7 @@ mod tests {
                 "inspect the recent CI runs",
             ),
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: inspect_command.clone(),
@@ -16770,7 +16792,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "reviewed evidence: recent CI runs are success/cancelled"
                             .to_string(),
@@ -16794,9 +16816,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -16859,7 +16881,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "gh run list --limit 10".to_string(),
@@ -16910,7 +16932,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let inspect_command = r#"printf '%s' '[{"conclusion":"success","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23910509164","workflowName":"CI"},{"conclusion":"cancelled","headBranch":"main","name":"CI","status":"completed","url":"https://github.com/spoke-sh/paddles/actions/runs/23902835068","workflowName":"CI"}]'"#.to_string();
         let planner = Arc::new(TestPlanner::new(
@@ -16923,7 +16945,7 @@ mod tests {
                 "inspect the recent CI runs",
             ),
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: inspect_command.clone(),
@@ -16936,7 +16958,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "reviewed evidence: recent CI runs are success/cancelled"
                             .to_string(),
@@ -16960,9 +16982,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -17033,7 +17055,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let first_command = "PATH=\"$PWD/bin:$PATH\" gh run list --limit 20".to_string();
         let planner = Arc::new(TestPlanner::new(
@@ -17046,7 +17068,7 @@ mod tests {
                 "inspect the recent CI runs",
             ),
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Inspect {
                             command: "gh run list --limit 10".to_string(),
@@ -17059,7 +17081,7 @@ mod tests {
 
                     deliberation_state: None,
                 },
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "reviewed evidence: current CI listing does not confirm a failure"
                             .to_string(),
@@ -17083,9 +17105,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink(
@@ -17174,7 +17196,7 @@ mod tests {
         #[derive(Default)]
         struct StaticHistorySynthesizer;
 
-        impl SynthesizerEngine for StaticHistorySynthesizer {
+        impl FinalRenderingEngine for StaticHistorySynthesizer {
             fn set_verbose(&self, _level: u8) {}
 
             fn respond_for_turn(
@@ -17182,7 +17204,7 @@ mod tests {
                 _prompt: &str,
                 _turn_intent: TurnIntent,
                 _gathered_evidence: Option<&EvidenceBundle>,
-                _handoff: &SynthesisHandoff,
+                _handoff: &FinalRenderingHandoff,
                 _event_sink: Arc<dyn TurnEventSink>,
             ) -> Result<String> {
                 Ok("unused".to_string())
@@ -17355,9 +17377,9 @@ mod tests {
         struct WarmingGatherer;
 
         #[async_trait]
-        impl ContextGatherer for WarmingGatherer {
-            fn capability(&self) -> crate::domain::ports::GathererCapability {
-                crate::domain::ports::GathererCapability::Warming {
+        impl RetrievalProvider for WarmingGatherer {
+            fn capability(&self) -> crate::domain::ports::RetrievalCapability {
+                crate::domain::ports::RetrievalCapability::Warming {
                     reason: "background lexical bootstrap is still running".to_string(),
                 }
             }
@@ -17365,15 +17387,15 @@ mod tests {
             fn capability_for_planning(
                 &self,
                 planning: &crate::domain::ports::PlannerConfig,
-            ) -> crate::domain::ports::GathererCapability {
+            ) -> crate::domain::ports::RetrievalCapability {
                 match planning.retrieval_strategy {
                     RetrievalStrategy::Lexical => {
-                        crate::domain::ports::GathererCapability::Warming {
+                        crate::domain::ports::RetrievalCapability::Warming {
                             reason: "bm25 warmup in progress".to_string(),
                         }
                     }
                     RetrievalStrategy::Vector => {
-                        crate::domain::ports::GathererCapability::Warming {
+                        crate::domain::ports::RetrievalCapability::Warming {
                             reason: "vector warmup in progress".to_string(),
                         }
                     }
@@ -17384,7 +17406,7 @@ mod tests {
                 &self,
                 _request: &ContextGatherRequest,
             ) -> Result<ContextGatherResult> {
-                panic!("warming gatherer should not be invoked")
+                panic!("warming retrieval provider should not be invoked")
             }
         }
 
@@ -17402,7 +17424,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: Some(PreparedRetrievalProvider {
+            retrieval_provider: Some(PreparedRetrievalProvider {
                 provider: GathererProvider::SiftDirect,
                 label: "sift-direct".to_string(),
                 model_id: None,
@@ -17427,9 +17449,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-                gatherer: Some(Arc::new(WarmingGatherer) as Arc<dyn ContextGatherer>),
+                action_selector: planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: Some(Arc::new(WarmingGatherer) as Arc<dyn RetrievalProvider>),
             });
             service
                 .process_prompt("Should we search the workspace yet?")
@@ -17479,7 +17501,7 @@ mod tests {
                 model_id: "gpt-5.4".to_string(),
                 paths: None,
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -17498,9 +17520,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("What changed?")
@@ -17537,7 +17559,7 @@ mod tests {
                 model_id: "qwen-1.5b".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -17556,9 +17578,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: Arc::new(RecordingSynthesizer::default()),
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
             });
             service
                 .process_prompt("What changed?")
@@ -17586,9 +17608,9 @@ mod tests {
         }
 
         #[async_trait]
-        impl ContextGatherer for StrategyCapabilityGatherer {
-            fn capability(&self) -> crate::domain::ports::GathererCapability {
-                crate::domain::ports::GathererCapability::Warming {
+        impl RetrievalProvider for StrategyCapabilityGatherer {
+            fn capability(&self) -> crate::domain::ports::RetrievalCapability {
+                crate::domain::ports::RetrievalCapability::Warming {
                     reason: "boot warmup in progress".to_string(),
                 }
             }
@@ -17596,13 +17618,13 @@ mod tests {
             fn capability_for_planning(
                 &self,
                 planning: &crate::domain::ports::PlannerConfig,
-            ) -> crate::domain::ports::GathererCapability {
+            ) -> crate::domain::ports::RetrievalCapability {
                 match planning.retrieval_strategy {
                     RetrievalStrategy::Lexical => {
-                        crate::domain::ports::GathererCapability::Available
+                        crate::domain::ports::RetrievalCapability::Available
                     }
                     RetrievalStrategy::Vector => {
-                        crate::domain::ports::GathererCapability::Warming {
+                        crate::domain::ports::RetrievalCapability::Warming {
                             reason: "vector warmup in progress".to_string(),
                         }
                     }
@@ -17615,7 +17637,7 @@ mod tests {
             ) -> Result<ContextGatherResult> {
                 self.recorded_requests
                     .lock()
-                    .expect("gatherer requests lock")
+                    .expect("retrieval provider requests lock")
                     .push(request.clone());
                 Ok(ContextGatherResult::unsupported(
                     "should not run while warming",
@@ -17625,9 +17647,9 @@ mod tests {
 
         let workspace = tempfile::tempdir().expect("workspace");
         let service = test_service(workspace.path());
-        let gatherer = Arc::new(StrategyCapabilityGatherer::default());
+        let retrieval_provider = Arc::new(StrategyCapabilityGatherer::default());
         let mut context = test_planner_loop_context(InitialEditInstruction::default());
-        context.gatherer = Some(gatherer.clone() as Arc<dyn ContextGatherer>);
+        context.retrieval_provider = Some(retrieval_provider.clone() as Arc<dyn RetrievalProvider>);
         let session = service.shared_conversation_session();
         let sink = Arc::new(RecordingTurnEventSink::default());
         let trace = Arc::new(StructuredTurnTrace::new(
@@ -17661,7 +17683,7 @@ mod tests {
                         failure_label: "planner search failed",
                         unavailable_label: "planner search backend unavailable",
                         missing_backend_message:
-                            "no gatherer backend is configured for planner search",
+                            "no retrieval provider backend is configured for planner search",
                     },
                     &mut used_workspace_resources,
                 )
@@ -17673,17 +17695,17 @@ mod tests {
             "planner search backend unavailable: vector warmup in progress"
         );
         assert!(
-            gatherer
+            retrieval_provider
                 .recorded_requests
                 .lock()
-                .expect("gatherer requests lock")
+                .expect("retrieval provider requests lock")
                 .is_empty(),
             "cold vector retrieval should be refused before gather_context runs"
         );
         assert!(!used_workspace_resources);
         assert!(sink.recorded().iter().any(|event| matches!(
             event,
-            TurnEvent::GathererCapability { capability, .. }
+            TurnEvent::RetrievalCapability { capability, .. }
                 if capability.contains("warming: vector warmup in progress")
         )));
     }
@@ -17693,7 +17715,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let service = test_service(workspace.path());
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let gatherer = Arc::new(RecordingGatherer {
+        let retrieval_provider = Arc::new(RecordingGatherer {
             recorded_requests: Arc::clone(&requests),
             bundle: EvidenceBundle::new(
                 "Found the likely implementation file.".to_string(),
@@ -17706,7 +17728,7 @@ mod tests {
             ),
         });
         let mut context = test_planner_loop_context(InitialEditInstruction::default());
-        context.gatherer = Some(gatherer);
+        context.retrieval_provider = Some(retrieval_provider);
         context.interpretation = InterpretationContext {
             summary: "Search the implementation path.".to_string(),
             ..Default::default()
@@ -17744,7 +17766,7 @@ mod tests {
                         failure_label: "planner search failed",
                         unavailable_label: "planner search backend unavailable",
                         missing_backend_message:
-                            "no gatherer backend is configured for planner search",
+                            "no retrieval provider backend is configured for planner search",
                     },
                     &mut used_workspace_resources,
                 )
@@ -17774,7 +17796,7 @@ mod tests {
                         failure_label: "planner refine failed",
                         unavailable_label: "planner refine backend unavailable",
                         missing_backend_message:
-                            "no gatherer backend is configured for refined planner search",
+                            "no retrieval provider backend is configured for refined planner search",
                     },
                     &mut used_workspace_resources,
                 )
@@ -17785,7 +17807,7 @@ mod tests {
         assert_eq!(refine_summary, "refined search toward `runtime shell host`");
         assert!(used_workspace_resources);
         assert_eq!(loop_state.evidence_items.len(), 1);
-        let recorded_requests = requests.lock().expect("gatherer requests lock");
+        let recorded_requests = requests.lock().expect("retrieval provider requests lock");
         assert_eq!(recorded_requests.len(), 2);
         assert_eq!(recorded_requests[0].intent_reason, "planner-search");
         assert_eq!(recorded_requests[0].planning.mode, RetrievalMode::Linear);
@@ -17819,7 +17841,7 @@ mod tests {
         )
         .expect("write app file");
 
-        let decision = RecursivePlannerDecision {
+        let decision = ActionSelectionEngineDecision {
             action: PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "cargo test".to_string(),
@@ -17999,7 +18021,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -18012,7 +18034,7 @@ mod tests {
                 "start with a local checkpoint",
             ),
             vec![
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Read {
                             path: "README.md".to_string(),
@@ -18038,7 +18060,7 @@ mod tests {
                     },
                     "continue the active path before answering",
                 ),
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -18059,9 +18081,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Trace the current runtime state.", sink.clone())
@@ -18148,7 +18170,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -18169,7 +18191,7 @@ mod tests {
                     },
                     "consume the active tool path once",
                 ),
-                RecursivePlannerDecision {
+                ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
                         reason: "model selected answer".to_string(),
                     },
@@ -18190,9 +18212,9 @@ mod tests {
         let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Trace the current runtime state.", sink.clone())
@@ -18260,7 +18282,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let model_initial_rationale =
             "Model: I want to inspect the workspace before answering.".to_string();
@@ -18274,7 +18296,7 @@ mod tests {
                 },
                 model_initial_rationale.as_str(),
             ),
-            vec![RecursivePlannerDecision {
+            vec![ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "model done".to_string(),
                 },
@@ -18295,9 +18317,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Inspect then stop.", sink.clone())
@@ -18396,7 +18418,7 @@ mod tests {
                 model_id: "synth".to_string(),
                 paths: Some(sample_model_paths("synth")),
             },
-            gatherer: None,
+            retrieval_provider: None,
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -18412,9 +18434,9 @@ mod tests {
         runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
-                planner_engine: planner,
-                synthesizer_engine: synthesizer,
-                gatherer: None,
+                action_selector: planner,
+                final_renderer: synthesizer,
+                retrieval_provider: None,
             });
             service
                 .process_prompt_with_sink("Continue executing the mission VI2q5DKHe", sink.clone())

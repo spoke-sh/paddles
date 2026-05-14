@@ -1,4 +1,4 @@
-use super::{planning::WorkspaceAction, workspace_action_execution::WorkspaceActionResult};
+use super::{action_selection::WorkspaceAction, workspace_action_execution::WorkspaceActionResult};
 use anyhow::Result;
 
 pub trait WorkspaceEditor: Send + Sync {

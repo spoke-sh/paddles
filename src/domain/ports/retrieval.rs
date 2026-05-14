@@ -3,14 +3,14 @@ use paddles_conversation::ContextLocator;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Port for specialized context-gathering subagents.
+/// Port for specialized retrieval providers.
 #[async_trait]
-pub trait ContextGatherer: Send + Sync {
-    /// Report whether this gatherer is actually usable in the current runtime.
-    fn capability(&self) -> GathererCapability;
+pub trait RetrievalProvider: Send + Sync {
+    /// Report whether this retrieval provider is actually usable in the current runtime.
+    fn capability(&self) -> RetrievalCapability;
 
-    /// Report whether the gatherer can satisfy a concrete retrieval plan right now.
-    fn capability_for_planning(&self, _planning: &PlannerConfig) -> GathererCapability {
+    /// Report whether the provider can satisfy a concrete retrieval plan right now.
+    fn capability_for_planning(&self, _planning: &PlannerConfig) -> RetrievalCapability {
         self.capability()
     }
 
@@ -28,7 +28,7 @@ pub trait ContextGatherer: Send + Sync {
     }
 }
 
-/// Request sent to a context-gathering lane before final synthesis.
+/// Request sent to a retrieval provider before final rendering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextGatherRequest {
     pub user_query: String,
@@ -67,7 +67,7 @@ impl ContextGatherRequest {
     }
 }
 
-/// Size limits for evidence returned to the synthesizer lane.
+/// Size limits for evidence returned to final rendering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvidenceBudget {
     pub max_items: usize,
@@ -203,7 +203,7 @@ impl RetrieverOption {
 
 /// Capability state for the active gatherer implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum GathererCapability {
+pub enum RetrievalCapability {
     Available,
     Warming { reason: String },
     Unsupported { reason: String },
@@ -372,7 +372,7 @@ pub struct PlannerTraceMetadata {
     pub trace_artifact_ref: Option<String>,
 }
 
-/// Evidence prepared for a synthesizer lane.
+/// Evidence prepared for final rendering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvidenceBundle {
     pub summary: String,
@@ -403,27 +403,27 @@ impl EvidenceBundle {
     }
 }
 
-/// Result returned by a context-gathering lane.
+/// Result returned by a retrieval provider.
 ///
 /// The gatherer returns evidence for a downstream synthesizer. It does not
 /// pretend to be the final answering model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextGatherResult {
-    pub capability: GathererCapability,
+    pub capability: RetrievalCapability,
     pub evidence_bundle: Option<EvidenceBundle>,
 }
 
 impl ContextGatherResult {
     pub fn available(evidence_bundle: EvidenceBundle) -> Self {
         Self {
-            capability: GathererCapability::Available,
+            capability: RetrievalCapability::Available,
             evidence_bundle: Some(evidence_bundle),
         }
     }
 
     pub fn unsupported(reason: impl Into<String>) -> Self {
         Self {
-            capability: GathererCapability::Unsupported {
+            capability: RetrievalCapability::Unsupported {
                 reason: reason.into(),
             },
             evidence_bundle: None,
@@ -432,7 +432,7 @@ impl ContextGatherResult {
 
     pub fn harness_required(reason: impl Into<String>) -> Self {
         Self {
-            capability: GathererCapability::HarnessRequired {
+            capability: RetrievalCapability::HarnessRequired {
                 reason: reason.into(),
             },
             evidence_bundle: None,
@@ -440,7 +440,7 @@ impl ContextGatherResult {
     }
 
     pub fn is_synthesis_ready(&self) -> bool {
-        matches!(self.capability, GathererCapability::Available) && self.evidence_bundle.is_some()
+        matches!(self.capability, RetrievalCapability::Available) && self.evidence_bundle.is_some()
     }
 }
 
@@ -448,8 +448,8 @@ impl ContextGatherResult {
 mod tests {
     use super::{
         ContextGatherRequest, ContextGatherResult, EvidenceBudget, EvidenceBundle, EvidenceItem,
-        GathererCapability, PlannerConfig, PlannerDecision, PlannerStrategyKind,
-        PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence, RetrievalMode, RetrievalStrategy,
+        PlannerConfig, PlannerDecision, PlannerStrategyKind, PlannerTraceMetadata,
+        PlannerTraceStep, RetainedEvidence, RetrievalCapability, RetrievalMode, RetrievalStrategy,
         RetrieverOption,
     };
     use std::path::PathBuf;
@@ -503,7 +503,7 @@ mod tests {
                         rank: 2,
                     },
                     EvidenceItem {
-                        source: "src/domain/ports/context_gathering.rs".into(),
+                        source: "src/domain/ports/retrieval.rs".into(),
                         snippet: "ContextGatherResult wraps evidence and capability.".into(),
                         rationale: "Defines the contract.".into(),
                         rank: 1,
@@ -541,9 +541,9 @@ mod tests {
                 retained_artifacts: vec![RetainedEvidence {
                     source: "src/application/mod.rs".into(),
                     snippet: Some(
-                        "PreparedTurnRuntime keeps synthesizer and gatherer lanes.".into(),
+                        "PreparedTurnRuntime keeps final-rendering and retrieval providers.".into(),
                     ),
-                    rationale: Some("Carry the runtime lane wiring into the next step.".into()),
+                    rationale: Some("Carry the turn runtime wiring into the next step.".into()),
                     locator: None,
                 }],
                 graph_episode: None,
@@ -573,7 +573,7 @@ mod tests {
         assert!(!result.is_synthesis_ready());
         assert!(matches!(
             result.capability,
-            GathererCapability::Unsupported { ref reason }
+            RetrievalCapability::Unsupported { ref reason }
                 if reason == "provider not configured"
         ));
         assert!(result.evidence_bundle.is_none());
@@ -587,7 +587,7 @@ mod tests {
         assert!(!result.is_synthesis_ready());
         assert!(matches!(
             result.capability,
-            GathererCapability::HarnessRequired { ref reason }
+            RetrievalCapability::HarnessRequired { ref reason }
                 if reason == "context-1 requires a dedicated search harness"
         ));
         assert!(result.evidence_bundle.is_none());

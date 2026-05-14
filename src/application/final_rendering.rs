@@ -7,7 +7,7 @@ use super::*;
 pub(super) fn recent_turn_summaries(
     service: &AgentRuntime,
     session: &ConversationSession,
-    synthesizer_engine: &dyn SynthesizerEngine,
+    final_renderer: &dyn FinalRenderingEngine,
 ) -> Result<Vec<String>> {
     let session_slice = service.query_session_context_slice(
         &session.task_id(),
@@ -24,7 +24,7 @@ pub(super) fn recent_turn_summaries(
         }
     }
 
-    synthesizer_engine.recent_turn_summaries()
+    final_renderer.recent_turn_summaries()
 }
 
 pub(super) fn specialist_runtime_notes(

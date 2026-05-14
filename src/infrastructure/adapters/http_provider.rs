@@ -8,10 +8,11 @@ use crate::domain::model::{
     TraceModelExchangePhase, TurnEvent, TurnEventSink, TurnIntent, WorkspaceTextPosition,
 };
 use crate::domain::ports::{
-    EvidenceBundle, GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
+    ActionSelectionEngineDecision, EvidenceBundle, FinalRenderingEngine, FinalRenderingHandoff,
+    GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
     InitialEditInstruction, InterpretationContext, InterpretationRequest, PlannerAction,
-    PlannerCapability, PlannerRequest, RecursivePlannerDecision, RetrievalMode, RetrievalStrategy,
-    RetrieverOption, SynthesisHandoff, SynthesizerEngine, ThreadDecisionRequest, WorkspaceAction,
+    PlannerCapability, PlannerRequest, RetrievalMode, RetrievalStrategy, RetrieverOption,
+    ThreadDecisionRequest, WorkspaceAction,
 };
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
@@ -180,7 +181,7 @@ async fn send_with_retry(
     unreachable!()
 }
 
-/// HTTP-based model provider implementing SynthesizerEngine.
+/// HTTP-based model provider implementing FinalRenderingEngine.
 pub struct HttpProviderAdapter {
     client: reqwest::Client,
     provider_name: String,
@@ -1951,7 +1952,7 @@ Rules:
         }
     }
 
-    fn parse_planner_action(&self, response: &str) -> Result<RecursivePlannerDecision> {
+    fn parse_planner_action(&self, response: &str) -> Result<ActionSelectionEngineDecision> {
         let json = extract_json(response).unwrap_or(response);
         let envelope: PlannerEnvelope = serde_json::from_str(json)
             .map_err(|e| anyhow!("failed to parse planner action: {e}\nresponse: {response}"))?;
@@ -2089,7 +2090,7 @@ Rules:
                 reason: format!("unknown action: {other}"),
             },
         };
-        Ok(RecursivePlannerDecision {
+        Ok(ActionSelectionEngineDecision {
             action,
             rationale,
             answer,
@@ -2145,7 +2146,7 @@ Rules:
     }
 }
 
-impl SynthesizerEngine for HttpProviderAdapter {
+impl FinalRenderingEngine for HttpProviderAdapter {
     fn set_verbose(&self, level: u8) {
         self.verbose.store(level, Ordering::Relaxed);
     }
@@ -2155,7 +2156,7 @@ impl SynthesizerEngine for HttpProviderAdapter {
         prompt: &str,
         _turn_intent: TurnIntent,
         gathered_evidence: Option<&EvidenceBundle>,
-        handoff: &SynthesisHandoff,
+        handoff: &FinalRenderingHandoff,
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<String> {
         let system = self.build_answer_system_prompt(gathered_evidence.is_some());
@@ -2334,12 +2335,12 @@ impl SynthesizerEngine for HttpProviderAdapter {
     }
 }
 
-/// Wraps HttpProviderAdapter as a RecursivePlanner.
-pub struct HttpPlannerAdapter {
+/// Wraps HttpProviderAdapter as a ActionSelectionEngine.
+pub struct HttpActionSelectionAdapter {
     engine: Arc<HttpProviderAdapter>,
 }
 
-impl HttpPlannerAdapter {
+impl HttpActionSelectionAdapter {
     pub fn new(engine: Arc<HttpProviderAdapter>) -> Self {
         Self { engine }
     }
@@ -2364,7 +2365,7 @@ impl HttpPlannerAdapter {
 }
 
 #[async_trait]
-impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
+impl crate::domain::ports::ActionSelectionEngine for HttpActionSelectionAdapter {
     fn capability(&self) -> PlannerCapability {
         PlannerCapability::Available
     }
@@ -2498,7 +2499,7 @@ impl crate::domain::ports::RecursivePlanner for HttpPlannerAdapter {
         &self,
         request: &PlannerRequest,
         event_sink: Arc<dyn TurnEventSink>,
-    ) -> Result<RecursivePlannerDecision> {
+    ) -> Result<ActionSelectionEngineDecision> {
         let system = self.engine.build_planner_system_prompt_for_variant(
             &request.interpretation,
             &request.operator_memory,
@@ -3450,8 +3451,8 @@ fn fail_closed_http_initial_action(request: &PlannerRequest) -> InitialActionDec
     }
 }
 
-fn fail_closed_http_planner_action() -> RecursivePlannerDecision {
-    RecursivePlannerDecision {
+fn fail_closed_http_planner_action() -> ActionSelectionEngineDecision {
+    ActionSelectionEngineDecision {
         action: PlannerAction::Stop {
             reason: "planner-action-unavailable after invalid planner replies".to_string(),
         },
@@ -3873,7 +3874,7 @@ fn first_unverified_external_url(reply: &str, verified_external_urls: &[String])
 }
 
 fn external_grounding_required_without_verified_sources(
-    handoff: &SynthesisHandoff,
+    handoff: &FinalRenderingHandoff,
     verified_external_urls: &[String],
 ) -> bool {
     handoff
@@ -3898,7 +3899,7 @@ fn unverified_external_url_fallback(prompt: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiFormat, HttpPlannerAdapter, HttpProviderAdapter, truncate};
+    use super::{ApiFormat, HttpActionSelectionAdapter, HttpProviderAdapter, truncate};
     use crate::application::planner_action_schema::{
         PLANNER_ACTION_SCHEMA_BEGIN, PLANNER_ACTION_SCHEMA_END, PlannerActionSchemaVariant,
         render_planner_action_schema,
@@ -3911,11 +3912,11 @@ mod tests {
         TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        EvidenceBundle, EvidenceItem, GroundingDomain, GroundingRequirement, InitialAction,
-        InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry, PlannerAction,
-        PlannerBudget, PlannerExecutionContract, PlannerLoopState, PlannerRequest,
-        RecursivePlanner, RecursivePlannerDecision, RetrieverOption, SynthesisHandoff,
-        SynthesizerEngine, TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
+        ActionSelectionEngine, ActionSelectionEngineDecision, EvidenceBundle, EvidenceItem,
+        FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain, GroundingRequirement,
+        InitialAction, InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry,
+        PlannerAction, PlannerBudget, PlannerExecutionContract, PlannerLoopState, PlannerRequest,
+        RetrieverOption, TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -4833,7 +4834,7 @@ mod tests {
         let synth_base_url = base_url.clone();
         let synth_api_key = api_key.clone();
         let synth_provider_name = provider.name().to_string();
-        let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
+        let final_renderer_factory: Box<crate::application::FinalRendererFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
@@ -4843,14 +4844,14 @@ mod tests {
                     synth_base_url.clone(),
                     format,
                     render_capability_for(format),
-                )) as Arc<dyn SynthesizerEngine>)
+                )) as Arc<dyn FinalRenderingEngine>)
             },
         );
 
         let planner_base_url = base_url;
         let planner_api_key = api_key;
         let planner_provider_name = provider.name().to_string();
-        let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
+        let action_selector_factory: Box<crate::application::ActionSelectorFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
@@ -4861,20 +4862,21 @@ mod tests {
                     format,
                     render_capability_for(format),
                 ));
-                Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
+                Ok(Arc::new(HttpActionSelectionAdapter::new(engine))
+                    as Arc<dyn ActionSelectionEngine>)
             },
         );
 
-        let gatherer_factory: Box<crate::application::GathererFactory> =
+        let retrieval_provider_factory: Box<crate::application::RetrievalProviderFactory> =
             Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
 
         AgentRuntime::new(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
-            synthesizer_factory,
-            planner_factory,
-            gatherer_factory,
+            final_renderer_factory,
+            action_selector_factory,
+            retrieval_provider_factory,
         )
     }
 
@@ -4891,7 +4893,7 @@ mod tests {
         let synth_base_url = base_url.clone();
         let synth_api_key = api_key.clone();
         let synth_provider_name = provider.name().to_string();
-        let synthesizer_factory: Box<crate::application::SynthesizerFactory> = Box::new(
+        let final_renderer_factory: Box<crate::application::FinalRendererFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 Ok(Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
@@ -4901,14 +4903,14 @@ mod tests {
                     synth_base_url.clone(),
                     format,
                     render_capability_for(format),
-                )) as Arc<dyn SynthesizerEngine>)
+                )) as Arc<dyn FinalRenderingEngine>)
             },
         );
 
         let planner_base_url = base_url;
         let planner_api_key = api_key;
         let planner_provider_name = provider.name().to_string();
-        let planner_factory: Box<crate::application::PlannerFactory> = Box::new(
+        let action_selector_factory: Box<crate::application::ActionSelectorFactory> = Box::new(
             move |workspace: &Path, lane: &crate::application::PreparedModelClient| {
                 let engine = Arc::new(HttpProviderAdapter::new(
                     workspace.to_path_buf(),
@@ -4919,20 +4921,21 @@ mod tests {
                     format,
                     render_capability_for(format),
                 ));
-                Ok(Arc::new(HttpPlannerAdapter::new(engine)) as Arc<dyn RecursivePlanner>)
+                Ok(Arc::new(HttpActionSelectionAdapter::new(engine))
+                    as Arc<dyn ActionSelectionEngine>)
             },
         );
 
-        let gatherer_factory: Box<crate::application::GathererFactory> =
+        let retrieval_provider_factory: Box<crate::application::RetrievalProviderFactory> =
             Box::new(|_, _, _, _| Ok::<Option<_>, anyhow::Error>(None));
 
         AgentRuntime::with_trace_recorder(
             workspace,
             Arc::new(StaticRegistry),
             operator_memory,
-            synthesizer_factory,
-            planner_factory,
-            gatherer_factory,
+            final_renderer_factory,
+            action_selector_factory,
+            retrieval_provider_factory,
             recorder,
         )
     }
@@ -5831,7 +5834,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Inspect {
                         command: "nix build .#paddles -L".to_string(),
@@ -5868,7 +5871,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::ApplyPatch {
                         patch: "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-fn old() {}\n+fn new() {}\n*** End Patch\n".to_string(),
@@ -5904,7 +5907,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::ExternalCapability {
                         invocation: ExternalCapabilityInvocation::new(
@@ -5945,7 +5948,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::ExternalCapability {
                         invocation: ExternalCapabilityInvocation::new(
@@ -5986,7 +5989,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Inspect {
                         command: "git status --short".to_string(),
@@ -6023,7 +6026,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "model selected answer".to_string(),
                 },
@@ -6244,7 +6247,7 @@ mod tests {
             },
         ])
         .await;
-        let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
+        let planner = HttpActionSelectionAdapter::new(Arc::new(HttpProviderAdapter::new(
             workspace.path(),
             "openai",
             "mercury-2",
@@ -6294,7 +6297,7 @@ mod tests {
             ),
         }])
         .await;
-        let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
+        let planner = HttpActionSelectionAdapter::new(Arc::new(HttpProviderAdapter::new(
             workspace.path(),
             "inception",
             "mercury-2",
@@ -6508,7 +6511,7 @@ mod tests {
                 "Summarize the recovery.",
                 TurnIntent::DirectResponse,
                 None,
-                &SynthesisHandoff::default(),
+                &FinalRenderingHandoff::default(),
                 sink.clone(),
             )
             .expect("response after retry");
@@ -7078,7 +7081,7 @@ mod tests {
             },
         ])
         .await;
-        let planner = HttpPlannerAdapter::new(Arc::new(HttpProviderAdapter::new(
+        let planner = HttpActionSelectionAdapter::new(Arc::new(HttpProviderAdapter::new(
             workspace.path(),
             "openai",
             "mercury-2",
@@ -7101,7 +7104,7 @@ mod tests {
 
         assert_eq!(
             decision,
-            RecursivePlannerDecision {
+            ActionSelectionEngineDecision {
                 action: PlannerAction::Workspace {
                     action: WorkspaceAction::Inspect {
                         command: "git status --short".to_string(),
@@ -7470,7 +7473,7 @@ mod tests {
                 "CI is failing. Can you debug it on this machine?",
                 TurnIntent::Planned,
                 Some(&evidence),
-                &SynthesisHandoff::default(),
+                &FinalRenderingHandoff::default(),
                 Arc::new(RecordingTurnEventSink::default()),
             )
             .expect("grounded response");
@@ -7526,7 +7529,7 @@ mod tests {
                 "CI is failing. Can you debug it on this machine?",
                 TurnIntent::Planned,
                 Some(&evidence),
-                &SynthesisHandoff::default(),
+                &FinalRenderingHandoff::default(),
                 Arc::new(RecordingTurnEventSink::default()),
             )
             .expect("grounded response");
@@ -7583,7 +7586,7 @@ mod tests {
                 "CI is failing. Can you debug it on this machine?",
                 TurnIntent::Planned,
                 Some(&evidence),
-                &SynthesisHandoff::default(),
+                &FinalRenderingHandoff::default(),
                 Arc::new(RecordingTurnEventSink::default()),
             )
             .expect("grounded response");
@@ -7626,12 +7629,12 @@ mod tests {
                 "Can you give me the docs link?",
                 TurnIntent::DirectResponse,
                 None,
-                &SynthesisHandoff {
+                &FinalRenderingHandoff {
                     grounding: Some(GroundingRequirement {
                         domain: GroundingDomain::External,
                         reason: Some("need a verified web source before answering".to_string()),
                     }),
-                    ..SynthesisHandoff::default()
+                    ..FinalRenderingHandoff::default()
                 },
                 sink.clone(),
             )

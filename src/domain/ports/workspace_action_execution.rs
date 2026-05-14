@@ -1,4 +1,4 @@
-use super::planning::WorkspaceAction;
+use super::action_selection::WorkspaceAction;
 use crate::domain::model::{
     AppliedEdit, ExecutionGovernanceOutcome, ExecutionPermissionRequest, TurnEventSink,
 };
