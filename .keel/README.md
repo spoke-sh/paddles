@@ -495,7 +495,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Adopt HTTP-Only Inference Decision](epics/VJZ034dF2/voyages/VJZ8Bws9Z/) | planned |
+| [Adopt HTTP-Only Inference Decision](epics/VJZ034dF2/voyages/VJZ8Bws9Z/) | in-progress |
 | [Route Runtime Inference Through HTTP Model Clients](epics/VJZ034dF2/voyages/VJZ8CYrLb/) | planned |
 | [Migrate Provider Preferences To Turn Runtime Config](epics/VJZ034dF2/voyages/VJZ8DAKbC/) | planned |
 | [Remove In-Process Sift Inference Code](epics/VJZ034dF2/voyages/VJZ8DqFnJ/) | planned |

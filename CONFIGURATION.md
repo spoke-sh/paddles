@@ -126,6 +126,12 @@ weight = 1.5
 
 ## Runtime Lane Selection
 
+> Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP
+> model clients the only supported inference boundary for action selection and
+> final rendering. Local-first inference should run through a local HTTP model
+> service such as Ollama and use `ollama:<model>`. Sift-backed retrieval is a
+> separate boundary and remains available through explicit retrieval providers.
+
 `paddles` treats runtime configuration as shared/action-selection/synth/gatherer
 lane selection rather than single-model-only routing. Model reasoning is the
 planning inside the recursive agent loop; configuration only chooses which lane
@@ -166,7 +172,7 @@ When `[synthesizer]` or `[planner]` is omitted, that lane falls back to
 `[shared]`. CLI flags still win over everything:
 
 ```bash
-paddles --model qwen-1.5b --planner-model qwen3.5-2b --gatherer-provider sift-direct
+paddles --model ollama:<model> --gatherer-provider sift-direct
 ```
 
 Provider selection is now lane-specific as well. The synthesizer lane uses
@@ -183,16 +189,17 @@ paddles \
 That keeps providers authenticated side-by-side and lets the planner/synthesizer
 mix providers without restarting the session.
 
-If you want a distinct local gatherer model instead of the direct retrieval backend:
+If you want local-first inference with local retrieval, run a local HTTP model
+service and keep retrieval explicit:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-model qwen-coder-1.5b --gatherer-provider local
+paddles --model ollama:<model> --gatherer-provider sift-direct
 ```
 
 For local sift-backed retrieval, select the explicit provider:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-provider sift-direct
+paddles --model ollama:<model> --gatherer-provider sift-direct
 ```
 
 That backend stays local-first and services bounded agent search/refine actions.
@@ -322,14 +329,14 @@ Current specialist-brain contract:
 - the brain only activates when `recursive-structured-v1` is active and the session exposes durable turn summaries through `query_session_context(...)`
 - unsupported profiles or empty session history produce an explicit runtime note rather than silently bypassing the recursive planner loop
 
-Current local model guidance on an 8 GB CUDA card:
+Current local model guidance:
 
-- `qwen-1.5b` is the default Qwen2 instruct local path.
-- `qwen-coder-0.5b` is the smaller fast coding fallback when latency matters more than capability.
-- `qwen-coder-1.5b` remains available as the coding-tuned Qwen2 option.
-- `qwen-coder-3b` remains available as the larger Qwen2 coding lane when you want more coding headroom.
-- `qwen3.5-2b` remains available as an opt-in heavier lane, not the default.
-- If `qwen3.5-2b` cannot complete its CUDA load or first generation step because of GPU OOM or a reduced-precision runtime mismatch, the runtime warns and retries on CPU instead of aborting the REPL.
+- Paddles no longer treats in-process model loading as the future-supported
+  inference path. See [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md).
+- Run local models behind an HTTP service such as Ollama and select them with
+  `ollama:<model>`.
+- GPU, quantization, batching, and model residency are owned by that local HTTP
+  service rather than by paddles runtime construction.
 
 ### Nix Build Lanes
 
@@ -448,8 +455,9 @@ use `/login <provider>` to enter a provider API key through masked input;
 `paddles` updates the referenced key file and rebuilds the active runtime lanes
 so subsequent turns use the new credential immediately. `/model` shows the full
 known model catalog; providers with resolved credentials are marked enabled and
-providers without credentials are marked disabled. The local `sift` provider
-does not use API-key login.
+providers without credentials are marked disabled. Local HTTP providers such as
+Ollama do not require API-key login unless the local service is configured to
+require one.
 
 At runtime, those provider credentials and any native-transport bearer tokens
 are resolved through the shared `transport_mediator` hand instead of being read
@@ -580,18 +588,13 @@ family exposes more than one contract:
 - `unsupported` means the harness treats the provider as an explicit no-op for
   provider-native reasoning continuity.
 
-For the local `sift` provider, `bonsai-8b` is now available as an opt-in local
-model path:
+Legacy local `sift` model-provider selections are migration-only inputs. They
+should fail before runtime construction with an `ollama:<model>` migration hint.
+Do not add new local model-loading examples for this path.
 
 ```bash
-paddles --provider sift --model bonsai-8b
+paddles --model ollama:<model>
 ```
-
-That path uses the stable `sift` local model boundary. Bonsai now resolves from
-Prism's published GGUF source through the upstream `metamorph` -> Candle
-compatibility path rather than a direct unpacked-bundle download. This is still
-a compatibility path and does not preserve the original 1-bit runtime
-efficiency.
 
 ### Final Answer Render Capability
 
@@ -667,7 +670,7 @@ or lane surfaces keep their own protocol-specific error detail.
 drop-in answer model:
 
 ```bash
-paddles --model qwen-1.5b --gatherer-provider context1
+paddles --model ollama:<model> --gatherer-provider context1
 ```
 
 That provider is explicit and honest about its readiness:

@@ -3,7 +3,12 @@
 [![Keel Board](https://img.shields.io/badge/Keel-Board-blue)](.keel/README.md)
 [![CI](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/spoke-sh/paddles/actions/workflows/ci.yml)
 
-> `paddles` is a coding agent that can run with local models, opt into remote planner lanes, and be embedded as a Rust library. Its backbone architecture is one recursive agent loop: operator memory shapes turn interpretation, model reasoning is the planning, and the model selects bounded agent actions until Paddles can apply code edits, answer source-grounded codebase questions, or report an explicit block.
+> `paddles` is a coding agent that can run against local or remote HTTP model
+> services and be embedded as a Rust library. Its backbone architecture is one
+> recursive agent loop: operator memory shapes turn interpretation, model
+> reasoning is the planning, and the model selects bounded agent actions until
+> Paddles can apply code edits, answer source-grounded codebase questions, or
+> report an explicit block.
 
 ## Backbone Architecture
 
@@ -121,7 +126,7 @@ flowchart LR
 
     subgraph Plan ["Recursive Agent Loop"]
         Decide["Model selects<br/>next bounded action"]
-        Local["Local action-selection lane<br/>Sift / Qwen"]
+        Local["Local HTTP model client<br/>ollama:&lt;model&gt;"]
         Heavy["Specialized action-selection lane<br/>Context-1 boundary"]
         Evidence["Evidence bundle<br/>typed trace + metadata"]
     end
@@ -441,7 +446,15 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 
 ## Current Runtime Lanes
 
-- The synthesizer lane defaults to `qwen-1.5b` on the local `sift` provider.
+> Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP
+> model clients the only supported inference boundary for action selection and
+> final rendering. Local-first inference should run through a local HTTP model
+> service such as Ollama and use the `ollama:<model>` provider form. Sift remains
+> a retrieval/indexing concern until a separate decision changes that boundary.
+
+- The response model defaults to the configured HTTP model client. Local-first
+  users should run a local HTTP model service and select it with
+  `ollama:<model>`.
 - Authored `paddles.toml` can define `[shared]`, `[synthesizer]`, and `[planner]` model sections. `shared` is the default fallback for both lanes when the specific section does not set its own provider/model.
 - The planner lane is the configurable action-selection lane. It defaults to the shared provider/model unless `--planner-provider <provider>` and `--planner-model <id>` select a different planner-capable lane.
 - Remote providers can stay logged in side-by-side. In the TUI, use `/login <provider>` to add credentials for any supported provider and `/model` to inspect the active lanes or switch the shared runtime selection.
@@ -453,9 +466,9 @@ Those semantics are stable across recorder adapters. Embedded `transit-core` is 
 - Inception is available through the same OpenAI-compatible HTTP lane used by the core remote providers. Authenticate with `/login inception`, then select the supported core model path with `/model inception mercury-2`.
 - `mercury-2` remains the supported Inception planner/synthesizer chat model. Workspace edits still execute locally through the shared workspace editor boundary, so provider selection does not change `apply_patch` semantics.
 - Provider-native streaming/diffusion views remain optional follow-on capabilities; they are still not required to use Inception in `paddles`.
-- `qwen-coder-0.5b`, `qwen-coder-1.5b`, `qwen-coder-3b`, `qwen3.5-2b`, and `bonsai-8b` remain available as opt-in local planner or synthesizer variants on the `sift` provider.
-- Local `sift` model preparation now goes through the stable crate-root `sift::prepare_model(...)` seam for compatible single-bundle local models. `bonsai-8b` now resolves back through Prism's published GGUF source and the upstream `metamorph` compatibility path instead of bypassing that seam with an unpacked-bundle download.
-- That Bonsai preparation path is still a compatibility path, not native 1-bit execution. It makes the model usable on the current local runtime, but it does not preserve the original 1-bit efficiency of the published GGUF artifact.
+- Legacy local Sift model-provider selections are migration-only inputs. They
+  should fail with an `ollama:<model>` migration hint instead of being silently
+  remapped to another provider.
 - `sift-direct` is the default local gatherer/search backend used by `search` and `refine` agent actions.
 - `paddles` owns the recursive agent loop. `sift` executes direct retrieval only.
 - `search` and `refine` actions carry bounded retrieval mode and strategy into the gatherer boundary.
@@ -553,10 +566,11 @@ Opt into the GPU lane explicitly:
 just paddles --cuda
 ```
 
-Use a heavier action-selection lane while keeping a lighter synthesizer:
+Use a heavier action-selection model while keeping a lighter final-rendering
+model:
 
 ```bash
-paddles --model qwen-1.5b --planner-model qwen3.5-2b
+paddles --model ollama:<model> --planner-model openai:gpt-5.4
 ```
 
 One-shot prompt mode stays plain for scripts:

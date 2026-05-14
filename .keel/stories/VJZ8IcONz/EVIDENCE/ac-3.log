@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T21:43:22.961530751-07:00
+mode: manual
+---
+README.md, CONFIGURATION.md, and ARCHITECTURE.md reference ADR VJZBM9Guy and replace future local in-process model-loading guidance with local HTTP model service guidance using ollama:<model>.

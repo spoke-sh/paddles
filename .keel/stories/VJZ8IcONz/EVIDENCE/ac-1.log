@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T21:43:22.800640020-07:00
+mode: manual
+---
+ADR VJZBM9Guy is accepted and states that Paddles must not load inference models in-process for action selection or final rendering; action-selection and final-rendering inference must use HTTP model-client adapters.

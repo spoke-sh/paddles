@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-13T21:43:22.876949810-07:00
+mode: manual
+---
+ADR VJZBM9Guy states local model inference is supported through local HTTP services and requires ollama:<model> as the canonical local provider form in docs, migration hints, and examples.

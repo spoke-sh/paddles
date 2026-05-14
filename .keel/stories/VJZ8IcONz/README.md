@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VJZ8IcONz
-status: backlog
+status: done
 created_at: 2026-05-13T21:29:36
-updated_at: 2026-05-13T21:36:07
+updated_at: 2026-05-13T21:43:43
 # authored
 title: Adopt HTTP-Only Model Inference ADR
 type: chore
 operator-signal:
 scope: VJZ034dF2/VJZ8Bws9Z
 index: 1
+started_at: 2026-05-13T21:41:34
+submitted_at: 2026-05-13T21:43:38
+completed_at: 2026-05-13T21:43:43
 ---
 
 # Adopt HTTP-Only Model Inference ADR
@@ -22,6 +25,6 @@ guardrails that keep docs and future code aligned with the decision.
 
 ## Acceptance Criteria
 
-- [ ] ADR states paddles no longer loads inference models in-process for action selection or final rendering. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end -->
-- [ ] ADR states local-first inference is supported through HTTP model services and uses `ollama:<model>` as the canonical local provider form. [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end -->
-- [ ] Architecture/configuration docs reference the ADR and stop presenting in-process local model loading as the future inference path. [SRS-01/AC-03] <!-- verify: manual, SRS-01:start:end -->
+- [x] ADR states paddles no longer loads inference models in-process for action selection or final rendering. [SRS-01/AC-01] <!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] ADR states local-first inference is supported through HTTP model services and uses `ollama:<model>` as the canonical local provider form. [SRS-01/AC-02] <!-- verify: manual, SRS-01:start:end, proof: ac-2.log-->
+- [x] Architecture/configuration docs reference the ADR and stop presenting in-process local model loading as the future inference path. [SRS-01/AC-03] <!-- verify: manual, SRS-01:start:end, proof: ac-3.log-->

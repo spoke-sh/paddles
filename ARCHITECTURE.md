@@ -303,9 +303,12 @@ Paddles a recursive coding agent:
 
 Domain modules must stay free of provider clients, CLI/TUI state, web routes,
 filesystem traversal, shell execution, and persistence details. They may expose
-serde-compatible value types and ports, but they should not know whether a
-action-selection model is local Sift, remote HTTP, embedded Transit, a browser
-route, or a test double.
+serde-compatible value types and ports, but they should not know which HTTP
+model service supplies action-selection or final-rendering inference. [ADR
+VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) makes HTTP model clients the only
+supported inference boundary; local-first inference is provided by local HTTP
+services such as `ollama:<model>`, not by paddles-owned in-process model
+loading.
 
 ### Application Layer
 
@@ -872,13 +875,16 @@ Two capabilities are still maturing:
 
 ## Current Model Routing
 
+> Migration note: [ADR VJZBM9Guy](.keel/adrs/VJZBM9Guy/README.md) moves model
+> inference to HTTP model clients. The local-first inference path is a local HTTP
+> provider such as `ollama:<model>`. Sift remains documented here only as a
+> retrieval/indexing backend until a separate retrieval decision changes it.
+
 Current routing now uses explicit action-selection/synth roles:
 
-- synthesizer default: `qwen-1.5b`
+- synthesizer default: configured HTTP model client
 - action-selection default: synthesizer model unless `--planner-model` overrides it
-- optional coding-oriented action-selection/synth models: `qwen-coder-0.5b`,
-  `qwen-coder-1.5b`, `qwen-coder-3b`
-- heavier opt-in action-selection/synth lane: `qwen3.5-2b`
+- local-first HTTP model form: `ollama:<model>`
 - local gatherer backend: `sift-direct`
 - current gatherer mode: model-selected bounded retrieval for `search` / `refine` requests
 - experimental action-selection/gatherer boundary: `context-1`
