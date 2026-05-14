@@ -1,14 +1,16 @@
 ---
 # system-managed
 id: VJZ8ABnX2
-status: achieved
+status: verified
 created_at: 2026-05-13T21:29:04
-updated_at: 2026-05-13T23:22:07
+updated_at: 2026-05-13T23:24:22
 # authored
 title: HTTP-Only Inference And Turn Runtime Migration
 watch: ~
 activated_at: 2026-05-13T21:36:25
 achieved_at: 2026-05-13T23:22:07
+verified_at: 2026-05-13T23:24:22
+verification_artifact: .keel/missions/VJZ8ABnX2/verification.gif
 ---
 
 # HTTP-Only Inference And Turn Runtime Migration
