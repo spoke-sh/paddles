@@ -9,6 +9,7 @@
 |---------|--------|----------|------------|-----------|----|------|
 | [HTTP API Design For Paddles](bearings/VFKApee25/) | laid | ✓ | ✓ | decision-ready | 10.31 | ✓ |
 | [Adaptive Interpretation Context Refinement](bearings/VFUNJz9zT/) | laid | ✓ | ✓ | decision-ready | 4.89 | ✓ |
+| [Map Turn Loop And HTTP Inference Cleanup](bearings/VJZ034dF2/) | ready | ✓ | ✓ | decision-ready | 3.22 | - |
 
 ## Epics
 
@@ -471,6 +472,12 @@
 | [Unified Agent Action Contract](epics/VJXwbmekZ/voyages/VJXwlCA0P/) | done |
 | [Recursive Loop Migration](epics/VJXwbmekZ/voyages/VJXwlE718/) | done |
 | [Agent Vocabulary Cleanup](epics/VJXwbmekZ/voyages/VJXwlG70U/) | done |
+
+### [HTTP Inference And Turn Loop Cleanup Research](epics/VJZ0tpZQJ/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Inventory Legacy Inference And Lane Surfaces](epics/VJZ0tpZQJ/voyages/VJZ14yp0U/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)
 
