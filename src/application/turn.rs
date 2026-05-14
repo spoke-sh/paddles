@@ -1,5 +1,5 @@
 //! Turn orchestration phase: top-level `process_prompt*` entry points that
-//! drive interpretation, routing, planner loop execution, synthesis, and
+//! drive interpretation, routing, agent loop execution, synthesis, and
 //! transcript persistence for a single user turn. Free functions here
 //! replace the prior `TurnOrchestrationChamber` wrapper struct.
 
@@ -101,10 +101,10 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             context: interpretation.clone(),
         });
 
-        let planner_capability = action_selector.capability();
+        let action_selection_capability = action_selector.capability();
         trace.emit(TurnEvent::PlannerCapability {
             provider: prepared.planner.model_id.clone(),
-            capability: format_planner_capability(&planner_capability),
+            capability: format_action_selection_capability(&action_selection_capability),
         });
 
         let recent_turns =
@@ -137,12 +137,12 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         .with_collaboration(collaboration.clone())
         .with_recent_turns(recent_turns.clone())
         .with_recent_thread_summary(recent_thread_summary.clone())
-        .with_runtime_notes(planner_runtime_notes(
+        .with_runtime_notes(action_selection_runtime_notes(
             retrieval_provider.as_ref(),
             &specialist_runtime_notes,
             &collaboration,
         ))
-        .with_execution_contract(service.planner_execution_contract(
+        .with_execution_contract(service.action_selection_execution_contract(
             retrieval_provider.as_ref(),
             &collaboration,
             request_instruction_frame.as_ref(),
@@ -150,7 +150,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         ))
         .with_entity_resolver(Arc::clone(&service.entity_resolver));
 
-        let execution_plan = match planner_capability {
+        let execution_plan = match action_selection_capability {
             PlannerCapability::Available => {
                 let mut decision = action_selector
                     .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
@@ -275,8 +275,8 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             }
             PlannerCapability::Unsupported { reason } => {
                 trace.emit(TurnEvent::Fallback {
-                    stage: "planner".to_string(),
-                    reason: format!("planner unavailable before first action selection: {reason}"),
+                    stage: "action-selection".to_string(),
+                    reason: format!("action-selection client unavailable before first action selection: {reason}"),
                 });
                 fallback_execution_plan(&prepared)
             }
@@ -289,7 +289,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             summary: execution_plan.route_summary.clone(),
         });
 
-        let planner_outcome = match execution_plan.path {
+        let agent_loop_outcome = match execution_plan.path {
             PromptExecutionPath::PlannerThenSynthesize => {
                 let recent_turns = final_rendering::recent_turn_summaries(
                     service,
@@ -301,10 +301,10 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                     Arc::clone(&service.trace_recorder),
                 ));
 
-                agent_loop::execute_recursive_planner_loop(
+                agent_loop::execute_agent_loop(
                     service,
                     &current_prompt,
-                    PlannerLoopContext {
+                    AgentLoopContext {
                         prepared: prepared.clone(),
                         action_selector,
                         retrieval_provider,
@@ -333,7 +333,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                 )
                 .await?
             }
-            PromptExecutionPath::SynthesizerOnly => PlannerLoopOutcome {
+            PromptExecutionPath::SynthesizerOnly => AgentLoopOutcome {
                 evidence: None,
                 direct_answer: execution_plan.direct_answer.clone(),
                 instruction_frame: execution_plan.instruction_frame.clone(),
@@ -348,7 +348,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             "The turn closed before the requested control could reach another safe checkpoint.",
         );
 
-        if let Some(continuation) = planner_outcome.continuation {
+        if let Some(continuation) = agent_loop_outcome.continuation {
             trace.record_checkpoint_without_response(
                 TraceCheckpointKind::TurnCompleted,
                 continuation.summary,
@@ -357,8 +357,8 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             continue;
         }
 
-        if let Some(reply) = planner_outcome.direct_answer {
-            let response = if let Some(frame) = planner_outcome
+        if let Some(reply) = agent_loop_outcome.direct_answer {
+            let response = if let Some(frame) = agent_loop_outcome
                 .instruction_frame
                 .as_ref()
                 .filter(|frame| frame.has_pending_workspace_obligation())
@@ -394,10 +394,10 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             recent_turns,
             recent_thread_summary,
             collaboration: collaboration.clone(),
-            instruction_frame: planner_outcome.instruction_frame.clone(),
-            grounding: planner_outcome.grounding.clone(),
+            instruction_frame: agent_loop_outcome.instruction_frame.clone(),
+            grounding: agent_loop_outcome.grounding.clone(),
         };
-        if let Some(frame) = planner_outcome
+        if let Some(frame) = agent_loop_outcome
             .instruction_frame
             .as_ref()
             .filter(|frame| frame.has_pending_workspace_obligation())
@@ -422,7 +422,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             engine.respond_for_turn(
                 &prompt_for_model,
                 intent,
-                planner_outcome.evidence.as_ref(),
+                agent_loop_outcome.evidence.as_ref(),
                 &handoff,
                 event_sink,
             )
@@ -430,8 +430,9 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         .await
         .map_err(|err| anyhow::anyhow!("Sift session task failed: {err}"))??;
         let response = AuthoredResponse::from_plain_text(
-            trace_for_reply
-                .completion_response_mode_for_synthesis(planner_outcome.instruction_frame.as_ref()),
+            trace_for_reply.completion_response_mode_for_synthesis(
+                agent_loop_outcome.instruction_frame.as_ref(),
+            ),
             &reply,
         );
         let reply = final_rendering::finalize_turn_response(

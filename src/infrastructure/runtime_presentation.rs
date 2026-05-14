@@ -950,7 +950,7 @@ mod tests {
                 mode: "single".to_string(),
                 turns: 1,
                 steps: 3,
-                stop_reason: Some("planner_budget".to_string()),
+                stop_reason: Some("agent_loop_budget".to_string()),
                 active_branch_id: None,
                 branch_count: None,
                 frontier_count: None,
@@ -963,7 +963,7 @@ mod tests {
 
         assert_eq!(
             presentation.text,
-            "strategy=direct, mode=single, turns=1, steps=3, stop=planner_budget\nGraph: nodes=12, edges=4, branches=n/a, frontier=n/a, active=none, retained=0"
+            "strategy=direct, mode=single, turns=1, steps=3, stop=agent_loop_budget\nGraph: nodes=12, edges=4, branches=n/a, frontier=n/a, active=none, retained=0"
         );
         assert_eq!(presentation.title, "• Reviewed planner trace");
     }

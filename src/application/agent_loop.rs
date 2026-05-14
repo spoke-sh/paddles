@@ -1,4 +1,4 @@
-//! Agent loop phase: drives the recursive planner loop end-to-end —
+//! Agent loop phase: drives the recursive agent loop end-to-end —
 //! action selection, governance gating, evidence accumulation, refinement,
 //! and replan. Free functions here replace the prior
 //! `RecursiveControlChamber` wrapper struct so call sites read as plain
@@ -6,24 +6,24 @@
 
 use super::*;
 
-pub(super) async fn execute_recursive_planner_loop(
+pub(super) async fn execute_agent_loop(
     service: &AgentRuntime,
     prompt: &str,
-    context: PlannerLoopContext,
+    context: AgentLoopContext,
     initial_decision: Option<ActionSelectionEngineDecision>,
     trace: Arc<StructuredTurnTrace>,
-) -> Result<PlannerLoopOutcome> {
+) -> Result<AgentLoopOutcome> {
     let mut context = context;
     let base_budget =
-        planner_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
-    let planner_loop_service = service.planner_loop_service();
+        agent_loop_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
+    let agent_loop_replan_policy = service.agent_loop_replan_policy();
     let execution_contract_service = service.execution_contract_service();
-    let mut budget = planner_loop_service.budget_for_replan_attempt(&base_budget, 0);
+    let mut budget = agent_loop_replan_policy.budget_for_replan_attempt(&base_budget, 0);
     let harness_profile = context.prepared.harness_profile();
-    let mut loop_state = PlannerLoopState {
+    let mut loop_state = AgentLoopState {
         target_resolution: context.initial_edit.resolution.clone(),
         refinement_policy: harness_profile.active_refinement_policy(),
-        ..PlannerLoopState::default()
+        ..AgentLoopState::default()
     };
     let mut used_workspace_resources = false;
     let mut stop_reason = None;
@@ -54,9 +54,9 @@ pub(super) async fn execute_recursive_planner_loop(
         }
 
         if sequence > budget.max_steps {
-            if let Some(replan_event) = planner_loop_service.activate_replan(
-                "planner-budget-exhausted",
-                PlannerLoopReplanActivation {
+            if let Some(replan_event) = agent_loop_replan_policy.activate_replan(
+                "agent-budget-exhausted",
+                AgentLoopReplanActivation {
                     instruction_frame: instruction_frame.as_ref(),
                     base_budget: &base_budget,
                     completed_replans: &mut replan_count,
@@ -74,7 +74,7 @@ pub(super) async fn execute_recursive_planner_loop(
         }
 
         let evidence_count_before = loop_state.evidence_items.len();
-        let planner_selected_this_step = pending_initial_decision.is_none();
+        let model_selected_this_step = pending_initial_decision.is_none();
         sync_deliberation_signal_note(&mut loop_state, &pending_deliberation_signals);
         let mut decision = if let Some(decision) = pending_initial_decision.take() {
             decision
@@ -91,7 +91,7 @@ pub(super) async fn execute_recursive_planner_loop(
             .with_collaboration(context.collaboration.clone())
             .with_recent_turns(context.recent_turns.clone())
             .with_recent_thread_summary(context.recent_thread_summary.clone())
-            .with_runtime_notes(planner_runtime_notes(
+            .with_runtime_notes(action_selection_runtime_notes(
                 context.retrieval_provider.as_ref(),
                 &context.specialist_runtime_notes,
                 &context.collaboration,
@@ -115,7 +115,7 @@ pub(super) async fn execute_recursive_planner_loop(
                 .await?
         };
 
-        if planner_selected_this_step {
+        if model_selected_this_step {
             decision = review_decision_under_signals(
                 prompt,
                 &context,
@@ -138,7 +138,7 @@ pub(super) async fn execute_recursive_planner_loop(
         if let Some(resolution) = decision.edit.resolution.clone() {
             loop_state.target_resolution = Some(resolution);
         }
-        if planner_selected_this_step {
+        if model_selected_this_step {
             let (controller_summary, signal_summary) = compile_recursive_paddles_rationale(
                 &decision.action,
                 &loop_state.evidence_items,
@@ -199,7 +199,7 @@ pub(super) async fn execute_recursive_planner_loop(
                     } => {
                         if search_steps(&loop_state) >= budget.max_searches {
                             stop_reason = Some("search-budget-exhausted".to_string());
-                            "planner search budget exhausted".to_string()
+                            "agent search budget exhausted".to_string()
                         } else {
                             service.execute_planner_gather_step(
                                 &context,
@@ -210,17 +210,17 @@ pub(super) async fn execute_recursive_planner_loop(
                                     query: query.clone(),
                                     intent_reason: intent
                                         .clone()
-                                        .unwrap_or_else(|| "planner-search".to_string()),
+                                        .unwrap_or_else(|| "agent-search".to_string()),
                                     mode: *mode,
                                     strategy: *strategy,
                                     retrievers: retrievers.clone(),
                                     max_evidence_items: budget.max_evidence_items,
                                     success_summary_override: None,
-                                    no_bundle_message: "planner search returned no evidence bundle",
-                                    failure_label: "planner search failed",
-                                    unavailable_label: "planner search backend unavailable",
+                                    no_bundle_message: "agent search returned no evidence bundle",
+                                    failure_label: "agent search failed",
+                                    unavailable_label: "agent search backend unavailable",
                                     missing_backend_message:
-                                        "no retrieval provider backend is configured for planner search",
+                                        "no retrieval provider backend is configured for agent search",
                                 },
                                 &mut used_workspace_resources,
                             )
@@ -230,9 +230,9 @@ pub(super) async fn execute_recursive_planner_loop(
                     WorkspaceAction::Inspect { command } => {
                         if inspect_steps(&loop_state) >= budget.max_inspects {
                             stop_reason = Some("inspect-budget-exhausted".to_string());
-                            "planner inspect budget exhausted".to_string()
+                            "agent inspect budget exhausted".to_string()
                         } else {
-                            let call_id = format!("planner-tool-{sequence}");
+                            let call_id = format!("agent-tool-{sequence}");
                             trace.emit(TurnEvent::ToolCalled {
                                 call_id: call_id.clone(),
                                 tool_name: "inspect".to_string(),
@@ -321,7 +321,7 @@ pub(super) async fn execute_recursive_planner_loop(
                         }
                     }
                     WorkspaceAction::Shell { command } => {
-                        let call_id = format!("planner-tool-{sequence}");
+                        let call_id = format!("agent-tool-{sequence}");
                         trace.emit(TurnEvent::ToolCalled {
                             call_id: call_id.clone(),
                             tool_name: "shell".to_string(),
@@ -413,7 +413,7 @@ pub(super) async fn execute_recursive_planner_loop(
                         }
                     }
                     WorkspaceAction::ExternalCapability { invocation } => {
-                        let call_id = format!("planner-tool-{sequence}");
+                        let call_id = format!("agent-tool-{sequence}");
                         let broker = service.external_capability_broker();
                         let descriptor = broker.descriptor(&invocation.capability_id);
                         trace.emit(TurnEvent::ToolCalled {
@@ -485,9 +485,9 @@ pub(super) async fn execute_recursive_planner_loop(
                             && read_steps(&loop_state) >= budget.max_reads
                         {
                             stop_reason = Some("read-budget-exhausted".to_string());
-                            "planner read budget exhausted".to_string()
+                            "agent read budget exhausted".to_string()
                         } else {
-                            let call_id = format!("planner-tool-{sequence}");
+                            let call_id = format!("agent-tool-{sequence}");
                             trace.emit(TurnEvent::ToolCalled {
                                 call_id: call_id.clone(),
                                 tool_name: action.label().to_string(),
@@ -578,7 +578,7 @@ pub(super) async fn execute_recursive_planner_loop(
                 } => {
                     if search_steps(&loop_state) >= budget.max_searches {
                         stop_reason = Some("search-budget-exhausted".to_string());
-                        "planner refine budget exhausted".to_string()
+                        "agent refine budget exhausted".to_string()
                     } else {
                         service.execute_planner_gather_step(
                             &context,
@@ -587,7 +587,7 @@ pub(super) async fn execute_recursive_planner_loop(
                             &gatherer_provider,
                             PlannerGatherSpec {
                                 query: query.clone(),
-                                intent_reason: "planner-refine".to_string(),
+                                intent_reason: "agent-refine".to_string(),
                                 mode: *mode,
                                 strategy: *strategy,
                                 retrievers: retrievers.clone(),
@@ -595,11 +595,11 @@ pub(super) async fn execute_recursive_planner_loop(
                                 success_summary_override: Some(format!(
                                     "refined search toward `{query}`"
                                 )),
-                                no_bundle_message: "planner refine returned no evidence bundle",
-                                failure_label: "planner refine failed",
-                                unavailable_label: "planner refine backend unavailable",
+                                no_bundle_message: "agent refine returned no evidence bundle",
+                                failure_label: "agent refine failed",
+                                unavailable_label: "agent refine backend unavailable",
                                 missing_backend_message:
-                                    "no retrieval provider backend is configured for refined planner search",
+                                    "no retrieval provider backend is configured for refined agent search",
                             },
                             &mut used_workspace_resources,
                         )
@@ -624,7 +624,7 @@ pub(super) async fn execute_recursive_planner_loop(
                         }
                     }
                     format!(
-                        "queued {} planner branch(es)",
+                        "queued {} agent branch(es)",
                         branches.len().min(budget.max_branch_factor)
                     )
                 }
@@ -643,20 +643,20 @@ pub(super) async fn execute_recursive_planner_loop(
                         });
                         direct_answer = None;
                         stop_reason = Some("instruction-unsatisfied".to_string());
-                        "planner stop converted into a blocked reply because the requested applied edit is still unsatisfied"
+                        "agent stop converted into a blocked reply because the requested applied edit is still unsatisfied"
                             .to_string()
                     } else {
                         direct_answer = stop_reason_direct_answer(reason, decision.answer.clone());
                         stop_reason = Some(reason.clone());
                         accepted_stop = true;
-                        format!("planner requested synthesis: {reason}")
+                        format!("agent loop requested synthesis: {reason}")
                     }
                 }
             }
         };
 
         loop_state.steps.push(PlannerStepRecord {
-            step_id: format!("planner-step-{sequence}"),
+            step_id: format!("agent-step-{sequence}"),
             sequence,
             branch_id: None,
             action: decision.action.clone(),
@@ -736,9 +736,9 @@ pub(super) async fn execute_recursive_planner_loop(
         }
 
         if let Some(reason) = stop_reason.clone() {
-            if let Some(replan_event) = planner_loop_service.activate_replan(
+            if let Some(replan_event) = agent_loop_replan_policy.activate_replan(
                 &reason,
-                PlannerLoopReplanActivation {
+                AgentLoopReplanActivation {
                     instruction_frame: instruction_frame.as_ref(),
                     base_budget: &base_budget,
                     completed_replans: &mut replan_count,
@@ -762,7 +762,7 @@ pub(super) async fn execute_recursive_planner_loop(
 
     let completed = stop_reason.is_some();
     let stop_reason = annotate_stop_reason_for_pending_instruction(
-        stop_reason.unwrap_or_else(|| "planner-budget-exhausted".to_string()),
+        stop_reason.unwrap_or_else(|| "agent-budget-exhausted".to_string()),
         instruction_frame.as_ref(),
     );
     trace.emit(TurnEvent::PlannerSummary {
@@ -806,8 +806,8 @@ pub(super) async fn execute_recursive_planner_loop(
             .map(|planner| planner.retained_artifacts.len()),
     });
 
-    if !used_workspace_resources && planner_stopped_without_resource_use(&loop_state) {
-        return Ok(PlannerLoopOutcome {
+    if !used_workspace_resources && action_selection_stopped_without_resource_use(&loop_state) {
+        return Ok(AgentLoopOutcome {
             evidence: None,
             direct_answer: direct_answer.or_else(|| {
                 instruction_frame
@@ -821,8 +821,8 @@ pub(super) async fn execute_recursive_planner_loop(
         });
     }
 
-    Ok(PlannerLoopOutcome {
-        evidence: Some(build_planner_evidence_bundle(
+    Ok(AgentLoopOutcome {
+        evidence: Some(build_agent_loop_evidence_bundle(
             &context.prepared,
             prompt,
             &loop_state,

@@ -8271,7 +8271,7 @@ mod tests {
         assert_eq!(
             app.rows.last().map(|row| row.header.as_str()),
             Some("• Step 1/12: inspect `git status --short` — git status --short"),
-            "matching inspect tool calls should stay folded into the planner step row"
+            "matching inspect tool calls should stay folded into the agent step row"
         );
     }
 

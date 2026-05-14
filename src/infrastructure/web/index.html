@@ -2179,7 +2179,7 @@ const TRACE_VIEW_PATHS = {
 const FORENSIC_KIND_LABELS = {
   TaskRootStarted: 'task root',
   TurnStarted: 'turn start',
-  PlannerAction: 'planner step',
+  PlannerAction: 'agent step',
   PlannerBranchDeclared: 'branch',
   SelectionArtifact: 'selection artifact',
   ModelExchangeArtifact: 'model exchange',
@@ -4001,9 +4001,9 @@ function plannerStepsForTurn(turn) {
     .map((recordProjection) => {
       const entry = kindEntry(recordProjection);
       return {
-        id: 'planner-step:' + recordProjection.record.record_id,
+        id: 'agent-step:' + recordProjection.record.record_id,
         recordId: recordProjection.record.record_id,
-        label: truncate(entry.value.action || 'planner step', 44)
+        label: truncate(entry.value.action || 'agent step', 44)
       };
     });
 }
@@ -4054,7 +4054,7 @@ function nodeIdsForRecord(recordProjection) {
       ids.add('artifact:' + entry.value.artifact.artifact_id);
     }
   } else if (entry.key === 'PlannerAction') {
-    ids.add('planner-step:' + recordProjection.record.record_id);
+    ids.add('agent-step:' + recordProjection.record.record_id);
   } else if (entry.key === 'CompletionCheckpoint' && entry.value.response && entry.value.response.artifact_id) {
     ids.add('output:' + entry.value.response.artifact_id);
   } else if (entry.key === 'SignalSnapshot') {
@@ -4088,7 +4088,7 @@ function recordMatchesFocus(recordProjection, focus) {
   }
   if (focus.kind === 'planner_step') {
     if (entry.key === 'PlannerAction') {
-      return 'planner-step:' + recordProjection.record.record_id === focus.id;
+      return 'agent-step:' + recordProjection.record.record_id === focus.id;
     }
     if (entry.key === 'LineageEdge') {
       return entry.value.source.id === focus.id || entry.value.target.id === focus.id;
@@ -4703,7 +4703,7 @@ function renderConversationDetail() {
     '</div>' +
     '<div class="forensic-detail-card">' +
       '<div class="forensic-detail-card-title">Navigation</div>' +
-      '<div class="forensic-inline-note">Choose a turn on the left, then narrow the lineage focus to model calls or planner steps before drilling into an exact trace record. The payload pane keeps a raw and rendered toggle for exact browser-side forensics.</div>' +
+      '<div class="forensic-inline-note">Choose a turn on the left, then narrow the lineage focus to model calls or agent steps before drilling into an exact trace record. The payload pane keeps a raw and rendered toggle for exact browser-side forensics.</div>' +
     '</div>';
 }
 

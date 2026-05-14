@@ -536,7 +536,7 @@ mod tests {
                     },
                     intervention: None,
                 },
-                detail: Some("planner step 1".to_string()),
+                detail: Some("agent step 1".to_string()),
             },
         };
 

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Size limits for context compaction self-assessment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompactionBudget {
-    /// Maximum number of planner steps allowed for self-assessment.
+    /// Maximum number of agent steps allowed for self-assessment.
     pub max_steps: usize,
 }
 

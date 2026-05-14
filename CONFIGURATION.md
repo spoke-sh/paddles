@@ -354,7 +354,7 @@ Current specialist-brain contract:
 
 - `session-continuity-v1` is registered under both profiles so the planner contract stays stable across models
 - the brain only activates when `recursive-structured-v1` is active and the session exposes durable turn summaries through `query_session_context(...)`
-- unsupported profiles or empty session history produce an explicit runtime note rather than silently bypassing the recursive planner loop
+- unsupported profiles or empty session history produce an explicit runtime note rather than silently bypassing the recursive agent loop
 
 Current local HTTP model guidance:
 

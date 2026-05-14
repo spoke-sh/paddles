@@ -107,7 +107,7 @@ The important architectural change is that these are now first-class runtime sta
 
 That gives TUI, web, and future API clients one shared runtime view instead of separate ad hoc interpretations of action-selection, retrieval, and tool progress. UI projection should treat that watch phase as a pacing signal rather than proof that execution has terminated; a retrieval row can legitimately report `watch=overtime` while the turn remains actively hunting and the projected total continues to move.
 
-> **Naming note.** Earlier drafts of this document referred to these phases as "chambers" wrapped by `*Chamber` types and to the runtime as `MechSuitService`. Mission VI2q5DKHe is migrating that vocabulary toward industry-standard agent terminology — `AgentRuntime` has landed; chamber wrappers and the `recursive_control` → `agent_loop` rename are planned. Treat any remaining "chamber" prose in this document as historical until that rename ships.
+> **Naming note.** Earlier drafts of this document referred to these phases as "chambers" wrapped by `*Chamber` types and to the runtime as `MechSuitService`. Mission VI2q5DKHe is migrating that vocabulary toward industry-standard agent terminology — `AgentRuntime` has landed; chamber wrappers and the `recursive_control` → `agent_loop` rename has shipped. Treat any remaining "chamber" prose in this document as historical until those references are retired.
 
 ### Act 3: Final Rendering
 

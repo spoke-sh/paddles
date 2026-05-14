@@ -1,10 +1,10 @@
 use crate::domain::model::InstructionFrame;
-use crate::domain::ports::{PlannerBudget, PlannerLoopState};
+use crate::domain::ports::{AgentLoopState, PlannerBudget};
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct PlannerLoopService;
+pub(super) struct AgentLoopReplanPolicy;
 
-impl PlannerLoopService {
+impl AgentLoopReplanPolicy {
     pub(super) const fn new() -> Self {
         Self
     }
@@ -29,9 +29,9 @@ impl PlannerLoopService {
     pub(super) fn activate_replan(
         &self,
         stop_reason: &str,
-        activation: PlannerLoopReplanActivation<'_>,
-    ) -> Option<PlannerLoopReplanEvent> {
-        let PlannerLoopReplanActivation {
+        activation: AgentLoopReplanActivation<'_>,
+    ) -> Option<AgentLoopReplanEvent> {
+        let AgentLoopReplanActivation {
             instruction_frame,
             base_budget,
             completed_replans,
@@ -52,10 +52,10 @@ impl PlannerLoopService {
         *budget = self.budget_for_replan_attempt(base_budget, *completed_replans);
         self.sync_replan_note(loop_state, stop_reason, instruction_frame);
 
-        Some(PlannerLoopReplanEvent {
+        Some(AgentLoopReplanEvent {
             stage: "replan",
             reason: format!(
-                "pending edit remained open after {}; extending planner budget to {} steps, {} reads, {} inspects, and {} searches while continuing from current evidence",
+                "pending edit remained open after {}; extending agent-loop budget to {} steps, {} reads, {} inspects, and {} searches while continuing from current evidence",
                 Self::budget_stop_reason_label(stop_reason),
                 budget.max_steps,
                 budget.max_reads,
@@ -79,7 +79,7 @@ impl PlannerLoopService {
 
     fn sync_replan_note(
         &self,
-        loop_state: &mut PlannerLoopState,
+        loop_state: &mut AgentLoopState,
         stop_reason: &str,
         instruction_frame: Option<&InstructionFrame>,
     ) {
@@ -121,21 +121,21 @@ impl PlannerLoopService {
 
     fn stop_reason_supports_replan(stop_reason: &str) -> bool {
         stop_reason.contains("budget-exhausted")
-            || stop_reason == "planner-budget-exhausted"
+            || stop_reason == "agent-budget-exhausted"
             || stop_reason == "instruction-unsatisfied"
     }
 }
 
-pub(super) struct PlannerLoopReplanActivation<'a> {
+pub(super) struct AgentLoopReplanActivation<'a> {
     pub(super) instruction_frame: Option<&'a InstructionFrame>,
     pub(super) base_budget: &'a PlannerBudget,
     pub(super) completed_replans: &'a mut usize,
     pub(super) budget: &'a mut PlannerBudget,
-    pub(super) loop_state: &'a mut PlannerLoopState,
+    pub(super) loop_state: &'a mut AgentLoopState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct PlannerLoopReplanEvent {
+pub(super) struct AgentLoopReplanEvent {
     pub(super) stage: &'static str,
     pub(super) reason: String,
 }
@@ -157,24 +157,24 @@ mod tests {
     }
 
     #[test]
-    fn planner_loop_replan_extends_budget_and_keeps_current_evidence_context() {
-        let service = PlannerLoopService::new();
+    fn agent_loop_replan_extends_budget_and_keeps_current_evidence_context() {
+        let service = AgentLoopReplanPolicy::new();
         let base_budget = edit_budget();
         let mut completed_replans = 0;
         let mut budget = service.budget_for_replan_attempt(&base_budget, completed_replans);
-        let mut loop_state = PlannerLoopState {
+        let mut loop_state = AgentLoopState {
             notes: vec![
                 "existing planner note".to_string(),
                 "Replan from current evidence after prior attempt.".to_string(),
             ],
-            ..PlannerLoopState::default()
+            ..AgentLoopState::default()
         };
         let instruction_frame = InstructionFrame::for_edit(vec!["src/lib.rs".to_string()]);
 
         let event = service
             .activate_replan(
-                "planner-budget-exhausted",
-                PlannerLoopReplanActivation {
+                "agent-budget-exhausted",
+                AgentLoopReplanActivation {
                     instruction_frame: Some(&instruction_frame),
                     base_budget: &base_budget,
                     completed_replans: &mut completed_replans,
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(budget.max_inspects, 2);
         assert_eq!(budget.max_searches, 2);
         assert_eq!(event.stage, "replan");
-        assert!(event.reason.contains("planner budget"));
+        assert!(event.reason.contains("agent-loop budget"));
         assert!(event.reason.contains("8 steps"));
         assert!(
             loop_state
@@ -212,16 +212,16 @@ mod tests {
     }
 
     #[test]
-    fn planner_loop_replan_does_not_activate_without_pending_workspace_obligation() {
-        let service = PlannerLoopService::new();
+    fn agent_loop_replan_does_not_activate_without_pending_workspace_obligation() {
+        let service = AgentLoopReplanPolicy::new();
         let base_budget = edit_budget();
         let mut completed_replans = 0;
         let mut budget = service.budget_for_replan_attempt(&base_budget, completed_replans);
-        let mut loop_state = PlannerLoopState::default();
+        let mut loop_state = AgentLoopState::default();
 
         let event = service.activate_replan(
-            "planner-budget-exhausted",
-            PlannerLoopReplanActivation {
+            "agent-budget-exhausted",
+            AgentLoopReplanActivation {
                 instruction_frame: None,
                 base_budget: &base_budget,
                 completed_replans: &mut completed_replans,

@@ -2505,7 +2505,7 @@ impl crate::domain::ports::ActionSelectionEngine for HttpActionSelectionAdapter 
             &request.operator_memory,
             PlannerActionSchemaVariant::Recursive,
         );
-        let mut user = build_http_planner_action_prompt(request, self.engine.format);
+        let mut user = build_http_agent_action_prompt(request, self.engine.format);
         let mut capture = self.exchange_capture(
             event_sink.as_ref(),
             TraceModelExchangeCategory::PlannerAction,
@@ -2524,7 +2524,7 @@ impl crate::domain::ports::ActionSelectionEngine for HttpActionSelectionAdapter 
                 stage: "planner-retry".to_string(),
                 reason: "missing or invalid planner action response; asking the planner to restate the next action inside the harness state space".to_string(),
             });
-            user = build_http_planner_retry_prompt(request, self.engine.format);
+            user = build_http_agent_action_retry_prompt(request, self.engine.format);
             capture = self.exchange_capture(
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::PlannerAction,
@@ -2544,7 +2544,8 @@ impl crate::domain::ports::ActionSelectionEngine for HttpActionSelectionAdapter 
                 stage: "planner-redecision".to_string(),
                 reason: "asking the planner for one final constrained next action inside the harness state space".to_string(),
             });
-            user = build_http_planner_redecision_prompt(request, &response, self.engine.format);
+            user =
+                build_http_agent_action_redecision_prompt(request, &response, self.engine.format);
             capture = self.exchange_capture(
                 event_sink.as_ref(),
                 TraceModelExchangeCategory::PlannerAction,
@@ -3187,7 +3188,7 @@ fn normalize_external_capability_payload(payload: Option<Value>) -> Value {
     }
 }
 
-fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
+fn build_http_agent_action_runtime_context(request: &PlannerRequest) -> String {
     let mut context = format!(
         "Runtime context:\n\
 - You are selecting bounded agent actions inside Paddles' recursive agent loop.\n\
@@ -3251,7 +3252,7 @@ fn build_http_planner_runtime_context(request: &PlannerRequest) -> String {
     context
 }
 
-fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
+fn build_http_agent_loop_state_digest(request: &PlannerRequest) -> String {
     let mut lines = vec![format!(
         "Budget remaining: steps={}, evidence_limit={}, pending_branches={}",
         request
@@ -3263,7 +3264,7 @@ fn build_http_planner_loop_state_digest(request: &PlannerRequest) -> String {
     )];
 
     if request.loop_state.steps.is_empty() {
-        lines.push("No planner steps have executed yet.".to_string());
+        lines.push("No agent steps have executed yet.".to_string());
     } else {
         for step in &request.loop_state.steps {
             lines.push(format!(
@@ -3324,7 +3325,7 @@ fn completed_read_observations(request: &PlannerRequest) -> Vec<(String, usize)>
     counts.into_iter().collect()
 }
 
-fn planner_completed_evidence_stop_guidance() -> &'static str {
+fn agent_completed_evidence_stop_guidance() -> &'static str {
     "Choose `stop` as soon as the current loop state contains enough evidence. `stop` is the model-owned handoff to final rendering; final rendering receives retained evidence and can quote, summarize, or answer from it. Do not leave the harness state space by answering the user in prose.\n\
 If a completed read observation already contains the requested source and no edit or command is needed, prefer `stop` over selecting the same read again unless the observation is stale, incomplete, or a mutation changed the file."
 }
@@ -3338,8 +3339,8 @@ Use `inspect` only for a single read-only probe. Do not chain inspect commands w
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 {}",
         request.user_prompt,
-        build_http_planner_runtime_context(request),
-        planner_transport_reply_instruction(format)
+        build_http_agent_action_runtime_context(request),
+        agent_action_transport_reply_instruction(format)
     )
 }
 
@@ -3355,8 +3356,8 @@ Use `inspect` only for a single read-only probe. Do not chain inspect commands w
 If `edit` is `yes` and one likely target file is already known, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 \n\
 User prompt: {}",
-        build_http_planner_runtime_context(request),
-        planner_transport_retry_instruction(format, true),
+        build_http_agent_action_runtime_context(request),
+        agent_action_transport_retry_instruction(format, true),
         request.user_prompt
     )
 }
@@ -3381,24 +3382,24 @@ Invalid reply to correct:\n\
 {}\n\
 \n\
 User prompt: {}",
-        build_http_planner_runtime_context(request),
-        planner_transport_retry_instruction(format, true),
+        build_http_agent_action_runtime_context(request),
+        agent_action_transport_retry_instruction(format, true),
         truncate(invalid_reply, 800),
         request.user_prompt
     )
 }
 
-fn build_http_planner_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
+fn build_http_agent_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     let steps_used = request.loop_state.steps.len();
     let steps_remaining = request.budget.max_steps.saturating_sub(steps_used);
     let mut user = format!(
         "User prompt: {}\n\n{}\nBudget: {steps_used}/{} steps used, {steps_remaining} remaining.\n",
         request.user_prompt,
-        build_http_planner_runtime_context(request),
+        build_http_agent_action_runtime_context(request),
         request.budget.max_steps
     );
     user.push_str("\n## Current loop state\n");
-    user.push_str(&build_http_planner_loop_state_digest(request));
+    user.push_str(&build_http_agent_loop_state_digest(request));
     user.push('\n');
     user.push_str(&format!(
         "\nSelect the next bounded agent action inside the recursive agent loop.\n\
@@ -3408,13 +3409,13 @@ Use `inspect` only for a single read-only probe. Do not chain inspect commands w
 If one likely target file is already known or already read, move into exact-diff state space. For local, mechanical changes like padding, copy, a selector, one condition, or a small UI tweak, prefer `replace_in_file` or `apply_patch` over rereading the same file.\n\
 If the loop-state notes contain a steering review, judge the proposed next move against the gathered sources and return the action that should actually execute next.\n\
 {}",
-        planner_completed_evidence_stop_guidance(),
-        planner_transport_reply_instruction(format)
+        agent_completed_evidence_stop_guidance(),
+        agent_action_transport_reply_instruction(format)
     ));
     user
 }
 
-fn build_http_planner_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
+fn build_http_agent_action_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "Your last agent-action reply was empty or invalid.\n\
 Return the next bounded agent action inside the recursive agent loop.\n\
@@ -3427,15 +3428,15 @@ If one likely target file is already known or already read, move into exact-diff
 {}\n\
 \n\
 Current user request: {}",
-        build_http_planner_runtime_context(request),
-        build_http_planner_loop_state_digest(request),
-        planner_completed_evidence_stop_guidance(),
-        planner_transport_retry_instruction(format, false),
+        build_http_agent_action_runtime_context(request),
+        build_http_agent_loop_state_digest(request),
+        agent_completed_evidence_stop_guidance(),
+        agent_action_transport_retry_instruction(format, false),
         request.user_prompt
     )
 }
 
-fn build_http_planner_redecision_prompt(
+fn build_http_agent_action_redecision_prompt(
     request: &PlannerRequest,
     invalid_reply: &str,
     format: ApiFormat,
@@ -3455,10 +3456,10 @@ Invalid reply to correct:\n\
 {}\n\
 \n\
         Current user request: {}",
-        build_http_planner_runtime_context(request),
-        build_http_planner_loop_state_digest(request),
-        planner_completed_evidence_stop_guidance(),
-        planner_transport_retry_instruction(format, false),
+        build_http_agent_action_runtime_context(request),
+        build_http_agent_loop_state_digest(request),
+        agent_completed_evidence_stop_guidance(),
+        agent_action_transport_retry_instruction(format, false),
         truncate(invalid_reply, 800),
         request.user_prompt
     )
@@ -3574,7 +3575,7 @@ fn extract_json(text: &str) -> Option<&str> {
     None
 }
 
-fn planner_transport_reply_instruction(format: ApiFormat) -> &'static str {
+fn agent_action_transport_reply_instruction(format: ApiFormat) -> &'static str {
     match format {
         ApiFormat::OpenAi => {
             "Use the `select_planner_action` tool exactly once. Put the action envelope in the tool arguments and do not answer in prose."
@@ -3583,7 +3584,7 @@ fn planner_transport_reply_instruction(format: ApiFormat) -> &'static str {
     }
 }
 
-fn planner_transport_retry_instruction(format: ApiFormat, initial: bool) -> String {
+fn agent_action_transport_retry_instruction(format: ApiFormat, initial: bool) -> String {
     let label = if initial {
         "first bounded agent action"
     } else {
@@ -3945,11 +3946,11 @@ mod tests {
         TraceModelExchangePhase, TraceRecordKind, TurnEvent, TurnEventSink, TurnIntent,
     };
     use crate::domain::ports::{
-        ActionSelectionEngine, ActionSelectionEngineDecision, EvidenceBundle, EvidenceItem,
-        FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain, GroundingRequirement,
-        InitialAction, InitialEditInstruction, InterpretationContext, ModelPaths, ModelRegistry,
-        PlannerAction, PlannerBudget, PlannerExecutionContract, PlannerLoopState, PlannerRequest,
-        RetrieverOption, TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
+        ActionSelectionEngine, ActionSelectionEngineDecision, AgentLoopState, EvidenceBundle,
+        EvidenceItem, FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain,
+        GroundingRequirement, InitialAction, InitialEditInstruction, InterpretationContext,
+        ModelPaths, ModelRegistry, PlannerAction, PlannerBudget, PlannerExecutionContract,
+        PlannerRequest, RetrieverOption, TraceRecorder, WorkspaceAction, WorkspaceActionExecutor,
     };
     use crate::infrastructure::adapters::agent_memory::AgentMemory;
     use crate::infrastructure::adapters::trace_recorders::InMemoryTraceRecorder;
@@ -4182,7 +4183,7 @@ mod tests {
                     adapter,
                     request,
                     PlannerActionSchemaVariant::Recursive,
-                    super::build_http_planner_action_prompt(request, ApiFormat::OpenAi),
+                    super::build_http_agent_action_prompt(request, ApiFormat::OpenAi),
                 ),
             ),
             (
@@ -4192,7 +4193,7 @@ mod tests {
                     adapter,
                     request,
                     PlannerActionSchemaVariant::Recursive,
-                    super::build_http_planner_retry_prompt(request, ApiFormat::OpenAi),
+                    super::build_http_agent_action_retry_prompt(request, ApiFormat::OpenAi),
                 ),
             ),
             (
@@ -4202,7 +4203,7 @@ mod tests {
                     adapter,
                     request,
                     PlannerActionSchemaVariant::Recursive,
-                    super::build_http_planner_redecision_prompt(
+                    super::build_http_agent_action_redecision_prompt(
                         request,
                         "not json",
                         ApiFormat::OpenAi,
@@ -6210,7 +6211,7 @@ mod tests {
     }
 
     #[test]
-    fn http_planner_action_prompt_includes_evidence_and_pressure_notes() {
+    fn http_agent_action_prompt_includes_evidence_and_pressure_notes() {
         let request = PlannerRequest::new(
             "CI is failing. Can you debug it on this machine?",
             "/workspace",
@@ -6220,9 +6221,9 @@ mod tests {
         .with_runtime_notes(vec![
             "Workspace retrieval readiness: bm25=available, vector=warming. Prefer bm25 if search is needed immediately.".to_string(),
         ])
-        .with_loop_state(PlannerLoopState {
+        .with_loop_state(AgentLoopState {
             steps: vec![crate::domain::ports::PlannerStepRecord {
-                step_id: "planner-step-1".to_string(),
+                step_id: "agent-step-1".to_string(),
                 sequence: 1,
                 branch_id: None,
                 action: PlannerAction::Workspace {
@@ -6243,10 +6244,10 @@ mod tests {
                 "Steering review [premise-challenge]\nTreat the reported failure as a hypothesis and judge the gathered sources before repeating the same probe."
                     .to_string(),
             ],
-            ..PlannerLoopState::default()
+            ..AgentLoopState::default()
         });
 
-        let prompt = super::build_http_planner_action_prompt(&request, ApiFormat::OpenAi);
+        let prompt = super::build_http_agent_action_prompt(&request, ApiFormat::OpenAi);
 
         assert!(prompt.contains("Current loop state"));
         assert!(prompt.contains("Runtime notes"));
@@ -6268,7 +6269,7 @@ mod tests {
     }
 
     #[test]
-    fn http_planner_action_prompt_surfaces_completed_reads_as_model_owned_handoff_context() {
+    fn http_agent_action_prompt_surfaces_completed_reads_as_model_owned_handoff_context() {
         let retained_snippet = format!(
             "Read file AGENTS.md:\n# AGENTS.md\n\n{}\nTail evidence confirms this is the operator contract.",
             "Shared guidance for AI agents using `paddles` to work on `paddles`. ".repeat(3)
@@ -6279,9 +6280,9 @@ mod tests {
             InterpretationContext::default(),
             PlannerBudget::default(),
         )
-        .with_loop_state(PlannerLoopState {
+        .with_loop_state(AgentLoopState {
             steps: vec![crate::domain::ports::PlannerStepRecord {
-                step_id: "planner-step-0".to_string(),
+                step_id: "agent-step-0".to_string(),
                 sequence: 0,
                 branch_id: None,
                 action: PlannerAction::Workspace {
@@ -6297,10 +6298,10 @@ mod tests {
                 rationale: "read the operator contract before answering".to_string(),
                 rank: 1,
             }],
-            ..PlannerLoopState::default()
+            ..AgentLoopState::default()
         });
 
-        let prompt = super::build_http_planner_action_prompt(&request, ApiFormat::OpenAi);
+        let prompt = super::build_http_agent_action_prompt(&request, ApiFormat::OpenAi);
 
         assert!(prompt.contains("Completed read observations"));
         assert!(prompt.contains("`AGENTS.md` already read 1 time(s)"));

@@ -15,14 +15,14 @@ mod workspace_action_execution;
 mod workspace_editing;
 
 pub use action_selection::{
-    ActionSelectionEngine, AgentAction, AgentDecision, CompactionPlan, CompactionRequest,
-    GroundingDomain, GroundingRequirement, GuidanceCategory, InitialAction, InitialActionDecision,
-    InitialEditInstruction, InterpretationConflict, InterpretationContext,
+    ActionSelectionEngine, AgentAction, AgentDecision, AgentLoopState, CompactionPlan,
+    CompactionRequest, GroundingDomain, GroundingRequirement, GuidanceCategory, InitialAction,
+    InitialActionDecision, InitialEditInstruction, InterpretationConflict, InterpretationContext,
     InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
     InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
     InterpretationToolHint, OperatorMemoryDocument, PlannerAction, PlannerBudget,
     PlannerCapability, PlannerDecision as ActionSelectionEngineDecision, PlannerExecutionContract,
-    PlannerLoopState, PlannerRequest, PlannerStepRecord, RefinementPolicy, RefinementTrigger,
+    PlannerRequest, PlannerStepRecord, RefinementPolicy, RefinementTrigger,
     RefinementTriggerSource, ThreadDecisionRequest, WorkspaceAction,
 };
 pub use context_resolution::ContextResolver;

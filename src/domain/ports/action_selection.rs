@@ -182,7 +182,7 @@ pub struct PlannerRequest {
     pub recent_thread_summary: Option<String>,
     pub runtime_notes: Vec<String>,
     pub execution_contract: PlannerExecutionContract,
-    pub loop_state: PlannerLoopState,
+    pub loop_state: AgentLoopState,
     pub budget: PlannerBudget,
     pub resolver: Option<Arc<dyn ContextResolver>>,
     pub entity_resolver: Option<Arc<dyn EntityResolver>>,
@@ -211,7 +211,7 @@ impl PlannerRequest {
             recent_thread_summary: None,
             runtime_notes: Vec::new(),
             execution_contract: PlannerExecutionContract::default(),
-            loop_state: PlannerLoopState::default(),
+            loop_state: AgentLoopState::default(),
             budget,
             resolver: None,
             entity_resolver: None,
@@ -258,7 +258,7 @@ impl PlannerRequest {
         self
     }
 
-    pub fn with_loop_state(mut self, loop_state: PlannerLoopState) -> Self {
+    pub fn with_loop_state(mut self, loop_state: AgentLoopState) -> Self {
         self.loop_state = loop_state;
         self
     }
@@ -310,7 +310,7 @@ impl ThreadDecisionRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct PlannerLoopState {
+pub struct AgentLoopState {
     pub steps: Vec<PlannerStepRecord>,
     pub evidence_items: Vec<EvidenceItem>,
     pub notes: Vec<String>,
@@ -765,11 +765,11 @@ fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentAction, AgentDecision, GroundingDomain, GroundingRequirement, GuidanceCategory,
-        InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
-        InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
-        InterpretationProcedureStep, InterpretationToolHint, PlannerAction, PlannerBudget,
-        PlannerLoopState, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
+        AgentAction, AgentDecision, AgentLoopState, GroundingDomain, GroundingRequirement,
+        GuidanceCategory, InitialAction, InitialActionDecision, InitialEditInstruction,
+        InterpretationContext, InterpretationDecisionFramework, InterpretationDocument,
+        InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint,
+        PlannerAction, PlannerBudget, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
         RetrievalMode, RetrievalStrategy, ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
@@ -867,8 +867,8 @@ mod tests {
     }
 
     #[test]
-    fn planner_loop_state_defaults_include_refinement_fields() {
-        let state = PlannerLoopState::default();
+    fn agent_loop_state_defaults_include_refinement_fields() {
+        let state = AgentLoopState::default();
 
         assert_eq!(state.refinement_count, 0);
         assert!(state.last_refinement_step.is_none());

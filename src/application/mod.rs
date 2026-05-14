@@ -1,4 +1,5 @@
 mod agent_loop;
+mod agent_loop_replan;
 mod context_assembly;
 mod conversation_read_model;
 mod deliberation;
@@ -11,12 +12,12 @@ mod final_rendering;
 mod harness_capability_posture;
 mod planner_action_execution;
 pub mod planner_action_schema;
-mod planner_loop;
 pub mod read_model;
 mod runtime_posture_projection;
 mod turn;
 mod worker_runtime;
 
+use self::agent_loop_replan::{AgentLoopReplanActivation, AgentLoopReplanPolicy};
 pub use self::deliberation::{
     DeliberationConfidence, DeliberationContinuation, DeliberationSignal, DeliberationSignals,
     extract_deliberation_signals,
@@ -37,7 +38,6 @@ pub use self::harness_capability_posture::{
     HarnessExternalCapabilityRuntimeStatus, HarnessProviderModelRuntimeStatus,
     HarnessProviderRegistryRuntimeStatus, RuntimeHarnessCapabilityPostureService,
 };
-use self::planner_loop::{PlannerLoopReplanActivation, PlannerLoopService};
 pub use self::runtime_posture_projection::{
     RuntimeCapabilityPostureEvent, RuntimeDiagnosticPostureEvent, RuntimeEvalOutcomePostureEvent,
     RuntimeEvalPostureEvent, RuntimeGovernancePostureEvent, RuntimePostureProjectionInput,
@@ -104,15 +104,15 @@ use crate::domain::model::{
     WorkerArtifactRecord, WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleResult,
 };
 use crate::domain::ports::{
-    ActionSelectionEngine, ActionSelectionEngineDecision, ContextGatherRequest, ContextResolver,
-    EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome, EntityResolutionRequest,
-    EntityResolver, EvidenceBudget, EvidenceBundle, EvidenceItem, ExternalCapabilityBroker,
-    FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain, GroundingRequirement,
-    InitialAction, InitialActionDecision, InitialEditInstruction, InterpretationContext,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationRequest,
-    InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint, OperatorMemory,
-    OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability, PlannerConfig,
-    PlannerExecutionContract, PlannerLoopState, PlannerRequest, PlannerStepRecord,
+    ActionSelectionEngine, ActionSelectionEngineDecision, AgentLoopState, ContextGatherRequest,
+    ContextResolver, EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome,
+    EntityResolutionRequest, EntityResolver, EvidenceBudget, EvidenceBundle, EvidenceItem,
+    ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain,
+    GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
+    InterpretationContext, InterpretationProcedure, InterpretationProcedureStep,
+    InterpretationRequest, InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint,
+    OperatorMemory, OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability,
+    PlannerConfig, PlannerExecutionContract, PlannerRequest, PlannerStepRecord,
     PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
     RetrievalCapability, RetrievalMode, RetrievalProvider, RetrievalStrategy, RetrieverOption,
     SpecialistBrainRequest, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
@@ -382,7 +382,7 @@ impl Drop for ActiveTurnGuard {
     }
 }
 
-struct PlannerLoopContext {
+struct AgentLoopContext {
     prepared: PreparedTurnRuntime,
     action_selector: Arc<dyn ActionSelectionEngine>,
     retrieval_provider: Option<Arc<dyn RetrievalProvider>>,
@@ -515,7 +515,7 @@ impl StructuredTurnTrace {
     fn planner_step_node(&self, record_id: &TraceRecordId) -> TraceLineageNodeRef {
         TraceLineageNodeRef {
             kind: TraceLineageNodeKind::PlannerStep,
-            id: format!("planner-step:{}", record_id.as_str()),
+            id: format!("agent-step:{}", record_id.as_str()),
             label: record_id.as_str().to_string(),
         }
     }
@@ -654,7 +654,7 @@ impl StructuredTurnTrace {
             self.turn_node(),
             self.planner_step_node(&record_id),
             TraceLineageRelation::Contains,
-            format!("turn contains planner step `{action}`"),
+            format!("turn contains agent step `{action}`"),
         );
     }
 
@@ -1375,7 +1375,7 @@ impl TurnEventSink for StructuredTurnTrace {
                         kind: TraceSignalKind::BudgetBoundary,
                         gate: None,
                         phase: None,
-                        summary: format!("planner stop reason `{stop_reason}`"),
+                        summary: format!("action-selection stop reason `{stop_reason}`"),
                         level: level.to_string(),
                         magnitude_percent,
                         applies_to: Some(self.turn_node()),
@@ -1472,7 +1472,7 @@ impl ForensicTraceSink for StructuredTurnTrace {
                     self.planner_step_node(&parent_record_id),
                     self.model_call_node(&capture.exchange_id),
                     TraceLineageRelation::Triggers,
-                    "planner step triggered model call",
+                    "agent step triggered model call",
                 );
             }
         }
@@ -1856,8 +1856,8 @@ fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSigna
             "inspect_budget"
         } else if stop_reason.contains("read-budget") {
             "read_budget"
-        } else if stop_reason.contains("planner-budget") {
-            "planner_budget"
+        } else if stop_reason.contains("agent-budget") {
+            "agent_loop_budget"
         } else {
             "controller_policy"
         };
@@ -1874,7 +1874,7 @@ fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSigna
                     source: secondary_source.to_string(),
                     share_percent: 40,
                     rationale: format!(
-                        "The planner stop reason still carried `{stop_reason}` while the applied-edit obligation remained open."
+                        "The action-selection stop reason still carried `{stop_reason}` while the applied-edit obligation remained open."
                     ),
                 },
             ],
@@ -1890,7 +1890,7 @@ fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSigna
     } else if stop_reason.contains("premise-challenge") {
         "premise_challenge"
     } else {
-        "planner_budget"
+        "agent_loop_budget"
     };
 
     (
@@ -1904,12 +1904,12 @@ fn budget_signal_details(stop_reason: &str) -> (&'static str, u8, Vec<TraceSigna
             TraceSignalContribution {
                 source: source.to_string(),
                 share_percent: 65,
-                rationale: format!("The planner stopped because `{stop_reason}`."),
+                rationale: format!("The action-selection client stopped because `{stop_reason}`."),
             },
             TraceSignalContribution {
-                source: "planner_budget".to_string(),
+                source: "agent_loop_budget".to_string(),
                 share_percent: 35,
-                rationale: "The planner budget bounded additional recursion and retrieval."
+                rationale: "The agent-loop budget bounded additional recursion and retrieval."
                     .to_string(),
             },
         ],
@@ -2443,7 +2443,7 @@ impl AgentRuntime {
         self.external_capability_broker().descriptors()
     }
 
-    pub fn planner_execution_contract(
+    pub fn action_selection_execution_contract(
         &self,
         retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
         collaboration: &CollaborationModeResult,
@@ -2535,8 +2535,8 @@ impl AgentRuntime {
             .push(observer);
     }
 
-    fn planner_loop_service(&self) -> PlannerLoopService {
-        PlannerLoopService::new()
+    fn agent_loop_replan_policy(&self) -> AgentLoopReplanPolicy {
+        AgentLoopReplanPolicy::new()
     }
 
     fn execution_contract_service(&self) -> ExecutionContractService {
@@ -2676,8 +2676,8 @@ impl AgentRuntime {
 
     async fn execute_planner_gather_step(
         &self,
-        context: &PlannerLoopContext,
-        loop_state: &mut PlannerLoopState,
+        context: &AgentLoopContext,
+        loop_state: &mut AgentLoopState,
         trace: Arc<StructuredTurnTrace>,
         gatherer_provider: &str,
         spec: PlannerGatherSpec,
@@ -3193,9 +3193,9 @@ impl AgentRuntime {
 
     async fn apply_turn_controls_at_safe_checkpoint(
         &self,
-        context: &PlannerLoopContext,
+        context: &AgentLoopContext,
         trace: &Arc<StructuredTurnTrace>,
-    ) -> Result<Option<PlannerLoopOutcome>> {
+    ) -> Result<Option<AgentLoopOutcome>> {
         let requests = trace.session.take_turn_control_requests(&trace.turn_id);
         if requests.is_empty() {
             return Ok(None);
@@ -3234,7 +3234,7 @@ impl AgentRuntime {
                         "Interrupted the active turn at a safe checkpoint.",
                     ),
                 });
-                Ok(Some(PlannerLoopOutcome {
+                Ok(Some(AgentLoopOutcome {
                     evidence: None,
                     direct_answer: Some(AuthoredResponse::from_plain_text(
                         ResponseMode::DirectAnswer,
@@ -3348,12 +3348,12 @@ impl AgentRuntime {
                     ),
                 });
 
-                Ok(Some(PlannerLoopOutcome {
+                Ok(Some(AgentLoopOutcome {
                     evidence: None,
                     direct_answer: None,
                     instruction_frame: None,
                     grounding: None,
-                    continuation: Some(PlannerLoopContinuation {
+                    continuation: Some(AgentLoopContinuation {
                         prompt: candidate.prompt,
                         summary: format!(
                             "turn handed off to steered prompt on {} via {}",
@@ -3428,7 +3428,7 @@ impl AgentRuntime {
     fn mid_loop_refinement_reason(
         &self,
         sequence: usize,
-        loop_state: &PlannerLoopState,
+        loop_state: &AgentLoopState,
         steps_without_new_evidence: usize,
         deliberation_signals: &DeliberationSignals,
     ) -> Option<String> {
@@ -3508,8 +3508,8 @@ impl AgentRuntime {
     async fn derive_mid_loop_interpretation_context(
         &self,
         prompt: &str,
-        context: &PlannerLoopContext,
-        loop_state: &PlannerLoopState,
+        context: &AgentLoopContext,
+        loop_state: &AgentLoopState,
         _evidence_count_before: &usize,
         trace: &Arc<StructuredTurnTrace>,
     ) -> Option<InterpretationContext> {
@@ -3518,7 +3518,7 @@ impl AgentRuntime {
             .operator_memory_documents(&self.workspace_root);
         documents.push(crate::domain::ports::OperatorMemoryDocument {
             path: self.workspace_root.join(".paddles/refinement-context.md"),
-            source: "planner-loop-context".to_string(),
+            source: "agent-loop-context".to_string(),
             contents: format!(
                 "Interpretation context before refinement:\n{}",
                 context.interpretation.render()
@@ -3536,7 +3536,7 @@ impl AgentRuntime {
         if !evidence_snapshot.is_empty() {
             documents.push(crate::domain::ports::OperatorMemoryDocument {
                 path: self.workspace_root.join(".paddles/refinement-evidence.md"),
-                source: "planner-loop-evidence".to_string(),
+                source: "agent-loop-evidence".to_string(),
                 contents: format!("Recent evidence:\n{evidence_snapshot}"),
             });
         }
@@ -3572,15 +3572,15 @@ struct PromptExecutionPlan {
     grounding: Option<GroundingRequirement>,
 }
 
-struct PlannerLoopOutcome {
+struct AgentLoopOutcome {
     evidence: Option<EvidenceBundle>,
     direct_answer: Option<AuthoredResponse>,
     instruction_frame: Option<InstructionFrame>,
     grounding: Option<GroundingRequirement>,
-    continuation: Option<PlannerLoopContinuation>,
+    continuation: Option<AgentLoopContinuation>,
 }
 
-struct PlannerLoopContinuation {
+struct AgentLoopContinuation {
     prompt: String,
     summary: String,
 }
@@ -4488,7 +4488,7 @@ fn render_structured_clarification_request(
     lines.join("\n")
 }
 
-fn planner_runtime_notes(
+fn action_selection_runtime_notes(
     retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
     specialist_notes: &[String],
     collaboration: &CollaborationModeResult,
@@ -4540,7 +4540,7 @@ fn planner_runtime_notes(
     notes
 }
 
-fn format_planner_capability(capability: &PlannerCapability) -> String {
+fn format_action_selection_capability(capability: &PlannerCapability) -> String {
     match capability {
         PlannerCapability::Available => "available".to_string(),
         PlannerCapability::Unsupported { reason } => format!("unsupported: {reason}"),
@@ -4588,7 +4588,7 @@ fn planner_summary_event(planner: &PlannerTraceMetadata) -> TurnEvent {
 async fn build_planner_prior_context(
     interpretation: &InterpretationContext,
     recent_turns: &[String],
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     resolver: Option<Arc<dyn ContextResolver>>,
 ) -> Vec<String> {
     let mut prior = Vec::new();
@@ -4649,7 +4649,7 @@ async fn build_planner_prior_context(
     prior
 }
 
-fn planner_budget_for_turn(
+fn agent_loop_budget_for_turn(
     instruction_frame: Option<&InstructionFrame>,
     initial_edit: &InitialEditInstruction,
 ) -> PlannerBudget {
@@ -5038,7 +5038,7 @@ async fn rerank_known_edit_candidates_with_vector_lookup(
     ranked.into_iter().map(|(path, _)| path).collect()
 }
 
-fn search_steps(loop_state: &PlannerLoopState) -> usize {
+fn search_steps(loop_state: &AgentLoopState) -> usize {
     loop_state
         .steps
         .iter()
@@ -5053,7 +5053,7 @@ fn search_steps(loop_state: &PlannerLoopState) -> usize {
         .count()
 }
 
-fn has_file_targeting_step(loop_state: &PlannerLoopState) -> bool {
+fn has_file_targeting_step(loop_state: &AgentLoopState) -> bool {
     loop_state.steps.iter().any(|step| {
         matches!(
             step.action,
@@ -5099,9 +5099,9 @@ struct DecisionReviewFrame<'a> {
 
 async fn review_decision_under_signals(
     prompt: &str,
-    context: &PlannerLoopContext,
+    context: &AgentLoopContext,
     budget: &PlannerBudget,
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     decision: ActionSelectionEngineDecision,
     frame: DecisionReviewFrame<'_>,
 ) -> Result<ActionSelectionEngineDecision> {
@@ -5152,7 +5152,7 @@ async fn review_decision_under_signals(
     .with_collaboration(context.collaboration.clone())
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
-    .with_runtime_notes(planner_runtime_notes(
+    .with_runtime_notes(action_selection_runtime_notes(
         context.retrieval_provider.as_ref(),
         &context.specialist_runtime_notes,
         &context.collaboration,
@@ -5194,8 +5194,8 @@ async fn review_decision_under_signals(
 }
 
 fn collect_steering_review_notes(
-    context: &PlannerLoopContext,
-    loop_state: &PlannerLoopState,
+    context: &AgentLoopContext,
+    loop_state: &AgentLoopState,
     decision: &ActionSelectionEngineDecision,
     workspace_root: &Path,
     deliberation_signals: &DeliberationSignals,
@@ -5469,7 +5469,7 @@ fn compile_recursive_paddles_rationale(
 }
 
 fn sync_deliberation_signal_note(
-    loop_state: &mut PlannerLoopState,
+    loop_state: &mut AgentLoopState,
     deliberation_signals: &DeliberationSignals,
 ) {
     const DELIBERATION_SIGNAL_NOTE_PREFIX: &str = "Deliberation signals:";
@@ -5532,7 +5532,7 @@ fn format_deliberation_review_note(
 }
 
 fn should_apply_execution_review(
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     decision: &ActionSelectionEngineDecision,
     likely_targets: &[String],
 ) -> bool {
@@ -5576,7 +5576,7 @@ fn normalize_candidate_files(
 
 fn format_premise_challenge_review_note(
     decision: &ActionSelectionEngineDecision,
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
 ) -> String {
     let mut lines = vec![
         "Steering review [premise-challenge]".to_string(),
@@ -5604,7 +5604,7 @@ struct WorkspaceEditorPressure {
 }
 
 fn workspace_editor_pressure(
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     decision: &ActionSelectionEngineDecision,
     likely_targets: &[String],
 ) -> WorkspaceEditorPressure {
@@ -5636,7 +5636,7 @@ struct GitCommitPressure {
     commit_attempted: bool,
 }
 
-fn git_commit_pressure(loop_state: &PlannerLoopState) -> GitCommitPressure {
+fn git_commit_pressure(loop_state: &AgentLoopState) -> GitCommitPressure {
     let mut pressure = GitCommitPressure::default();
 
     for step in &loop_state.steps {
@@ -5678,7 +5678,7 @@ fn git_commit_pressure(loop_state: &PlannerLoopState) -> GitCommitPressure {
 }
 
 fn should_apply_commit_review(
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     decision: &ActionSelectionEngineDecision,
 ) -> bool {
     if decision_is_git_commit(&decision.action) {
@@ -5730,7 +5730,7 @@ fn format_commit_bias_review_note(
     lines.join("\n")
 }
 
-fn prior_read_counts(loop_state: &PlannerLoopState) -> HashMap<String, usize> {
+fn prior_read_counts(loop_state: &AgentLoopState) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for step in &loop_state.steps {
         if let PlannerAction::Workspace {
@@ -5768,7 +5768,7 @@ fn workspace_action_path(action: &WorkspaceAction) -> Option<&str> {
 fn maybe_promote_missing_resolution_for_mutation(
     workspace_root: &Path,
     candidate_files: &[String],
-    loop_state: &mut PlannerLoopState,
+    loop_state: &mut AgentLoopState,
     action: &WorkspaceAction,
 ) {
     let Some(EntityResolutionOutcome::Missing { .. }) = loop_state.target_resolution.as_ref()
@@ -5831,7 +5831,7 @@ fn decision_is_git_commit(action: &PlannerAction) -> bool {
 
 fn unresolved_target_mutation_boundary(
     action: &WorkspaceAction,
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
 ) -> Option<(String, String)> {
     if !matches!(
         action,
@@ -5982,7 +5982,7 @@ fn decision_targets_file(action: &PlannerAction) -> bool {
 }
 
 fn likely_action_bias_targets(
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     workspace_root: &Path,
     limit: usize,
 ) -> Vec<String> {
@@ -6040,7 +6040,7 @@ fn likely_action_bias_targets(
 }
 
 fn resolution_backed_action_bias_targets(
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     workspace_root: &Path,
     limit: usize,
 ) -> Vec<String> {
@@ -6562,7 +6562,7 @@ impl CompactionEngine {
     }
 }
 
-fn read_steps(loop_state: &PlannerLoopState) -> usize {
+fn read_steps(loop_state: &AgentLoopState) -> usize {
     loop_state
         .steps
         .iter()
@@ -6577,7 +6577,7 @@ fn read_steps(loop_state: &PlannerLoopState) -> usize {
         .count()
 }
 
-fn inspect_steps(loop_state: &PlannerLoopState) -> usize {
+fn inspect_steps(loop_state: &AgentLoopState) -> usize {
     loop_state
         .steps
         .iter()
@@ -6762,7 +6762,7 @@ fn rehydrate_conversation_session(replay: &TraceReplay) -> ConversationSession {
     session
 }
 
-fn planner_stopped_without_resource_use(loop_state: &PlannerLoopState) -> bool {
+fn action_selection_stopped_without_resource_use(loop_state: &AgentLoopState) -> bool {
     matches!(
         loop_state.steps.last().map(|step| &step.action),
         Some(PlannerAction::Stop { .. })
@@ -6803,10 +6803,10 @@ fn stop_reason_direct_answer(reason: &str, answer: Option<String>) -> Option<Aut
     None
 }
 
-fn build_planner_evidence_bundle(
+fn build_agent_loop_evidence_bundle(
     prepared: &PreparedTurnRuntime,
     prompt: &str,
-    loop_state: &PlannerLoopState,
+    loop_state: &AgentLoopState,
     completed: bool,
     stop_reason: &str,
 ) -> EvidenceBundle {
@@ -6996,17 +6996,17 @@ mod tests {
         TraceRecordKind, TraceSignalKind, TranscriptUpdateSink, TurnEvent, TurnEventSink,
     };
     use crate::domain::ports::{
-        ActionSelectionEngine, ActionSelectionEngineDecision, ContextGatherRequest,
+        ActionSelectionEngine, ActionSelectionEngineDecision, AgentLoopState, ContextGatherRequest,
         ContextGatherResult, EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome,
         EntityResolutionRequest, EntityResolver, EvidenceBundle, EvidenceItem,
         ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain,
         GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
         InterpretationContext, InterpretationRequest, ModelPaths, ModelRegistry, PlannerAction,
         PlannerBudget, PlannerCapability, PlannerGraphBranch, PlannerGraphBranchStatus,
-        PlannerGraphEpisode, PlannerLoopState, PlannerRequest, PlannerStepRecord,
-        PlannerStrategyKind, PlannerTraceMetadata, RetainedEvidence, RetrievalMode,
-        RetrievalProvider, RetrievalStrategy, RetrieverOption, ThreadDecisionRequest,
-        TraceRecorder, TraceRecorderCapability, WorkspaceAction, WorkspaceActionCapability,
+        PlannerGraphEpisode, PlannerRequest, PlannerStepRecord, PlannerStrategyKind,
+        PlannerTraceMetadata, RetainedEvidence, RetrievalMode, RetrievalProvider,
+        RetrievalStrategy, RetrieverOption, ThreadDecisionRequest, TraceRecorder,
+        TraceRecorderCapability, WorkspaceAction, WorkspaceActionCapability,
         WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceCapabilitySurface,
         WorkspaceToolCapability,
     };
@@ -7813,10 +7813,8 @@ mod tests {
         )
     }
 
-    fn test_planner_loop_context(
-        initial_edit: InitialEditInstruction,
-    ) -> super::PlannerLoopContext {
-        super::PlannerLoopContext {
+    fn test_agent_loop_context(initial_edit: InitialEditInstruction) -> super::AgentLoopContext {
+        super::AgentLoopContext {
             prepared: PreparedTurnRuntime {
                 planner: PreparedModelClient {
                     role: ModelClientRole::ActionSelection,
@@ -8411,7 +8409,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_workspace_initial_actions_route_to_the_planner_loop() {
+    fn explicit_workspace_initial_actions_route_to_the_agent_loop() {
         let prepared = PreparedTurnRuntime {
             planner: PreparedModelClient {
                 role: ModelClientRole::ActionSelection,
@@ -8446,7 +8444,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_initial_actions_route_to_the_planner_loop() {
+    fn resource_initial_actions_route_to_the_agent_loop() {
         let prepared = PreparedTurnRuntime {
             planner: PreparedModelClient {
                 role: ModelClientRole::ActionSelection,
@@ -8660,10 +8658,10 @@ mod tests {
         ));
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         let outcome = runtime
-            .block_on(super::agent_loop::execute_recursive_planner_loop(
+            .block_on(super::agent_loop::execute_agent_loop(
                 &service,
                 "Explain the loop.",
-                test_planner_loop_context(InitialEditInstruction::default()),
+                test_agent_loop_context(InitialEditInstruction::default()),
                 Some(answer_decision),
                 trace,
             ))
@@ -8744,7 +8742,7 @@ mod tests {
             session.allocate_turn_id(),
             session.active_thread().thread_ref,
         ));
-        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        let mut context = test_agent_loop_context(InitialEditInstruction::default());
         context.action_selector = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
             vec![planner_decision(
@@ -8770,7 +8768,7 @@ mod tests {
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime
-            .block_on(super::agent_loop::execute_recursive_planner_loop(
+            .block_on(super::agent_loop::execute_agent_loop(
                 &service,
                 "Inspect the loop.",
                 context,
@@ -8966,7 +8964,7 @@ mod tests {
             session.allocate_turn_id(),
             session.active_thread().thread_ref,
         ));
-        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        let mut context = test_agent_loop_context(InitialEditInstruction::default());
         context.action_selector = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
             vec![planner_decision(
@@ -8980,7 +8978,7 @@ mod tests {
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime
-            .block_on(super::agent_loop::execute_recursive_planner_loop(
+            .block_on(super::agent_loop::execute_agent_loop(
                 &service,
                 "Observe the loop.",
                 context,
@@ -9022,8 +9020,8 @@ mod tests {
         );
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction::default()),
-            &PlannerLoopState::default(),
+            &test_agent_loop_context(InitialEditInstruction::default()),
+            &AgentLoopState::default(),
             &ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
                     reason: "answer now".to_string(),
@@ -9243,7 +9241,7 @@ mod tests {
     }
 
     #[test]
-    fn external_capability_evidence_appends_result_and_source_provenance_to_planner_loop() {
+    fn external_capability_evidence_appends_result_and_source_provenance_to_agent_loop() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
@@ -10544,7 +10542,7 @@ mod tests {
                 && snapshot
                     .contributions
                     .iter()
-                    .any(|item| item.source == "planner_budget")
+                    .any(|item| item.source == "agent_loop_budget")
         }));
 
         let ordered_kinds = signal_snapshots
@@ -10771,7 +10769,9 @@ mod tests {
             .await
             .expect("process second prompt");
 
-        let second_requests = planner_requests_two.lock().expect("planner requests lock");
+        let second_requests = planner_requests_two
+            .lock()
+            .expect("action-selection requests lock");
         assert_eq!(second_requests.len(), 1);
         assert_eq!(
             second_requests[0].recent_turns,
@@ -11567,7 +11567,7 @@ mod tests {
                 .skip(1)
                 .flat_map(|request| request.loop_state.notes.iter())
                 .all(|note| !note.contains("Execution checklist")),
-            "follow-on planner requests should not receive generic execution checklist notes"
+            "follow-on action-selection requests should not receive generic execution checklist notes"
         );
     }
 
@@ -11677,7 +11677,7 @@ mod tests {
                 .iter()
                 .skip(1)
                 .all(|prompt| prompt == "steer harder"),
-            "all follow-on planner requests should use the steered prompt: {prompts:?}"
+            "all follow-on action-selection requests should use the steered prompt: {prompts:?}"
         );
 
         let replay = recorder.replay(&session.task_id()).expect("replay");
@@ -12502,7 +12502,7 @@ mod tests {
 
     #[test]
     fn action_bias_targets_code_files_before_docs() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             evidence_items: vec![
                 EvidenceItem {
                     source: "README.md".to_string(),
@@ -12512,7 +12512,7 @@ mod tests {
                 },
                 EvidenceItem {
                     source: "src/application/mod.rs".to_string(),
-                    snippet: "planner loop".to_string(),
+                    snippet: "agent loop".to_string(),
                     rationale: "code".to_string(),
                     rank: 2,
                 },
@@ -12539,7 +12539,7 @@ mod tests {
 
     #[test]
     fn action_bias_targets_ignore_non_authored_workspace_paths() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             evidence_items: vec![
                 EvidenceItem {
                     source:
@@ -12578,7 +12578,7 @@ mod tests {
             "/apps/docs/.docusaurus/\n",
         )
         .expect("write gitignore");
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             evidence_items: vec![
                 EvidenceItem {
                     source: "apps/docs/.docusaurus/client-modules.js".to_string(),
@@ -12603,10 +12603,10 @@ mod tests {
 
     #[test]
     fn action_bias_redirects_non_file_actions_before_any_search_step() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             evidence_items: vec![EvidenceItem {
                 source: "src/application/mod.rs".to_string(),
-                snippet: "planner loop".to_string(),
+                snippet: "agent loop".to_string(),
                 rationale: "best candidate".to_string(),
                 rank: 1,
             }],
@@ -12627,7 +12627,7 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction {
+            &test_agent_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["src/application/mod.rs".to_string()],
                 resolution: None,
@@ -12647,9 +12647,9 @@ mod tests {
 
     #[test]
     fn action_bias_rejects_repeated_list_files_in_edit_turn() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             steps: vec![PlannerStepRecord {
-                step_id: "planner-step-1".to_string(),
+                step_id: "agent-step-1".to_string(),
                 sequence: 1,
                 branch_id: None,
                 action: PlannerAction::Workspace {
@@ -12682,7 +12682,7 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction {
+            &test_agent_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["src/infrastructure/providers.rs".to_string()],
                 resolution: None,
@@ -12703,9 +12703,9 @@ mod tests {
 
     #[test]
     fn action_bias_escalates_to_exact_diff_after_target_file_has_been_read() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             steps: vec![PlannerStepRecord {
-                step_id: "planner-step-1".to_string(),
+                step_id: "agent-step-1".to_string(),
                 sequence: 1,
                 branch_id: None,
                 action: PlannerAction::Workspace {
@@ -12738,7 +12738,7 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction {
+            &test_agent_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
                 resolution: None,
@@ -12795,7 +12795,7 @@ mod tests {
             InitialActionDecision {
                 action: InitialAction::Workspace {
                     action: WorkspaceAction::Search {
-                        query: "planner loop edit target".to_string(),
+                        query: "agent loop edit target".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: crate::domain::ports::RetrievalStrategy::Lexical,
                         retrievers: Vec::new(),
@@ -12898,7 +12898,7 @@ mod tests {
                 vec![
                     EvidenceItem {
                         source: "src/application/mod.rs".to_string(),
-                        snippet: "planner loop handles action bias".to_string(),
+                        snippet: "agent loop handles action bias".to_string(),
                         rationale: "best candidate".to_string(),
                         rank: 1,
                     },
@@ -12975,7 +12975,7 @@ mod tests {
         fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
         fs::write(
             workspace.path().join("src/application/mod.rs"),
-            "fn planner_loop() {}\n",
+            "fn agent_loop() {}\n",
         )
         .expect("write app file");
         fs::write(workspace.path().join("README.md"), "# Docs\n").expect("write readme");
@@ -13071,7 +13071,7 @@ mod tests {
                 retrieval_provider: None,
             });
             service
-                .process_prompt("edit the planner loop")
+                .process_prompt("edit the agent loop")
                 .await
                 .expect("process prompt")
         });
@@ -13265,7 +13265,7 @@ mod tests {
     #[test]
     fn workspace_editor_boundary_budget_signal_credits_boundary_source() {
         let (_, _, contributions) =
-            budget_signal_details("workspace-editor-boundary:planner-budget-exhausted");
+            budget_signal_details("workspace-editor-boundary:agent-budget-exhausted");
         assert!(
             contributions
                 .iter()
@@ -13274,18 +13274,18 @@ mod tests {
         assert!(
             contributions
                 .iter()
-                .any(|item| item.source == "planner_budget")
+                .any(|item| item.source == "agent_loop_budget")
         );
     }
 
     #[test]
-    fn known_edit_planner_budget_preserves_workspace_editor_headroom() {
+    fn known_edit_agent_loop_budget_preserves_workspace_editor_headroom() {
         let initial_edit = InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["apps/web/src/runtime-shell.css".to_string()],
             resolution: None,
         };
-        let budget = super::planner_budget_for_turn(
+        let budget = super::agent_loop_budget_for_turn(
             super::instruction_frame_from_initial_edit(&initial_edit).as_ref(),
             &initial_edit,
         );
@@ -13555,7 +13555,7 @@ mod tests {
             }],
             Arc::clone(&recorded_requests),
         ));
-        let mut context = test_planner_loop_context(InitialEditInstruction {
+        let mut context = test_agent_loop_context(InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["src/application/mod.rs".to_string()],
             resolution: Some(resolution.clone()),
@@ -13566,10 +13566,10 @@ mod tests {
             "Fix the planner stream text in src/application/mod.rs",
             &context,
             &PlannerBudget::default(),
-            &PlannerLoopState {
+            &AgentLoopState {
                 evidence_items: vec![EvidenceItem {
                     source: "src/application/mod.rs".to_string(),
-                    snippet: "fn planner_loop() {}".to_string(),
+                    snippet: "fn agent_loop() {}".to_string(),
                     rationale: "known authored target".to_string(),
                     rank: 1,
                 }],
@@ -13658,7 +13658,7 @@ mod tests {
             ],
             explanation: "two authored files remained tied".to_string(),
         };
-        let context = test_planner_loop_context(InitialEditInstruction {
+        let context = test_agent_loop_context(InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["src/application/mod.rs".to_string()],
             resolution: Some(resolution.clone()),
@@ -13667,7 +13667,7 @@ mod tests {
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime.block_on(async {
-            super::agent_loop::execute_recursive_planner_loop(
+            super::agent_loop::execute_agent_loop(
                 &service,
                 "Update the planner stream text",
                 context,
@@ -13690,7 +13690,7 @@ mod tests {
                 trace,
             )
             .await
-            .expect("planner loop should succeed");
+            .expect("agent loop should succeed");
         });
 
         assert!(
@@ -15100,7 +15100,7 @@ mod tests {
                 .iter()
                 .any(|note| note
                     .contains("Replan from current evidence after instruction unsatisfied."))),
-            "advice-only planner stops with an open applied-edit obligation should trigger a bounded replan into workspace editing"
+            "advice-only action-selection stops with an open applied-edit obligation should trigger a bounded replan into workspace editing"
         );
     }
 
@@ -15962,7 +15962,7 @@ mod tests {
             requests
                 .iter()
                 .any(|request| request.budget.max_steps > 10 && request.budget.max_inspects > 3),
-            "replanning should expand the known-edit planner budget"
+            "replanning should expand the known-edit agent-loop budget"
         );
         assert!(
             requests
@@ -15970,7 +15970,7 @@ mod tests {
                 .skip(1)
                 .flat_map(|request| request.loop_state.notes.iter())
                 .any(|note| note.contains("Replan from current evidence")),
-            "follow-on planner requests should carry a replanning note after budget exhaustion"
+            "follow-on action-selection requests should carry a replanning note after budget exhaustion"
         );
 
         let plan_updates = sink
@@ -16781,9 +16781,9 @@ mod tests {
 
     #[test]
     fn premise_challenge_stops_redundant_ci_probe_after_non_failing_run_evidence() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             steps: vec![PlannerStepRecord {
-                step_id: "planner-step-1".to_string(),
+                step_id: "agent-step-1".to_string(),
                 sequence: 1,
                 branch_id: None,
                 action: PlannerAction::Workspace {
@@ -16817,7 +16817,7 @@ mod tests {
                 deliberation_state: None,        };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction::default()),
+            &test_agent_loop_context(InitialEditInstruction::default()),
             &loop_state,
             &decision,
             Path::new("/workspace"),
@@ -16949,9 +16949,9 @@ mod tests {
 
     #[test]
     fn premise_challenge_stops_redundant_plain_ci_run_list_probe() {
-        let loop_state = crate::domain::ports::PlannerLoopState {
+        let loop_state = crate::domain::ports::AgentLoopState {
             steps: vec![PlannerStepRecord {
-                step_id: "planner-step-1".to_string(),
+                step_id: "agent-step-1".to_string(),
                 sequence: 1,
                 branch_id: None,
                 action: PlannerAction::Workspace {
@@ -16984,7 +16984,7 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction::default()),
+            &test_agent_loop_context(InitialEditInstruction::default()),
             &loop_state,
             &decision,
             Path::new("/workspace"),
@@ -17736,7 +17736,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let service = test_service(workspace.path());
         let retrieval_provider = Arc::new(StrategyCapabilityGatherer::default());
-        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        let mut context = test_agent_loop_context(InitialEditInstruction::default());
         context.retrieval_provider = Some(retrieval_provider.clone() as Arc<dyn RetrievalProvider>);
         let session = service.shared_conversation_session();
         let sink = Arc::new(RecordingTurnEventSink::default());
@@ -17748,7 +17748,7 @@ mod tests {
             session.allocate_turn_id(),
             session.active_thread().thread_ref,
         ));
-        let mut loop_state = PlannerLoopState::default();
+        let mut loop_state = AgentLoopState::default();
         let mut used_workspace_resources = false;
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -17761,17 +17761,17 @@ mod tests {
                     "sift-direct",
                     super::PlannerGatherSpec {
                         query: "semantic target".to_string(),
-                        intent_reason: "planner-search".to_string(),
+                        intent_reason: "agent-search".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: RetrievalStrategy::Vector,
                         retrievers: Vec::new(),
                         max_evidence_items: 8,
                         success_summary_override: None,
-                        no_bundle_message: "planner search returned no evidence bundle",
-                        failure_label: "planner search failed",
-                        unavailable_label: "planner search backend unavailable",
+                        no_bundle_message: "agent search returned no evidence bundle",
+                        failure_label: "agent search failed",
+                        unavailable_label: "agent search backend unavailable",
                         missing_backend_message:
-                            "no retrieval provider backend is configured for planner search",
+                            "no retrieval provider backend is configured for agent search",
                     },
                     &mut used_workspace_resources,
                 )
@@ -17780,7 +17780,7 @@ mod tests {
 
         assert_eq!(
             summary,
-            "planner search backend unavailable: vector warmup in progress"
+            "agent search backend unavailable: vector warmup in progress"
         );
         assert!(
             retrieval_provider
@@ -17815,7 +17815,7 @@ mod tests {
                 }],
             ),
         });
-        let mut context = test_planner_loop_context(InitialEditInstruction::default());
+        let mut context = test_agent_loop_context(InitialEditInstruction::default());
         context.retrieval_provider = Some(retrieval_provider);
         context.interpretation = InterpretationContext {
             summary: "Search the implementation path.".to_string(),
@@ -17831,7 +17831,7 @@ mod tests {
             session.allocate_turn_id(),
             session.active_thread().thread_ref,
         ));
-        let mut loop_state = PlannerLoopState::default();
+        let mut loop_state = AgentLoopState::default();
         let mut used_workspace_resources = false;
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -17844,17 +17844,17 @@ mod tests {
                     "sift-direct",
                     super::PlannerGatherSpec {
                         query: "runtime shell host".to_string(),
-                        intent_reason: "planner-search".to_string(),
+                        intent_reason: "agent-search".to_string(),
                         mode: RetrievalMode::Linear,
                         strategy: RetrievalStrategy::Lexical,
                         retrievers: vec![RetrieverOption::PathFuzzy],
                         max_evidence_items: 8,
                         success_summary_override: None,
-                        no_bundle_message: "planner search returned no evidence bundle",
-                        failure_label: "planner search failed",
-                        unavailable_label: "planner search backend unavailable",
+                        no_bundle_message: "agent search returned no evidence bundle",
+                        failure_label: "agent search failed",
+                        unavailable_label: "agent search backend unavailable",
                         missing_backend_message:
-                            "no retrieval provider backend is configured for planner search",
+                            "no retrieval provider backend is configured for agent search",
                     },
                     &mut used_workspace_resources,
                 )
@@ -17869,7 +17869,7 @@ mod tests {
                     "sift-direct",
                     super::PlannerGatherSpec {
                         query: "runtime shell host".to_string(),
-                        intent_reason: "planner-refine".to_string(),
+                        intent_reason: "agent-refine".to_string(),
                         mode: RetrievalMode::Graph,
                         strategy: RetrievalStrategy::Vector,
                         retrievers: vec![
@@ -17880,11 +17880,11 @@ mod tests {
                         success_summary_override: Some(
                             "refined search toward `runtime shell host`".to_string(),
                         ),
-                        no_bundle_message: "planner refine returned no evidence bundle",
-                        failure_label: "planner refine failed",
-                        unavailable_label: "planner refine backend unavailable",
+                        no_bundle_message: "agent refine returned no evidence bundle",
+                        failure_label: "agent refine failed",
+                        unavailable_label: "agent refine backend unavailable",
                         missing_backend_message:
-                            "no retrieval provider backend is configured for refined planner search",
+                            "no retrieval provider backend is configured for refined agent search",
                     },
                     &mut used_workspace_resources,
                 )
@@ -17897,7 +17897,7 @@ mod tests {
         assert_eq!(loop_state.evidence_items.len(), 1);
         let recorded_requests = requests.lock().expect("retrieval provider requests lock");
         assert_eq!(recorded_requests.len(), 2);
-        assert_eq!(recorded_requests[0].intent_reason, "planner-search");
+        assert_eq!(recorded_requests[0].intent_reason, "agent-search");
         assert_eq!(recorded_requests[0].planning.mode, RetrievalMode::Linear);
         assert_eq!(
             recorded_requests[0].planning.retrieval_strategy,
@@ -17907,7 +17907,7 @@ mod tests {
             recorded_requests[0].planning.retrievers,
             vec![RetrieverOption::PathFuzzy]
         );
-        assert_eq!(recorded_requests[1].intent_reason, "planner-refine");
+        assert_eq!(recorded_requests[1].intent_reason, "agent-refine");
         assert_eq!(recorded_requests[1].planning.mode, RetrievalMode::Graph);
         assert_eq!(
             recorded_requests[1].planning.retrieval_strategy,
@@ -17925,7 +17925,7 @@ mod tests {
         fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
         fs::write(
             workspace.path().join("src/application/mod.rs"),
-            "fn planner_loop() {}\n",
+            "fn agent_loop() {}\n",
         )
         .expect("write app file");
 
@@ -17944,12 +17944,12 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction {
+            &test_agent_loop_context(InitialEditInstruction {
                 known_edit: true,
                 candidate_files: vec!["src/application/mod.rs".to_string()],
                 resolution: None,
             }),
-            &PlannerLoopState::default(),
+            &AgentLoopState::default(),
             &decision,
             workspace.path(),
             &DeliberationSignals::default(),
@@ -17965,7 +17965,7 @@ mod tests {
     #[test]
     fn continuation_signals_suspend_mid_loop_refinement() {
         let service = test_service(Path::new("/workspace"));
-        let loop_state = PlannerLoopState {
+        let loop_state = AgentLoopState {
             evidence_items: vec![EvidenceItem {
                 source: "command: pwd".to_string(),
                 snippet: "/workspace".to_string(),
@@ -18010,8 +18010,8 @@ mod tests {
         };
 
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction::default()),
-            &PlannerLoopState::default(),
+            &test_agent_loop_context(InitialEditInstruction::default()),
+            &AgentLoopState::default(),
             &planner_decision(
                 PlannerAction::Stop {
                     reason: "answer now".to_string(),
@@ -18032,8 +18032,8 @@ mod tests {
     #[test]
     fn explicit_none_signals_do_not_request_deliberation_review() {
         let notes = super::collect_steering_review_notes(
-            &test_planner_loop_context(InitialEditInstruction::default()),
-            &PlannerLoopState::default(),
+            &test_agent_loop_context(InitialEditInstruction::default()),
+            &AgentLoopState::default(),
             &planner_decision(
                 PlannerAction::Stop {
                     reason: "answer now".to_string(),
@@ -18084,7 +18084,7 @@ mod tests {
             InterpretationContext::default(),
             PlannerBudget::default(),
         )
-        .with_loop_state(PlannerLoopState {
+        .with_loop_state(AgentLoopState {
             target_resolution: Some(resolution.clone()),
             ..Default::default()
         });
