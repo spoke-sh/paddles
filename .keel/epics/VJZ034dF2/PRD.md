@@ -1,4 +1,4 @@
-# Map Turn Loop And HTTP Inference Cleanup - Product Requirements
+# HTTP-Only Inference And Turn Runtime Migration - Product Requirements
 
 > Paddles can become more coherent by making HTTP inference the only model
 transport boundary and by retiring planner, synthesizer, and gatherer as
@@ -20,7 +20,11 @@ provider compatibility, traceability, or the model-owned reasoning contract.
 
 | ID | Goal | Success Metric | Target |
 |----|------|----------------|--------|
-| GOAL-01 | Validate bearing recommendation in delivery flow | Adoption signal | Initial rollout complete |
+| GOAL-01 | Make model inference HTTP-only | Action-selection and final-rendering model calls use HTTP clients only | No in-process Sift inference path remains |
+| GOAL-02 | Preserve local-first inference through Ollama-style HTTP services | Local setup examples and migration hints use `ollama:<model>` | Local-first docs no longer teach paddles-owned model loading |
+| GOAL-03 | Hard-fail legacy Sift model-provider config | Old `sift` model-provider selections fail before runtime construction with a migration hint | No silent remapping to another provider |
+| GOAL-04 | Collapse lane terminology across public and internal code | Planner/synthesizer/gatherer lane concepts are replaced by turn runtime phase and model-client names | Internal Rust types and user-facing surfaces no longer use lane-shaped vocabulary |
+| GOAL-05 | Keep Sift retrieval out of scope | Sift retrieval/indexing remains independently selectable until a later decision | Retrieval tests remain green |
 
 ## Users
 
@@ -32,11 +36,20 @@ provider compatibility, traceability, or the model-owned reasoning contract.
 
 ### In Scope
 
-- [SCOPE-01] Deliver the bearing-backed capability slice for this epic.
+- [SCOPE-01] Add the ADR and compatibility policy for HTTP-only model inference.
+- [SCOPE-02] Route action-selection and final-rendering model inference through HTTP model clients only.
+- [SCOPE-03] Hard-fail legacy `sift` model-provider config with an actionable `ollama:<model>` migration hint.
+- [SCOPE-04] Introduce turn-runtime model-client preferences and migrate away from lane-shaped provider state.
+- [SCOPE-05] Delete in-process Sift model-loading and Sift inference adapters after HTTP-only construction is proven.
+- [SCOPE-06] Rename user-facing and internal Rust planner/synthesizer/gatherer lane concepts to turn runtime phase concepts.
+- [SCOPE-07] Update owning docs, prompts, tests, CLI/config help, and route/TUI copy in the same slices that change behavior.
 
 ### Out of Scope
 
-- [SCOPE-02] Unrelated platform-wide refactors outside bearing findings.
+- [SCOPE-08] Removing Sift retrieval/indexing.
+- [SCOPE-09] Replacing the recursive turn loop or model-owned reasoning contract with controller-authored pseudo-plans.
+- [SCOPE-10] Silent compatibility remaps from Sift inference config to Ollama or any other HTTP provider.
+- [SCOPE-11] Unrelated feature work or broad platform refactors outside the migration.
 
 ## Requirements
 
@@ -45,7 +58,13 @@ provider compatibility, traceability, or the model-owned reasoning contract.
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| FR-01 | Implement the core user workflow identified in bearing research. | GOAL-01 | must | Converts research recommendation into executable product capability. |
+| FR-01 | Record an ADR that makes HTTP model clients the only supported inference boundary for action selection and final rendering. | GOAL-01, GOAL-02 | must | Model loading, hardware placement, batching, and residency should not be paddles-owned concerns. |
+| FR-02 | Reject legacy `sift` model-provider config before runtime construction with a migration hint that names `ollama:<model>`. | GOAL-03 | must | Silent remapping would hide deployment and model-quality changes. |
+| FR-03 | Build action-selection and final-rendering model clients exclusively from HTTP provider configuration. | GOAL-01 | must | The runtime should have one model-client boundary. |
+| FR-04 | Preserve Sift retrieval/indexing independently from model inference removal. | GOAL-05 | must | Retrieval has a different blast radius and needs a later decision. |
+| FR-05 | Replace runtime lane preferences with turn-runtime model-client preferences while keeping legacy lane-shaped config readable only for migration. | GOAL-02, GOAL-04 | must | New configuration should teach the target architecture. |
+| FR-06 | Delete in-process Sift inference adapters, model registry preparation, and inference-only dependencies once HTTP-only construction is proven. | GOAL-01, GOAL-03 | must | Dead inference code should not remain as a maintenance branch. |
+| FR-07 | Rename public and internal planner/synthesizer/gatherer lane concepts to turn runtime phases, model clients, retrieval, execution, evidence, and final rendering. | GOAL-04 | must | The codebase should be logically centered on the turn loop. |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
 ### Non-Functional Requirements
@@ -53,7 +72,10 @@ provider compatibility, traceability, or the model-owned reasoning contract.
 <!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| NFR-01 | Ensure deterministic behavior and operational visibility for the delivered workflow. | GOAL-01 | must | Keeps delivery safe and auditable during rollout. |
+| NFR-01 | Every implementation story follows TDD with a failing test or doc check before behavior changes. | GOAL-01, GOAL-03, GOAL-04 | must | This migration crosses runtime construction, config, docs, and user-facing language. |
+| NFR-02 | Provider compatibility failures must be deterministic, actionable, and occur before model runtime construction. | GOAL-03 | must | Operators need clear migration errors, not late runtime surprises. |
+| NFR-03 | Docs and source vocabulary must remain synchronized in each sealed slice. | GOAL-02, GOAL-04 | must | Documentation is part of the migration surface. |
+| NFR-04 | Existing HTTP provider behavior, retries, structured final answers, credential boundaries, and local-first operation remain covered by tests. | GOAL-01, GOAL-02 | must | The cleanup should simplify architecture without losing provider coverage. |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->
 
 ## Verification Strategy
@@ -65,24 +87,28 @@ provider compatibility, traceability, or the model-owned reasoning contract.
 
 | Assumption | Impact if Wrong | Validation |
 |------------|-----------------|------------|
-| Bearing findings reflect current user needs | Scope may need re-planning | Re-check feedback during first voyage |
+| The research recommendation remains the canonical implementation plan | Scope may need re-planning | Human confirmed slices 1-5 on 2026-05-13 |
+| Sift retrieval/indexing can remain independent of Sift inference deletion | Retrieval follow-up mission may need to move earlier | Keep retrieval tests green during inference slices |
+| Internal Rust renames can be completed without replacing the turn loop itself | Scope may need additional refactor stories | Use compiler and test failures to expose remaining references |
 
 ## Open Questions & Risks
 
 | Question/Risk | Owner | Status |
 |---------------|-------|--------|
-| Which Sift references are still load-bearing runtime behavior versus obsolete | Planner | Open |
-| Does any current HTTP provider path still depend on planner/synthesizer lane | Planner | Open |
-| What is the smallest first implementation slice that proves HTTP-only | Planner | Open |
-| Which canonical docs own the post-cleanup architecture: ADR, ARCHITECTURE, | Planner | Open |
+| Does any Sift retrieval code still depend on inference-only dependencies after the model adapters are removed? | Operator | Open |
+| Which compatibility aliases should be removed immediately versus retained as warning-only shims during the preference migration? | Operator | Open |
+| How many internal port renames can land safely in one story without obscuring behavior changes? | Operator | Open |
 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] Inventory all Sift, embedded-model, and local model-loading references
-- [ ] Inventory planner, synthesizer, and gatherer lane call sites and identify
-- [ ] Produce a migration map with sealed implementation slices, test anchors,
-- [ ] Surface any ADR-level decisions required before deleting shipped runtime
+- [ ] ADR accepted and owning docs identify HTTP model clients as the only inference boundary.
+- [ ] Legacy `sift` model-provider config hard-fails with a migration hint naming `ollama:<model>`.
+- [ ] Action-selection and final-rendering runtime construction no longer resolves local `ModelPaths`.
+- [ ] In-process Sift inference adapters, model preparation, and inference-only dependencies are removed.
+- [ ] New runtime preferences use turn-runtime/model-client terminology; legacy lane-shaped config is migration input only.
+- [ ] User-facing copy and internal Rust code no longer present planner/synthesizer/gatherer as runtime lanes.
+- [ ] Sift retrieval/indexing remains independently selectable and tested.
 <!-- END SUCCESS_CRITERIA -->
 
 ## Research Analysis

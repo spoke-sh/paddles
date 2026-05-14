@@ -491,5 +491,13 @@
 |--------|--------|
 | [Evidence-Threshold Context Refinement](epics/VFUNJz9zT/voyages/VFURjeU0t/) | done |
 
-### [Map Turn Loop And HTTP Inference Cleanup](epics/VJZ034dF2/) (draft)
+### [HTTP-Only Inference And Turn Runtime Migration](epics/VJZ034dF2/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Adopt HTTP-Only Inference Decision](epics/VJZ034dF2/voyages/VJZ8Bws9Z/) | planned |
+| [Route Runtime Inference Through HTTP Model Clients](epics/VJZ034dF2/voyages/VJZ8CYrLb/) | planned |
+| [Migrate Provider Preferences To Turn Runtime Config](epics/VJZ034dF2/voyages/VJZ8DAKbC/) | planned |
+| [Remove In-Process Sift Inference Code](epics/VJZ034dF2/voyages/VJZ8DqFnJ/) | planned |
+| [Collapse Runtime Lane Terminology](epics/VJZ034dF2/voyages/VJZ8ERr2f/) | planned |
 

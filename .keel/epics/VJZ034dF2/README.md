@@ -3,14 +3,15 @@
 id: VJZ034dF2
 created_at: 2026-05-13T21:17:27
 # authored
-title: Map Turn Loop And HTTP Inference Cleanup
+title: HTTP-Only Inference And Turn Runtime Migration
+mission: VJZ8ABnX2
 ---
 
-# Map Turn Loop And HTTP Inference Cleanup
+# HTTP-Only Inference And Turn Runtime Migration
 
-> Paddles should remove in-process Sift model inference in favor of HTTP model
-> clients and retire planner/synthesizer/gatherer as public runtime lane
-> concepts around the canonical turn loop.
+> Paddles removes in-process Sift model inference in favor of HTTP model
+> clients and retires planner/synthesizer/gatherer lane concepts across
+> user-facing surfaces and internal Rust code around the canonical turn loop.
 
 ## Documents
 
@@ -22,7 +23,12 @@ title: Map Turn Loop And HTTP Inference Cleanup
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/0 voyages complete, 0/0 stories done
+**Progress:** 0/5 voyages complete, 0/16 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
+| [Adopt HTTP-Only Inference Decision](voyages/VJZ8Bws9Z/) | planned | 0/3 |
+| [Route Runtime Inference Through HTTP Model Clients](voyages/VJZ8CYrLb/) | planned | 0/3 |
+| [Migrate Provider Preferences To Turn Runtime Config](voyages/VJZ8DAKbC/) | planned | 0/4 |
+| [Remove In-Process Sift Inference Code](voyages/VJZ8DqFnJ/) | planned | 0/3 |
+| [Collapse Runtime Lane Terminology](voyages/VJZ8ERr2f/) | planned | 0/3 |
 <!-- END GENERATED -->
