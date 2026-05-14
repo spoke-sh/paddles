@@ -1,0 +1,135 @@
+---
+recorded_at: 2026-05-13T21:10:39.952113504-07:00
+mode: manual
+files: [".keel/epics/VJZ0tpZQJ/voyages/VJZ14yp0U/HTTP_MODEL_CLIENT_SEAMS.md"]
+---
+
+--- File: HTTP_MODEL_CLIENT_SEAMS.md ---
+# HTTP Model Client Seam Inventory
+
+Story: VJZ1Krd85
+
+## Executive Finding
+
+Paddles already has a usable HTTP inference boundary for planner and answer
+generation. The cleanup should make that boundary the only model inference path,
+with local-first execution represented by local HTTP services such as Ollama
+instead of paddles-owned model loading.
+
+The main runtime split today is not "local versus remote." It is:
+
+- **HTTP model clients**: provider URL, auth, wire format, capability surface,
+  planner action schema transport, and final-answer rendering.
+- **In-process Sift model loading**: local model preparation, Candle/Qwen
+  runtime ownership, and Sift planner/synthesizer adapters.
+- **Retrieval/indexing**: context gathering paths that may still use Sift
+  independently of model inference.
+
+## Source Inventory
+
+| Surface | Current Role | Cleanup Direction |
+|---------|--------------|-------------------|
+| `src/infrastructure/adapters/http_provider.rs` | Owns `HttpProviderAdapter`, `HttpPlannerAdapter`, `ProviderTurnRequest`, `ProviderTurnResponse`, retry handling, OpenAI/Responses/Anthropic/Gemini request builders, planner action-schema transport, structured answer rendering, deliberation continuity, and HTTP adapter tests. | Promote as the sole model inference adapter family. |
+| `src/infrastructure/providers.rs` | Defines `ModelProvider`, `ApiFormat`, `ModelCapabilitySurface`, render capability, planner tool-call capability, auth requirement, base URL defaults, model alias/thinking-mode normalization, and documented capability matrix. | Keep as the capability negotiation source while removing or rejecting non-HTTP model providers. |
+| `src/main.rs` | `build_synthesizer_engine` and `build_planner_engine` branch Sift lanes to local adapters and all other providers to `HttpProviderAdapter` / `HttpPlannerAdapter`; `resolve_remote_provider_config` gathers HTTP format, URL, API key, and capability surface. | Collapse factory branches so model inference always resolves through HTTP provider config. |
+| `src/infrastructure/config.rs` | Parses `provider`, `provider_url`, shared/synthesizer/planner overlays, model IDs, thinking mode, and persisted runtime lane settings. Defaults still point at Sift/Qwen. | Retain URL/model config, but change defaults and naming away from lanes and local model paths. |
+| `src/infrastructure/credentials.rs` | Stores provider API keys, resolves environment or local credential-store values, marks Ollama as auth-optional, and exposes provider availability to UI surfaces. | Keep as HTTP provider auth support; remove auth-free Sift model-provider treatment. |
+| `src/infrastructure/transport_mediator.rs` | Mediates provider credential resolution and records execution-hand diagnostics before HTTP adapters are constructed. Required providers fail closed when no key is available. | Keep as the preflight boundary for HTTP model clients. |
+| `src/infrastructure/runtime_preferences.rs` | Persists selected runtime lane provider/model/thinking settings and reloads them into `RuntimeLaneConfig`. | Rename or reshape around turn-loop model-client preferences. |
+| `src/application/mod.rs` | Prepares `PreparedRuntimeLanes`, resolves local `ModelPaths` only for Sift model providers, and provides planner/synth/gatherer factories to the active runtime. | Replace model-lane preparation with turn-loop model-client preparation that never returns local model paths for inference. |
+| `src/infrastructure/cli/interactive_tui.rs` | Exposes provider/model selection, provider availability, login state, thinking-mode selection, and persisted runtime lane preferences. | Update UI labels and tests to describe HTTP model clients and turn phases, not Sift-backed lanes. |
+| `CONFIGURATION.md`, `ARCHITECTURE.md`, `README.md`, `POLICY.md` | Document provider matrix, HTTP wire formats, local Sift defaults, local model preparation, and planner/synth/gatherer lane concepts. | Update with the implementation slices that remove Sift model inference and lane language. |
+
+## Capability Negotiation Seams
+
+`ModelCapabilitySurface` is the best long-term contract to preserve. It already
+separates the concepts that the turn loop must know before a model call:
+
+- `http_format`: OpenAI-compatible, Anthropic, Gemini, or currently `None` for
+  Sift.
+- `render_capability`: final-answer transport style such as OpenAI JSON schema,
+  Anthropic tool use, Gemini schema, or prompt envelope.
+- `planner_tool_call`: native tool call, structured JSON envelope, or prompt
+  envelope.
+- `transport_support`: whether paddles can send the selected model through the
+  HTTP adapter.
+- `deliberation`: whether provider-native state can be continued, summarized,
+  toggled, or is unsupported.
+
+The cleanup should preserve this surface and make it impossible for an inference
+provider to negotiate `http_format: None`. Any non-HTTP capability should belong
+to retrieval/indexing or be rejected before runtime construction.
+
+## HTTP Runtime Flow
+
+1. Configuration picks a provider, model ID, thinking mode, and optional
+   `provider_url`.
+2. `resolve_remote_provider_config` validates transport support, asks
+   `TransportToolMediator` for the API key, reads the provider capability
+   surface, resolves the HTTP format, and selects either an override URL or the
+   provider default base URL.
+3. `build_synthesizer_engine` constructs `HttpProviderAdapter` for answer
+   generation when the lane is not Sift.
+4. `build_planner_engine` constructs the same `HttpProviderAdapter` wrapped by
+   `HttpPlannerAdapter` for action selection when the lane is not Sift.
+5. `HttpProviderAdapter` renders provider-specific requests while sharing the
+   canonical planner action schema and answer contract at the model-client
+   boundary.
+
+The target implementation should make steps 3 and 4 unconditional for model
+inference and delete the Sift local-inference branches.
+
+## Local HTTP-Backed Providers
+
+Ollama is the concrete local-first replacement seam:
+
+- `ModelProvider::Ollama` is OpenAI-compatible HTTP.
+- Its default base URL is `http://localhost:11434`.
+- It accepts freeform model IDs, so paddles does not need to own local model
+  catalogs for inference.
+- Its API key is optional, keeping localhost development friction low while
+  still supporting protected deployments through `OLLAMA_API_KEY`.
+- Thinking-mode capability is model-sensitive, but it is expressed as request
+  controls over HTTP instead of in-process model/runtime choices.
+
+This preserves local-first operation without coupling paddles to model download,
+quantization, tokenizer/config compatibility, CUDA/CPU fallback, or residency
+management. Those concerns move to the local HTTP model service.
+
+## Test Anchors
+
+Future cleanup slices should start with failing tests around these seams:
+
+1. `src/main.rs` transport tests should prove every configured planner and answer
+   model provider uses an HTTP format and gets a base URL before adapter
+   construction. Existing anchors include OpenAI chat/Responses transport tests.
+2. `src/application/mod.rs` runtime preparation tests should prove planner and
+   answer inference never resolve local `ModelPaths`, while `sift-direct` or
+   other retrieval providers can still prepare without inference paths.
+3. `src/infrastructure/providers.rs` capability tests should prove all inference
+   providers have `http_format: Some(_)`, declared render capability, planner
+   action capability, deliberation support, auth requirement, and documented
+   matrix rows.
+4. `src/infrastructure/adapters/http_provider.rs` tests should remain the
+   canonical proof for action-schema parity: native OpenAI tool calls,
+   Responses prompt envelope, Anthropic prompt envelope, Gemini structured JSON,
+   retries through `send_with_retry`, and structured final-answer schemas.
+5. CLI/config tests should prove `provider_url`, stored credentials, optional
+   Ollama credentials, runtime preferences, and TUI provider selection all feed
+   the same HTTP model-client boundary.
+6. Deletion tests should first fail on `ModelProvider::Sift` as an inference
+   provider, then pass with an actionable rejection or after the variant is
+   removed from model-provider selection entirely.
+
+## Migration Notes
+
+- Treat the HTTP adapter as the model-client boundary, not as a "remote-only"
+  boundary.
+- Keep provider capability negotiation centralized; do not replace it with
+  scattered provider-name checks during cleanup.
+- Remove in-process model loading from planner/answer paths before trying to
+  remove Sift as a retrieval/indexing dependency.
+- Prefer one compatibility policy for old `sift` model-provider config:
+  explicit rejection with a local HTTP migration hint is clearer than silently
+  mapping it to another provider.
+
