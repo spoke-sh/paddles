@@ -255,6 +255,8 @@ mod tests {
     };
     use crate::infrastructure::credentials::CredentialStore;
     use crate::infrastructure::execution_hand::ExecutionHandRegistry;
+    use crate::infrastructure::providers::ModelProvider;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     #[test]
@@ -316,6 +318,69 @@ mod tests {
                 .last_error
                 .as_deref()
                 .is_some_and(|error| error.contains("PADDLES_MISSING_TRANSPORT_MEDIATOR_TOKEN"))
+        );
+    }
+
+    #[test]
+    fn mediator_allows_optional_ollama_provider_without_credentials() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        let mediator = TransportToolMediator::new(
+            Arc::new(CredentialStore::with_base_dir_and_env(
+                dir.path(),
+                BTreeMap::new(),
+            )),
+            Arc::clone(&registry),
+            &NativeTransportConfigurations::default(),
+        );
+
+        let api_key = mediator
+            .resolve_provider_api_key(ModelProvider::Ollama, "qwen3")
+            .expect("Ollama should not require credentials");
+
+        assert_eq!(api_key, "");
+        let diagnostic = registry
+            .diagnostic(ExecutionHandKind::TransportMediator)
+            .expect("transport mediator diagnostic");
+        assert_eq!(diagnostic.phase, ExecutionHandPhase::Ready);
+        assert!(
+            diagnostic
+                .summary
+                .contains("resolved provider credential for `ollama`")
+        );
+    }
+
+    #[test]
+    fn mediator_fails_closed_for_missing_required_provider_credentials() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registry = Arc::new(ExecutionHandRegistry::default());
+        let mediator = TransportToolMediator::new(
+            Arc::new(CredentialStore::with_base_dir_and_env(
+                dir.path(),
+                BTreeMap::new(),
+            )),
+            Arc::clone(&registry),
+            &NativeTransportConfigurations::default(),
+        );
+
+        let error = mediator
+            .resolve_provider_api_key(ModelProvider::Openai, "gpt-5.4")
+            .expect_err("OpenAI should require credentials");
+        let message = format!("{error:#}");
+
+        assert!(message.contains("provider `openai` is not authenticated"));
+        assert!(message.contains("OPENAI_API_KEY"));
+        assert!(message.contains("/login openai"));
+        assert!(message.contains("openai:gpt-5.4"));
+        let diagnostic = registry
+            .diagnostic(ExecutionHandKind::TransportMediator)
+            .expect("transport mediator diagnostic");
+        assert_eq!(diagnostic.phase, ExecutionHandPhase::Failed);
+        assert!(
+            diagnostic
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("OPENAI_API_KEY"))
         );
     }
 }

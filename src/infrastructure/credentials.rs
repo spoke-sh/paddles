@@ -26,6 +26,7 @@ struct CredentialsManifest {
 #[derive(Debug)]
 pub struct CredentialStore {
     base_dir: PathBuf,
+    env_overrides: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,13 +74,27 @@ impl CredentialStore {
         let base_dir = std::env::var("HOME")
             .map(|h| PathBuf::from(h).join(".config/paddles"))
             .unwrap_or_else(|_| PathBuf::from(".config/paddles"));
-        Self { base_dir }
+        Self {
+            base_dir,
+            env_overrides: None,
+        }
     }
 
     #[cfg(test)]
-    fn with_base_dir(base_dir: impl Into<PathBuf>) -> Self {
+    pub fn with_base_dir(base_dir: impl Into<PathBuf>) -> Self {
         Self {
             base_dir: base_dir.into(),
+            env_overrides: Some(BTreeMap::new()),
+        }
+    }
+
+    pub fn with_base_dir_and_env(
+        base_dir: impl Into<PathBuf>,
+        env_overrides: BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+            env_overrides: Some(env_overrides),
         }
     }
 
@@ -148,7 +163,13 @@ impl CredentialStore {
     }
 
     pub fn resolve_api_key(&self, env_name: &str) -> ResolvedApiKey {
-        let env_value = std::env::var(env_name).ok().filter(|key| !key.is_empty());
+        let env_value = match &self.env_overrides {
+            Some(overrides) => overrides
+                .get(env_name)
+                .cloned()
+                .filter(|key| !key.is_empty()),
+            None => std::env::var(env_name).ok().filter(|key| !key.is_empty()),
+        };
         self.resolve_api_key_from(env_name, env_value.as_deref())
     }
 

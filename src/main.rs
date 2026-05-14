@@ -929,11 +929,16 @@ mod tests {
         PreparedModelLane, PreparedRuntimeLanes, RuntimeHarnessCapabilityPostureService,
         RuntimeLaneRole,
     };
-    use paddles::domain::model::{ExternalCapabilityCatalog, ExternalCapabilityCatalogConfig};
+    use paddles::domain::model::{
+        ExecutionHandKind, ExecutionHandPhase, ExternalCapabilityCatalog,
+        ExternalCapabilityCatalogConfig, NativeTransportConfigurations,
+    };
     use paddles::domain::ports::ModelPaths;
     use paddles::infrastructure::config::{HostedTransitAuthorityConfig, TraceAuthoritySelection};
+    use paddles::infrastructure::credentials::CredentialStore;
     use paddles::infrastructure::execution_hand::ExecutionHandRegistry;
     use paddles::infrastructure::providers::ModelProvider;
+    use paddles::infrastructure::runtime_preferences::RuntimeLanePreferenceStore;
     use paddles::infrastructure::transport_mediator::TransportToolMediator;
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -966,6 +971,21 @@ mod tests {
         let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
         let transport_mediator = Arc::new(TransportToolMediator::with_execution_hand_registry(
             Arc::clone(&execution_hand_registry),
+        ));
+        (execution_hand_registry, transport_mediator)
+    }
+
+    fn transport_mediator_with_empty_credentials_for_test(
+        credential_root: &Path,
+    ) -> (Arc<ExecutionHandRegistry>, Arc<TransportToolMediator>) {
+        let execution_hand_registry = Arc::new(ExecutionHandRegistry::default());
+        let transport_mediator = Arc::new(TransportToolMediator::new(
+            Arc::new(CredentialStore::with_base_dir_and_env(
+                credential_root,
+                BTreeMap::new(),
+            )),
+            Arc::clone(&execution_hand_registry),
+            &NativeTransportConfigurations::default(),
         ));
         (execution_hand_registry, transport_mediator)
     }
@@ -1137,6 +1157,127 @@ mod tests {
             &BTreeMap::new(),
         )
         .expect("Ollama synthesizer should build through the HTTP provider adapter");
+    }
+
+    #[test]
+    fn ollama_model_clients_build_without_credentials() {
+        let workspace = tempdir().expect("workspace");
+        let credentials = tempdir().expect("credentials");
+        let (execution_hand_registry, transport_mediator) =
+            transport_mediator_with_empty_credentials_for_test(credentials.path());
+        let planner_lane = PreparedModelLane {
+            role: RuntimeLaneRole::Planner,
+            provider: ModelProvider::Ollama,
+            model_id: "qwen3".to_string(),
+            paths: None,
+        };
+
+        build_planner_engine(
+            workspace.path(),
+            Arc::clone(&execution_hand_registry),
+            Arc::clone(&transport_mediator),
+            &planner_lane,
+            &BTreeMap::new(),
+        )
+        .expect("Ollama planner should build without credentials");
+
+        let planner_diagnostic = execution_hand_registry
+            .diagnostic(ExecutionHandKind::TransportMediator)
+            .expect("transport mediator diagnostic");
+        assert_eq!(planner_diagnostic.phase, ExecutionHandPhase::Ready);
+        assert!(
+            planner_diagnostic
+                .summary
+                .contains("resolved provider credential for `ollama`"),
+            "{}",
+            planner_diagnostic.summary
+        );
+
+        let synthesizer_lane = PreparedModelLane {
+            role: RuntimeLaneRole::Synthesizer,
+            provider: ModelProvider::Ollama,
+            model_id: "qwen3".to_string(),
+            paths: None,
+        };
+
+        build_synthesizer_engine(
+            workspace.path(),
+            execution_hand_registry,
+            transport_mediator,
+            &synthesizer_lane,
+            &BTreeMap::new(),
+        )
+        .expect("Ollama synthesizer should build without credentials");
+    }
+
+    #[test]
+    fn migrated_turn_runtime_preferences_do_not_bypass_transport_mediator_credentials() {
+        let workspace = tempdir().expect("workspace");
+        let state = tempdir().expect("state");
+        let credentials = tempdir().expect("credentials");
+        let turn_runtime_path = state.path().join("turn-runtime.toml");
+        let legacy_path = state.path().join("runtime-lanes.toml");
+        std::fs::write(
+            &legacy_path,
+            r#"provider = "openai"
+model = "gpt-5.4"
+"#,
+        )
+        .expect("write legacy runtime lane preferences");
+        let store = RuntimeLanePreferenceStore::with_migration_paths(
+            &turn_runtime_path,
+            Some(&legacy_path),
+        );
+        let preferences = store
+            .load()
+            .expect("load migrated preferences")
+            .expect("migrated preferences");
+        let final_rendering = preferences.final_rendering();
+        let provider = final_rendering
+            .provider
+            .as_deref()
+            .and_then(ModelProvider::from_name)
+            .expect("migrated provider");
+        let model_id = final_rendering
+            .model
+            .clone()
+            .expect("migrated final rendering model");
+        let lane = PreparedModelLane {
+            role: RuntimeLaneRole::Synthesizer,
+            provider,
+            model_id,
+            paths: None,
+        };
+        let (execution_hand_registry, transport_mediator) =
+            transport_mediator_with_empty_credentials_for_test(credentials.path());
+
+        let error = match build_synthesizer_engine(
+            workspace.path(),
+            Arc::clone(&execution_hand_registry),
+            transport_mediator,
+            &lane,
+            &BTreeMap::new(),
+        ) {
+            Ok(_) => panic!("migrated OpenAI preferences should still require credentials"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+
+        assert!(turn_runtime_path.exists());
+        assert!(message.contains("provider `openai` is not authenticated"));
+        assert!(message.contains("OPENAI_API_KEY"));
+        assert!(message.contains("/login openai"));
+        assert!(message.contains("openai:gpt-5.4"));
+        let diagnostic = execution_hand_registry
+            .diagnostic(ExecutionHandKind::TransportMediator)
+            .expect("transport mediator diagnostic");
+        assert_eq!(diagnostic.phase, ExecutionHandPhase::Failed);
+        assert!(
+            diagnostic
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("OPENAI_API_KEY"))
+        );
     }
 
     #[test]
