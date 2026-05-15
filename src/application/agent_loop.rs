@@ -14,21 +14,22 @@ pub(super) async fn execute_agent_loop(
     trace: Arc<StructuredTurnTrace>,
 ) -> Result<AgentLoopOutcome> {
     let mut context = context;
-    let base_budget =
-        agent_loop_budget_for_turn(context.instruction_frame.as_ref(), &context.initial_edit);
     let agent_loop_replan_policy = service.agent_loop_replan_policy();
     let execution_contract_service = service.execution_contract_service();
-    let mut budget = agent_loop_replan_policy.budget_for_replan_attempt(&base_budget, 0);
     let harness_profile = context.prepared.harness_profile();
     let mut loop_state = AgentLoopState {
+        instruction_frame: context.instruction_frame.clone(),
+        grounding: context.grounding.clone(),
         target_resolution: context.initial_edit.resolution.clone(),
         refinement_policy: harness_profile.active_refinement_policy(),
         ..AgentLoopState::default()
     };
+    let base_budget =
+        agent_loop_budget_for_turn(loop_state.instruction_frame.as_ref(), &context.initial_edit);
+    let mut budget = agent_loop_replan_policy.budget_for_replan_attempt(&base_budget, 0);
     let mut used_workspace_resources = false;
     let mut stop_reason = None;
     let mut direct_answer = None;
-    let mut instruction_frame = context.instruction_frame.clone();
     let mut pending_initial_decision = initial_decision;
     let mut pending_deliberation_signals = DeliberationSignals::default();
     let mut steps_without_new_evidence = 0usize;
@@ -50,10 +51,11 @@ pub(super) async fn execute_agent_loop(
         }
 
         if sequence > budget.max_steps {
+            let replan_instruction_frame = loop_state.instruction_frame.clone();
             if let Some(replan_event) = agent_loop_replan_policy.activate_replan(
                 "agent-budget-exhausted",
                 AgentLoopReplanActivation {
-                    instruction_frame: instruction_frame.as_ref(),
+                    instruction_frame: replan_instruction_frame.as_ref(),
                     base_budget: &base_budget,
                     completed_replans: &mut replan_count,
                     budget: &mut budget,
@@ -99,8 +101,8 @@ pub(super) async fn execute_agent_loop(
                 external_capabilities: &context.external_capabilities,
                 retrieval_provider: context.retrieval_provider.as_deref(),
                 turn_contract: &context.turn_contract,
-                instruction_frame: instruction_frame.as_ref(),
-                grounding: context.grounding.as_ref(),
+                instruction_frame: loop_state.instruction_frame.as_ref(),
+                grounding: loop_state.grounding.as_ref(),
             }))
             .with_loop_state(loop_state.clone())
             .with_resolver(context.resolver.clone())
@@ -130,10 +132,12 @@ pub(super) async fn execute_agent_loop(
         decision =
             sanitize_recursive_planner_decision_for_turn_contract(&context.turn_contract, decision);
         if decision.grounding.is_some() {
-            context.grounding = decision.grounding.clone();
+            loop_state.grounding = decision.grounding.clone();
         }
-        instruction_frame =
-            merge_instruction_frame_with_edit_signal(instruction_frame, &decision.edit);
+        loop_state.instruction_frame = merge_instruction_frame_with_edit_signal(
+            loop_state.instruction_frame.take(),
+            &decision.edit,
+        );
         if let Some(resolution) = decision.edit.resolution.clone() {
             loop_state.target_resolution = Some(resolution);
         }
@@ -362,7 +366,7 @@ pub(super) async fn execute_agent_loop(
                                         },
                                         budget.max_evidence_items,
                                     );
-                                    if let Some(frame) = instruction_frame.as_mut() {
+                                    if let Some(frame) = loop_state.instruction_frame.as_mut() {
                                         frame.note_successful_workspace_action(action);
                                     }
                                     used_workspace_resources = true;
@@ -514,7 +518,7 @@ pub(super) async fn execute_agent_loop(
                                             governance_outcome,
                                         );
                                     }
-                                    if let Some(frame) = instruction_frame.as_mut() {
+                                    if let Some(frame) = loop_state.instruction_frame.as_mut() {
                                         frame.note_successful_workspace_action(action);
                                     }
                                     if let Some(edit) = result.applied_edit.clone() {
@@ -628,7 +632,8 @@ pub(super) async fn execute_agent_loop(
                     )
                 }
                 PlannerAction::Stop { reason } => {
-                    if let Some(frame) = instruction_frame
+                    if let Some(frame) = loop_state
+                        .instruction_frame
                         .as_ref()
                         .filter(|frame| frame.has_pending_workspace_obligation())
                     {
@@ -735,10 +740,11 @@ pub(super) async fn execute_agent_loop(
         }
 
         if let Some(reason) = stop_reason.clone() {
+            let replan_instruction_frame = loop_state.instruction_frame.clone();
             if let Some(replan_event) = agent_loop_replan_policy.activate_replan(
                 &reason,
                 AgentLoopReplanActivation {
-                    instruction_frame: instruction_frame.as_ref(),
+                    instruction_frame: replan_instruction_frame.as_ref(),
                     base_budget: &base_budget,
                     completed_replans: &mut replan_count,
                     budget: &mut budget,
@@ -762,7 +768,7 @@ pub(super) async fn execute_agent_loop(
     let completed = stop_reason.is_some();
     let stop_reason = annotate_stop_reason_for_pending_instruction(
         stop_reason.unwrap_or_else(|| "agent-budget-exhausted".to_string()),
-        instruction_frame.as_ref(),
+        loop_state.instruction_frame.as_ref(),
     );
     trace.emit(TurnEvent::PlannerSummary {
         strategy: "model-driven".to_string(),
@@ -809,13 +815,14 @@ pub(super) async fn execute_agent_loop(
         return Ok(AgentLoopOutcome {
             evidence: None,
             direct_answer: direct_answer.or_else(|| {
-                instruction_frame
+                loop_state
+                    .instruction_frame
                     .as_ref()
                     .filter(|frame| frame.has_pending_workspace_obligation())
                     .map(blocked_instruction_response)
             }),
-            instruction_frame,
-            grounding: context.grounding.clone(),
+            instruction_frame: loop_state.instruction_frame,
+            grounding: loop_state.grounding,
             continuation: None,
         });
     }
@@ -829,13 +836,14 @@ pub(super) async fn execute_agent_loop(
             &stop_reason,
         )),
         direct_answer: direct_answer.or_else(|| {
-            instruction_frame
+            loop_state
+                .instruction_frame
                 .as_ref()
                 .filter(|frame| frame.has_pending_workspace_obligation())
                 .map(blocked_instruction_response)
         }),
-        instruction_frame,
-        grounding: context.grounding.clone(),
+        instruction_frame: loop_state.instruction_frame,
+        grounding: loop_state.grounding,
         continuation: None,
     })
 }

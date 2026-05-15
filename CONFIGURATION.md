@@ -382,7 +382,7 @@ for:
 
 - interpretation context assembly
 - model-selected first action
-- automatic plan updates when planned turns need explicit execution containment
+- model-authored plan updates when the loop selects explicit remaining work
 - agent action selection
 - retrieval capability and gathered evidence
 - loop summaries and stop reasons
@@ -422,19 +422,19 @@ resolved verbosity explicitly allows it.
 
 Repository-question answers also include source/file citations by default.
 When a turn carries edit pressure, grounding pressure, or multi-step follow-up
-pressure from recent conversation turns, Paddles now emits a Codex-style
-checklist of the remaining work in the stream and feeds the same unfinished
-items back into agent-loop notes so the execution stays contained until the
-checklist is complete.
+pressure from recent conversation turns, Paddles attaches those obligations to
+the first loop request as instruction-frame or loop-state data. The same state
+feeds the completion contract so the model can choose the next bounded action
+inside the recursive loop.
 Known-edit turns also get one bounded replan when they hit agent-loop budget
-before an applied edit lands. That replan keeps the current evidence, updates
-the checklist, and expands the per-turn read/inspect/search envelope instead of
+before an applied edit lands. That replan keeps the current evidence and
+expands the per-turn read/inspect/search envelope instead of
 dropping straight to the blocked-edit reply.
 Prompted git-commit turns now use the same containment path. When the prompt
 explicitly asks Paddles to record a commit, the controller opens a commit
-obligation, bootstraps a `git status --short` probe if the model tried to
-answer directly, and keeps the turn open until a `git commit` shell action
-lands. After `git status` and `git diff` have already been inspected,
+obligation, attaches it to loop state, and keeps the turn open until a
+`git commit` shell action lands. After `git status` and `git diff` have
+already been inspected,
 action-bias review steers advice-only `stop` answers back toward recording the
 commit instead of ending the turn with guidance text.
 

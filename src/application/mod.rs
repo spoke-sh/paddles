@@ -107,8 +107,8 @@ use crate::domain::ports::{
     ActionSelectionEngine, ActionSelectionEngineDecision, AgentLoopState, ContextGatherRequest,
     ContextResolver, EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome,
     EntityResolutionRequest, EntityResolver, EvidenceBudget, EvidenceBundle, EvidenceItem,
-    ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingRequirement,
-    InitialEditInstruction, InterpretationContext, InterpretationProcedure,
+    ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain,
+    GroundingRequirement, InitialEditInstruction, InterpretationContext, InterpretationProcedure,
     InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
     ModelRegistry, NormalizedEntityHint, OperatorMemory, OperatorMemoryDocument, PlannerAction,
     PlannerBudget, PlannerCapability, PlannerConfig, PlannerExecutionContract, PlannerRequest,
@@ -119,7 +119,7 @@ use crate::domain::ports::{
     WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceCapabilitySurface,
 };
 #[cfg(test)]
-use crate::domain::ports::{GroundingDomain, InitialAction, InitialActionDecision};
+use crate::domain::ports::{InitialAction, InitialActionDecision};
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use std::collections::HashMap;
@@ -3818,7 +3818,6 @@ fn prompt_requests_git_commit(prompt: &str) -> bool {
     }
 }
 
-#[cfg(test)]
 fn prompt_requires_repository_grounding(prompt: &str) -> bool {
     let tokens = normalized_prompt_tokens(prompt);
     if tokens.is_empty() {
@@ -3879,166 +3878,33 @@ fn prompt_requires_repository_grounding(prompt: &str) -> bool {
         || (local_reference && architecture_subject)
 }
 
-#[cfg(test)]
-fn bootstrap_repository_grounding_initial_action(
+fn initial_loop_grounding_requirement(
+    turn_contract: &TurnContract,
     prompt: &str,
-    decision: &InitialActionDecision,
-) -> Option<InitialActionDecision> {
-    match decision.action {
-        InitialAction::Answer | InitialAction::Stop { .. } => {}
-        _ => return None,
+) -> Option<GroundingRequirement> {
+    if turn_contract.active.mode == CollaborationMode::Review {
+        return Some(GroundingRequirement {
+            domain: GroundingDomain::Repository,
+            reason: Some(
+                "review mode requires local, diff-backed repository evidence before synthesis"
+                    .to_string(),
+            ),
+        });
     }
 
-    if !prompt_requires_repository_grounding(prompt) {
-        return None;
+    if prompt_requires_repository_grounding(prompt) {
+        return Some(GroundingRequirement {
+            domain: GroundingDomain::Repository,
+            reason: Some(
+                "the user request asks for a repository-scoped answer that needs local evidence"
+                    .to_string(),
+            ),
+        });
     }
 
-    Some(InitialActionDecision {
-        action: InitialAction::Workspace {
-            action: WorkspaceAction::Inspect {
-                command: repository_grounding_probe_command(prompt),
-            },
-        },
-        rationale:
-            "controller bootstrapped a local repository grounding probe before direct synthesis"
-                .to_string(),
-        answer: None,
-        edit: decision.edit.clone(),
-        grounding: decision.grounding.clone(),
-    })
+    None
 }
 
-#[cfg(test)]
-fn bootstrap_git_commit_initial_action(
-    prompt: &str,
-    decision: &InitialActionDecision,
-) -> Option<InitialActionDecision> {
-    match decision.action {
-        InitialAction::Answer | InitialAction::Stop { .. } => {}
-        _ => return None,
-    }
-
-    if !prompt_requests_git_commit(prompt) {
-        return None;
-    }
-
-    Some(InitialActionDecision {
-        action: InitialAction::Workspace {
-            action: WorkspaceAction::Inspect {
-                command: "git status --short".to_string(),
-            },
-        },
-        rationale:
-            "controller bootstrapped a git status probe before allowing a commit turn to answer directly"
-                .to_string(),
-        answer: None,
-        edit: decision.edit.clone(),
-        grounding: decision.grounding.clone(),
-    })
-}
-
-#[cfg(test)]
-fn repository_grounding_probe_command(prompt: &str) -> String {
-    let terms = repository_grounding_probe_terms(prompt);
-    let pattern = if terms.is_empty() {
-        "paddles|generative|planner|synthesizer|runtime".to_string()
-    } else {
-        terms.join("|")
-    };
-
-    format!(
-        "rg -n -i --hidden --glob '!target' --glob '!node_modules' --glob '!.git' \"({pattern})\" ."
-    )
-}
-
-#[cfg(test)]
-fn repository_grounding_probe_terms(prompt: &str) -> Vec<String> {
-    let tokens = normalized_prompt_tokens(prompt);
-    let mut prioritized = Vec::new();
-
-    for token in &tokens {
-        if matches!(
-            token.as_str(),
-            "paddles"
-                | "repository"
-                | "repo"
-                | "codebase"
-                | "workspace"
-                | "layer"
-                | "layers"
-                | "architecture"
-                | "architectural"
-                | "component"
-                | "components"
-                | "feature"
-                | "features"
-                | "pipeline"
-                | "pipelines"
-                | "system"
-                | "systems"
-                | "stack"
-                | "runtime"
-                | "runtimes"
-                | "planner"
-                | "planners"
-                | "synthesizer"
-                | "synthesizers"
-                | "framework"
-                | "frameworks"
-                | "model"
-                | "models"
-                | "adapter"
-                | "adapters"
-                | "integration"
-                | "integrations"
-                | "generative"
-                | "multimodal"
-        ) && !prioritized.contains(token)
-        {
-            prioritized.push(token.clone());
-        }
-    }
-
-    if !prioritized.is_empty() {
-        prioritized.truncate(4);
-        return prioritized;
-    }
-
-    let mut fallback = Vec::new();
-    for token in tokens {
-        if token.len() < 4
-            || matches!(
-                token.as_str(),
-                "that"
-                    | "this"
-                    | "with"
-                    | "from"
-                    | "into"
-                    | "your"
-                    | "have"
-                    | "think"
-                    | "would"
-                    | "could"
-                    | "should"
-                    | "there"
-                    | "here"
-                    | "perfect"
-            )
-        {
-            continue;
-        }
-        if !fallback.contains(&token) {
-            fallback.push(token);
-        }
-        if fallback.len() >= 4 {
-            break;
-        }
-    }
-
-    fallback
-}
-
-#[cfg(test)]
 fn normalized_prompt_tokens(prompt: &str) -> Vec<String> {
     prompt
         .split(|ch: char| !ch.is_ascii_alphanumeric())
@@ -4332,33 +4198,6 @@ fn sanitize_recursive_planner_decision_for_turn_contract(
     decision.edit =
         sanitize_initial_edit_instruction_for_turn_contract(turn_contract, decision.edit);
     decision
-}
-
-#[cfg(test)]
-fn bootstrap_review_initial_action(
-    decision: &InitialActionDecision,
-) -> Option<InitialActionDecision> {
-    if matches!(
-        decision.action,
-        InitialAction::Workspace {
-            action: WorkspaceAction::Diff { .. }
-        }
-    ) {
-        return None;
-    }
-
-    Some(InitialActionDecision {
-        action: InitialAction::Workspace {
-            action: WorkspaceAction::Diff { path: None },
-        },
-        rationale: "review mode requires local diff evidence before synthesis".to_string(),
-        answer: None,
-        edit: InitialEditInstruction::default(),
-        grounding: Some(GroundingRequirement {
-            domain: GroundingDomain::Repository,
-            reason: Some("review mode starts by inspecting local changes".to_string()),
-        }),
-    })
 }
 
 fn turn_contract_boundary_for_action(
@@ -5147,8 +4986,8 @@ async fn review_decision_under_signals(
             external_capabilities: &context.external_capabilities,
             retrieval_provider: context.retrieval_provider.as_deref(),
             turn_contract: &context.turn_contract,
-            instruction_frame: context.instruction_frame.as_ref(),
-            grounding: context.grounding.as_ref(),
+            instruction_frame: review_loop_state.instruction_frame.as_ref(),
+            grounding: review_loop_state.grounding.as_ref(),
         }),
     )
     .with_loop_state(review_loop_state)
@@ -5184,7 +5023,7 @@ fn collect_steering_review_notes(
 ) -> Vec<SteeringReviewNote> {
     let mut notes = Vec::new();
 
-    let commit_obligation_accepts_commit_action = context
+    let commit_obligation_accepts_commit_action = loop_state
         .instruction_frame
         .as_ref()
         .is_some_and(InstructionFrame::requires_applied_commit)
@@ -5226,7 +5065,7 @@ fn collect_steering_review_notes(
         });
     }
 
-    if context
+    if loop_state
         .instruction_frame
         .as_ref()
         .is_some_and(InstructionFrame::requires_applied_commit)
@@ -9229,55 +9068,343 @@ mod tests {
     }
 
     #[test]
-    fn unified_loop_preserves_bootstrap_guardrails() {
-        let terminal = InitialActionDecision {
-            action: InitialAction::Answer,
-            rationale: "answer directly".to_string(),
-            answer: Some("Looks fine.".to_string()),
-            edit: InitialEditInstruction {
-                known_edit: true,
-                candidate_files: vec!["src/application/mod.rs".to_string()],
-                resolution: None,
+    fn turn_obligations_are_loop_inputs() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src")).expect("create src");
+        fs::write(workspace.path().join("src/lib.rs"), "pub fn before() {}\n").expect("write lib");
+
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
             },
-            grounding: Some(GroundingRequirement {
-                domain: GroundingDomain::Repository,
-                reason: Some("repo-local answer".to_string()),
-            }),
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            retrieval_provider: None,
         };
-
-        let commit_bootstrap =
-            super::bootstrap_git_commit_initial_action("Make a git commit", &terminal)
-                .expect("commit turn should inspect git status");
-        assert!(matches!(
-            commit_bootstrap.action,
-            InitialAction::Workspace {
-                action: WorkspaceAction::Inspect { ref command }
-            } if command == "git status --short"
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "let the loop decide"),
+            vec![ActionSelectionEngineDecision {
+                action: PlannerAction::Stop {
+                    reason: "advice is enough".to_string(),
+                },
+                rationale: "the model tried to stop before doing the requested work".to_string(),
+                answer: Some("You can edit src/lib.rs and commit it.".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            }],
+            Arc::clone(&recorded_requests),
         ));
-        assert_eq!(commit_bootstrap.edit, terminal.edit);
-        assert_eq!(commit_bootstrap.grounding, terminal.grounding);
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer);
 
-        let grounding_bootstrap = super::bootstrap_repository_grounding_initial_action(
-            "Does this belong in our runtime architecture?",
-            &terminal,
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                action_selector: planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
+            });
+            service
+                .process_prompt("Fix src/lib.rs and make a git commit")
+                .await
+                .expect("process prompt");
+        });
+
+        let requests = recorded_requests
+            .lock()
+            .expect("recorded requests lock")
+            .clone();
+        let first_request = requests.first().expect("first loop request");
+        let frame = first_request
+            .loop_state
+            .instruction_frame
+            .as_ref()
+            .expect("turn obligations should ride in loop state");
+        assert!(frame.requires_applied_edit());
+        assert!(frame.requires_applied_commit());
+        assert!(
+            frame
+                .candidate_files
+                .iter()
+                .any(|path| path == "src/lib.rs")
+        );
+        assert!(
+            first_request
+                .execution_contract
+                .completion_contract
+                .iter()
+                .any(|line| line.contains("not complete until an applied workspace edit succeeds"))
+        );
+        assert!(
+            first_request
+                .execution_contract
+                .completion_contract
+                .iter()
+                .any(|line| line
+                    .contains("not complete until the requested git commit has been recorded"))
+        );
+    }
+
+    #[test]
+    fn grounding_and_review_pressure_are_loop_context() {
+        let repository_workspace = tempfile::tempdir().expect("repository workspace");
+        fs::create_dir_all(repository_workspace.path().join("src/domain/model"))
+            .expect("create src dir");
+        fs::write(
+            repository_workspace
+                .path()
+                .join("src/domain/model/generative.rs"),
+            "pub enum ResponseMode { GroundedAnswer, DirectAnswer }\n",
         )
-        .expect("repo-scoped answer should inspect local context");
-        assert!(matches!(
-            grounding_bootstrap.action,
-            InitialAction::Workspace {
-                action: WorkspaceAction::Inspect { .. }
-            }
-        ));
-        assert_eq!(grounding_bootstrap.edit, terminal.edit);
+        .expect("write generative module");
 
-        let review_bootstrap = super::bootstrap_review_initial_action(&terminal)
-            .expect("review mode should force diff evidence");
-        assert!(matches!(
-            review_bootstrap.action,
-            InitialAction::Workspace {
-                action: WorkspaceAction::Diff { path: None }
-            }
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            retrieval_provider: None,
+        };
+        let repository_requests = Arc::new(Mutex::new(Vec::new()));
+        let repository_planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer from loop context"),
+            vec![ActionSelectionEngineDecision {
+                action: PlannerAction::Stop {
+                    reason: "the loop contract is enough".to_string(),
+                },
+                rationale: "try to finish without a synthetic repository probe".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            }],
+            Arc::clone(&repository_requests),
         ));
+        let repository_service = test_service(repository_workspace.path());
+        let repository_sink = Arc::new(RecordingTurnEventSink::default());
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *repository_service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared: prepared.clone(),
+                action_selector: repository_planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
+            });
+            repository_service
+                .process_prompt_with_sink(
+                    "I think this is a perfect fit for our generative layer",
+                    repository_sink.clone(),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        let repository_first_request = repository_requests
+            .lock()
+            .expect("repository request log")
+            .first()
+            .cloned()
+            .expect("repository first loop request");
+        assert_eq!(
+            repository_first_request
+                .loop_state
+                .grounding
+                .as_ref()
+                .map(|grounding| grounding.domain),
+            Some(GroundingDomain::Repository)
+        );
+        assert!(
+            repository_first_request
+                .execution_contract
+                .completion_contract
+                .iter()
+                .any(|line| line
+                    .contains("Do not stop with a final answer until repository evidence"))
+        );
+        assert!(!repository_sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, invocation, .. }
+                if tool_name == "inspect" && invocation.contains("rg -n -i --hidden")
+        )));
+
+        let review_workspace = tempfile::tempdir().expect("review workspace");
+        fs::write(review_workspace.path().join("README.md"), "# Workspace\n")
+            .expect("write readme");
+        let review_requests = Arc::new(Mutex::new(Vec::new()));
+        let review_planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "review from loop context"),
+            vec![ActionSelectionEngineDecision {
+                action: PlannerAction::Stop {
+                    reason: "review evidence is sufficient".to_string(),
+                },
+                rationale: "try to finish review without a controller-forced diff".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            }],
+            Arc::clone(&review_requests),
+        ));
+        let review_service = test_service(review_workspace.path());
+        let review_sink = Arc::new(RecordingTurnEventSink::default());
+        let review_session = review_service.shared_conversation_session();
+
+        runtime.block_on(async {
+            *review_service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                action_selector: review_planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
+            });
+            review_service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Review the current local changes",
+                    review_session,
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Known(CollaborationMode::Review),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("operator selected review mode".to_string()),
+                    )),
+                    review_sink.clone(),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        let review_first_request = review_requests
+            .lock()
+            .expect("review request log")
+            .first()
+            .cloned()
+            .expect("review first loop request");
+        assert_eq!(
+            review_first_request
+                .loop_state
+                .grounding
+                .as_ref()
+                .map(|grounding| grounding.domain),
+            Some(GroundingDomain::Repository)
+        );
+        assert!(
+            review_first_request
+                .loop_state
+                .grounding
+                .as_ref()
+                .and_then(|grounding| grounding.reason.as_deref())
+                .is_some_and(|reason| reason.contains("review mode"))
+        );
+        assert!(!review_sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::ToolCalled { tool_name, .. } if tool_name == "diff"
+        )));
+    }
+
+    #[test]
+    fn turn_contract_blocks_mutation_inside_loop() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
+
+        let prepared = PreparedTurnRuntime {
+            planner: PreparedModelClient {
+                role: ModelClientRole::ActionSelection,
+                provider: ModelProvider::Sift,
+                model_id: "planner".to_string(),
+                paths: Some(sample_model_paths("planner")),
+            },
+            synthesizer: PreparedModelClient {
+                role: ModelClientRole::FinalRendering,
+                provider: ModelProvider::Sift,
+                model_id: "synth".to_string(),
+                paths: Some(sample_model_paths("synth")),
+            },
+            retrieval_provider: None,
+        };
+        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "try to mutate"),
+            vec![ActionSelectionEngineDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::WriteFile {
+                        path: "README.md".to_string(),
+                        content: "# Mutated\n".to_string(),
+                    },
+                },
+                rationale: "apply the change directly".to_string(),
+                answer: None,
+                edit: InitialEditInstruction {
+                    known_edit: true,
+                    candidate_files: vec!["README.md".to_string()],
+                    resolution: None,
+                },
+                grounding: None,
+                deliberation_state: None,
+            }],
+            Arc::clone(&recorded_requests),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let service = test_service(workspace.path());
+        bind_workspace_action_executor(&service, synthesizer.clone());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = service.shared_conversation_session();
+
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let reply = runtime.block_on(async {
+            *service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared,
+                action_selector: planner,
+                final_renderer: synthesizer.clone(),
+                retrieval_provider: None,
+            });
+            service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Plan the README change",
+                    session,
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Known(CollaborationMode::Planning),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("operator selected planning mode".to_string()),
+                    )),
+                    sink.clone(),
+                )
+                .await
+                .expect("process prompt")
+        });
+
+        assert!(reply.contains("Need clarification before mutating"));
+        assert!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .is_empty(),
+            "planning mode must block mutation after model selection and before execution"
+        );
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::Fallback { stage, reason }
+                if stage == "collaboration-mode"
+                    && reason.contains("planning mode blocked mutating action")
+        )));
     }
 
     #[test]
@@ -16680,7 +16807,7 @@ mod tests {
     }
 
     #[test]
-    fn review_mode_bootstraps_local_diff_and_carries_findings_first_handoff() {
+    fn review_mode_carries_model_selected_diff_and_findings_first_handoff() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
@@ -16707,7 +16834,7 @@ mod tests {
                     action: PlannerAction::Workspace {
                         action: WorkspaceAction::Diff { path: None },
                     },
-                    rationale: "review mode starts with local diff evidence".to_string(),
+                    rationale: "the model selected local diff evidence for review".to_string(),
                     answer: None,
                     edit: InitialEditInstruction::default(),
                     grounding: None,
@@ -17136,12 +17263,6 @@ mod tests {
         assert_eq!(reply, "Applied the bounded action.");
         assert!(!sink.recorded().iter().any(|event| matches!(
             event,
-            TurnEvent::Fallback { stage, reason }
-                if stage == "grounding-bootstrap"
-                    && reason.contains("repo-scoped")
-        )));
-        assert!(!sink.recorded().iter().any(|event| matches!(
-            event,
             TurnEvent::ToolCalled { tool_name, invocation, .. }
                 if tool_name == "inspect"
                     && invocation.contains("rg -n -i --hidden")
@@ -17153,7 +17274,7 @@ mod tests {
                 .lock()
                 .expect("gathered summaries lock")
                 .is_empty(),
-            "final rendering should not receive synthetic repository evidence from a pre-loop probe"
+            "final rendering should only receive evidence selected inside the agent loop"
         );
     }
 

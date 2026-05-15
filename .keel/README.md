@@ -484,7 +484,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Unify First Action Entry Point](epics/VJeQx1O20/voyages/VJeRAOoHj/) | done |
-| [Move Turn Contract Into Agent Loop](epics/VJeQx1O20/voyages/VJeRAPzHh/) | in-progress |
+| [Move Turn Contract Into Agent Loop](epics/VJeQx1O20/voyages/VJeRAPzHh/) | done |
 | [Retire Pre-Loop Bootstraps And Vocabulary](epics/VJeQx1O20/voyages/VJeRAR1IS/) | planned |
 
 ### [HTTP API Design For Paddles](epics/VFKApee25/) (done)

@@ -62,11 +62,11 @@ Terminal direct answers are actions in the same loop. The model decides whether
 a turn should answer, inspect locally, recurse, edit, or stop. The controller
 validates that choice and keeps the loop safe.
 
-One fail-closed exception now exists for repository-scoped follow-ups. If the
-model selects a direct answer for a turn that appears to refer to local
-architecture or ownership without grounded evidence, the controller bootstraps a
-local read-only probe before synthesis instead of permitting an ungrounded
-reply.
+Repository-scoped and review turns express their grounding pressure as loop
+state and completion-contract data. The controller may require repository
+evidence before a final answer is trusted, but it does not synthesize a local
+probe as a first action. The model still chooses whether to read, diff, inspect,
+search, answer, or stop inside the recursive loop.
 
 The missing control seam here used to be instruction satisfaction. The model
 could correctly identify an edit turn, but nothing in the loop remembered that
@@ -530,15 +530,14 @@ Known-edit turns also reserve a modest amount of extra read, inspect, and search
 headroom before the workspace-editor boundary fires, so the model can inspect a
 few candidate files without exhausting the turn before any patch is applied.
 
-If that first contained budget still runs out before an edit lands, the controller now performs one bounded replan. The replan preserves accumulated evidence, injects an explicit "do not restart" note into loop state, updates the shared checklist, and expands the known-edit step/read/inspect/search envelope for one more pass.
+If that first contained budget still runs out before an edit lands, the controller now performs one bounded replan. The replan preserves accumulated evidence, injects an explicit "do not restart" note into loop state, and expands the known-edit step/read/inspect/search envelope for one more pass.
 
 This is why a mutation turn should not spend its whole budget doing broad retrieval after the likely file is already on the board.
 
 Git-commit turns now ride the same convergence rails. When a prompt explicitly
 asks Paddles to make a commit, the controller opens a commit obligation,
-bootstraps `git status --short` if the model tries to answer directly, and
-keeps the turn inside the recursive agent loop until a `git commit` action
-succeeds.
+attaches it to the first loop request, and keeps the turn inside the recursive
+agent loop until a `git commit` action succeeds.
 Once both `git status` and `git diff` are already on the board, action-bias
 review treats another advice-only stop as non-convergent and steers the model
 toward recording the commit instead.

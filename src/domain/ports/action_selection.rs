@@ -4,7 +4,7 @@ use super::retrieval::{
     EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy, RetrieverOption,
 };
 pub use crate::domain::model::{
-    CompactionPlan, CompactionRequest, ConversationThread, GuidanceCategory,
+    CompactionPlan, CompactionRequest, ConversationThread, GuidanceCategory, InstructionFrame,
     InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
     InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
     InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate, ThreadDecision,
@@ -308,6 +308,8 @@ pub struct AgentLoopState {
     pub steps: Vec<PlannerStepRecord>,
     pub evidence_items: Vec<EvidenceItem>,
     pub notes: Vec<String>,
+    pub instruction_frame: Option<InstructionFrame>,
+    pub grounding: Option<GroundingRequirement>,
     pub target_resolution: Option<EntityResolutionOutcome>,
     pub pending_branches: Vec<TraceBranch>,
     pub latest_gatherer_trace: Option<PlannerTraceMetadata>,

@@ -3178,6 +3178,43 @@ fn build_http_agent_loop_state_digest(request: &PlannerRequest) -> String {
         }
     }
 
+    if let Some(frame) = request.loop_state.instruction_frame.as_ref() {
+        let mut obligations = Vec::new();
+        if frame.requires_applied_edit() {
+            obligations.push("applied workspace edit");
+        }
+        if frame.requires_applied_commit() {
+            obligations.push("recorded git commit");
+        }
+        if !obligations.is_empty() {
+            let mut line = format!(
+                "Pending instruction obligations: {}.",
+                obligations.join(", ")
+            );
+            if let Some(candidates) = frame.candidate_summary() {
+                line.push_str(&format!(" Candidate files: {candidates}."));
+            }
+            lines.push(line);
+        }
+    }
+
+    if let Some(grounding) = request.loop_state.grounding.as_ref() {
+        let domain = match grounding.domain {
+            GroundingDomain::Repository => "repository",
+            GroundingDomain::External => "external",
+            GroundingDomain::Mixed => "repository and external",
+        };
+        let mut line = format!("Grounding required: {domain} evidence.");
+        if let Some(reason) = grounding
+            .reason
+            .as_deref()
+            .filter(|reason| !reason.trim().is_empty())
+        {
+            line.push_str(&format!(" Reason: {}.", reason.trim()));
+        }
+        lines.push(line);
+    }
+
     let completed_reads = completed_read_observations(request);
     if !completed_reads.is_empty() {
         lines.push("Completed read observations:".to_string());

@@ -143,6 +143,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                 controller_prompt_commit_instruction(&current_prompt),
             );
         }
+        let grounding = initial_loop_grounding_requirement(&turn_contract, &current_prompt);
 
         let (agent_loop_outcome, route_summary) = match action_selection_capability {
             PlannerCapability::Available => {
@@ -175,7 +176,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                         specialist_runtime_notes,
                         instruction_frame,
                         initial_edit,
-                        grounding: None,
+                        grounding,
                     },
                     None,
                     Arc::clone(&trace),
