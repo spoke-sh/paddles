@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJeQmJ0Ro
-status: active
+status: achieved
 created_at: 2026-05-14T19:14:22
-updated_at: 2026-05-14T19:19:33
+updated_at: 2026-05-14T20:37:55
 # authored
 title: Collapse Pre-Loop Routing Into Agent Loop
 watch: ~
 activated_at: 2026-05-14T19:19:33
+achieved_at: 2026-05-14T20:37:55
 ---
 
 # Collapse Pre-Loop Routing Into Agent Loop

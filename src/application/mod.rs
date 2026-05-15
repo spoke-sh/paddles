@@ -14616,7 +14616,90 @@ mod tests {
     }
 
     #[test]
-    fn recursive_loop_preserves_model_selected_repeated_read_actions() {
+    fn simple_evidence_question_answers_from_loop_state() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::write(
+            workspace.path().join("AGENTS.md"),
+            "# AGENTS.md\n\nThis document is an operator contract.\n",
+        )
+        .expect("write agents");
+
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![
+                ActionSelectionEngineDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "AGENTS.md".to_string(),
+                        },
+                    },
+                    rationale: "read the named operator contract".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                },
+                planner_stop_with_answer(
+                    "answered from gathered evidence",
+                    "The operator contract is defined in AGENTS.md.",
+                ),
+            ],
+            Arc::clone(&request_log),
+        ));
+        let service = test_service(workspace.path());
+        *service.runtime.blocking_write() = Some(ActiveRuntimeState {
+            prepared: prepared_turn_runtime_for_tests(),
+            action_selector: planner,
+            final_renderer: Arc::new(RecordingSynthesizer::default()),
+            retrieval_provider: None,
+        });
+
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let reply = tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(service.process_prompt_with_sink(
+                "Where is that operator contract defined? Can you show it to me?",
+                sink.clone(),
+            ))
+            .expect("process prompt");
+
+        assert_eq!(reply, "The operator contract is defined in AGENTS.md.");
+        let requests = request_log.lock().expect("request log lock");
+        assert_eq!(
+            requests.len(),
+            2,
+            "the loop should read once and then re-enter action selection with evidence"
+        );
+        assert!(requests[0].loop_state.evidence_items.is_empty());
+        assert!(
+            requests[1].loop_state.evidence_items.iter().any(|item| {
+                item.source == "AGENTS.md" && item.snippet.contains("operator contract")
+            }),
+            "the answer decision must see the completed AGENTS.md observation"
+        );
+        let events = sink.recorded();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, TurnEvent::ToolCalled { tool_name, .. } if tool_name == "read"))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerActionSelected { sequence: 0, action, .. }
+                if action.contains("read `AGENTS.md`")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerActionSelected { sequence: 1, action, .. }
+                if action.contains("stop (answered from gathered evidence)")
+        )));
+    }
+
+    #[test]
+    fn repeated_read_failure_uses_observation_feedback() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
             workspace.path().join("AGENTS.md"),
@@ -14642,6 +14725,7 @@ mod tests {
         let repeated_read = WorkspaceAction::Read {
             path: "AGENTS.md".to_string(),
         };
+        let request_log = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(
                 InitialAction::Workspace {
@@ -14671,7 +14755,7 @@ mod tests {
                     deliberation_state: None,
                 },
             ],
-            Arc::new(Mutex::new(Vec::new())),
+            Arc::clone(&request_log),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
         let service = test_service(workspace.path());
@@ -14700,6 +14784,35 @@ mod tests {
                 .as_slice(),
             [repeated_read.clone(), repeated_read],
             "the controller should preserve model-selected reads instead of stopping them as duplicates"
+        );
+        let requests = request_log.lock().expect("request log lock");
+        assert_eq!(
+            requests.len(),
+            3,
+            "each repeated read should return through action selection before the next decision"
+        );
+        assert!(requests[1].loop_state.steps.iter().any(|step| {
+            matches!(
+                step.action,
+                PlannerAction::Workspace {
+                    action: WorkspaceAction::Read { ref path }
+                } if path == "AGENTS.md"
+            ) && step.outcome.contains("executed read `AGENTS.md`")
+        }));
+        assert!(
+            requests[2]
+                .loop_state
+                .steps
+                .iter()
+                .filter(|step| matches!(
+                    step.action,
+                    PlannerAction::Workspace {
+                        action: WorkspaceAction::Read { ref path }
+                    } if path == "AGENTS.md"
+                ))
+                .count()
+                >= 2,
+            "the repeated read should be visible as loop feedback, not blocked by a duplicate guard"
         );
     }
 
