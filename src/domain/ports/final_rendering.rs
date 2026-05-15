@@ -1,4 +1,4 @@
-use crate::domain::model::{CollaborationModeResult, InstructionFrame, TurnEventSink, TurnIntent};
+use crate::domain::model::{InstructionFrame, TurnContract, TurnEventSink, TurnIntent};
 use crate::domain::ports::action_selection::GroundingRequirement;
 use crate::domain::ports::retrieval::EvidenceBundle;
 use anyhow::Result;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct FinalRenderingHandoff {
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
-    pub collaboration: CollaborationModeResult,
+    pub turn_contract: TurnContract,
     pub instruction_frame: Option<InstructionFrame>,
     pub grounding: Option<GroundingRequirement>,
 }

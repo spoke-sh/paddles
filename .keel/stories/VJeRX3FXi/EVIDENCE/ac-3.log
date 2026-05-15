@@ -1,0 +1,33 @@
+---
+recorded_at: 2026-05-14T19:58:51.272970543-07:00
+command: sh -lc 'cd /home/alex/workspace/spoke-sh/paddles && rg -n "collaboration" src ARCHITECTURE.md CONFIGURATION.md'
+---
+ARCHITECTURE.md:80:folklore or a pre-loop collaboration lane. Planning, execution, and review
+ARCHITECTURE.md:86:as every other turn transition. The phrase `collaboration-mode` is retained only
+ARCHITECTURE.md:238:**`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. Turn-contract declarations and structured clarification requests travel through that same recorder path, so transcript replay, web projection, and forensic drill-down all see one auditable source of truth. Existing `collaboration_mode_changed` record labels remain serialized compatibility names, not the internal loop contract. The transcript UI is a projection of these records; durable lineage lives in the recorder.
+src/domain/model/turns.rs:297:            Self::CollaborationModeChanged { .. } => "collaboration_mode_changed",
+src/domain/model/mod.rs:3:pub mod collaboration;
+src/domain/model/mod.rs:24:pub use collaboration::{
+src/domain/model/collaboration.rs:5://! "collaboration" are retained for operator-facing mode requests and existing
+src/domain/model/collaboration.rs:237:            detail: "collaboration mode request applied".to_string(),
+src/domain/model/collaboration.rs:281:            "no collaboration mode request supplied; using execution mode",
+src/domain/model/collaboration.rs:462:    fn collaboration_mode_states_stay_concise_and_fail_closed() {
+src/domain/model/collaboration.rs:491:    fn collaboration_mode_results_preserve_invalid_and_unavailable_requests() {
+src/domain/model/control.rs:187:            Self::Collaboration(_) => "collaboration",
+src/domain/model/control.rs:474:        let collaboration = crate::domain::model::TurnContract::invalid(
+src/domain/model/control.rs:481:            "unsupported collaboration mode `pairing`; continuing in execution mode",
+src/domain/model/control.rs:485:                result: collaboration.clone(),
+src/domain/model/control.rs:489:                result: collaboration,
+src/infrastructure/runtime_presentation.rs:186:            detail: detail_formatting::format_collaboration_mode_detail(result),
+src/infrastructure/runtime_presentation.rs:856:    fn projects_collaboration_mode_changes_into_runtime_event_presentation() {
+src/infrastructure/runtime_presentation/detail_formatting.rs:37:pub(super) fn format_collaboration_mode_detail(result: &TurnContract) -> String {
+src/application/turn.rs:49:    let turn_contract = resolve_collaboration_mode_request(mode_request);
+src/application/agent_loop.rs:177:                stage: "collaboration-mode".to_string(),
+src/application/mod.rs:4266:fn resolve_collaboration_mode_request(request: Option<CollaborationModeRequest>) -> TurnContract {
+src/application/mod.rs:4276:                format!("unsupported collaboration mode `{label}`; continuing in execution mode"),
+src/application/mod.rs:4388:                reason: "collaboration-mode-blocked".to_string(),
+src/application/mod.rs:4398:            reason: "collaboration-mode-blocked".to_string(),
+src/application/mod.rs:9291:            super::resolve_collaboration_mode_request(Some(CollaborationModeRequest::new(
+src/application/mod.rs:9312:        assert_eq!(blocked.reason, "collaboration-mode-blocked");
+src/application/mod.rs:16894:    fn unsupported_mode_requests_emit_typed_collaboration_results_instead_of_silent_fallback() {
+src/application/mod.rs:16961:                    && result.detail.contains("unsupported collaboration mode `pairing`")

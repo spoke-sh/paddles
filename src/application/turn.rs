@@ -46,7 +46,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
 ) -> Result<String> {
     let event_sink = service.wrap_sink_with_observers(event_sink);
     let mut current_prompt = prompt.to_string();
-    let collaboration = resolve_collaboration_mode_request(mode_request);
+    let turn_contract = resolve_collaboration_mode_request(mode_request);
 
     loop {
         service.persist_prompt_history(&current_prompt);
@@ -86,7 +86,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         ));
         trace.record_turn_start(&current_prompt, &interpretation, &prepared);
         trace.emit(TurnEvent::CollaborationModeChanged {
-            result: collaboration.clone(),
+            result: turn_contract.clone(),
         });
         let harness_profile = prepared.harness_profile();
         trace.emit(TurnEvent::ExecutionGovernanceProfileApplied {
@@ -119,8 +119,8 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         let controller_edit =
             controller_prompt_edit_instruction(&service.workspace_root, &current_prompt);
         let initial_edit =
-            sanitize_initial_edit_instruction_for_collaboration(&collaboration, controller_edit);
-        if initial_edit.known_edit && collaboration.active.mutation_posture.allows_mutation() {
+            sanitize_initial_edit_instruction_for_turn_contract(&turn_contract, controller_edit);
+        if initial_edit.known_edit && turn_contract.active.mutation_posture.allows_mutation() {
             let candidate_summary = if initial_edit.candidate_files.is_empty() {
                 "no candidate files surfaced yet".to_string()
             } else {
@@ -137,7 +137,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             });
         }
         let mut instruction_frame = instruction_frame_from_initial_edit(&initial_edit);
-        if collaboration.active.mutation_posture.allows_mutation() {
+        if turn_contract.active.mutation_posture.allows_mutation() {
             instruction_frame = merge_instruction_frames(
                 instruction_frame,
                 controller_prompt_commit_instruction(&current_prompt),
@@ -171,7 +171,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                             .operator_memory_documents(&service.workspace_root),
                         recent_turns: recent_turns.clone(),
                         recent_thread_summary: recent_thread_summary.clone(),
-                        collaboration: collaboration.clone(),
+                        turn_contract: turn_contract.clone(),
                         specialist_runtime_notes,
                         instruction_frame,
                         initial_edit,
@@ -280,7 +280,7 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         let handoff = FinalRenderingHandoff {
             recent_turns,
             recent_thread_summary,
-            collaboration: collaboration.clone(),
+            turn_contract: turn_contract.clone(),
             instruction_frame: agent_loop_outcome.instruction_frame.clone(),
             grounding: agent_loop_outcome.grounding.clone(),
         };

@@ -1,6 +1,6 @@
 use crate::domain::model::{
-    CollaborationMode, CollaborationModeResult, ExecutionGovernanceProfile,
-    ExecutionHandDiagnostic, ExternalCapabilityDescriptor, InstructionFrame,
+    CollaborationMode, ExecutionGovernanceProfile, ExecutionHandDiagnostic,
+    ExternalCapabilityDescriptor, InstructionFrame, TurnContract,
 };
 use crate::domain::ports::{
     GroundingDomain, GroundingRequirement, PlannerConfig, PlannerExecutionContract,
@@ -23,14 +23,14 @@ impl ExecutionContractService {
             governance_profile,
             external_capabilities,
             retrieval_provider,
-            collaboration,
+            turn_contract,
             instruction_frame,
             grounding,
         } = context;
         let mut capability_manifest = workspace_capability_surface
             .actions
             .iter()
-            .map(|capability| format_workspace_action_capability(capability, collaboration))
+            .map(|capability| format_workspace_action_capability(capability, turn_contract))
             .collect::<Vec<_>>();
         capability_manifest.extend(
             workspace_capability_surface
@@ -80,7 +80,7 @@ impl ExecutionContractService {
                 .to_string(),
         ];
 
-        match collaboration.active.mode {
+        match turn_contract.active.mode {
             CollaborationMode::Planning => completion_contract.push(
                 "Planning mode is read-only. Do not choose mutating workspace actions or shell commands that could change the repository."
                     .to_string(),
@@ -140,7 +140,7 @@ pub(super) struct ExecutionContractContext<'a> {
     pub(super) governance_profile: Option<&'a ExecutionGovernanceProfile>,
     pub(super) external_capabilities: &'a [ExternalCapabilityDescriptor],
     pub(super) retrieval_provider: Option<&'a dyn RetrievalProvider>,
-    pub(super) collaboration: &'a CollaborationModeResult,
+    pub(super) turn_contract: &'a TurnContract,
     pub(super) instruction_frame: Option<&'a InstructionFrame>,
     pub(super) grounding: Option<&'a GroundingRequirement>,
 }
@@ -186,13 +186,13 @@ pub(super) fn format_external_capability_catalog_entry(
 
 fn format_workspace_action_capability(
     capability: &WorkspaceActionCapability,
-    collaboration: &CollaborationModeResult,
+    turn_contract: &TurnContract,
 ) -> String {
-    if capability.mutating && !collaboration.active.mutation_posture.allows_mutation() {
+    if capability.mutating && !turn_contract.active.mutation_posture.allows_mutation() {
         return format!(
             "workspace action {}: blocked by {} mode read-only boundary \u{2014} {}",
             capability.action,
-            collaboration.active.mode.label(),
+            turn_contract.active.mode.label(),
             capability.summary
         );
     }
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn execution_contract_discloses_planner_capabilities_and_constraints() {
         let service = super::ExecutionContractService::new();
-        let collaboration = crate::domain::model::CollaborationModeResult::defaulted(
+        let turn_contract = crate::domain::model::TurnContract::defaulted(
             CollaborationMode::Planning.state(),
             "planning test",
         );
@@ -322,7 +322,7 @@ mod tests {
             governance_profile: None,
             external_capabilities: &external_capabilities,
             retrieval_provider: None,
-            collaboration: &collaboration,
+            turn_contract: &turn_contract,
             instruction_frame: Some(&instruction_frame),
             grounding: Some(&grounding),
         });

@@ -4,7 +4,7 @@ use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnap
 use super::harness::HarnessSnapshot;
 use super::interpretation::InterpretationContext;
 use super::traces::{TraceModelExchangeCategory, TraceModelExchangeLane, TraceModelExchangePhase};
-use super::{CollaborationModeResult, StructuredClarificationResult};
+use super::{StructuredClarificationResult, TurnContract};
 use paddles_conversation::TraceArtifactId;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -184,7 +184,7 @@ pub enum TurnEvent {
         summary: Option<String>,
     },
     CollaborationModeChanged {
-        result: CollaborationModeResult,
+        result: TurnContract,
     },
     StructuredClarificationChanged {
         result: StructuredClarificationResult,

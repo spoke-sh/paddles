@@ -614,12 +614,12 @@ mod tests {
     };
     use crate::domain::model::{
         AppliedEdit, CollaborationMode, CollaborationModeRequest, CollaborationModeRequestSource,
-        CollaborationModeRequestTarget, CollaborationModeResult, ExecutionEscalationRequest,
-        ExecutionGovernanceDecision, ExecutionGovernanceOutcome, ExecutionHandKind,
-        ExecutionPermission, ExecutionPermissionRequest, ExecutionPermissionRequirement,
-        ExecutionPermissionReuseScope, GovernorState, HarnessChamber, HarnessSnapshot,
-        HarnessStatus, StructuredClarificationKind, StructuredClarificationOption,
-        StructuredClarificationRequest, TimeoutPhase, TimeoutState, TurnEvent,
+        CollaborationModeRequestTarget, ExecutionEscalationRequest, ExecutionGovernanceDecision,
+        ExecutionGovernanceOutcome, ExecutionHandKind, ExecutionPermission,
+        ExecutionPermissionRequest, ExecutionPermissionRequirement, ExecutionPermissionReuseScope,
+        GovernorState, HarnessChamber, HarnessSnapshot, HarnessStatus, StructuredClarificationKind,
+        StructuredClarificationOption, StructuredClarificationRequest, TimeoutPhase, TimeoutState,
+        TurnContract, TurnEvent,
     };
 
     #[test]
@@ -855,7 +855,7 @@ mod tests {
     #[test]
     fn projects_collaboration_mode_changes_into_runtime_event_presentation() {
         let presentation = project_runtime_event(&TurnEvent::CollaborationModeChanged {
-            result: CollaborationModeResult::applied(
+            result: TurnContract::applied(
                 CollaborationModeRequest::new(
                     CollaborationModeRequestTarget::Known(CollaborationMode::Planning),
                     CollaborationModeRequestSource::OperatorSurface,

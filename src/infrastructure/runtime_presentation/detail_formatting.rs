@@ -1,5 +1,5 @@
 use crate::domain::model::{
-    AppliedEdit, CollaborationModeResult, PlanChecklistItem, StructuredClarificationResult,
+    AppliedEdit, PlanChecklistItem, StructuredClarificationResult, TurnContract,
 };
 use std::time::Duration;
 
@@ -34,7 +34,7 @@ pub(super) fn format_applied_edit_detail(edit: &AppliedEdit) -> String {
     detail
 }
 
-pub(super) fn format_collaboration_mode_detail(result: &CollaborationModeResult) -> String {
+pub(super) fn format_collaboration_mode_detail(result: &TurnContract) -> String {
     let mut lines = Vec::new();
     if let Some(request) = &result.request {
         lines.push(format!("requested={}", request.target.label()));

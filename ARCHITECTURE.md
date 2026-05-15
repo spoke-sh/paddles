@@ -76,14 +76,15 @@ frame for edit turns. That frame survives through recursive agent-loop
 reasoning and answer handoff, and the controller will not accept advice-only
 completion while an `applied_edit` obligation is still open.
 
-That same loop now carries typed collaboration mode state as runtime data, not
-prompt folklore. Planning, execution, and review requests resolve into explicit
-mode results with visible status (`applied`, `defaulted`, `invalid`, or
-`unavailable`), and planning-mode clarification pauses are recorded as bounded
-structured requests instead of ad hoc prose. The recursive harness still does
-the work; the difference is that mode selection and clarification pauses are
-now observable through the same event and trace spine as every other turn
-transition.
+That same loop now carries a typed turn contract as runtime data, not prompt
+folklore or a pre-loop collaboration lane. Planning, execution, and review
+requests resolve into explicit contract status (`applied`, `defaulted`,
+`invalid`, or `unavailable`), and planning-mode clarification pauses are
+recorded as bounded structured requests instead of ad hoc prose. The recursive
+harness still does the work; the difference is that mode selection and
+clarification pauses are now observable through the same event and trace spine
+as every other turn transition. The phrase `collaboration-mode` is retained only
+for user-facing mode vocabulary and serialized trace compatibility.
 
 ### The Agent Runtime And Its Phases
 
@@ -232,9 +233,9 @@ The internals path keeps raw record ids, trace ids, and payload content reachabl
 
 ### Visibility Throughout
 
-**`Renderer`** surfaces every step of this process — interpretation assembly, agent action selection, retrieval work, tool calls, collaboration-mode changes, structured clarification pauses, context strain, fallback decisions, final rendering, and now typed harness/governor state — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI can now prefer the explicit harness chamber over guessed labels, so the operator sees real engine ownership rather than a best-effort inference.
+**`Renderer`** surfaces every step of this process — interpretation assembly, agent action selection, retrieval work, tool calls, turn-contract mode changes, structured clarification pauses, context strain, fallback decisions, final rendering, and now typed harness/governor state — through a TUI transcript or plain CLI output. The renderer consumes normalized assistant blocks rather than relying on ad hoc markdown conventions from the model. The interactive TUI uses a compact inline viewport with a borderless live tail above the boxed composer, so completed transcript rows stay in normal terminal scrollback instead of disappearing behind a single full-screen page. When a turn step takes longer than two seconds with no new event, the TUI can now prefer the explicit harness chamber over guessed labels, so the operator sees real engine ownership rather than a best-effort inference.
 
-**`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. Collaboration-mode declarations and structured clarification requests travel through that same recorder path, so transcript replay, web projection, and forensic drill-down all see one auditable source of truth. The transcript UI is a projection of these records; durable lineage lives in the recorder.
+**`RecorderBoundary`** captures the same runtime transitions as typed trace records with stable ids, flowing through a `TraceRecorder` port to noop, in-memory, or embedded `transit-core` adapters. Turn-contract declarations and structured clarification requests travel through that same recorder path, so transcript replay, web projection, and forensic drill-down all see one auditable source of truth. Existing `collaboration_mode_changed` record labels remain serialized compatibility names, not the internal loop contract. The transcript UI is a projection of these records; durable lineage lives in the recorder.
 
 **`ExecutionHandBoundary`** names the local action surfaces the controller can trust to do work on its behalf. Workspace editing, background terminal execution, and credential-bearing transport mediation now share one lifecycle vocabulary: `described`, `provisioning`, `ready`, `executing`, `recovering`, `degraded`, and `failed`. Later adapters should record into that shared hand surface instead of inventing local readiness names.
 

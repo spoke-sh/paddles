@@ -3,9 +3,7 @@ use super::delegation::{
     WorkerArtifactRecord, WorkerDelegationRequest, WorkerIntegrationStatus, WorkerLifecycleResult,
 };
 use super::execution_hand::{ExecutionGovernanceDecision, ExecutionGovernanceSnapshot};
-use super::{
-    AuthoredResponse, CollaborationModeResult, ResponseMode, StructuredClarificationResult,
-};
+use super::{AuthoredResponse, ResponseMode, StructuredClarificationResult, TurnContract};
 use paddles_conversation::{
     ArtifactEnvelope, ConversationThreadRef, TaskTraceId, ThreadCandidate, ThreadDecision,
     ThreadMergeRecord, TraceArtifactId, TraceBranchId, TraceCheckpointId, TraceRecordId,
@@ -451,7 +449,7 @@ pub enum TraceRecordKind {
     WorkerLifecycleRecorded(TraceWorkerLifecycle),
     WorkerArtifactRecorded(TraceWorkerArtifact),
     WorkerIntegrationRecorded(TraceWorkerIntegration),
-    CollaborationModeDeclared(CollaborationModeResult),
+    CollaborationModeDeclared(TurnContract),
     StructuredClarificationRecorded(StructuredClarificationResult),
     ExecutionGovernanceProfileDeclared(ExecutionGovernanceSnapshot),
     ExecutionGovernanceDecisionRecorded(ExecutionGovernanceDecision),

@@ -1,3 +1,10 @@
+//! User-facing mode vocabulary and serialized compatibility records for turn
+//! policy.
+//!
+//! The agent loop consumes this module through `TurnContract`. Names containing
+//! "collaboration" are retained for operator-facing mode requests and existing
+//! trace/event compatibility; they are not a separate runtime lane.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,14 +201,14 @@ impl CollaborationModeRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CollaborationModeResultStatus {
+pub enum TurnContractStatus {
     Applied,
     Defaulted,
     Invalid,
     Unavailable,
 }
 
-impl CollaborationModeResultStatus {
+impl TurnContractStatus {
     pub fn label(self) -> &'static str {
         match self {
             Self::Applied => "applied",
@@ -213,20 +220,20 @@ impl CollaborationModeResultStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CollaborationModeResult {
+pub struct TurnContract {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<CollaborationModeRequest>,
     pub active: CollaborationModeState,
-    pub status: CollaborationModeResultStatus,
+    pub status: TurnContractStatus,
     pub detail: String,
 }
 
-impl CollaborationModeResult {
+impl TurnContract {
     pub fn applied(request: CollaborationModeRequest, active: CollaborationModeState) -> Self {
         Self {
             request: Some(request),
             active,
-            status: CollaborationModeResultStatus::Applied,
+            status: TurnContractStatus::Applied,
             detail: "collaboration mode request applied".to_string(),
         }
     }
@@ -235,7 +242,7 @@ impl CollaborationModeResult {
         Self {
             request: None,
             active,
-            status: CollaborationModeResultStatus::Defaulted,
+            status: TurnContractStatus::Defaulted,
             detail: detail.into(),
         }
     }
@@ -248,7 +255,7 @@ impl CollaborationModeResult {
         Self {
             request: Some(request),
             active,
-            status: CollaborationModeResultStatus::Invalid,
+            status: TurnContractStatus::Invalid,
             detail: detail.into(),
         }
     }
@@ -261,13 +268,13 @@ impl CollaborationModeResult {
         Self {
             request: Some(request),
             active,
-            status: CollaborationModeResultStatus::Unavailable,
+            status: TurnContractStatus::Unavailable,
             detail: detail.into(),
         }
     }
 }
 
-impl Default for CollaborationModeResult {
+impl Default for TurnContract {
     fn default() -> Self {
         Self::defaulted(
             CollaborationMode::Execution.state(),
@@ -444,11 +451,11 @@ pub struct StructuredClarificationResult {
 mod tests {
     use super::{
         CollaborationClarificationPolicy, CollaborationMode, CollaborationModeRequest,
-        CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
-        CollaborationModeResultStatus, CollaborationMutationPosture, CollaborationOutputContract,
-        StructuredClarificationAnswer, StructuredClarificationAnswerPayload,
-        StructuredClarificationKind, StructuredClarificationOption, StructuredClarificationRequest,
-        StructuredClarificationStatus,
+        CollaborationModeRequestSource, CollaborationModeRequestTarget,
+        CollaborationMutationPosture, CollaborationOutputContract, StructuredClarificationAnswer,
+        StructuredClarificationAnswerPayload, StructuredClarificationKind,
+        StructuredClarificationOption, StructuredClarificationRequest,
+        StructuredClarificationStatus, TurnContract, TurnContractStatus,
     };
 
     #[test]
@@ -482,7 +489,7 @@ mod tests {
 
     #[test]
     fn collaboration_mode_results_preserve_invalid_and_unavailable_requests() {
-        let invalid = CollaborationModeResult::invalid(
+        let invalid = TurnContract::invalid(
             CollaborationModeRequest::new(
                 CollaborationModeRequestTarget::Unsupported("pairing".to_string()),
                 CollaborationModeRequestSource::OperatorSurface,
@@ -491,7 +498,7 @@ mod tests {
             CollaborationMode::Execution.state(),
             "pairing mode is not available".to_string(),
         );
-        let unavailable = CollaborationModeResult::unavailable(
+        let unavailable = TurnContract::unavailable(
             CollaborationModeRequest::new(
                 CollaborationModeRequestTarget::Known(CollaborationMode::Review),
                 CollaborationModeRequestSource::Transport,
@@ -501,7 +508,7 @@ mod tests {
             "review mode is currently unavailable on this surface".to_string(),
         );
 
-        assert_eq!(invalid.status, CollaborationModeResultStatus::Invalid);
+        assert_eq!(invalid.status, TurnContractStatus::Invalid);
         assert_eq!(
             invalid.request.as_ref().expect("request").target.label(),
             "pairing"
@@ -509,10 +516,7 @@ mod tests {
         assert_eq!(invalid.active.mode, CollaborationMode::Execution);
         assert!(invalid.detail.contains("not available"));
 
-        assert_eq!(
-            unavailable.status,
-            CollaborationModeResultStatus::Unavailable
-        );
+        assert_eq!(unavailable.status, TurnContractStatus::Unavailable);
         assert_eq!(
             unavailable
                 .request

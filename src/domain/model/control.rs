@@ -1,7 +1,7 @@
 use super::{
-    AppliedEdit, CollaborationModeResult, ConversationThreadRef, PlanChecklistItem,
-    StructuredClarificationResult, ThreadDecision, ThreadDecisionKind, ThreadMergeRecord,
-    TraceBranchId, TraceRecordKind, TurnEvent, TurnTraceId,
+    AppliedEdit, ConversationThreadRef, PlanChecklistItem, StructuredClarificationResult,
+    ThreadDecision, ThreadDecisionKind, ThreadMergeRecord, TraceBranchId, TraceRecordKind,
+    TurnContract, TurnEvent, TurnTraceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -156,7 +156,7 @@ pub struct ControlRuntimeItem {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CollaborationRuntimeItem {
-    pub result: CollaborationModeResult,
+    pub result: TurnContract,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -471,7 +471,7 @@ mod tests {
             ]
         );
 
-        let collaboration = crate::domain::model::CollaborationModeResult::invalid(
+        let collaboration = crate::domain::model::TurnContract::invalid(
             CollaborationModeRequest::new(
                 CollaborationModeRequestTarget::Unsupported("pairing".to_string()),
                 CollaborationModeRequestSource::OperatorSurface,

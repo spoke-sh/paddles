@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJeRAPzHh
-status: planned
+status: in-progress
 epic: VJeQx1O20
 created_at: 2026-05-14T19:15:55
 # authored
 title: Move Turn Contract Into Agent Loop
 index: 2
 updated_at: 2026-05-14T19:19:31
+started_at: 2026-05-14T19:53:49
 ---
 
 # Move Turn Contract Into Agent Loop
@@ -26,10 +27,10 @@ updated_at: 2026-05-14T19:19:31
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Rename Collaboration Runtime Contract](../../../../stories/VJeRX3FXi/README.md) | refactor | backlog |
+| [Rename Collaboration Runtime Contract](../../../../stories/VJeRX3FXi/README.md) | refactor | done |
 | [Move Turn Obligations Into Loop State](../../../../stories/VJeRYVkyL/README.md) | refactor | backlog |
 <!-- END GENERATED -->

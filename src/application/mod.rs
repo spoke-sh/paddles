@@ -80,23 +80,23 @@ pub use paddles_conversation::{
 
 use crate::domain::model::{
     ArtifactEnvelope, ArtifactKind, AuthoredResponse, BootContext, CollaborationMode,
-    CollaborationModeRequest, CollaborationModeRequestTarget, CollaborationModeResult,
-    CompactionDecision, CompactionPlan, ControlOperation, ControlResult, ControlResultStatus,
-    ControlSubject, ConversationReplayView, ConversationThreadRef, ExecutionGovernanceDecision,
-    ExecutionGovernanceOutcome, ExecutionGovernanceProfile, ExecutionHandDiagnostic,
-    ExecutionPermissionRequest, ExternalCapabilityDescriptor, ExternalCapabilityInvocation,
-    ForensicArtifactCapture, ForensicTraceSink, InstructionFrame, InstructionIntent,
-    MultiplexEventSink, NativeTransportDiagnostic, ResponseMode, SteeringGateKind,
-    SteeringGatePhase, StrainFactor, StrainLevel, StructuredClarificationKind,
-    StructuredClarificationOption, StructuredClarificationRequest, TaskTraceId, ThreadCandidate,
-    ThreadDecision, ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch,
-    TraceBranchId, TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind,
-    TraceCompletionCheckpoint, TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge,
-    TraceLineageNodeKind, TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact,
-    TraceModelExchangePhase, TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay,
-    TraceSelectionArtifact, TraceSelectionKind, TraceSignalContribution, TraceSignalKind,
-    TraceSignalSnapshot, TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnControlOperation,
-    TurnEvent, TurnEventSink, TurnIntent, TurnTraceId,
+    CollaborationModeRequest, CollaborationModeRequestTarget, CompactionDecision, CompactionPlan,
+    ControlOperation, ControlResult, ControlResultStatus, ControlSubject, ConversationReplayView,
+    ConversationThreadRef, ExecutionGovernanceDecision, ExecutionGovernanceOutcome,
+    ExecutionGovernanceProfile, ExecutionHandDiagnostic, ExecutionPermissionRequest,
+    ExternalCapabilityDescriptor, ExternalCapabilityInvocation, ForensicArtifactCapture,
+    ForensicTraceSink, InstructionFrame, InstructionIntent, MultiplexEventSink,
+    NativeTransportDiagnostic, ResponseMode, SteeringGateKind, SteeringGatePhase, StrainFactor,
+    StrainLevel, StructuredClarificationKind, StructuredClarificationOption,
+    StructuredClarificationRequest, TaskTraceId, ThreadCandidate, ThreadDecision,
+    ThreadDecisionKind, ThreadMergeMode, ThreadMergeRecord, TraceBranch, TraceBranchId,
+    TraceBranchStatus, TraceCheckpointId, TraceCheckpointKind, TraceCompletionCheckpoint,
+    TraceHarnessProfileSelection, TraceLineage, TraceLineageEdge, TraceLineageNodeKind,
+    TraceLineageNodeRef, TraceLineageRelation, TraceModelExchangeArtifact, TraceModelExchangePhase,
+    TraceRecord, TraceRecordId, TraceRecordKind, TraceReplay, TraceSelectionArtifact,
+    TraceSelectionKind, TraceSignalContribution, TraceSignalKind, TraceSignalSnapshot,
+    TraceTaskRoot, TraceToolCall, TraceTurnStarted, TurnContract, TurnControlOperation, TurnEvent,
+    TurnEventSink, TurnIntent, TurnTraceId,
 };
 #[cfg(test)]
 use crate::domain::model::{
@@ -400,7 +400,7 @@ struct AgentLoopContext {
     operator_memory: Vec<OperatorMemoryDocument>,
     recent_turns: Vec<String>,
     recent_thread_summary: Option<String>,
-    collaboration: CollaborationModeResult,
+    turn_contract: TurnContract,
     specialist_runtime_notes: Vec<String>,
     instruction_frame: Option<InstructionFrame>,
     initial_edit: InitialEditInstruction,
@@ -2447,7 +2447,7 @@ impl AgentRuntime {
     pub fn action_selection_execution_contract(
         &self,
         retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
-        collaboration: &CollaborationModeResult,
+        turn_contract: &TurnContract,
         instruction_frame: Option<&InstructionFrame>,
         grounding: Option<&GroundingRequirement>,
     ) -> PlannerExecutionContract {
@@ -2464,7 +2464,7 @@ impl AgentRuntime {
                 external_capabilities: &external_capabilities,
                 retrieval_provider: retrieval_provider
                     .map(|retrieval_provider| retrieval_provider.as_ref()),
-                collaboration,
+                turn_contract,
                 instruction_frame,
                 grounding,
             })
@@ -4263,16 +4263,14 @@ fn execution_plan_from_initial_action(
     }
 }
 
-fn resolve_collaboration_mode_request(
-    request: Option<CollaborationModeRequest>,
-) -> CollaborationModeResult {
+fn resolve_collaboration_mode_request(request: Option<CollaborationModeRequest>) -> TurnContract {
     match request {
-        None => CollaborationModeResult::default(),
+        None => TurnContract::default(),
         Some(request) => match request.target.clone() {
             CollaborationModeRequestTarget::Known(mode) => {
-                CollaborationModeResult::applied(request, mode.state())
+                TurnContract::applied(request, mode.state())
             }
-            CollaborationModeRequestTarget::Unsupported(label) => CollaborationModeResult::invalid(
+            CollaborationModeRequestTarget::Unsupported(label) => TurnContract::invalid(
                 request,
                 CollaborationMode::Execution.state(),
                 format!("unsupported collaboration mode `{label}`; continuing in execution mode"),
@@ -4281,20 +4279,20 @@ fn resolve_collaboration_mode_request(
     }
 }
 
-fn collaboration_runtime_notes(collaboration: &CollaborationModeResult) -> Vec<String> {
+fn turn_contract_runtime_notes(turn_contract: &TurnContract) -> Vec<String> {
     let mut notes = vec![format!(
         "Collaboration mode: {} (status={}, mutation_posture={}, output_contract={}, clarification_policy={}).",
-        collaboration.active.mode.label(),
-        collaboration.status.label(),
-        collaboration.active.mutation_posture.label(),
-        collaboration.active.output_contract.label(),
-        collaboration.active.clarification_policy.label(),
+        turn_contract.active.mode.label(),
+        turn_contract.status.label(),
+        turn_contract.active.mutation_posture.label(),
+        turn_contract.active.output_contract.label(),
+        turn_contract.active.clarification_policy.label(),
     )];
-    if !collaboration.detail.trim().is_empty() {
-        notes.push(format!("Mode detail: {}", collaboration.detail.trim()));
+    if !turn_contract.detail.trim().is_empty() {
+        notes.push(format!("Mode detail: {}", turn_contract.detail.trim()));
     }
 
-    match collaboration.active.mode {
+    match turn_contract.active.mode {
         CollaborationMode::Planning => notes.push(
             "Planning mode is read-only. Prefer search, list_files, read, inspect, or diff. If progress would require shell or file mutation, stop and ask for bounded clarification instead."
                 .to_string(),
@@ -4312,11 +4310,11 @@ fn collaboration_runtime_notes(collaboration: &CollaborationModeResult) -> Vec<S
     notes
 }
 
-fn sanitize_initial_edit_instruction_for_collaboration(
-    collaboration: &CollaborationModeResult,
+fn sanitize_initial_edit_instruction_for_turn_contract(
+    turn_contract: &TurnContract,
     edit: InitialEditInstruction,
 ) -> InitialEditInstruction {
-    if collaboration.active.mutation_posture.allows_mutation() {
+    if turn_contract.active.mutation_posture.allows_mutation() {
         edit
     } else {
         InitialEditInstruction {
@@ -4327,12 +4325,12 @@ fn sanitize_initial_edit_instruction_for_collaboration(
     }
 }
 
-fn sanitize_recursive_planner_decision_for_collaboration(
-    collaboration: &CollaborationModeResult,
+fn sanitize_recursive_planner_decision_for_turn_contract(
+    turn_contract: &TurnContract,
     mut decision: ActionSelectionEngineDecision,
 ) -> ActionSelectionEngineDecision {
     decision.edit =
-        sanitize_initial_edit_instruction_for_collaboration(collaboration, decision.edit);
+        sanitize_initial_edit_instruction_for_turn_contract(turn_contract, decision.edit);
     decision
 }
 
@@ -4363,30 +4361,30 @@ fn bootstrap_review_initial_action(
     })
 }
 
-fn collaboration_boundary_for_action(
-    collaboration: &CollaborationModeResult,
+fn turn_contract_boundary_for_action(
+    turn_contract: &TurnContract,
     action: &PlannerAction,
     edit: &InitialEditInstruction,
-) -> Option<CollaborationBoundaryOutcome> {
+) -> Option<TurnContractBoundaryOutcome> {
     let PlannerAction::Workspace { action } = action else {
         return None;
     };
-    if collaboration.active.mutation_posture.allows_mutation() || !action.is_mutating() {
+    if turn_contract.active.mutation_posture.allows_mutation() || !action.is_mutating() {
         return None;
     }
 
     let detail = format!(
         "{} mode blocked mutating action `{}` and kept the harness read-only.",
-        collaboration.active.mode.label(),
+        turn_contract.active.mode.label(),
         action.summary()
     );
-    match collaboration.active.mode {
+    match turn_contract.active.mode {
         CollaborationMode::Planning => {
             let clarification = planning_mode_mutation_clarification_request(
                 action,
                 edit.candidate_files.as_slice(),
             );
-            Some(CollaborationBoundaryOutcome {
+            Some(TurnContractBoundaryOutcome {
                 reason: "collaboration-mode-blocked".to_string(),
                 response: AuthoredResponse::from_plain_text(
                     ResponseMode::DirectAnswer,
@@ -4396,7 +4394,7 @@ fn collaboration_boundary_for_action(
                 clarification: Some(clarification.requested(detail)),
             })
         }
-        CollaborationMode::Review => Some(CollaborationBoundaryOutcome {
+        CollaborationMode::Review => Some(TurnContractBoundaryOutcome {
             reason: "collaboration-mode-blocked".to_string(),
             response: AuthoredResponse::from_plain_text(
                 ResponseMode::DirectAnswer,
@@ -4413,7 +4411,7 @@ fn collaboration_boundary_for_action(
 }
 
 #[derive(Clone)]
-struct CollaborationBoundaryOutcome {
+struct TurnContractBoundaryOutcome {
     reason: String,
     response: AuthoredResponse,
     summary: String,
@@ -4474,9 +4472,9 @@ fn render_structured_clarification_request(
 fn action_selection_runtime_notes(
     retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
     specialist_notes: &[String],
-    collaboration: &CollaborationModeResult,
+    turn_contract: &TurnContract,
 ) -> Vec<String> {
-    let mut notes = collaboration_runtime_notes(collaboration);
+    let mut notes = turn_contract_runtime_notes(turn_contract);
     notes.extend(specialist_notes.iter().cloned());
     let Some(retrieval_provider) = retrieval_provider else {
         return notes;
@@ -5133,13 +5131,13 @@ async fn review_decision_under_signals(
         budget.clone(),
     )
     .with_operator_memory(context.operator_memory.clone())
-    .with_collaboration(context.collaboration.clone())
+    .with_turn_contract(context.turn_contract.clone())
     .with_recent_turns(context.recent_turns.clone())
     .with_recent_thread_summary(context.recent_thread_summary.clone())
     .with_runtime_notes(action_selection_runtime_notes(
         context.retrieval_provider.as_ref(),
         &context.specialist_runtime_notes,
-        &context.collaboration,
+        &context.turn_contract,
     ))
     .with_execution_contract(
         ExecutionContractService::new().build(ExecutionContractContext {
@@ -5148,7 +5146,7 @@ async fn review_decision_under_signals(
             governance_profile: context.governance_profile.as_ref(),
             external_capabilities: &context.external_capabilities,
             retrieval_provider: context.retrieval_provider.as_deref(),
-            collaboration: &context.collaboration,
+            turn_contract: &context.turn_contract,
             instruction_frame: context.instruction_frame.as_ref(),
             grounding: context.grounding.as_ref(),
         }),
@@ -6933,9 +6931,9 @@ mod tests {
     use crate::domain::model::DeliberationState;
     use crate::domain::model::{
         AuthoredResponse, CollaborationMode, CollaborationModeRequest,
-        CollaborationModeRequestSource, CollaborationModeRequestTarget, CollaborationModeResult,
-        CompactionPlan, CompactionRequest, ControlOperation, ControlResultStatus,
-        ConversationReplayView, ResponseMode, StructuredClarificationStatus, TurnControlOperation,
+        CollaborationModeRequestSource, CollaborationModeRequestTarget, CompactionPlan,
+        CompactionRequest, ControlOperation, ControlResultStatus, ConversationReplayView,
+        ResponseMode, StructuredClarificationStatus, TurnContract, TurnControlOperation,
     };
     use crate::domain::model::{
         ContextStrain, ConversationForensicUpdate, ConversationThreadRef,
@@ -7975,7 +7973,7 @@ mod tests {
             operator_memory: Vec::new(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
-            collaboration: CollaborationModeResult::default(),
+            turn_contract: TurnContract::default(),
             specialist_runtime_notes: Vec::new(),
             instruction_frame: super::instruction_frame_from_initial_edit(&initial_edit),
             initial_edit,
@@ -9300,7 +9298,7 @@ mod tests {
             candidate_files: vec!["src/lib.rs".to_string()],
             resolution: None,
         };
-        let blocked = super::collaboration_boundary_for_action(
+        let blocked = super::turn_contract_boundary_for_action(
             &planning,
             &PlannerAction::Workspace {
                 action: WorkspaceAction::WriteFile {
@@ -16567,7 +16565,7 @@ mod tests {
     }
 
     #[test]
-    fn planning_mode_explores_read_only_then_requests_bounded_clarification_before_mutation() {
+    fn turn_contract_preserves_mode_semantics() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(workspace.path().join("README.md"), "# Workspace\n").expect("write readme");
 
@@ -16672,11 +16670,11 @@ mod tests {
             .expect("recorded requests lock")
             .clone();
         assert_eq!(
-            requests[0].collaboration.active.mode,
+            requests[0].turn_contract.active.mode,
             CollaborationMode::Planning
         );
         assert_eq!(
-            requests[1].collaboration.active.mode,
+            requests[1].turn_contract.active.mode,
             CollaborationMode::Planning
         );
     }
@@ -16771,9 +16769,9 @@ mod tests {
         );
         let handoffs = synthesizer.handoffs.lock().expect("handoffs lock").clone();
         let handoff = handoffs.last().expect("review handoff");
-        assert_eq!(handoff.collaboration.active.mode, CollaborationMode::Review);
+        assert_eq!(handoff.turn_contract.active.mode, CollaborationMode::Review);
         assert_eq!(
-            handoff.collaboration.active.output_contract.label(),
+            handoff.turn_contract.active.output_contract.label(),
             "findings_first_review"
         );
         let requests = recorded_requests
@@ -16781,7 +16779,7 @@ mod tests {
             .expect("recorded requests lock")
             .clone();
         assert_eq!(
-            requests[0].collaboration.active.mode,
+            requests[0].turn_contract.active.mode,
             CollaborationMode::Review
         );
     }
@@ -16869,7 +16867,7 @@ mod tests {
             event,
             TurnEvent::CollaborationModeChanged { result }
                 if result.active.mode == CollaborationMode::Planning
-                    && result.status == crate::domain::model::CollaborationModeResultStatus::Applied
+                    && result.status == crate::domain::model::TurnContractStatus::Applied
         )));
         assert!(sink.recorded().iter().any(|event| matches!(
             event,
@@ -16959,7 +16957,7 @@ mod tests {
             event,
             TurnEvent::CollaborationModeChanged { result }
                 if result.active.mode == CollaborationMode::Execution
-                    && result.status == crate::domain::model::CollaborationModeResultStatus::Invalid
+                    && result.status == crate::domain::model::TurnContractStatus::Invalid
                     && result.detail.contains("unsupported collaboration mode `pairing`")
         )));
 
@@ -16968,7 +16966,7 @@ mod tests {
             &record.kind,
             TraceRecordKind::CollaborationModeDeclared(result)
                 if result.active.mode == CollaborationMode::Execution
-                    && result.status == crate::domain::model::CollaborationModeResultStatus::Invalid
+                    && result.status == crate::domain::model::TurnContractStatus::Invalid
         )));
     }
 
@@ -17056,7 +17054,7 @@ mod tests {
             .expect("recorded requests lock")
             .clone();
         assert_eq!(
-            requests[0].collaboration.active.mode,
+            requests[0].turn_contract.active.mode,
             CollaborationMode::Execution
         );
     }

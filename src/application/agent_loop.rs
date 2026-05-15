@@ -84,13 +84,13 @@ pub(super) async fn execute_agent_loop(
                 budget.clone(),
             )
             .with_operator_memory(context.operator_memory.clone())
-            .with_collaboration(context.collaboration.clone())
+            .with_turn_contract(context.turn_contract.clone())
             .with_recent_turns(context.recent_turns.clone())
             .with_recent_thread_summary(context.recent_thread_summary.clone())
             .with_runtime_notes(action_selection_runtime_notes(
                 context.retrieval_provider.as_ref(),
                 &context.specialist_runtime_notes,
-                &context.collaboration,
+                &context.turn_contract,
             ))
             .with_execution_contract(execution_contract_service.build(ExecutionContractContext {
                 workspace_capability_surface: &context.workspace_capability_surface,
@@ -98,7 +98,7 @@ pub(super) async fn execute_agent_loop(
                 governance_profile: context.governance_profile.as_ref(),
                 external_capabilities: &context.external_capabilities,
                 retrieval_provider: context.retrieval_provider.as_deref(),
-                collaboration: &context.collaboration,
+                turn_contract: &context.turn_contract,
                 instruction_frame: instruction_frame.as_ref(),
                 grounding: context.grounding.as_ref(),
             }))
@@ -128,7 +128,7 @@ pub(super) async fn execute_agent_loop(
         }
 
         decision =
-            sanitize_recursive_planner_decision_for_collaboration(&context.collaboration, decision);
+            sanitize_recursive_planner_decision_for_turn_contract(&context.turn_contract, decision);
         if decision.grounding.is_some() {
             context.grounding = decision.grounding.clone();
         }
@@ -168,8 +168,8 @@ pub(super) async fn execute_agent_loop(
         });
 
         let mut accepted_stop = false;
-        let outcome = if let Some(outcome) = collaboration_boundary_for_action(
-            &context.collaboration,
+        let outcome = if let Some(outcome) = turn_contract_boundary_for_action(
+            &context.turn_contract,
             &decision.action,
             &decision.edit,
         ) {

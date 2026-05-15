@@ -2181,8 +2181,8 @@ impl FinalRenderingEngine for HttpProviderAdapter {
             user_msg.push_str(summary);
             user_msg.push_str("\n\n");
         }
-        user_msg.push_str("## Collaboration Contract\n");
-        user_msg.push_str(&format_collaboration_contract(&handoff.collaboration));
+        user_msg.push_str("## Turn Contract\n");
+        user_msg.push_str(&format_turn_contract(&handoff.turn_contract));
         user_msg.push_str("\n\n");
         if let Some(frame) = handoff.instruction_frame.as_ref() {
             user_msg.push_str("## Instruction Manifold\n");
@@ -3740,21 +3740,19 @@ fn format_grounding_contract(grounding: &GroundingRequirement) -> String {
     lines.join("\n")
 }
 
-fn format_collaboration_contract(
-    collaboration: &crate::domain::model::CollaborationModeResult,
-) -> String {
+fn format_turn_contract(turn_contract: &crate::domain::model::TurnContract) -> String {
     let mut lines = vec![format!(
         "mode={} status={} mutation_posture={} output_contract={} clarification_policy={}",
-        collaboration.active.mode.label(),
-        collaboration.status.label(),
-        collaboration.active.mutation_posture.label(),
-        collaboration.active.output_contract.label(),
-        collaboration.active.clarification_policy.label(),
+        turn_contract.active.mode.label(),
+        turn_contract.status.label(),
+        turn_contract.active.mutation_posture.label(),
+        turn_contract.active.output_contract.label(),
+        turn_contract.active.clarification_policy.label(),
     )];
-    if !collaboration.detail.trim().is_empty() {
-        lines.push(format!("detail={}", collaboration.detail.trim()));
+    if !turn_contract.detail.trim().is_empty() {
+        lines.push(format!("detail={}", turn_contract.detail.trim()));
     }
-    match collaboration.active.mode {
+    match turn_contract.active.mode {
         crate::domain::model::CollaborationMode::Planning => lines.push(
             "Stay read-only. If progress would require mutation, ask for bounded clarification instead of editing."
                 .to_string(),

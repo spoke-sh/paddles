@@ -4,11 +4,11 @@ use super::retrieval::{
     EvidenceItem, PlannerTraceMetadata, RetrievalMode, RetrievalStrategy, RetrieverOption,
 };
 pub use crate::domain::model::{
-    CollaborationModeResult, CompactionPlan, CompactionRequest, ConversationThread,
-    GuidanceCategory, InterpretationConflict, InterpretationContext,
-    InterpretationCoverageConfidence, InterpretationDecisionFramework, InterpretationDocument,
-    InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate,
-    ThreadDecision, TraceBranch, TraceBranchId, WorkspaceAction,
+    CompactionPlan, CompactionRequest, ConversationThread, GuidanceCategory,
+    InterpretationConflict, InterpretationContext, InterpretationCoverageConfidence,
+    InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationToolHint, ThreadCandidate, ThreadDecision,
+    TraceBranch, TraceBranchId, TurnContract, WorkspaceAction,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -171,7 +171,7 @@ pub struct PlannerRequest {
     /// the interpretation pass surfaced. Populated at PlannerRequest
     /// construction time from the OperatorMemory port.
     pub operator_memory: Vec<OperatorMemoryDocument>,
-    pub collaboration: CollaborationModeResult,
+    pub turn_contract: TurnContract,
     pub recent_turns: Vec<String>,
     pub recent_thread_summary: Option<String>,
     pub runtime_notes: Vec<String>,
@@ -200,7 +200,7 @@ impl PlannerRequest {
             workspace_root: workspace_root.into(),
             interpretation,
             operator_memory: Vec::new(),
-            collaboration: CollaborationModeResult::default(),
+            turn_contract: TurnContract::default(),
             recent_turns: Vec::new(),
             recent_thread_summary: None,
             runtime_notes: Vec::new(),
@@ -247,8 +247,8 @@ impl PlannerRequest {
         self
     }
 
-    pub fn with_collaboration(mut self, collaboration: CollaborationModeResult) -> Self {
-        self.collaboration = collaboration;
+    pub fn with_turn_contract(mut self, turn_contract: TurnContract) -> Self {
+        self.turn_contract = turn_contract;
         self
     }
 

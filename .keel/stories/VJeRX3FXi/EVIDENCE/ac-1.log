@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-14T19:58:33.661317439-07:00
+command: sh -lc 'cd /home/alex/workspace/spoke-sh/paddles && if rg -n "context\\.collaboration|collaboration_runtime_notes|CollaborationModeResult" src/application src/domain src/infrastructure; then exit 1; else status=$?; if [ "$status" -eq 1 ]; then echo "no legacy runtime collaboration contract references in src/application src/domain src/infrastructure"; exit 0; else exit "$status"; fi; fi'
+---
+no legacy runtime collaboration contract references in src/application src/domain src/infrastructure
