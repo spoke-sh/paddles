@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-14T19:47:20.424980325-07:00
+command: sh -lc 'cd /home/alex/workspace/spoke-sh/paddles && if rg -n "PromptExecutionPlan|PromptExecutionPath" src/application src/domain src/infrastructure; then exit 1; else status=$?; if [ "$status" -eq 1 ]; then echo "no PromptExecutionPlan or PromptExecutionPath references in src/application src/domain src/infrastructure"; exit 0; else exit "$status"; fi; fi'
+---
+no PromptExecutionPlan or PromptExecutionPath references in src/application src/domain src/infrastructure

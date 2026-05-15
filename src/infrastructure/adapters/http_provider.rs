@@ -9,11 +9,12 @@ use crate::domain::model::{
 };
 use crate::domain::ports::{
     ActionSelectionEngineDecision, EvidenceBundle, FinalRenderingEngine, FinalRenderingHandoff,
-    GroundingDomain, GroundingRequirement, InitialAction, InitialActionDecision,
-    InitialEditInstruction, InterpretationContext, InterpretationRequest, PlannerAction,
-    PlannerCapability, PlannerRequest, RetrievalMode, RetrievalStrategy, RetrieverOption,
-    ThreadDecisionRequest, WorkspaceAction,
+    GroundingDomain, GroundingRequirement, InitialEditInstruction, InterpretationContext,
+    InterpretationRequest, PlannerAction, PlannerCapability, PlannerRequest, RetrievalMode,
+    RetrievalStrategy, RetrieverOption, ThreadDecisionRequest, WorkspaceAction,
 };
+#[cfg(test)]
+use crate::domain::ports::{InitialAction, InitialActionDecision};
 use crate::infrastructure::execution_hand::ExecutionHandRegistry;
 use crate::infrastructure::providers::{
     ApiFormat, DeliberationCapabilitySurface, DeliberationStateContract, DeliberationSupport,
@@ -2100,6 +2101,7 @@ Rules:
         })
     }
 
+    #[cfg(test)]
     fn parse_initial_action_decision(&self, response: &str) -> Result<InitialActionDecision> {
         let json = extract_json(response).unwrap_or(response);
         let envelope: PlannerEnvelope = serde_json::from_str(json)
@@ -2393,106 +2395,6 @@ impl crate::domain::ports::ActionSelectionEngine for HttpActionSelectionAdapter 
             decision_framework: Default::default(),
             ..InterpretationContext::default()
         })
-    }
-
-    async fn select_initial_action(
-        &self,
-        request: &PlannerRequest,
-        event_sink: Arc<dyn TurnEventSink>,
-    ) -> Result<InitialActionDecision> {
-        let system = self.engine.build_planner_system_prompt_for_variant(
-            &request.interpretation,
-            &request.operator_memory,
-            PlannerActionSchemaVariant::Initial,
-        );
-        let mut user = build_http_initial_action_prompt(request, self.engine.format);
-        let mut capture = self.exchange_capture(
-            event_sink.as_ref(),
-            TraceModelExchangeCategory::InitialAction,
-        );
-        let PlannerActionTransportResponse {
-            content: mut response,
-            mut raw_response_artifact_id,
-            deliberation_state: _,
-        } = self
-            .engine
-            .send_planner_action_async(&system, &user, Some(capture.clone()))
-            .await?;
-
-        if is_blank_model_reply(&response)
-            || self
-                .engine
-                .parse_initial_action_decision(&response)
-                .is_err()
-        {
-            event_sink.emit(TurnEvent::Fallback {
-                stage: "initial-action-retry".to_string(),
-                reason: "missing or invalid initial action response; asking the planner to restate the action inside the harness state space".to_string(),
-            });
-            user = build_http_initial_action_retry_prompt(request, self.engine.format);
-            capture = self.exchange_capture(
-                event_sink.as_ref(),
-                TraceModelExchangeCategory::InitialAction,
-            );
-            PlannerActionTransportResponse {
-                content: response,
-                raw_response_artifact_id,
-                deliberation_state: _,
-            } = self
-                .engine
-                .send_planner_action_async(&system, &user, Some(capture.clone()))
-                .await?;
-        }
-
-        if is_blank_model_reply(&response)
-            || self
-                .engine
-                .parse_initial_action_decision(&response)
-                .is_err()
-        {
-            event_sink.emit(TurnEvent::Fallback {
-                stage: "initial-action-redecision".to_string(),
-                reason: "asking the planner for one final constrained initial action inside the harness state space".to_string(),
-            });
-            user =
-                build_http_initial_action_redecision_prompt(request, &response, self.engine.format);
-            capture = self.exchange_capture(
-                event_sink.as_ref(),
-                TraceModelExchangeCategory::InitialAction,
-            );
-            PlannerActionTransportResponse {
-                content: response,
-                raw_response_artifact_id,
-                deliberation_state: _,
-            } = self
-                .engine
-                .send_planner_action_async(&system, &user, Some(capture.clone()))
-                .await?;
-        }
-
-        match self.engine.parse_initial_action_decision(&response) {
-            Ok(decision) => {
-                let rendered = json!({
-                    "action": decision.action.summary(),
-                    "rationale": decision.rationale,
-                    "edit": if decision.edit.known_edit { "yes" } else { "no" },
-                    "candidate_files": decision.edit.candidate_files,
-                })
-                .to_string();
-                self.engine
-                    .record_rendered_response(&capture, &rendered, raw_response_artifact_id);
-                Ok(decision)
-            }
-            Err(_) => {
-                event_sink.emit(TurnEvent::Fallback {
-                    stage: "initial-action-fallback".to_string(),
-                    reason:
-                        "controller failed closed after repeated invalid initial-action replies"
-                            .to_string(),
-                });
-                Ok(fail_closed_http_initial_action(request))
-            }
-        }
     }
 
     async fn select_next_action(
@@ -3330,6 +3232,7 @@ fn agent_completed_evidence_stop_guidance() -> &'static str {
 If a completed read observation already contains the requested source and no edit or command is needed, prefer `stop` over selecting the same read again unless the observation is stale, incomplete, or a mutation changed the file."
 }
 
+#[cfg(test)]
 fn build_http_initial_action_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "User prompt: {}\n\n{}\nSelect the first bounded agent action inside the recursive agent loop.\n\
@@ -3344,6 +3247,7 @@ If `edit` is `yes` and one likely target file is already known, move into exact-
     )
 }
 
+#[cfg(test)]
 fn build_http_initial_action_retry_prompt(request: &PlannerRequest, format: ApiFormat) -> String {
     format!(
         "Your last agent-action reply was empty or invalid.\n\
@@ -3362,6 +3266,7 @@ User prompt: {}",
     )
 }
 
+#[cfg(test)]
 fn build_http_initial_action_redecision_prompt(
     request: &PlannerRequest,
     invalid_reply: &str,
@@ -3467,22 +3372,6 @@ Invalid reply to correct:\n\
 
 fn is_blank_model_reply(reply: &str) -> bool {
     reply.trim().is_empty()
-}
-
-fn fail_closed_http_initial_action(request: &PlannerRequest) -> InitialActionDecision {
-    InitialActionDecision {
-        action: InitialAction::Stop {
-            reason: format!(
-                "initial-action-unavailable after invalid planner replies for `{}`",
-                truncate(&request.user_prompt, 120)
-            ),
-        },
-        rationale: "controller failed closed after repeated invalid initial-action replies"
-            .to_string(),
-        answer: None,
-        edit: InitialEditInstruction::default(),
-        grounding: None,
-    }
 }
 
 fn fail_closed_http_planner_action() -> ActionSelectionEngineDecision {
@@ -6312,7 +6201,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn openai_planner_retries_invalid_initial_action_before_succeeding() {
+    async fn openai_planner_retries_invalid_loop_action_before_succeeding() {
         let workspace = tempfile::tempdir().expect("workspace");
         let server = start_mock_server(vec![
             MockResponse {
@@ -6345,13 +6234,13 @@ mod tests {
         );
 
         let decision = planner
-            .select_initial_action(&request, Arc::new(RecordingTurnEventSink::default()))
+            .select_next_action(&request, Arc::new(RecordingTurnEventSink::default()))
             .await
-            .expect("initial action");
+            .expect("loop action");
 
         assert_eq!(
             decision.action,
-            InitialAction::Workspace {
+            PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "git status --short".to_string(),
                 },
@@ -6395,13 +6284,13 @@ mod tests {
         );
 
         let decision = planner
-            .select_initial_action(&request, Arc::new(RecordingTurnEventSink::default()))
+            .select_next_action(&request, Arc::new(RecordingTurnEventSink::default()))
             .await
-            .expect("initial action");
+            .expect("loop action");
 
         assert_eq!(
             decision.action,
-            InitialAction::Workspace {
+            PlannerAction::Workspace {
                 action: WorkspaceAction::Inspect {
                     command: "git status --short".to_string(),
                 },

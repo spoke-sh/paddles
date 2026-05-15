@@ -3564,9 +3564,9 @@ impl AgentRuntime {
 
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct PromptExecutionPlan {
+struct LoopEntryTestPlan {
     intent: TurnIntent,
-    path: PromptExecutionPath,
+    path: LoopEntryTestPath,
     route_summary: String,
     initial_planner_decision: Option<ActionSelectionEngineDecision>,
     direct_answer: Option<AuthoredResponse>,
@@ -3590,7 +3590,7 @@ struct AgentLoopContinuation {
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PromptExecutionPath {
+enum LoopEntryTestPath {
     SynthesizerOnly,
     PlannerThenSynthesize,
 }
@@ -3624,10 +3624,10 @@ fn turn_control_result_for_request(
 }
 
 #[cfg(test)]
-fn fallback_execution_plan(prepared: &PreparedTurnRuntime) -> PromptExecutionPlan {
-    PromptExecutionPlan {
+fn fallback_execution_plan(prepared: &PreparedTurnRuntime) -> LoopEntryTestPlan {
+    LoopEntryTestPlan {
         intent: TurnIntent::DirectResponse,
-        path: PromptExecutionPath::SynthesizerOnly,
+        path: LoopEntryTestPath::SynthesizerOnly,
         route_summary: format!(
             "action-selection client '{}' is unavailable, so the turn will fall back to final-rendering client '{}' for a direct response",
             prepared.planner.model_id, prepared.synthesizer.model_id
@@ -4144,7 +4144,7 @@ fn blocked_instruction_response(frame: &InstructionFrame) -> AuthoredResponse {
 fn execution_plan_from_initial_action(
     prepared: &PreparedTurnRuntime,
     decision: InitialActionDecision,
-) -> PromptExecutionPlan {
+) -> LoopEntryTestPlan {
     let InitialActionDecision {
         action,
         rationale,
@@ -4166,9 +4166,9 @@ fn execution_plan_from_initial_action(
                 )
             };
 
-            PromptExecutionPlan {
+            LoopEntryTestPlan {
                 intent: TurnIntent::DirectResponse,
-                path: PromptExecutionPath::PlannerThenSynthesize,
+                path: LoopEntryTestPath::PlannerThenSynthesize,
                 route_summary,
                 initial_planner_decision: Some(ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
@@ -4199,9 +4199,9 @@ fn execution_plan_from_initial_action(
                 )
             };
 
-            PromptExecutionPlan {
+            LoopEntryTestPlan {
                 intent: TurnIntent::DirectResponse,
-                path: PromptExecutionPath::PlannerThenSynthesize,
+                path: LoopEntryTestPath::PlannerThenSynthesize,
                 route_summary,
                 initial_planner_decision: Some(ActionSelectionEngineDecision {
                     action: PlannerAction::Stop {
@@ -4241,9 +4241,9 @@ fn execution_plan_from_initial_action(
                 )
             };
 
-            PromptExecutionPlan {
+            LoopEntryTestPlan {
                 intent: TurnIntent::Planned,
-                path: PromptExecutionPath::PlannerThenSynthesize,
+                path: LoopEntryTestPath::PlannerThenSynthesize,
                 route_summary,
                 initial_planner_decision: Some(ActionSelectionEngineDecision {
                     action: planner_action,
@@ -7221,22 +7221,6 @@ mod tests {
             })
         }
 
-        async fn select_initial_action(
-            &self,
-            request: &PlannerRequest,
-            _event_sink: Arc<dyn TurnEventSink>,
-        ) -> Result<InitialActionDecision> {
-            self.call_log
-                .lock()
-                .expect("planner call log lock")
-                .push("initial");
-            self.recorded_requests
-                .lock()
-                .expect("recorded requests lock")
-                .push(request.clone());
-            Ok(self.initial_decision.clone())
-        }
-
         async fn select_next_action(
             &self,
             request: &PlannerRequest,
@@ -7323,7 +7307,6 @@ mod tests {
     }
 
     struct BlockingTurnControlPlanner {
-        initial_decision: InitialActionDecision,
         next_decisions: Mutex<VecDeque<ActionSelectionEngineDecision>>,
         recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
         thread_decision: ThreadDecisionPlan,
@@ -7341,7 +7324,6 @@ mod tests {
             let loop_decisions =
                 legacy_loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
             Self {
-                initial_decision,
                 next_decisions: Mutex::new(VecDeque::from(loop_decisions)),
                 recorded_requests,
                 thread_decision,
@@ -7379,26 +7361,6 @@ mod tests {
                 decision_framework: Default::default(),
                 ..Default::default()
             })
-        }
-
-        async fn select_initial_action(
-            &self,
-            request: &PlannerRequest,
-            _event_sink: Arc<dyn TurnEventSink>,
-        ) -> Result<InitialActionDecision> {
-            self.recorded_requests
-                .lock()
-                .expect("recorded requests lock")
-                .push(request.clone());
-            let gate = self
-                .release_initial_once
-                .lock()
-                .expect("initial gate lock")
-                .take();
-            if let Some(gate) = gate {
-                gate.notified().await;
-            }
-            Ok(self.initial_decision.clone())
         }
 
         async fn select_next_action(
@@ -8561,7 +8523,7 @@ mod tests {
         );
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
         assert!(plan.initial_planner_decision.is_some());
     }
 
@@ -8606,7 +8568,7 @@ mod tests {
         );
 
         assert_eq!(plan.intent, TurnIntent::Planned);
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
         assert!(plan.route_summary.contains("git status"));
     }
 
@@ -8646,7 +8608,7 @@ mod tests {
         );
 
         assert_eq!(plan.intent, TurnIntent::Planned);
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
         assert!(plan.route_summary.contains("git status"));
         assert!(plan.initial_planner_decision.is_some());
     }
@@ -8680,7 +8642,7 @@ mod tests {
         );
 
         assert_eq!(plan.intent, TurnIntent::DirectResponse);
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
         assert!(plan.initial_planner_decision.is_some());
     }
 
@@ -8729,7 +8691,7 @@ mod tests {
                 initial_action_decision(action, "first model decision"),
             );
 
-            assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+            assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
             assert!(
                 plan.initial_planner_decision.is_some(),
                 "first model decision must enter the recursive loop"
@@ -8774,7 +8736,7 @@ mod tests {
         assert_eq!(
             call_log.lock().expect("planner call log lock").as_slice(),
             &["next"],
-            "normal turns must not call select_initial_action before the loop"
+            "normal turns must route the first model action through the loop"
         );
         assert_eq!(request_log.lock().expect("request log lock").len(), 1);
         assert!(sink.recorded().iter().any(|event| matches!(
@@ -9023,7 +8985,7 @@ mod tests {
         );
         assert_eq!(
             answer_plan.path,
-            super::PromptExecutionPath::PlannerThenSynthesize
+            super::LoopEntryTestPath::PlannerThenSynthesize
         );
         let answer_decision = answer_plan
             .initial_planner_decision
@@ -9052,7 +9014,7 @@ mod tests {
         );
         assert_eq!(
             stop_plan.path,
-            super::PromptExecutionPath::PlannerThenSynthesize
+            super::LoopEntryTestPath::PlannerThenSynthesize
         );
         let stop_decision = stop_plan
             .initial_planner_decision
@@ -9137,7 +9099,7 @@ mod tests {
                 &prepared,
                 initial_action_decision(action, "first resource decision"),
             );
-            assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+            assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
             assert!(plan.initial_planner_decision.is_some());
         }
 
@@ -9251,7 +9213,7 @@ mod tests {
             },
         );
 
-        assert_eq!(plan.path, super::PromptExecutionPath::PlannerThenSynthesize);
+        assert_eq!(plan.path, super::LoopEntryTestPath::PlannerThenSynthesize);
         assert_eq!(
             plan.initial_planner_decision
                 .as_ref()
@@ -9324,7 +9286,7 @@ mod tests {
     fn unified_loop_fail_closed_paths() {
         let prepared = prepared_turn_runtime_for_tests();
         let fallback = super::fallback_execution_plan(&prepared);
-        assert_eq!(fallback.path, super::PromptExecutionPath::SynthesizerOnly);
+        assert_eq!(fallback.path, super::LoopEntryTestPath::SynthesizerOnly);
         assert!(fallback.route_summary.contains("action-selection client"));
 
         let planning =

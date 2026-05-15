@@ -27,12 +27,6 @@ pub trait ActionSelectionEngine: Send + Sync {
         event_sink: Arc<dyn TurnEventSink>,
     ) -> Result<InterpretationContext, anyhow::Error>;
 
-    async fn select_initial_action(
-        &self,
-        request: &PlannerRequest,
-        event_sink: Arc<dyn TurnEventSink>,
-    ) -> Result<InitialActionDecision, anyhow::Error>;
-
     async fn select_next_action(
         &self,
         request: &PlannerRequest,
@@ -765,19 +759,78 @@ fn format_retriever_suffix(retrievers: &[RetrieverOption]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentAction, AgentDecision, AgentLoopState, GroundingDomain, GroundingRequirement,
-        GuidanceCategory, InitialAction, InitialActionDecision, InitialEditInstruction,
-        InterpretationContext, InterpretationDecisionFramework, InterpretationDocument,
-        InterpretationProcedure, InterpretationProcedureStep, InterpretationToolHint,
-        PlannerAction, PlannerBudget, RefinementPolicy, RefinementTrigger, RefinementTriggerSource,
-        RetrievalMode, RetrievalStrategy, ThreadDecisionRequest, WorkspaceAction,
+        ActionSelectionEngine, AgentAction, AgentDecision, AgentLoopState, CompactionPlan,
+        GroundingDomain, GroundingRequirement, GuidanceCategory, InitialAction,
+        InitialActionDecision, InitialEditInstruction, InterpretationContext,
+        InterpretationDecisionFramework, InterpretationDocument, InterpretationProcedure,
+        InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, PlannerAction,
+        PlannerBudget, PlannerCapability, PlannerDecision, PlannerRequest, RefinementPolicy,
+        RefinementTrigger, RefinementTriggerSource, RetrievalMode, RetrievalStrategy,
+        ThreadDecisionRequest, WorkspaceAction,
     };
     use crate::domain::model::{
         ConversationThread, ConversationThreadRef, ConversationThreadStatus, DeliberationState,
-        ExternalCapabilityInvocation, ThreadCandidate, ThreadCandidateId, WorkspaceTextPosition,
+        ExternalCapabilityInvocation, ThreadCandidate, ThreadCandidateId, ThreadDecision,
+        WorkspaceTextPosition,
     };
+    use crate::domain::ports::CompactionRequest;
+    use anyhow::Result;
+    use async_trait::async_trait;
     use serde_json::json;
     use std::collections::BTreeSet;
+    use std::sync::Arc;
+
+    struct LoopOnlySelector;
+
+    #[async_trait]
+    impl ActionSelectionEngine for LoopOnlySelector {
+        fn capability(&self) -> PlannerCapability {
+            PlannerCapability::Available
+        }
+
+        async fn derive_interpretation_context(
+            &self,
+            _request: &InterpretationRequest,
+            _event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
+        ) -> Result<InterpretationContext> {
+            Ok(InterpretationContext::default())
+        }
+
+        async fn select_next_action(
+            &self,
+            _request: &PlannerRequest,
+            _event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
+        ) -> Result<PlannerDecision> {
+            Ok(PlannerDecision {
+                action: PlannerAction::Stop {
+                    reason: "done".to_string(),
+                },
+                rationale: "loop-owned action selection is the only runtime entry point"
+                    .to_string(),
+                answer: Some("done".to_string()),
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            })
+        }
+
+        async fn select_thread_decision(
+            &self,
+            _request: &ThreadDecisionRequest,
+            _event_sink: Arc<dyn crate::domain::model::TurnEventSink>,
+        ) -> Result<ThreadDecision> {
+            unimplemented!("thread routing is not exercised by this contract test")
+        }
+
+        async fn assess_context_relevance(
+            &self,
+            _request: &CompactionRequest,
+        ) -> Result<CompactionPlan> {
+            Ok(CompactionPlan {
+                decisions: std::collections::HashMap::new(),
+            })
+        }
+    }
 
     #[test]
     fn interpretation_context_renders_sources() {
@@ -1015,6 +1068,13 @@ mod tests {
             agent_recursive.deliberation_state.as_ref(),
             Some(&deliberation_state)
         );
+    }
+
+    #[test]
+    fn action_selection_initial_compatibility_is_not_runtime_routing() {
+        let selector: Box<dyn ActionSelectionEngine> = Box::new(LoopOnlySelector);
+
+        assert_eq!(selector.capability(), PlannerCapability::Available);
     }
 
     fn sample_agent_actions() -> Vec<AgentAction> {
