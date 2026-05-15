@@ -178,7 +178,6 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                         initial_edit,
                         grounding,
                     },
-                    None,
                     Arc::clone(&trace),
                 )
                 .await?;

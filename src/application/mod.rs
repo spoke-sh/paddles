@@ -3104,95 +3104,6 @@ impl AgentRuntime {
         .await
     }
 
-    #[cfg(test)]
-    async fn bootstrap_known_edit_initial_action(
-        &self,
-        prompt: &str,
-        interpretation: &InterpretationContext,
-        recent_turns: &[String],
-        retrieval_provider: Option<&Arc<dyn RetrievalProvider>>,
-        decision: &InitialActionDecision,
-        trace: &StructuredTurnTrace,
-    ) -> Result<Option<InitialActionDecision>> {
-        if !decision.edit.known_edit {
-            return Ok(None);
-        }
-
-        let candidates = known_edit_bootstrap_candidates(
-            &self.workspace_root,
-            &decision.edit.candidate_files,
-            prompt,
-            3,
-        );
-        if candidates.is_empty() {
-            return Ok(None);
-        }
-
-        let resolution = resolve_known_edit_target(
-            &self.entity_resolver,
-            &self.workspace_root,
-            prompt,
-            &candidates,
-            &[],
-            decision.edit.resolution.as_ref(),
-        )
-        .await;
-        if let Some(outcome @ EntityResolutionOutcome::Resolved { .. }) = resolution.as_ref() {
-            trace.record_entity_resolution_outcome(outcome, "bootstrap");
-        }
-        let seeded_candidates = resolution
-            .as_ref()
-            .map(|outcome| merge_resolution_candidate_paths(&candidates, outcome))
-            .unwrap_or_else(|| candidates.clone());
-
-        let ranked_candidates = if matches!(
-            resolution.as_ref(),
-            Some(EntityResolutionOutcome::Resolved { .. })
-        ) {
-            seeded_candidates.clone()
-        } else if let Some(retrieval_provider) = retrieval_provider {
-            rerank_known_edit_candidates_with_vector_lookup(
-                retrieval_provider,
-                &self.workspace_root,
-                prompt,
-                interpretation,
-                recent_turns,
-                &seeded_candidates,
-            )
-            .await
-        } else {
-            seeded_candidates.clone()
-        };
-
-        let best_path = resolution
-            .as_ref()
-            .and_then(EntityResolutionOutcome::resolved_path)
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| {
-                ranked_candidates
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| candidates[0].clone())
-            });
-        Ok(Some(InitialActionDecision {
-            action: InitialAction::Workspace {
-                action: WorkspaceAction::Read {
-                    path: best_path.clone(),
-                },
-            },
-            rationale: format!(
-                "known edit turn; action produces information, so read `{best_path}` before broader planning"
-            ),
-            answer: None,
-            edit: crate::domain::ports::InitialEditInstruction {
-                known_edit: decision.edit.known_edit,
-                candidate_files: ranked_candidates,
-                resolution: resolution.or_else(|| decision.edit.resolution.clone()),
-            },
-            grounding: decision.grounding.clone(),
-        }))
-    }
-
     async fn apply_turn_controls_at_safe_checkpoint(
         &self,
         context: &AgentLoopContext,
@@ -3704,7 +3615,7 @@ fn controller_prompt_edit_instruction(
 
     InitialEditInstruction {
         known_edit: true,
-        candidate_files: known_edit_bootstrap_candidates(workspace_root, &[], prompt, 3),
+        candidate_files: known_edit_loop_candidates(workspace_root, &[], prompt, 3),
         resolution: None,
     }
 }
@@ -4732,7 +4643,7 @@ fn dynamic_tool_probe_procedure_steps(
     steps
 }
 
-fn known_edit_bootstrap_candidates(
+fn known_edit_loop_candidates(
     workspace_root: &Path,
     hinted_paths: &[String],
     prompt: &str,
@@ -4774,89 +4685,6 @@ fn known_edit_bootstrap_candidates(
         .take(limit)
         .map(|(path, _)| path)
         .collect()
-}
-
-#[cfg(test)]
-async fn rerank_known_edit_candidates_with_vector_lookup(
-    retrieval_provider: &Arc<dyn RetrievalProvider>,
-    workspace_root: &Path,
-    prompt: &str,
-    interpretation: &InterpretationContext,
-    recent_turns: &[String],
-    candidates: &[String],
-) -> Vec<String> {
-    let path_policy = WorkspacePathPolicy::new(workspace_root);
-    let planning = PlannerConfig::default()
-        .with_mode(RetrievalMode::Linear)
-        .with_retrieval_strategy(RetrievalStrategy::Vector)
-        .with_step_limit(1);
-    if !matches!(
-        retrieval_provider.capability_for_planning(&planning),
-        RetrievalCapability::Available
-    ) {
-        return candidates.to_vec();
-    }
-
-    let mut prior_context = Vec::new();
-    prior_context.push(format!(
-        "known-edit candidate files under review: {}",
-        candidates.join(", ")
-    ));
-    if !interpretation.is_empty() {
-        prior_context.push(interpretation.render());
-    }
-    prior_context.extend(recent_turns.iter().take(2).cloned());
-
-    let request = ContextGatherRequest::new(
-        prompt,
-        workspace_root.to_path_buf(),
-        "known-edit-bootstrap",
-        EvidenceBudget::default(),
-    )
-    .with_planning(planning)
-    .with_prior_context(prior_context);
-
-    let Ok(result) = retrieval_provider.gather_context(&request).await else {
-        return candidates.to_vec();
-    };
-
-    let Some(bundle) = result.evidence_bundle else {
-        return candidates.to_vec();
-    };
-
-    let mut scored = HashMap::<String, i32>::new();
-    for (index, path) in candidates.iter().enumerate() {
-        scored.insert(path.clone(), 300 - index as i32 * 10);
-    }
-
-    for item in &bundle.items {
-        let Some(path) = normalize_action_bias_source(&item.source, workspace_root, &path_policy)
-        else {
-            continue;
-        };
-        if let Some(score) = scored.get_mut(&path) {
-            *score += 90 + evidence_rank_bonus(item.rank);
-        }
-    }
-
-    if let Some(trace) = &bundle.planner {
-        for (index, artifact) in trace.retained_artifacts.iter().enumerate() {
-            let Some(path) =
-                normalize_action_bias_source(&artifact.source, workspace_root, &path_policy)
-            else {
-                continue;
-            };
-            if let Some(score) = scored.get_mut(&path) {
-                *score += 60 - index as i32 * 5;
-            }
-        }
-    }
-
-    let mut ranked = scored.into_iter().collect::<Vec<_>>();
-    ranked.sort_by(|(path_a, score_a), (path_b, score_b)| {
-        score_b.cmp(score_a).then_with(|| path_a.cmp(path_b))
-    });
-    ranked.into_iter().map(|(path, _)| path).collect()
 }
 
 fn search_steps(loop_state: &AgentLoopState) -> usize {
@@ -6157,14 +5985,6 @@ fn merge_known_edit_target_lists(primary: &[String], secondary: &[String]) -> Ve
     merged
 }
 
-#[cfg(test)]
-fn merge_resolution_candidate_paths(
-    candidates: &[String],
-    resolution: &EntityResolutionOutcome,
-) -> Vec<String> {
-    merge_known_edit_target_lists(&resolution.candidate_paths(), candidates)
-}
-
 fn sanitize_entity_resolution_outcome(
     workspace_root: &Path,
     outcome: EntityResolutionOutcome,
@@ -6989,7 +6809,7 @@ mod tests {
             recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
         ) -> Self {
             let next_decisions =
-                legacy_loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
+                loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
             Self {
                 initial_decision,
                 next_decisions: Mutex::new(VecDeque::from(next_decisions)),
@@ -7159,7 +6979,7 @@ mod tests {
             release_initial_once: Arc<tokio::sync::Notify>,
         ) -> Self {
             let loop_decisions =
-                legacy_loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
+                loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
             Self {
                 next_decisions: Mutex::new(VecDeque::from(loop_decisions)),
                 recorded_requests,
@@ -7574,75 +7394,33 @@ mod tests {
         initial_decision: &InitialActionDecision,
         next_decisions: Vec<ActionSelectionEngineDecision>,
     ) -> Vec<ActionSelectionEngineDecision> {
-        if !next_decisions.is_empty() {
-            return next_decisions;
-        }
-
-        let first = loop_decision_from_initial_fixture(initial_decision);
-        let needs_terminal_stop = !matches!(first.action, PlannerAction::Stop { .. });
-        let mut decisions = vec![first];
-        if needs_terminal_stop {
-            decisions.push(ActionSelectionEngineDecision {
-                action: PlannerAction::Stop {
-                    reason: "legacy initial fixture complete".to_string(),
-                },
-                rationale: "the test-only initial-action fixture completed as a loop step"
-                    .to_string(),
-                answer: None,
-                edit: InitialEditInstruction::default(),
-                grounding: None,
-                deliberation_state: None,
-            });
-        }
-        decisions
-    }
-
-    fn legacy_loop_decisions_for_test_initial_fixture(
-        initial_decision: &InitialActionDecision,
-        next_decisions: Vec<ActionSelectionEngineDecision>,
-    ) -> Vec<ActionSelectionEngineDecision> {
-        let mut decisions = Vec::new();
-        match &initial_decision.action {
+        let mut decisions = match &initial_decision.action {
             InitialAction::Workspace { .. }
             | InitialAction::Refine { .. }
             | InitialAction::Branch { .. } => {
-                decisions.push(loop_decision_from_initial_fixture(initial_decision));
+                vec![loop_decision_from_initial_fixture(initial_decision)]
             }
             InitialAction::Answer | InitialAction::Stop { .. } => {
-                if initial_decision.edit.known_edit {
-                    if let Some(path) =
-                        legacy_known_edit_candidate_for_loop_fixture(&initial_decision.edit)
-                    {
-                        decisions.push(ActionSelectionEngineDecision {
-                            action: PlannerAction::Workspace {
-                                action: WorkspaceAction::Read { path },
-                            },
-                            rationale:
-                                "test-only known-edit fixture starts with the inferred target"
-                                    .to_string(),
-                            answer: None,
-                            edit: initial_decision.edit.clone(),
-                            grounding: initial_decision.grounding.clone(),
-                            deliberation_state: None,
-                        });
-                    }
-                } else if next_decisions.is_empty() {
-                    decisions.push(loop_decision_from_initial_fixture(initial_decision));
+                if next_decisions.is_empty() {
+                    vec![loop_decision_from_initial_fixture(initial_decision)]
+                } else {
+                    Vec::new()
                 }
             }
-        }
+        };
 
         decisions.extend(next_decisions);
         if decisions.is_empty() {
             decisions.push(loop_decision_from_initial_fixture(initial_decision));
         }
+
         let needs_terminal_stop = decisions
             .last()
             .is_some_and(|decision| !matches!(decision.action, PlannerAction::Stop { .. }));
         if needs_terminal_stop {
             decisions.push(ActionSelectionEngineDecision {
                 action: PlannerAction::Stop {
-                    reason: "legacy initial fixture complete".to_string(),
+                    reason: "test initial fixture complete".to_string(),
                 },
                 rationale: "the test-only initial-action fixture completed as a loop step"
                     .to_string(),
@@ -7653,45 +7431,6 @@ mod tests {
             });
         }
         decisions
-    }
-
-    fn legacy_known_edit_candidate_for_loop_fixture(
-        edit: &InitialEditInstruction,
-    ) -> Option<String> {
-        edit.candidate_files
-            .iter()
-            .max_by_key(|path| {
-                let normalized = path.replace('\\', "/");
-                let extension_score = if normalized.ends_with(".rs")
-                    || normalized.ends_with(".tsx")
-                    || normalized.ends_with(".ts")
-                    || normalized.ends_with(".jsx")
-                    || normalized.ends_with(".js")
-                    || normalized.ends_with(".css")
-                    || normalized.ends_with(".toml")
-                {
-                    50
-                } else if normalized.ends_with(".md") {
-                    -30
-                } else {
-                    0
-                };
-                let source_score = if normalized.starts_with("src/")
-                    || normalized.contains("/src/")
-                    || normalized.starts_with("apps/")
-                {
-                    25
-                } else {
-                    0
-                };
-                let readme_penalty = if normalized.eq_ignore_ascii_case("README.md") {
-                    -50
-                } else {
-                    0
-                };
-                extension_score + source_score + readme_penalty
-            })
-            .cloned()
     }
 
     fn loop_decision_from_initial_fixture(
@@ -8625,7 +8364,6 @@ mod tests {
                 &service,
                 "Answer directly.",
                 direct_context,
-                None,
                 direct_trace,
             ))
             .expect("direct loop outcome");
@@ -8683,7 +8421,6 @@ mod tests {
                 &service,
                 "Inspect the loop.",
                 workspace_context,
-                None,
                 workspace_trace,
             ))
             .expect("workspace loop outcome");
@@ -8773,7 +8510,6 @@ mod tests {
                 &service,
                 "Trace the first action.",
                 context,
-                None,
                 trace,
             ))
             .expect("loop outcome");
@@ -8875,12 +8611,17 @@ mod tests {
             session.active_thread().thread_ref,
         ));
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let mut context = test_agent_loop_context(InitialEditInstruction::default());
+        context.action_selector = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![answer_decision],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
         let outcome = runtime
             .block_on(super::agent_loop::execute_agent_loop(
                 &service,
                 "Explain the loop.",
-                test_agent_loop_context(InitialEditInstruction::default()),
-                Some(answer_decision),
+                context,
                 trace,
             ))
             .expect("answer loop should finish");
@@ -8963,26 +8704,28 @@ mod tests {
         let mut context = test_agent_loop_context(InitialEditInstruction::default());
         context.action_selector = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
-            vec![planner_decision(
-                PlannerAction::Stop {
-                    reason: "done".to_string(),
+            vec![
+                ActionSelectionEngineDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "src/application/mod.rs".to_string(),
+                        },
+                    },
+                    rationale: "read the code".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
                 },
-                "finish after first resource action",
-            )],
+                planner_decision(
+                    PlannerAction::Stop {
+                        reason: "done".to_string(),
+                    },
+                    "finish after first resource action",
+                ),
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
-        let initial_step = ActionSelectionEngineDecision {
-            action: PlannerAction::Workspace {
-                action: WorkspaceAction::Read {
-                    path: "src/application/mod.rs".to_string(),
-                },
-            },
-            rationale: "read the code".to_string(),
-            answer: None,
-            edit: InitialEditInstruction::default(),
-            grounding: None,
-            deliberation_state: None,
-        };
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
         runtime
@@ -8990,7 +8733,6 @@ mod tests {
                 &service,
                 "Inspect the loop.",
                 context,
-                Some(initial_step),
                 trace,
             ))
             .expect("workspace loop should finish");
@@ -9408,6 +9150,194 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_pressure_is_loop_visible_context() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src")).expect("create src");
+        fs::write(workspace.path().join("src/lib.rs"), "pub fn before() {}\n").expect("write lib");
+
+        let edit_commit_requests = Arc::new(Mutex::new(Vec::new()));
+        let edit_commit_planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            vec![planner_stop_with_answer(
+                "answer",
+                "Describe the edit and commit without doing it.",
+            )],
+            Arc::clone(&edit_commit_requests),
+        ));
+        let edit_commit_service = test_service(workspace.path());
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        runtime.block_on(async {
+            *edit_commit_service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared: prepared_turn_runtime_for_tests(),
+                action_selector: edit_commit_planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
+            });
+            edit_commit_service
+                .process_prompt("Fix src/lib.rs and make a git commit")
+                .await
+                .expect("process prompt");
+        });
+
+        let edit_commit_first = edit_commit_requests
+            .lock()
+            .expect("edit/commit request log")
+            .first()
+            .cloned()
+            .expect("first edit/commit request");
+        let frame = edit_commit_first
+            .loop_state
+            .instruction_frame
+            .as_ref()
+            .expect("edit and commit frame");
+        assert!(frame.requires_applied_edit());
+        assert!(frame.requires_applied_commit());
+        assert!(
+            edit_commit_first
+                .execution_contract
+                .completion_contract
+                .iter()
+                .any(|line| line.contains("not complete until an applied workspace edit succeeds"))
+        );
+        assert!(
+            edit_commit_first
+                .execution_contract
+                .completion_contract
+                .iter()
+                .any(|line| line
+                    .contains("not complete until the requested git commit has been recorded"))
+        );
+
+        let review_requests = Arc::new(Mutex::new(Vec::new()));
+        let review_planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "review directly"),
+            vec![planner_stop_with_answer(
+                "answer",
+                "Review findings without local evidence.",
+            )],
+            Arc::clone(&review_requests),
+        ));
+        let review_service = test_service(workspace.path());
+        let review_session = review_service.shared_conversation_session();
+        runtime.block_on(async {
+            *review_service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared: prepared_turn_runtime_for_tests(),
+                action_selector: review_planner,
+                final_renderer: Arc::new(RecordingSynthesizer::default()),
+                retrieval_provider: None,
+            });
+            review_service
+                .process_prompt_in_session_with_mode_request_and_sink(
+                    "Review the current local changes",
+                    review_session,
+                    Some(CollaborationModeRequest::new(
+                        CollaborationModeRequestTarget::Known(CollaborationMode::Review),
+                        CollaborationModeRequestSource::OperatorSurface,
+                        Some("operator selected review mode".to_string()),
+                    )),
+                    Arc::new(RecordingTurnEventSink::default()),
+                )
+                .await
+                .expect("process prompt");
+        });
+
+        let review_first = review_requests
+            .lock()
+            .expect("review request log")
+            .first()
+            .cloned()
+            .expect("first review request");
+        assert_eq!(
+            review_first
+                .loop_state
+                .grounding
+                .as_ref()
+                .map(|grounding| grounding.domain),
+            Some(GroundingDomain::Repository)
+        );
+        assert!(
+            review_first
+                .execution_contract
+                .completion_contract
+                .iter()
+                .any(|line| line
+                    .contains("Do not stop with a final answer until repository evidence"))
+        );
+    }
+
+    #[test]
+    fn edit_commit_boundaries_survive_bootstrap_removal() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src")).expect("create src");
+        fs::write(workspace.path().join("src/lib.rs"), "pub fn before() {}\n").expect("write lib");
+
+        let edit_planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            vec![planner_stop_with_answer(
+                "answer",
+                "Here is how you could edit src/lib.rs.",
+            )],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let edit_synthesizer = Arc::new(RecordingSynthesizer::default());
+        let edit_service = test_service(workspace.path());
+        bind_workspace_action_executor(&edit_service, edit_synthesizer.clone());
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+        let edit_reply = runtime.block_on(async {
+            *edit_service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared: prepared_turn_runtime_for_tests(),
+                action_selector: edit_planner,
+                final_renderer: edit_synthesizer.clone(),
+                retrieval_provider: None,
+            });
+            edit_service
+                .process_prompt("Fix src/lib.rs")
+                .await
+                .expect("process prompt")
+        });
+        assert!(edit_reply.contains("haven't completed the requested repository edit yet"));
+        assert!(
+            edit_synthesizer
+                .executed_actions
+                .lock()
+                .expect("edit executed actions")
+                .is_empty()
+        );
+
+        let commit_planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "answer directly"),
+            vec![planner_stop_with_answer(
+                "answer",
+                "You can commit these changes with git commit.",
+            )],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let commit_synthesizer = Arc::new(RecordingSynthesizer::default());
+        let commit_service = test_service(workspace.path());
+        bind_workspace_action_executor(&commit_service, commit_synthesizer.clone());
+        let commit_reply = runtime.block_on(async {
+            *commit_service.runtime.write().await = Some(ActiveRuntimeState {
+                prepared: prepared_turn_runtime_for_tests(),
+                action_selector: commit_planner,
+                final_renderer: commit_synthesizer.clone(),
+                retrieval_provider: None,
+            });
+            commit_service
+                .process_prompt("Make a git commit")
+                .await
+                .expect("process prompt")
+        });
+        assert!(commit_reply.contains("haven't completed the requested git commit yet"));
+        assert!(
+            commit_synthesizer
+                .executed_actions
+                .lock()
+                .expect("commit executed actions")
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn unified_loop_fail_closed_paths() {
         let prepared = prepared_turn_runtime_for_tests();
         let fallback = super::fallback_execution_plan(&prepared);
@@ -9473,12 +9403,22 @@ mod tests {
         let mut context = test_agent_loop_context(InitialEditInstruction::default());
         context.action_selector = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "unused"),
-            vec![planner_decision(
-                PlannerAction::Stop {
-                    reason: "observed".to_string(),
-                },
-                "terminal observation",
-            )],
+            vec![
+                planner_decision(
+                    PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "src/lib.rs".to_string(),
+                        },
+                    },
+                    "read for evidence",
+                ),
+                planner_decision(
+                    PlannerAction::Stop {
+                        reason: "observed".to_string(),
+                    },
+                    "terminal observation",
+                ),
+            ],
             Arc::new(Mutex::new(Vec::new())),
         ));
 
@@ -9488,18 +9428,6 @@ mod tests {
                 &service,
                 "Observe the loop.",
                 context,
-                Some(ActionSelectionEngineDecision {
-                    action: PlannerAction::Workspace {
-                        action: WorkspaceAction::Read {
-                            path: "src/lib.rs".to_string(),
-                        },
-                    },
-                    rationale: "read for evidence".to_string(),
-                    answer: None,
-                    edit: InitialEditInstruction::default(),
-                    grounding: None,
-                    deliberation_state: None,
-                }),
                 trace,
             ))
             .expect("observable loop should finish");
@@ -13468,124 +13396,7 @@ mod tests {
     }
 
     #[test]
-    fn known_edit_initial_decision_bootstraps_to_a_file_read() {
-        let workspace = tempfile::tempdir().expect("workspace");
-        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
-        fs::write(
-            workspace.path().join("src/application/mod.rs"),
-            "fn agent_loop() {}\n",
-        )
-        .expect("write app file");
-        fs::write(workspace.path().join("README.md"), "# Docs\n").expect("write readme");
-
-        let prepared = PreparedTurnRuntime {
-            planner: PreparedModelClient {
-                role: ModelClientRole::ActionSelection,
-                provider: ModelProvider::Sift,
-                model_id: "planner".to_string(),
-                paths: Some(sample_model_paths("planner")),
-            },
-            synthesizer: PreparedModelClient {
-                role: ModelClientRole::FinalRendering,
-                provider: ModelProvider::Sift,
-                model_id: "synth".to_string(),
-                paths: Some(sample_model_paths("synth")),
-            },
-            retrieval_provider: None,
-        };
-        let planner = Arc::new(TestPlanner::new(
-            InitialActionDecision {
-                action: InitialAction::Answer,
-                rationale: "known edit turn; controller should choose the file".to_string(),
-                answer: None,
-                edit: InitialEditInstruction {
-                    known_edit: true,
-                    candidate_files: vec![
-                        "README.md".to_string(),
-                        "src/application/mod.rs".to_string(),
-                    ],
-                    resolution: None,
-                },
-                grounding: None,
-            },
-            vec![
-                ActionSelectionEngineDecision {
-                    action: PlannerAction::Stop {
-                        reason: "the file was enough".to_string(),
-                    },
-                    rationale: "stop after the read".to_string(),
-                    answer: None,
-                    edit: InitialEditInstruction::default(),
-                    grounding: None,
-
-                    deliberation_state: None,
-                },
-                ActionSelectionEngineDecision {
-                    action: PlannerAction::Stop {
-                        reason: "the file was enough".to_string(),
-                    },
-                    rationale: "stop after the read".to_string(),
-                    answer: None,
-                    edit: InitialEditInstruction::default(),
-                    grounding: None,
-
-                    deliberation_state: None,
-                },
-                ActionSelectionEngineDecision {
-                    action: PlannerAction::Stop {
-                        reason: "the file was enough".to_string(),
-                    },
-                    rationale: "stop after the read".to_string(),
-                    answer: None,
-                    edit: InitialEditInstruction::default(),
-                    grounding: None,
-
-                    deliberation_state: None,
-                },
-                ActionSelectionEngineDecision {
-                    action: PlannerAction::Stop {
-                        reason: "the file was enough".to_string(),
-                    },
-                    rationale: "stop after the read".to_string(),
-                    answer: None,
-                    edit: InitialEditInstruction::default(),
-                    grounding: None,
-
-                    deliberation_state: None,
-                },
-            ],
-            Arc::new(Mutex::new(Vec::new())),
-        ));
-        let synthesizer = Arc::new(RecordingSynthesizer::default());
-        let service = test_service(workspace.path());
-        bind_workspace_action_executor(&service, synthesizer.clone());
-
-        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-        runtime.block_on(async {
-            *service.runtime.write().await = Some(ActiveRuntimeState {
-                prepared,
-                action_selector: planner,
-                final_renderer: synthesizer.clone(),
-                retrieval_provider: None,
-            });
-            service
-                .process_prompt("edit the agent loop")
-                .await
-                .expect("process prompt")
-        });
-
-        let executed_actions = synthesizer
-            .executed_actions
-            .lock()
-            .expect("executed actions lock");
-        assert!(matches!(
-            executed_actions.first(),
-            Some(WorkspaceAction::Read { path }) if path == "src/application/mod.rs"
-        ));
-    }
-
-    #[test]
-    fn known_edit_bootstrap_discards_node_modules_hints_and_prefers_authored_files() {
+    fn known_edit_loop_discards_node_modules_hints_and_prefers_authored_files() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(
             workspace
@@ -13608,7 +13419,7 @@ mod tests {
         )
         .expect("write authored compare");
 
-        let candidates = super::known_edit_bootstrap_candidates(
+        let candidates = super::known_edit_loop_candidates(
             workspace.path(),
             &[
                 "apps/docs/node_modules/playwright-core/lib/server/utils/image_tools/compare.js"
@@ -13622,7 +13433,7 @@ mod tests {
     }
 
     #[test]
-    fn known_edit_bootstrap_discards_gitignored_generated_artifacts() {
+    fn known_edit_loop_discards_gitignored_generated_artifacts() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("apps/docs/.docusaurus"))
             .expect("create generated docs dir");
@@ -13645,7 +13456,7 @@ mod tests {
         )
         .expect("write authored runtime app");
 
-        let candidates = super::known_edit_bootstrap_candidates(
+        let candidates = super::known_edit_loop_candidates(
             workspace.path(),
             &["apps/docs/.docusaurus/client-modules.js".to_string()],
             "Fix the runtime app shell behavior",
@@ -13896,7 +13707,7 @@ mod tests {
         let retrieval_provider = Arc::new(RecordingGatherer {
             recorded_requests: Arc::clone(&gatherer_requests),
             bundle: EvidenceBundle::new(
-                "vector bootstrap ranked the file candidates".to_string(),
+                "vector evidence ranked the file candidates".to_string(),
                 vec![EvidenceItem {
                     source: "src/two.rs".to_string(),
                     snippet: "most relevant".to_string(),
@@ -13940,100 +13751,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn known_edit_bootstrap_uses_deterministic_resolution() {
-        let workspace = tempfile::tempdir().expect("workspace");
-        fs::create_dir_all(workspace.path().join("apps/web/src/components"))
-            .expect("create components");
-        fs::write(
-            workspace
-                .path()
-                .join("apps/web/src/components/ManifoldVisualization.tsx"),
-            "export function ManifoldVisualization() { return null; }\n",
-        )
-        .expect("write component");
-        let recorded_requests = Arc::new(Mutex::new(Vec::new()));
-        let mut service = test_service(workspace.path());
-        service.entity_resolver = Arc::new(StaticEntityResolver {
-            outcome: EntityResolutionOutcome::Resolved {
-                target: EntityResolutionCandidate::new(
-                    "apps/web/src/components/ManifoldVisualization.tsx",
-                    EntityLookupMode::ExactPath,
-                    1,
-                ),
-                alternatives: Vec::new(),
-                explanation: "single authored target".to_string(),
-            },
-            recorded_requests: Arc::clone(&recorded_requests),
-        });
-        let decision = InitialActionDecision {
-            action: InitialAction::Workspace {
-                action: WorkspaceAction::Search {
-                    query: "find the manifold component".to_string(),
-                    mode: RetrievalMode::Linear,
-                    strategy: RetrievalStrategy::Lexical,
-                    retrievers: Vec::new(),
-                    intent: Some("implementation search".to_string()),
-                },
-            },
-            rationale: "search first".to_string(),
-            answer: None,
-            edit: InitialEditInstruction {
-                known_edit: true,
-                candidate_files: vec![
-                    "apps/web/src/components/ManifoldVisualization.tsx".to_string(),
-                ],
-                resolution: None,
-            },
-            grounding: None,
-        };
-
-        let bootstrapped = service
-            .bootstrap_known_edit_initial_action(
-                "Tighten the ManifoldVisualization copy in the web UI.",
-                &InterpretationContext::default(),
-                &[],
-                None,
-                &decision,
-                &StructuredTurnTrace::new(
-                    Arc::new(RecordingTurnEventSink::default()),
-                    Arc::new(InMemoryTraceRecorder::default()),
-                    Vec::new(),
-                    ConversationSession::new(
-                        TaskTraceId::new("task-bootstrap").expect("task trace id"),
-                    ),
-                    crate::domain::model::TurnTraceId::new("turn-bootstrap")
-                        .expect("turn trace id"),
-                    ConversationThreadRef::Mainline,
-                ),
-            )
-            .await
-            .expect("bootstrap should succeed")
-            .expect("known edit should bootstrap");
-
-        assert!(matches!(
-            bootstrapped.action,
-            InitialAction::Workspace {
-                action: WorkspaceAction::Read { ref path }
-            } if path == "apps/web/src/components/ManifoldVisualization.tsx"
-        ));
-        assert_eq!(
-            bootstrapped
-                .edit
-                .resolution
-                .as_ref()
-                .and_then(EntityResolutionOutcome::resolved_path),
-            Some("apps/web/src/components/ManifoldVisualization.tsx")
-        );
-        assert_eq!(
-            recorded_requests
-                .lock()
-                .expect("resolver requests lock")
-                .len(),
-            1
-        );
-    }
-
-    #[tokio::test]
     async fn execution_pressure_prefers_resolved_targets_over_repeated_search() {
         let resolution = EntityResolutionOutcome::Resolved {
             target: EntityResolutionCandidate::new(
@@ -14042,7 +13759,8 @@ mod tests {
                 1,
             ),
             alternatives: Vec::new(),
-            explanation: "deterministic bootstrap already resolved the authored target".to_string(),
+            explanation: "deterministic resolution already resolved the authored target"
+                .to_string(),
         };
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
@@ -14165,11 +13883,30 @@ mod tests {
             ],
             explanation: "two authored files remained tied".to_string(),
         };
-        let context = test_agent_loop_context(InitialEditInstruction {
+        let mut context = test_agent_loop_context(InitialEditInstruction {
             known_edit: true,
             candidate_files: vec!["src/application/mod.rs".to_string()],
             resolution: Some(resolution.clone()),
         });
+        context.action_selector = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![ActionSelectionEngineDecision {
+                action: PlannerAction::Workspace {
+                    action: WorkspaceAction::ReplaceInFile {
+                        path: "src/application/mod.rs".to_string(),
+                        old: "before".to_string(),
+                        new: "after".to_string(),
+                        replace_all: false,
+                    },
+                },
+                rationale: "edit immediately".to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            }],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
         bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -14178,22 +13915,6 @@ mod tests {
                 &service,
                 "Update the planner stream text",
                 context,
-                Some(ActionSelectionEngineDecision {
-                    action: PlannerAction::Workspace {
-                        action: WorkspaceAction::ReplaceInFile {
-                            path: "src/application/mod.rs".to_string(),
-                            old: "before".to_string(),
-                            new: "after".to_string(),
-                            replace_all: false,
-                        },
-                    },
-                    rationale: "edit immediately".to_string(),
-                    answer: None,
-                    edit: InitialEditInstruction::default(),
-                    grounding: None,
-
-                    deliberation_state: None,
-                }),
                 trace,
             )
             .await
@@ -16211,8 +15932,8 @@ mod tests {
             .filter(|action| matches!(action, WorkspaceAction::Read { .. }))
             .count();
         assert!(
-            read_count >= 3,
-            "edit turn should retain enough headroom to read multiple candidate files before patching"
+            read_count >= 2,
+            "edit turn should retain enough headroom for multiple model-selected candidate reads before patching"
         );
         assert!(executed_actions.iter().any(|action| matches!(
             action,
@@ -16264,7 +15985,7 @@ mod tests {
         let planner = Arc::new(TestPlanner::new(
             InitialActionDecision {
                 action: InitialAction::Answer,
-                rationale: "the controller should bootstrap the likely file first".to_string(),
+                rationale: "the loop should retain likely file pressure".to_string(),
                 answer: Some(answer.clone()),
                 edit: InitialEditInstruction {
                     known_edit: true,

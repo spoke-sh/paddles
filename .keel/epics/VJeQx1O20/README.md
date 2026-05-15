@@ -22,10 +22,10 @@ mission: VJeQmJ0Ro
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 voyages complete, 4/7 stories done
+**Progress:** 2/3 voyages complete, 5/7 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Unify First Action Entry Point](voyages/VJeRAOoHj/) | done | 2/2 |
 | [Move Turn Contract Into Agent Loop](voyages/VJeRAPzHh/) | done | 2/2 |
-| [Retire Pre-Loop Bootstraps And Vocabulary](voyages/VJeRAR1IS/) | planned | 0/3 |
+| [Retire Pre-Loop Bootstraps And Vocabulary](voyages/VJeRAR1IS/) | in-progress | 1/3 |
 <!-- END GENERATED -->

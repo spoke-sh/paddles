@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-05-14T20:23:21.595207335-07:00
+command: sh -lc 'cd /home/alex/workspace/spoke-sh/paddles && if rg -n "bootstrap_.*initial_action|known-edit-bootstrap|commit-bootstrap|grounding-bootstrap|review-bootstrap" src/application; then exit 1; else test $? -eq 1; fi'
+---

@@ -10,7 +10,6 @@ pub(super) async fn execute_agent_loop(
     service: &AgentRuntime,
     prompt: &str,
     context: AgentLoopContext,
-    initial_decision: Option<ActionSelectionEngineDecision>,
     trace: Arc<StructuredTurnTrace>,
 ) -> Result<AgentLoopOutcome> {
     let mut context = context;
@@ -30,7 +29,6 @@ pub(super) async fn execute_agent_loop(
     let mut used_workspace_resources = false;
     let mut stop_reason = None;
     let mut direct_answer = None;
-    let mut pending_initial_decision = initial_decision;
     let mut pending_deliberation_signals = DeliberationSignals::default();
     let mut steps_without_new_evidence = 0usize;
     let mut replan_count = 0usize;
@@ -72,62 +70,55 @@ pub(super) async fn execute_agent_loop(
         }
 
         let evidence_count_before = loop_state.evidence_items.len();
-        let model_selected_this_step = pending_initial_decision.is_none();
         sync_deliberation_signal_note(&mut loop_state, &pending_deliberation_signals);
-        let mut decision = if let Some(decision) = pending_initial_decision.take() {
-            decision
-        } else {
-            context.workspace_capability_surface =
-                service.workspace_action_executor().capability_surface();
-            let request = PlannerRequest::new(
-                prompt,
-                service.workspace_root.clone(),
-                context.interpretation.clone(),
-                budget.clone(),
-            )
-            .with_operator_memory(context.operator_memory.clone())
-            .with_turn_contract(context.turn_contract.clone())
-            .with_recent_turns(context.recent_turns.clone())
-            .with_recent_thread_summary(context.recent_thread_summary.clone())
-            .with_runtime_notes(action_selection_runtime_notes(
-                context.retrieval_provider.as_ref(),
-                &context.specialist_runtime_notes,
-                &context.turn_contract,
-            ))
-            .with_execution_contract(execution_contract_service.build(ExecutionContractContext {
-                workspace_capability_surface: &context.workspace_capability_surface,
-                execution_hands: &context.execution_hands,
-                governance_profile: context.governance_profile.as_ref(),
-                external_capabilities: &context.external_capabilities,
-                retrieval_provider: context.retrieval_provider.as_deref(),
-                turn_contract: &context.turn_contract,
-                instruction_frame: loop_state.instruction_frame.as_ref(),
-                grounding: loop_state.grounding.as_ref(),
-            }))
-            .with_loop_state(loop_state.clone())
-            .with_resolver(context.resolver.clone())
-            .with_entity_resolver(context.entity_resolver.clone());
-            context
-                .action_selector
-                .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
-                .await?
-        };
-
-        if model_selected_this_step {
-            decision = review_decision_under_signals(
-                prompt,
-                &context,
-                &budget,
-                &loop_state,
-                decision,
-                DecisionReviewFrame {
-                    deliberation_signals: &pending_deliberation_signals,
-                    workspace_root: &service.workspace_root,
-                    trace: trace.clone(),
-                },
-            )
+        context.workspace_capability_surface =
+            service.workspace_action_executor().capability_surface();
+        let request = PlannerRequest::new(
+            prompt,
+            service.workspace_root.clone(),
+            context.interpretation.clone(),
+            budget.clone(),
+        )
+        .with_operator_memory(context.operator_memory.clone())
+        .with_turn_contract(context.turn_contract.clone())
+        .with_recent_turns(context.recent_turns.clone())
+        .with_recent_thread_summary(context.recent_thread_summary.clone())
+        .with_runtime_notes(action_selection_runtime_notes(
+            context.retrieval_provider.as_ref(),
+            &context.specialist_runtime_notes,
+            &context.turn_contract,
+        ))
+        .with_execution_contract(execution_contract_service.build(ExecutionContractContext {
+            workspace_capability_surface: &context.workspace_capability_surface,
+            execution_hands: &context.execution_hands,
+            governance_profile: context.governance_profile.as_ref(),
+            external_capabilities: &context.external_capabilities,
+            retrieval_provider: context.retrieval_provider.as_deref(),
+            turn_contract: &context.turn_contract,
+            instruction_frame: loop_state.instruction_frame.as_ref(),
+            grounding: loop_state.grounding.as_ref(),
+        }))
+        .with_loop_state(loop_state.clone())
+        .with_resolver(context.resolver.clone())
+        .with_entity_resolver(context.entity_resolver.clone());
+        let mut decision = context
+            .action_selector
+            .select_next_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
             .await?;
-        }
+
+        decision = review_decision_under_signals(
+            prompt,
+            &context,
+            &budget,
+            &loop_state,
+            decision,
+            DecisionReviewFrame {
+                deliberation_signals: &pending_deliberation_signals,
+                workspace_root: &service.workspace_root,
+                trace: trace.clone(),
+            },
+        )
+        .await?;
 
         decision =
             sanitize_recursive_planner_decision_for_turn_contract(&context.turn_contract, decision);
@@ -141,27 +132,25 @@ pub(super) async fn execute_agent_loop(
         if let Some(resolution) = decision.edit.resolution.clone() {
             loop_state.target_resolution = Some(resolution);
         }
-        if model_selected_this_step {
-            let (controller_summary, signal_summary) = compile_recursive_paddles_rationale(
-                &decision.action,
-                &loop_state.evidence_items,
-                &pending_deliberation_signals,
-            );
-            trace.emit(TurnEvent::PlannerActionSelected {
-                sequence,
-                action: decision.action.summary(),
-                rationale: decision.rationale.clone(),
-                signal_summary: signal_summary.clone(),
-                controller_summary: Some(controller_summary.clone()),
-            });
-            trace.record_planner_action(
-                &decision.action.summary(),
-                &decision.rationale,
-                signal_summary.as_deref(),
-                Some(controller_summary.as_str()),
-                None,
-            );
-        }
+        let (controller_summary, signal_summary) = compile_recursive_paddles_rationale(
+            &decision.action,
+            &loop_state.evidence_items,
+            &pending_deliberation_signals,
+        );
+        trace.emit(TurnEvent::PlannerActionSelected {
+            sequence,
+            action: decision.action.summary(),
+            rationale: decision.rationale.clone(),
+            signal_summary: signal_summary.clone(),
+            controller_summary: Some(controller_summary.clone()),
+        });
+        trace.record_planner_action(
+            &decision.action.summary(),
+            &decision.rationale,
+            signal_summary.as_deref(),
+            Some(controller_summary.as_str()),
+            None,
+        );
 
         trace.emit(TurnEvent::PlannerStepProgress {
             step_number: sequence,
