@@ -107,18 +107,19 @@ use crate::domain::ports::{
     ActionSelectionEngine, ActionSelectionEngineDecision, AgentLoopState, ContextGatherRequest,
     ContextResolver, EntityLookupMode, EntityResolutionCandidate, EntityResolutionOutcome,
     EntityResolutionRequest, EntityResolver, EvidenceBudget, EvidenceBundle, EvidenceItem,
-    ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingDomain,
-    GroundingRequirement, InitialAction, InitialActionDecision, InitialEditInstruction,
-    InterpretationContext, InterpretationProcedure, InterpretationProcedureStep,
-    InterpretationRequest, InterpretationToolHint, ModelPaths, ModelRegistry, NormalizedEntityHint,
-    OperatorMemory, OperatorMemoryDocument, PlannerAction, PlannerBudget, PlannerCapability,
-    PlannerConfig, PlannerExecutionContract, PlannerRequest, PlannerStepRecord,
-    PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep, RetainedEvidence,
-    RetrievalCapability, RetrievalMode, RetrievalProvider, RetrievalStrategy, RetrieverOption,
-    SpecialistBrainRequest, ThreadDecisionRequest, TraceRecorder, TraceRecorderCapability,
-    TraceSessionContextQuery, WorkspaceAction, WorkspaceActionExecutionFrame,
-    WorkspaceActionExecutor, WorkspaceCapabilitySurface,
+    ExternalCapabilityBroker, FinalRenderingEngine, FinalRenderingHandoff, GroundingRequirement,
+    InitialEditInstruction, InterpretationContext, InterpretationProcedure,
+    InterpretationProcedureStep, InterpretationRequest, InterpretationToolHint, ModelPaths,
+    ModelRegistry, NormalizedEntityHint, OperatorMemory, OperatorMemoryDocument, PlannerAction,
+    PlannerBudget, PlannerCapability, PlannerConfig, PlannerExecutionContract, PlannerRequest,
+    PlannerStepRecord, PlannerStrategyKind, PlannerTraceMetadata, PlannerTraceStep,
+    RetainedEvidence, RetrievalCapability, RetrievalMode, RetrievalProvider, RetrievalStrategy,
+    RetrieverOption, SpecialistBrainRequest, ThreadDecisionRequest, TraceRecorder,
+    TraceRecorderCapability, TraceSessionContextQuery, WorkspaceAction,
+    WorkspaceActionExecutionFrame, WorkspaceActionExecutor, WorkspaceCapabilitySurface,
 };
+#[cfg(test)]
+use crate::domain::ports::{GroundingDomain, InitialAction, InitialActionDecision};
 use anyhow::{Result, anyhow};
 use clap::ValueEnum;
 use std::collections::HashMap;
@@ -3103,6 +3104,7 @@ impl AgentRuntime {
         .await
     }
 
+    #[cfg(test)]
     async fn bootstrap_known_edit_initial_action(
         &self,
         prompt: &str,
@@ -3560,6 +3562,7 @@ impl AgentRuntime {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PromptExecutionPlan {
     intent: TurnIntent,
@@ -3585,6 +3588,7 @@ struct AgentLoopContinuation {
     summary: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptExecutionPath {
     SynthesizerOnly,
@@ -3619,6 +3623,7 @@ fn turn_control_result_for_request(
     }
 }
 
+#[cfg(test)]
 fn fallback_execution_plan(prepared: &PreparedTurnRuntime) -> PromptExecutionPlan {
     PromptExecutionPlan {
         intent: TurnIntent::DirectResponse,
@@ -3686,27 +3691,6 @@ fn merge_instruction_frame_with_edit_signal(
             Some(frame)
         }
         None => instruction_frame_from_initial_edit(edit),
-    }
-}
-
-fn merge_initial_edit_instruction(
-    current: &InitialEditInstruction,
-    inferred: &InitialEditInstruction,
-) -> InitialEditInstruction {
-    let mut candidate_files = current.candidate_files.clone();
-    for candidate in &inferred.candidate_files {
-        if !candidate_files.contains(candidate) {
-            candidate_files.push(candidate.clone());
-        }
-    }
-
-    InitialEditInstruction {
-        known_edit: current.known_edit || inferred.known_edit,
-        candidate_files,
-        resolution: inferred
-            .resolution
-            .clone()
-            .or_else(|| current.resolution.clone()),
     }
 }
 
@@ -3834,6 +3818,7 @@ fn prompt_requests_git_commit(prompt: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 fn prompt_requires_repository_grounding(prompt: &str) -> bool {
     let tokens = normalized_prompt_tokens(prompt);
     if tokens.is_empty() {
@@ -3894,6 +3879,7 @@ fn prompt_requires_repository_grounding(prompt: &str) -> bool {
         || (local_reference && architecture_subject)
 }
 
+#[cfg(test)]
 fn bootstrap_repository_grounding_initial_action(
     prompt: &str,
     decision: &InitialActionDecision,
@@ -3922,6 +3908,7 @@ fn bootstrap_repository_grounding_initial_action(
     })
 }
 
+#[cfg(test)]
 fn bootstrap_git_commit_initial_action(
     prompt: &str,
     decision: &InitialActionDecision,
@@ -3950,6 +3937,7 @@ fn bootstrap_git_commit_initial_action(
     })
 }
 
+#[cfg(test)]
 fn repository_grounding_probe_command(prompt: &str) -> String {
     let terms = repository_grounding_probe_terms(prompt);
     let pattern = if terms.is_empty() {
@@ -3963,6 +3951,7 @@ fn repository_grounding_probe_command(prompt: &str) -> String {
     )
 }
 
+#[cfg(test)]
 fn repository_grounding_probe_terms(prompt: &str) -> Vec<String> {
     let tokens = normalized_prompt_tokens(prompt);
     let mut prioritized = Vec::new();
@@ -4049,6 +4038,7 @@ fn repository_grounding_probe_terms(prompt: &str) -> Vec<String> {
     fallback
 }
 
+#[cfg(test)]
 fn normalized_prompt_tokens(prompt: &str) -> Vec<String> {
     prompt
         .split(|ch: char| !ch.is_ascii_alphanumeric())
@@ -4150,6 +4140,7 @@ fn blocked_instruction_response(frame: &InstructionFrame) -> AuthoredResponse {
     )
 }
 
+#[cfg(test)]
 fn execution_plan_from_initial_action(
     prepared: &PreparedTurnRuntime,
     decision: InitialActionDecision,
@@ -4336,15 +4327,6 @@ fn sanitize_initial_edit_instruction_for_collaboration(
     }
 }
 
-fn sanitize_initial_action_decision_for_collaboration(
-    collaboration: &CollaborationModeResult,
-    mut decision: InitialActionDecision,
-) -> InitialActionDecision {
-    decision.edit =
-        sanitize_initial_edit_instruction_for_collaboration(collaboration, decision.edit);
-    decision
-}
-
 fn sanitize_recursive_planner_decision_for_collaboration(
     collaboration: &CollaborationModeResult,
     mut decision: ActionSelectionEngineDecision,
@@ -4354,6 +4336,7 @@ fn sanitize_recursive_planner_decision_for_collaboration(
     decision
 }
 
+#[cfg(test)]
 fn bootstrap_review_initial_action(
     decision: &InitialActionDecision,
 ) -> Option<InitialActionDecision> {
@@ -4956,6 +4939,7 @@ fn known_edit_bootstrap_candidates(
         .collect()
 }
 
+#[cfg(test)]
 async fn rerank_known_edit_candidates_with_vector_lookup(
     retrieval_provider: &Arc<dyn RetrievalProvider>,
     workspace_root: &Path,
@@ -5202,9 +5186,16 @@ fn collect_steering_review_notes(
 ) -> Vec<SteeringReviewNote> {
     let mut notes = Vec::new();
 
+    let commit_obligation_accepts_commit_action = context
+        .instruction_frame
+        .as_ref()
+        .is_some_and(InstructionFrame::requires_applied_commit)
+        && decision_is_git_commit(&decision.action);
+
     if !loop_state.evidence_items.is_empty()
         && !decision.action.is_terminal()
         && !decision_targets_file(&decision.action)
+        && !commit_obligation_accepts_commit_action
     {
         notes.push(SteeringReviewNote {
             kind: SteeringReviewKind::Evidence,
@@ -5396,38 +5387,6 @@ fn summarize_rationale_evidence_sources(evidence_items: &[EvidenceItem]) -> Opti
             rest.len()
         )),
     }
-}
-
-fn compile_initial_paddles_rationale(
-    action: &InitialAction,
-    signals: &DeliberationSignals,
-) -> (String, Option<String>) {
-    let signal_summary = summarize_deliberation_signals(signals);
-    let rationale = match action {
-        InitialAction::Answer | InitialAction::Stop { .. } => format!(
-            "Paddles chose `{}` because the turn could complete without additional evidence before responding.",
-            action.summary()
-        ),
-        InitialAction::Workspace { .. }
-        | InitialAction::Refine { .. }
-        | InitialAction::Branch { .. } => format!(
-            "Paddles chose `{}` as the first bounded step to gather or act on the most relevant evidence.",
-            action.summary()
-        ),
-    };
-    let rationale = if continuation_requires_tool_follow_up(signals) {
-        format!(
-            "{rationale} Normalized deliberation signals preserved the active tool-result path."
-        )
-    } else if has_opaque_deliberation_hints(signals) {
-        format!(
-            "{rationale} Normalized deliberation signals kept the first step conservative and grounded."
-        )
-    } else {
-        rationale
-    };
-
-    (rationale, signal_summary)
 }
 
 fn compile_recursive_paddles_rationale(
@@ -6361,6 +6320,7 @@ fn merge_known_edit_target_lists(primary: &[String], secondary: &[String]) -> Ve
     merged
 }
 
+#[cfg(test)]
 fn merge_resolution_candidate_paths(
     candidates: &[String],
     resolution: &EntityResolutionOutcome,
@@ -7182,6 +7142,7 @@ mod tests {
         initial_decision: InitialActionDecision,
         next_decisions: Mutex<VecDeque<ActionSelectionEngineDecision>>,
         recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+        call_log: Arc<Mutex<Vec<&'static str>>>,
     }
 
     impl TestPlanner {
@@ -7190,10 +7151,41 @@ mod tests {
             next_decisions: Vec<ActionSelectionEngineDecision>,
             recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
         ) -> Self {
+            let next_decisions =
+                legacy_loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
             Self {
                 initial_decision,
                 next_decisions: Mutex::new(VecDeque::from(next_decisions)),
                 recorded_requests,
+                call_log: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn new_with_call_log(
+            initial_decision: InitialActionDecision,
+            next_decisions: Vec<ActionSelectionEngineDecision>,
+            recorded_requests: Arc<Mutex<Vec<PlannerRequest>>>,
+            call_log: Arc<Mutex<Vec<&'static str>>>,
+        ) -> Self {
+            let next_decisions =
+                loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
+            Self {
+                initial_decision,
+                next_decisions: Mutex::new(VecDeque::from(next_decisions)),
+                recorded_requests,
+                call_log,
+            }
+        }
+
+        fn repeatable_direct_initial_decision(&self) -> Option<ActionSelectionEngineDecision> {
+            if self.initial_decision.edit.known_edit {
+                return None;
+            }
+            match self.initial_decision.action {
+                InitialAction::Answer | InitialAction::Stop { .. } => {
+                    Some(loop_decision_from_initial_fixture(&self.initial_decision))
+                }
+                _ => None,
             }
         }
     }
@@ -7234,6 +7226,10 @@ mod tests {
             request: &PlannerRequest,
             _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<InitialActionDecision> {
+            self.call_log
+                .lock()
+                .expect("planner call log lock")
+                .push("initial");
             self.recorded_requests
                 .lock()
                 .expect("recorded requests lock")
@@ -7246,6 +7242,10 @@ mod tests {
             request: &PlannerRequest,
             _event_sink: Arc<dyn TurnEventSink>,
         ) -> Result<ActionSelectionEngineDecision> {
+            self.call_log
+                .lock()
+                .expect("planner call log lock")
+                .push("next");
             self.recorded_requests
                 .lock()
                 .expect("recorded requests lock")
@@ -7254,6 +7254,7 @@ mod tests {
                 .lock()
                 .expect("planner decisions lock")
                 .pop_front()
+                .or_else(|| self.repeatable_direct_initial_decision())
                 .ok_or_else(|| anyhow!("test planner exhausted"))
         }
 
@@ -7337,9 +7338,11 @@ mod tests {
             thread_decision: ThreadDecisionPlan,
             release_initial_once: Arc<tokio::sync::Notify>,
         ) -> Self {
+            let loop_decisions =
+                legacy_loop_decisions_for_test_initial_fixture(&initial_decision, next_decisions);
             Self {
                 initial_decision,
-                next_decisions: Mutex::new(VecDeque::from(next_decisions)),
+                next_decisions: Mutex::new(VecDeque::from(loop_decisions)),
                 recorded_requests,
                 thread_decision,
                 release_initial_once: Mutex::new(Some(release_initial_once)),
@@ -7407,6 +7410,14 @@ mod tests {
                 .lock()
                 .expect("recorded requests lock")
                 .push(request.clone());
+            let gate = self
+                .release_initial_once
+                .lock()
+                .expect("initial gate lock")
+                .take();
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
             self.next_decisions
                 .lock()
                 .expect("planner decisions lock")
@@ -7760,11 +7771,167 @@ mod tests {
         }
     }
 
+    fn loop_decisions_for_test_initial_fixture(
+        initial_decision: &InitialActionDecision,
+        next_decisions: Vec<ActionSelectionEngineDecision>,
+    ) -> Vec<ActionSelectionEngineDecision> {
+        if !next_decisions.is_empty() {
+            return next_decisions;
+        }
+
+        let first = loop_decision_from_initial_fixture(initial_decision);
+        let needs_terminal_stop = !matches!(first.action, PlannerAction::Stop { .. });
+        let mut decisions = vec![first];
+        if needs_terminal_stop {
+            decisions.push(ActionSelectionEngineDecision {
+                action: PlannerAction::Stop {
+                    reason: "legacy initial fixture complete".to_string(),
+                },
+                rationale: "the test-only initial-action fixture completed as a loop step"
+                    .to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            });
+        }
+        decisions
+    }
+
+    fn legacy_loop_decisions_for_test_initial_fixture(
+        initial_decision: &InitialActionDecision,
+        next_decisions: Vec<ActionSelectionEngineDecision>,
+    ) -> Vec<ActionSelectionEngineDecision> {
+        let mut decisions = Vec::new();
+        match &initial_decision.action {
+            InitialAction::Workspace { .. }
+            | InitialAction::Refine { .. }
+            | InitialAction::Branch { .. } => {
+                decisions.push(loop_decision_from_initial_fixture(initial_decision));
+            }
+            InitialAction::Answer | InitialAction::Stop { .. } => {
+                if initial_decision.edit.known_edit {
+                    if let Some(path) =
+                        legacy_known_edit_candidate_for_loop_fixture(&initial_decision.edit)
+                    {
+                        decisions.push(ActionSelectionEngineDecision {
+                            action: PlannerAction::Workspace {
+                                action: WorkspaceAction::Read { path },
+                            },
+                            rationale:
+                                "test-only known-edit fixture starts with the inferred target"
+                                    .to_string(),
+                            answer: None,
+                            edit: initial_decision.edit.clone(),
+                            grounding: initial_decision.grounding.clone(),
+                            deliberation_state: None,
+                        });
+                    }
+                } else if next_decisions.is_empty() {
+                    decisions.push(loop_decision_from_initial_fixture(initial_decision));
+                }
+            }
+        }
+
+        decisions.extend(next_decisions);
+        if decisions.is_empty() {
+            decisions.push(loop_decision_from_initial_fixture(initial_decision));
+        }
+        let needs_terminal_stop = decisions
+            .last()
+            .is_some_and(|decision| !matches!(decision.action, PlannerAction::Stop { .. }));
+        if needs_terminal_stop {
+            decisions.push(ActionSelectionEngineDecision {
+                action: PlannerAction::Stop {
+                    reason: "legacy initial fixture complete".to_string(),
+                },
+                rationale: "the test-only initial-action fixture completed as a loop step"
+                    .to_string(),
+                answer: None,
+                edit: InitialEditInstruction::default(),
+                grounding: None,
+                deliberation_state: None,
+            });
+        }
+        decisions
+    }
+
+    fn legacy_known_edit_candidate_for_loop_fixture(
+        edit: &InitialEditInstruction,
+    ) -> Option<String> {
+        edit.candidate_files
+            .iter()
+            .max_by_key(|path| {
+                let normalized = path.replace('\\', "/");
+                let extension_score = if normalized.ends_with(".rs")
+                    || normalized.ends_with(".tsx")
+                    || normalized.ends_with(".ts")
+                    || normalized.ends_with(".jsx")
+                    || normalized.ends_with(".js")
+                    || normalized.ends_with(".css")
+                    || normalized.ends_with(".toml")
+                {
+                    50
+                } else if normalized.ends_with(".md") {
+                    -30
+                } else {
+                    0
+                };
+                let source_score = if normalized.starts_with("src/")
+                    || normalized.contains("/src/")
+                    || normalized.starts_with("apps/")
+                {
+                    25
+                } else {
+                    0
+                };
+                let readme_penalty = if normalized.eq_ignore_ascii_case("README.md") {
+                    -50
+                } else {
+                    0
+                };
+                extension_score + source_score + readme_penalty
+            })
+            .cloned()
+    }
+
+    fn loop_decision_from_initial_fixture(
+        decision: &InitialActionDecision,
+    ) -> ActionSelectionEngineDecision {
+        let action = decision
+            .action
+            .as_planner_action()
+            .unwrap_or_else(|| PlannerAction::Stop {
+                reason: "answer".to_string(),
+            });
+        ActionSelectionEngineDecision {
+            action,
+            rationale: decision.rationale.clone(),
+            answer: decision.answer.clone(),
+            edit: decision.edit.clone(),
+            grounding: decision.grounding.clone(),
+            deliberation_state: None,
+        }
+    }
+
     fn planner_decision(action: PlannerAction, rationale: &str) -> ActionSelectionEngineDecision {
         ActionSelectionEngineDecision {
             action,
             rationale: rationale.to_string(),
             answer: None,
+            edit: InitialEditInstruction::default(),
+            grounding: None,
+            deliberation_state: None,
+        }
+    }
+
+    fn planner_stop_with_answer(reason: &str, answer: &str) -> ActionSelectionEngineDecision {
+        ActionSelectionEngineDecision {
+            action: PlannerAction::Stop {
+                reason: reason.to_string(),
+            },
+            rationale: "answer from the loop".to_string(),
+            answer: Some(answer.to_string()),
             edit: InitialEditInstruction::default(),
             grounding: None,
             deliberation_state: None,
@@ -8572,6 +8739,258 @@ mod tests {
                 "direct answers are produced by the loop terminal path"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn route_first_action_through_agent_loop() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+        let call_log = Arc::new(Mutex::new(Vec::new()));
+        let request_log = Arc::new(Mutex::new(Vec::new()));
+        let planner = Arc::new(TestPlanner::new_with_call_log(
+            initial_action_decision(InitialAction::Answer, "must not be used"),
+            vec![planner_stop_with_answer(
+                "answer",
+                "The loop owns the first action.",
+            )],
+            Arc::clone(&request_log),
+            Arc::clone(&call_log),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared: prepared_turn_runtime_for_tests(),
+            action_selector: planner,
+            final_renderer: synthesizer.clone(),
+            retrieval_provider: None,
+        });
+
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let reply = service
+            .process_prompt_with_sink("Where is the operator contract defined?", sink.clone())
+            .await
+            .expect("process prompt");
+
+        assert_eq!(reply, "The loop owns the first action.");
+        assert_eq!(
+            call_log.lock().expect("planner call log lock").as_slice(),
+            &["next"],
+            "normal turns must not call select_initial_action before the loop"
+        );
+        assert_eq!(request_log.lock().expect("request log lock").len(), 1);
+        assert!(sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerActionSelected { sequence: 0, action, .. }
+                if action.contains("stop (answer)")
+        )));
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "direct loop answers should not fall through to final rendering"
+        );
+    }
+
+    #[test]
+    fn first_agent_loop_iteration_handles_initial_outcomes() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        fs::create_dir_all(workspace.path().join("src/application")).expect("create app dir");
+        fs::write(
+            workspace.path().join("src/application/mod.rs"),
+            "loop code\n",
+        )
+        .expect("write source");
+        let service = test_service(workspace.path());
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+        let direct_sink = Arc::new(RecordingTurnEventSink::default());
+        let direct_session =
+            ConversationSession::new(TaskTraceId::new("task-loop-direct").expect("task"));
+        let direct_trace = Arc::new(StructuredTurnTrace::new(
+            direct_sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            direct_session.clone(),
+            direct_session.allocate_turn_id(),
+            direct_session.active_thread().thread_ref,
+        ));
+        let mut direct_context = test_agent_loop_context(InitialEditInstruction::default());
+        direct_context.action_selector = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![planner_stop_with_answer("answer", "No tool use needed.")],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let direct_outcome = runtime
+            .block_on(super::agent_loop::execute_agent_loop(
+                &service,
+                "Answer directly.",
+                direct_context,
+                None,
+                direct_trace,
+            ))
+            .expect("direct loop outcome");
+        assert_eq!(
+            direct_outcome
+                .direct_answer
+                .expect("direct answer")
+                .to_plain_text(),
+            "No tool use needed."
+        );
+        assert!(
+            direct_sink.recorded().iter().any(|event| matches!(
+                event,
+                TurnEvent::PlannerStepProgress { step_number: 0, .. }
+            ))
+        );
+
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        bind_workspace_action_executor(&service, synthesizer.clone());
+        let workspace_sink = Arc::new(RecordingTurnEventSink::default());
+        let workspace_session =
+            ConversationSession::new(TaskTraceId::new("task-loop-workspace").expect("task"));
+        let workspace_trace = Arc::new(StructuredTurnTrace::new(
+            workspace_sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            workspace_session.clone(),
+            workspace_session.allocate_turn_id(),
+            workspace_session.active_thread().thread_ref,
+        ));
+        let mut workspace_context = test_agent_loop_context(InitialEditInstruction::default());
+        workspace_context.action_selector = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![
+                planner_decision(
+                    PlannerAction::Workspace {
+                        action: WorkspaceAction::Read {
+                            path: "src/application/mod.rs".to_string(),
+                        },
+                    },
+                    "read first",
+                ),
+                planner_decision(
+                    PlannerAction::Stop {
+                        reason: "done".to_string(),
+                    },
+                    "finish",
+                ),
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+
+        runtime
+            .block_on(super::agent_loop::execute_agent_loop(
+                &service,
+                "Inspect the loop.",
+                workspace_context,
+                None,
+                workspace_trace,
+            ))
+            .expect("workspace loop outcome");
+        assert_eq!(
+            synthesizer
+                .executed_actions
+                .lock()
+                .expect("executed actions lock")
+                .as_slice(),
+            &[WorkspaceAction::Read {
+                path: "src/application/mod.rs".to_string()
+            }]
+        );
+        assert!(workspace_sink.recorded().iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerStepProgress {
+                step_number: 0,
+                action,
+                ..
+            } if action.contains("src/application/mod.rs")
+        )));
+    }
+
+    #[tokio::test]
+    async fn agent_loop_outcome_preserves_direct_answer_rendering() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+        let planner = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![planner_stop_with_answer(
+                "answer",
+                "Direct answers remain terminal loop outcomes.",
+            )],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+        let synthesizer = Arc::new(RecordingSynthesizer::default());
+        *service.runtime.write().await = Some(ActiveRuntimeState {
+            prepared: prepared_turn_runtime_for_tests(),
+            action_selector: planner,
+            final_renderer: synthesizer.clone(),
+            retrieval_provider: None,
+        });
+
+        let reply = service
+            .process_prompt_with_sink(
+                "Say whether a direct answer still works.",
+                Arc::new(RecordingTurnEventSink::default()),
+            )
+            .await
+            .expect("process prompt");
+
+        assert_eq!(reply, "Direct answers remain terminal loop outcomes.");
+        assert!(
+            synthesizer
+                .handoffs
+                .lock()
+                .expect("handoffs lock")
+                .is_empty(),
+            "direct answers should be finalized without final-rendering rewrite"
+        );
+    }
+
+    #[test]
+    fn first_action_trace_is_loop_owned() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let service = test_service(workspace.path());
+        let sink = Arc::new(RecordingTurnEventSink::default());
+        let session = ConversationSession::new(TaskTraceId::new("task-loop-trace").expect("task"));
+        let trace = Arc::new(StructuredTurnTrace::new(
+            sink.clone(),
+            Arc::new(InMemoryTraceRecorder::default()),
+            Vec::new(),
+            session.clone(),
+            session.allocate_turn_id(),
+            session.active_thread().thread_ref,
+        ));
+        let mut context = test_agent_loop_context(InitialEditInstruction::default());
+        context.action_selector = Arc::new(TestPlanner::new(
+            initial_action_decision(InitialAction::Answer, "unused"),
+            vec![planner_stop_with_answer("answer", "Trace is loop-owned.")],
+            Arc::new(Mutex::new(Vec::new())),
+        ));
+
+        tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(super::agent_loop::execute_agent_loop(
+                &service,
+                "Trace the first action.",
+                context,
+                None,
+                trace,
+            ))
+            .expect("loop outcome");
+
+        let events = sink.recorded();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PlannerActionSelected { sequence: 0, action, .. }
+                if action.contains("stop (answer)")
+        )));
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                TurnEvent::PlannerStepProgress { step_number: 0, .. }
+            ))
+        );
     }
 
     #[test]
@@ -10060,7 +10479,7 @@ mod tests {
                 _ => None,
             })
             .expect("planner action record");
-        assert_eq!(planner_action.0, "answer directly");
+        assert_eq!(planner_action.0, "stop (answer)");
         // The model's verbatim rationale is preserved; the controller no
         // longer overwrites it with its own narrative.
         assert_eq!(planner_action.1, "answer directly");
@@ -12940,19 +13359,11 @@ mod tests {
                     .loop_state
                     .notes
                     .iter()
-                    .any(|note| note.contains("Steering review [action-bias]"))
+                    .any(|note| note.contains("Steering review [premise-challenge]"))
             })
-            .expect("action bias review request should be recorded");
+            .expect("premise review request should be recorded");
         assert!(review_request.loop_state.notes.iter().any(|note| {
-            note.contains("Likely target files") && note.contains("src/application/mod.rs")
-        }));
-        assert!(review_request.loop_state.notes.iter().any(|note| {
-            note.contains("exact-diff state space")
-                && note.contains("replace_in_file")
-                && note.contains("apply_patch")
-        }));
-        assert!(review_request.loop_state.notes.iter().any(|note| {
-            note.contains("Workspace editor pressure: active.") && note.contains("workspace editor")
+            note.contains("Source snapshot") && note.contains("src/application/mod.rs")
         }));
 
         let executed_actions = synthesizer
@@ -13158,7 +13569,7 @@ mod tests {
     }
 
     #[test]
-    fn controller_infers_known_edit_from_prompt_without_provider_signal() {
+    fn controller_inferred_known_edit_reaches_loop_without_forced_bootstrap() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("apps/web/src")).expect("create css dir");
         fs::write(
@@ -13237,7 +13648,7 @@ mod tests {
         bind_workspace_action_executor(&service, synthesizer.clone());
 
         let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-        runtime.block_on(async {
+        let reply = runtime.block_on(async {
             *service.runtime.write().await = Some(ActiveRuntimeState {
                 prepared,
                 action_selector: planner,
@@ -13256,10 +13667,11 @@ mod tests {
             .executed_actions
             .lock()
             .expect("executed actions lock");
-        assert!(matches!(
-            executed_actions.first(),
-            Some(WorkspaceAction::Read { path }) if path == "apps/web/src/runtime-shell.css"
-        ));
+        assert!(
+            executed_actions.is_empty(),
+            "controller-inferred edit pressure should not force a pre-loop read"
+        );
+        assert!(reply.contains("haven't completed the requested repository edit yet"));
     }
 
     #[test]
@@ -13298,7 +13710,7 @@ mod tests {
     }
 
     #[test]
-    fn known_edit_bootstrap_uses_vector_evidence_to_pick_the_best_candidate() {
+    fn known_edit_vector_evidence_stays_model_selected_loop_context() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::create_dir_all(workspace.path().join("src")).expect("create src");
         fs::write(workspace.path().join("src/one.rs"), "fn one() {}\n").expect("write one");
@@ -13393,8 +13805,9 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
+        let gatherer_requests = Arc::new(Mutex::new(Vec::new()));
         let retrieval_provider = Arc::new(RecordingGatherer {
-            recorded_requests: Arc::new(Mutex::new(Vec::new())),
+            recorded_requests: Arc::clone(&gatherer_requests),
             bundle: EvidenceBundle::new(
                 "vector bootstrap ranked the file candidates".to_string(),
                 vec![EvidenceItem {
@@ -13426,10 +13839,17 @@ mod tests {
             .executed_actions
             .lock()
             .expect("executed actions lock");
-        assert!(matches!(
-            executed_actions.first(),
-            Some(WorkspaceAction::Read { path }) if path == "src/two.rs"
-        ));
+        assert!(
+            executed_actions.is_empty(),
+            "vector evidence should not force a controller-owned pre-loop read"
+        );
+        assert_eq!(
+            gatherer_requests
+                .lock()
+                .expect("gatherer requests lock")
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -15278,13 +15698,8 @@ mod tests {
             .expect("recorded requests lock")
             .clone();
         assert!(
-            requests.iter().any(|request| request
-                .loop_state
-                .notes
-                .iter()
-                .any(|note| note.contains("Steering review [action-bias]")
-                    && note.contains("git commit"))),
-            "commit turns should steer advice-only stops back toward a git commit action"
+            requests.iter().any(|request| request.budget.max_steps > 6),
+            "commit turns should replan after advice-only stops while preserving the commit obligation"
         );
     }
 
@@ -15964,15 +16379,6 @@ mod tests {
                 .any(|request| request.budget.max_steps > 10 && request.budget.max_inspects > 3),
             "replanning should expand the known-edit agent-loop budget"
         );
-        assert!(
-            requests
-                .iter()
-                .skip(1)
-                .flat_map(|request| request.loop_state.notes.iter())
-                .any(|note| note.contains("Replan from current evidence")),
-            "follow-on action-selection requests should carry a replanning note after budget exhaustion"
-        );
-
         let plan_updates = sink
             .recorded()
             .into_iter()
@@ -16336,17 +16742,29 @@ mod tests {
         let recorded_requests = Arc::new(Mutex::new(Vec::new()));
         let planner = Arc::new(TestPlanner::new(
             initial_action_decision(InitialAction::Answer, "reply directly"),
-            vec![ActionSelectionEngineDecision {
-                action: PlannerAction::Stop {
-                    reason: "local diff evidence is sufficient for review synthesis".to_string(),
+            vec![
+                ActionSelectionEngineDecision {
+                    action: PlannerAction::Workspace {
+                        action: WorkspaceAction::Diff { path: None },
+                    },
+                    rationale: "review mode starts with local diff evidence".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
                 },
-                rationale: "hand off the review after diff inspection".to_string(),
-                answer: None,
-                edit: InitialEditInstruction::default(),
-                grounding: None,
-
-                deliberation_state: None,
-            }],
+                ActionSelectionEngineDecision {
+                    action: PlannerAction::Stop {
+                        reason: "local diff evidence is sufficient for review synthesis"
+                            .to_string(),
+                    },
+                    rationale: "hand off the review after diff inspection".to_string(),
+                    answer: None,
+                    edit: InitialEditInstruction::default(),
+                    grounding: None,
+                    deliberation_state: None,
+                },
+            ],
             Arc::clone(&recorded_requests),
         ));
         let synthesizer = Arc::new(RecordingSynthesizer::default());
@@ -16682,7 +17100,7 @@ mod tests {
     }
 
     #[test]
-    fn repo_scoped_followups_bootstrap_a_grounding_probe_before_direct_answer() {
+    fn repo_scoped_followups_stay_inside_model_selected_loop() {
         let workspace = tempfile::tempdir().expect("workspace");
         fs::write(
             workspace.path().join("ARCHITECTURE.md"),
@@ -16756,13 +17174,13 @@ mod tests {
         });
 
         assert_eq!(reply, "Applied the bounded action.");
-        assert!(sink.recorded().iter().any(|event| matches!(
+        assert!(!sink.recorded().iter().any(|event| matches!(
             event,
             TurnEvent::Fallback { stage, reason }
                 if stage == "grounding-bootstrap"
                     && reason.contains("repo-scoped")
         )));
-        assert!(sink.recorded().iter().any(|event| matches!(
+        assert!(!sink.recorded().iter().any(|event| matches!(
             event,
             TurnEvent::ToolCalled { tool_name, invocation, .. }
                 if tool_name == "inspect"
@@ -16770,12 +17188,12 @@ mod tests {
                     && invocation.contains("generative|layer")
         )));
         assert!(
-            !synthesizer
+            synthesizer
                 .gathered_summaries
                 .lock()
                 .expect("gathered summaries lock")
                 .is_empty(),
-            "the synthesizer should receive repository evidence after the grounding probe"
+            "final rendering should not receive synthetic repository evidence from a pre-loop probe"
         );
     }
 

@@ -33,11 +33,7 @@ pub(super) async fn execute_agent_loop(
     let mut pending_deliberation_signals = DeliberationSignals::default();
     let mut steps_without_new_evidence = 0usize;
     let mut replan_count = 0usize;
-    let mut sequence = if pending_initial_decision.is_some() {
-        0usize
-    } else {
-        1usize
-    };
+    let mut sequence = 0usize;
     let gatherer_provider = context
         .prepared
         .retrieval_provider
@@ -133,6 +129,9 @@ pub(super) async fn execute_agent_loop(
 
         decision =
             sanitize_recursive_planner_decision_for_collaboration(&context.collaboration, decision);
+        if decision.grounding.is_some() {
+            context.grounding = decision.grounding.clone();
+        }
         instruction_frame =
             merge_instruction_frame_with_edit_signal(instruction_frame, &decision.edit);
         if let Some(resolution) = decision.edit.resolution.clone() {

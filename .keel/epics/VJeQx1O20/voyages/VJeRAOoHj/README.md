@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VJeRAOoHj
-status: planned
+status: in-progress
 epic: VJeQx1O20
 created_at: 2026-05-14T19:15:55
 # authored
 title: Unify First Action Entry Point
 index: 1
 updated_at: 2026-05-14T19:19:26
+started_at: 2026-05-14T19:22:08
 ---
 
 # Unify First Action Entry Point
@@ -26,10 +27,10 @@ updated_at: 2026-05-14T19:19:26
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Route First Action Through Agent Loop](../../../../stories/VJeRUd3hl/README.md) | feat | backlog |
+| [Route First Action Through Agent Loop](../../../../stories/VJeRUd3hl/README.md) | feat | done |
 | [Collapse Initial Action Interface](../../../../stories/VJeRVkb73/README.md) | refactor | backlog |
 <!-- END GENERATED -->

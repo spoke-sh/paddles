@@ -118,190 +118,39 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
         let recent_thread_summary = session.recent_thread_summary(&active_thread);
         let controller_edit =
             controller_prompt_edit_instruction(&service.workspace_root, &current_prompt);
-        let controller_commit_instruction = controller_prompt_commit_instruction(&current_prompt);
-        let request_instruction_frame = merge_instruction_frames(
-            instruction_frame_from_initial_edit(&controller_edit),
-            controller_commit_instruction.clone(),
-        );
-        let request = PlannerRequest::new(
-            &current_prompt,
-            service.workspace_root.clone(),
-            interpretation.clone(),
-            PlannerBudget::default(),
-        )
-        .with_operator_memory(
-            service
-                .operator_memory
-                .operator_memory_documents(&service.workspace_root),
-        )
-        .with_collaboration(collaboration.clone())
-        .with_recent_turns(recent_turns.clone())
-        .with_recent_thread_summary(recent_thread_summary.clone())
-        .with_runtime_notes(action_selection_runtime_notes(
-            retrieval_provider.as_ref(),
-            &specialist_runtime_notes,
-            &collaboration,
-        ))
-        .with_execution_contract(service.action_selection_execution_contract(
-            retrieval_provider.as_ref(),
-            &collaboration,
-            request_instruction_frame.as_ref(),
-            None,
-        ))
-        .with_entity_resolver(Arc::clone(&service.entity_resolver));
-
-        let execution_plan = match action_selection_capability {
-            PlannerCapability::Available => {
-                let mut decision = action_selector
-                    .select_initial_action(&request, trace.clone() as Arc<dyn TurnEventSink>)
-                    .await?;
-                let provider_edit_missing = !decision.edit.known_edit && controller_edit.known_edit;
-                decision.edit = merge_initial_edit_instruction(&decision.edit, &controller_edit);
-                if provider_edit_missing && collaboration.active.mutation_posture.allows_mutation()
-                {
-                    let candidate_summary = if decision.edit.candidate_files.is_empty() {
-                        "no candidate files surfaced yet".to_string()
-                    } else {
-                        format!(
-                            "candidate files: {}",
-                            decision.edit.candidate_files.join(", ")
-                        )
-                    };
-                    trace.emit(TurnEvent::Fallback {
-                            stage: "action-bias".to_string(),
-                            reason: format!(
-                                "controller inferred a concrete repository edit from the prompt and activated workspace editor pressure; {candidate_summary}"
-                            ),
-                        });
-                }
-                if collaboration.active.mutation_posture.allows_mutation()
-                    && let Some(bootstrapped) =
-                        bootstrap_git_commit_initial_action(&current_prompt, &decision)
-                {
-                    trace.emit(TurnEvent::Fallback {
-                            stage: "commit-bootstrap".to_string(),
-                            reason: format!(
-                                "commit-oriented turn bypassed initial `{}` and forced `{}` to inspect workspace status before committing",
-                                decision.action.summary(),
-                                bootstrapped.action.summary()
-                            ),
-                        });
-                    decision = bootstrapped;
-                }
-                if let Some(bootstrapped) = context_assembly::bootstrap_known_edit_initial_action(
-                    service,
-                    &current_prompt,
-                    &interpretation,
-                    &recent_turns,
-                    retrieval_provider.as_ref(),
-                    &decision,
-                    trace.as_ref(),
+        let initial_edit =
+            sanitize_initial_edit_instruction_for_collaboration(&collaboration, controller_edit);
+        if initial_edit.known_edit && collaboration.active.mutation_posture.allows_mutation() {
+            let candidate_summary = if initial_edit.candidate_files.is_empty() {
+                "no candidate files surfaced yet".to_string()
+            } else {
+                format!(
+                    "candidate files: {}",
+                    initial_edit.candidate_files.join(", ")
                 )
-                .await?
-                {
-                    let candidate_summary = if bootstrapped.edit.candidate_files.is_empty() {
-                        "no viable candidates discovered".to_string()
-                    } else {
-                        format!(
-                            "candidate files: {}",
-                            bootstrapped.edit.candidate_files.join(", ")
-                        )
-                    };
-                    trace.emit(TurnEvent::Fallback {
-                        stage: "known-edit-bootstrap".to_string(),
-                        reason: format!(
-                            "known edit turn bypassed initial `{}` and forced `{}`; {}",
-                            decision.action.summary(),
-                            bootstrapped.action.summary(),
-                            candidate_summary
-                        ),
-                    });
-                    decision = bootstrapped;
-                }
-                if let Some(bootstrapped) =
-                    bootstrap_repository_grounding_initial_action(&current_prompt, &decision)
-                {
-                    trace.emit(TurnEvent::Fallback {
-                            stage: "grounding-bootstrap".to_string(),
-                            reason: format!(
-                                "repo-scoped conversational turn bypassed initial `{}` and forced `{}` to ground the reply locally",
-                                decision.action.summary(),
-                                bootstrapped.action.summary()
-                            ),
-                        });
-                    decision = bootstrapped;
-                }
-                if collaboration.active.mode == CollaborationMode::Review
-                    && let Some(bootstrapped) = bootstrap_review_initial_action(&decision)
-                {
-                    trace.emit(TurnEvent::Fallback {
-                            stage: "review-bootstrap".to_string(),
-                            reason: format!(
-                                "review mode bypassed initial `{}` and forced `{}` to inspect local changes before synthesis",
-                                decision.action.summary(),
-                                bootstrapped.action.summary()
-                            ),
-                        });
-                    decision = bootstrapped;
-                }
-                decision =
-                    sanitize_initial_action_decision_for_collaboration(&collaboration, decision);
-                let (controller_summary, signal_summary) = compile_initial_paddles_rationale(
-                    &decision.action,
-                    &DeliberationSignals::default(),
-                );
-                trace.emit(TurnEvent::PlannerActionSelected {
-                    sequence: 0,
-                    action: decision.action.summary(),
-                    rationale: decision.rationale.clone(),
-                    signal_summary: signal_summary.clone(),
-                    controller_summary: Some(controller_summary.clone()),
-                });
-                trace.record_planner_action(
-                    &decision.action.summary(),
-                    &decision.rationale,
-                    signal_summary.as_deref(),
-                    Some(controller_summary.as_str()),
-                    None,
-                );
-                let mut execution_plan = execution_plan_from_initial_action(&prepared, decision);
-                if collaboration.active.mutation_posture.allows_mutation() {
-                    execution_plan.instruction_frame = merge_instruction_frames(
-                        execution_plan.instruction_frame.clone(),
-                        controller_commit_instruction,
-                    );
-                }
-                execution_plan
-            }
-            PlannerCapability::Unsupported { reason } => {
-                trace.emit(TurnEvent::Fallback {
-                    stage: "action-selection".to_string(),
-                    reason: format!("action-selection client unavailable before first action selection: {reason}"),
-                });
-                fallback_execution_plan(&prepared)
-            }
-        };
+            };
+            trace.emit(TurnEvent::Fallback {
+                stage: "action-bias".to_string(),
+                reason: format!(
+                    "controller inferred a concrete repository edit from the prompt and exposed workspace editor pressure to the agent loop; {candidate_summary}"
+                ),
+            });
+        }
+        let mut instruction_frame = instruction_frame_from_initial_edit(&initial_edit);
+        if collaboration.active.mutation_posture.allows_mutation() {
+            instruction_frame = merge_instruction_frames(
+                instruction_frame,
+                controller_prompt_commit_instruction(&current_prompt),
+            );
+        }
 
-        trace.emit(TurnEvent::IntentClassified {
-            intent: execution_plan.intent.clone(),
-        });
-        trace.emit(TurnEvent::RouteSelected {
-            summary: execution_plan.route_summary.clone(),
-        });
-
-        let agent_loop_outcome = match execution_plan.path {
-            PromptExecutionPath::PlannerThenSynthesize => {
-                let recent_turns = final_rendering::recent_turn_summaries(
-                    service,
-                    &session,
-                    final_renderer.as_ref(),
-                )?;
-
+        let (agent_loop_outcome, route_summary) = match action_selection_capability {
+            PlannerCapability::Available => {
                 let resolver: Arc<dyn ContextResolver> = Arc::new(TransitContextResolver::new(
                     Arc::clone(&service.trace_recorder),
                 ));
 
-                agent_loop::execute_agent_loop(
+                let outcome = agent_loop::execute_agent_loop(
                     service,
                     &current_prompt,
                     AgentLoopContext {
@@ -320,26 +169,53 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
                         operator_memory: service
                             .operator_memory
                             .operator_memory_documents(&service.workspace_root),
-                        recent_turns,
+                        recent_turns: recent_turns.clone(),
                         recent_thread_summary: recent_thread_summary.clone(),
                         collaboration: collaboration.clone(),
                         specialist_runtime_notes,
-                        instruction_frame: execution_plan.instruction_frame.clone(),
-                        initial_edit: execution_plan.initial_edit.clone(),
-                        grounding: execution_plan.grounding.clone(),
+                        instruction_frame,
+                        initial_edit,
+                        grounding: None,
                     },
-                    execution_plan.initial_planner_decision.clone(),
+                    None,
                     Arc::clone(&trace),
                 )
-                .await?
+                .await?;
+                let route_summary = if outcome.direct_answer.is_some() {
+                    "agent loop selected a terminal direct response".to_string()
+                } else if outcome.evidence.is_some() {
+                    format!(
+                        "agent loop gathered evidence with action-selection client '{}' before final-rendering client '{}'",
+                        prepared.planner.model_id, prepared.synthesizer.model_id
+                    )
+                } else {
+                    format!(
+                        "agent loop completed without gathered evidence before final-rendering client '{}'",
+                        prepared.synthesizer.model_id
+                    )
+                };
+                (outcome, route_summary)
             }
-            PromptExecutionPath::SynthesizerOnly => AgentLoopOutcome {
-                evidence: None,
-                direct_answer: execution_plan.direct_answer.clone(),
-                instruction_frame: execution_plan.instruction_frame.clone(),
-                grounding: execution_plan.grounding.clone(),
-                continuation: None,
-            },
+            PlannerCapability::Unsupported { reason } => {
+                let route_summary = format!(
+                    "action-selection client '{}' is unavailable, so the turn will fall back to final-rendering client '{}' for a direct response",
+                    prepared.planner.model_id, prepared.synthesizer.model_id
+                );
+                trace.emit(TurnEvent::Fallback {
+                    stage: "action-selection".to_string(),
+                    reason: format!("action-selection client unavailable before agent loop action selection: {reason}"),
+                });
+                (
+                    AgentLoopOutcome {
+                        evidence: None,
+                        direct_answer: None,
+                        instruction_frame: None,
+                        grounding: None,
+                        continuation: None,
+                    },
+                    route_summary,
+                )
+            }
         };
 
         agent_loop::expire_turn_control_requests(
@@ -347,6 +223,18 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             &trace,
             "The turn closed before the requested control could reach another safe checkpoint.",
         );
+
+        let intent = if agent_loop_outcome.evidence.is_some() {
+            TurnIntent::Planned
+        } else {
+            TurnIntent::DirectResponse
+        };
+        trace.emit(TurnEvent::IntentClassified {
+            intent: intent.clone(),
+        });
+        trace.emit(TurnEvent::RouteSelected {
+            summary: route_summary,
+        });
 
         if let Some(continuation) = agent_loop_outcome.continuation {
             trace.record_checkpoint_without_response(
@@ -383,7 +271,6 @@ pub(super) async fn process_prompt_in_session_with_mode_request_and_sink(
             return Ok(reply);
         }
 
-        let intent = execution_plan.intent;
         let engine = final_renderer;
         let trace_for_reply = Arc::clone(&trace);
         let event_sink = trace.as_event_sink();

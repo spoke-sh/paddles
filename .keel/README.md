@@ -483,7 +483,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Unify First Action Entry Point](epics/VJeQx1O20/voyages/VJeRAOoHj/) | planned |
+| [Unify First Action Entry Point](epics/VJeQx1O20/voyages/VJeRAOoHj/) | in-progress |
 | [Move Turn Contract Into Agent Loop](epics/VJeQx1O20/voyages/VJeRAPzHh/) | planned |
 | [Retire Pre-Loop Bootstraps And Vocabulary](epics/VJeQx1O20/voyages/VJeRAR1IS/) | planned |
 

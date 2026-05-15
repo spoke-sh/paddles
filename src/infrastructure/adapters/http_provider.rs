@@ -5702,7 +5702,7 @@ mod tests {
 
         assert!(forensic.iter().any(|artifact| {
             artifact.lane == TraceModelExchangeLane::Planner
-                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.category == TraceModelExchangeCategory::PlannerAction
                 && artifact.phase == TraceModelExchangePhase::AssembledContext
                 && artifact
                     .artifact
@@ -5712,7 +5712,7 @@ mod tests {
         }));
         assert!(forensic.iter().any(|artifact| {
             artifact.lane == TraceModelExchangeLane::Planner
-                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.category == TraceModelExchangeCategory::PlannerAction
                 && artifact.phase == TraceModelExchangePhase::ProviderRequest
                 && artifact
                     .artifact
@@ -5724,7 +5724,7 @@ mod tests {
         }));
         assert!(forensic.iter().any(|artifact| {
             artifact.lane == TraceModelExchangeLane::Planner
-                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.category == TraceModelExchangeCategory::PlannerAction
                 && artifact.phase == TraceModelExchangePhase::RawProviderResponse
                 && artifact.artifact.inline_content.as_deref() == Some(planner_response.as_str())
         }));
@@ -5805,7 +5805,7 @@ mod tests {
 
         assert!(forensic.iter().any(|artifact| {
             artifact.lane == TraceModelExchangeLane::Planner
-                && artifact.category == TraceModelExchangeCategory::InitialAction
+                && artifact.category == TraceModelExchangeCategory::PlannerAction
                 && artifact.phase == TraceModelExchangePhase::ProviderRequest
                 && artifact
                     .artifact
