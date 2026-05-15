@@ -13567,7 +13567,7 @@ mod tests {
             .expect("executed actions lock");
         assert!(
             executed_actions.is_empty(),
-            "controller-inferred edit pressure should not force a pre-loop read"
+            "controller-inferred edit pressure should not force a read outside the loop"
         );
         assert!(reply.contains("haven't completed the requested repository edit yet"));
     }
@@ -13739,7 +13739,7 @@ mod tests {
             .expect("executed actions lock");
         assert!(
             executed_actions.is_empty(),
-            "vector evidence should not force a controller-owned pre-loop read"
+            "vector evidence should not force a controller-owned read outside the loop"
         );
         assert_eq!(
             gatherer_requests

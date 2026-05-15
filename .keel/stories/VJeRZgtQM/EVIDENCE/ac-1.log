@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-05-14T20:30:03.666628559-07:00
+command: sh -lc 'cd /home/alex/workspace/spoke-sh/paddles && if rg -n "initial action|pre-loop|planner route|Planner step 0" src/infrastructure src/application; then exit 1; else test $? -eq 1; fi'
+---

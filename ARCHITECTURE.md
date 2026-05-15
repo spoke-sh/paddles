@@ -29,12 +29,16 @@ priorities, the project's conventions, and the tools at its disposal.
 agent loop. The model evaluates the assembled context and selects its next
 bounded agent action: terminal `answer`/`stop`, a workspace action, a semantic
 action, `external_capability`, `refine`, or `branch`.
+The recursive agent loop is the single action-selection owner. There is no
+separate planner lane outside this loop and no controller-owned route that
+selects sequence zero for normal turns; sequence zero is just the first pass
+through this loop.
 
 The bounded JSON action schema is rendered by
 `src/application/planner_action_schema.rs`. That application-layer boundary owns
-the first-action and later-action schema variants, action names, JSON examples,
-required fields, and shared selection rules. HTTP action-selection adapters do
-not author action schema lists; they embed the
+the sequence-zero and subsequent-action schema compatibility variants, action
+names, JSON examples, required fields, and shared selection rules. HTTP
+action-selection adapters do not author action schema lists; they embed the
 shared renderer output inside their prompt or transport envelope.
 
 Provider adapters still own provider-specific mechanics: native tool calls,
@@ -77,7 +81,7 @@ reasoning and answer handoff, and the controller will not accept advice-only
 completion while an `applied_edit` obligation is still open.
 
 That same loop now carries a typed turn contract as runtime data, not prompt
-folklore or a pre-loop collaboration lane. Planning, execution, and review
+folklore or an out-of-band collaboration lane. Planning, execution, and review
 requests resolve into explicit contract status (`applied`, `defaulted`,
 `invalid`, or `unavailable`), and planning-mode clarification pauses are
 recorded as bounded structured requests instead of ad hoc prose. The recursive
@@ -737,7 +741,7 @@ The target architecture is implemented across these modules:
 
 The runtime follows the backbone narrative from above:
 
-1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid initial replies get one constrained re-decision pass before the controller fails closed.
+1. **Interpretation** — operator memory loads from the AGENTS.md hierarchy, then a model-derived guidance graph discovers tool hints and decision procedures. Invalid sequence-zero action replies get one constrained re-decision pass before the controller fails closed.
 2. **Action selection** — workspace actions stay inside the recursive agent loop. Search/refine actions carry model-selected retrieval mode, strategy, and optional structural fuzzy retriever overrides into the retrieval boundary. The `sift-direct` retrieval provider executes direct retrieval, preserving evidence metadata and surfacing concrete retrieval stages without introducing a second action selector.
 3. **Recording** — the recorder boundary is live. Artifact envelopes keep large payloads behind typed `ContextLocator` values with tier metadata. Truncated inline content resolves to full records on demand through the `ContextResolver` port.
 4. **Context quality** — a `StrainTracker` accumulates truncation events during context assembly and emits `ContextStrain` as a turn event when strain is non-nominal.

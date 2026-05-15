@@ -136,6 +136,9 @@ weight = 1.5
 action selection, final rendering, and retrieval. Model reasoning is the
 planning inside the recursive agent loop; configuration chooses the HTTP model
 clients and retrieval provider used by that turn loop.
+Configuration can choose the action-selection client, but it does not create a
+separate planner lane or sequence-zero action route outside the recursive agent
+loop.
 
 - The **final-rendering model client** produces terminal user-facing responses and must always be configured.
 - The **action-selection model client** selects bounded workspace actions. It defaults to the final-rendering provider/model unless explicitly overridden by an action-selection-capable HTTP provider/model.
@@ -381,7 +384,7 @@ The REPL now renders a default Codex-style action stream. Expect visible steps
 for:
 
 - interpretation context assembly
-- model-selected first action
+- model-selected sequence-zero agent action
 - model-authored plan updates when the loop selects explicit remaining work
 - agent action selection
 - retrieval capability and gathered evidence

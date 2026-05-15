@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-05-14T20:30:03.757537742-07:00
+mode: manual
+---
+Reviewed ARCHITECTURE.md and CONFIGURATION.md. ARCHITECTURE.md now states the recursive agent loop is the single action-selection owner and sequence zero is the first pass through that loop. CONFIGURATION.md now states provider configuration can choose the action-selection client but cannot create a separate planner lane or sequence-zero action route outside the loop.

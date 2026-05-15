@@ -27,11 +27,11 @@ started_at: 2026-05-14T20:14:35
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Remove Pre-Loop Bootstrap Overrides](../../../../stories/VJeRZ5UCs/README.md) | refactor | done |
-| [Update Unified Loop Traces And Docs](../../../../stories/VJeRZgtQM/README.md) | chore | backlog |
+| [Update Unified Loop Traces And Docs](../../../../stories/VJeRZgtQM/README.md) | chore | done |
 | [Add Simple Evidence Question Regression](../../../../stories/VJeRaXliR/README.md) | chore | backlog |
 <!-- END GENERATED -->

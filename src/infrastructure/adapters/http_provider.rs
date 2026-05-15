@@ -3534,7 +3534,7 @@ fn edit_instruction_from_http_envelope(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("initial action reply must include top-level `edit`"))?;
+        .ok_or_else(|| anyhow!("agent action reply must include top-level `edit`"))?;
     let known_edit = match edit_value {
         "yes" | "true" => true,
         "no" | "false" => false,
@@ -3543,7 +3543,7 @@ fn edit_instruction_from_http_envelope(
     let candidate_files = envelope
         .candidate_files
         .as_ref()
-        .ok_or_else(|| anyhow!("initial action reply must include top-level `candidate_files`"))?
+        .ok_or_else(|| anyhow!("agent action reply must include top-level `candidate_files`"))?
         .iter()
         .map(|path| path.trim().replace('\\', "/"))
         .filter(|path| !path.is_empty())
@@ -6019,7 +6019,7 @@ mod tests {
             .parse_initial_action_decision(
                 r#"{"action":"answer","answer":"I need a verified link before I answer.","rationale":"external source grounding is required","edit":"no","candidate_files":[],"grounding":{"domain":"external","reason":"need a verified docs link"}}"#,
             )
-            .expect("initial action decision");
+            .expect("agent action decision");
 
         assert_eq!(
             decision.grounding,
@@ -6051,7 +6051,7 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("initial action reply must include top-level `edit`")
+                .contains("agent action reply must include top-level `edit`")
         );
     }
 
@@ -6072,7 +6072,7 @@ mod tests {
             .parse_initial_action_decision(
                 r#"{"action":"search","query":"runtime shell host","mode":"linear","strategy":"bm25","retrievers":["path-fuzzy","segment-fuzzy"],"edit":"yes","candidate_files":["apps/web/src/runtime-app.tsx"],"rationale":"use structural fuzzy lookup for the likely UI target"}"#,
             )
-            .expect("initial action");
+            .expect("agent action");
 
         assert_eq!(
             decision.action,
